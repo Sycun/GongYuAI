@@ -137,10 +137,17 @@ export function installTool(
   };
 }
 
+/** 北京时间：2026-11-21 16:27 */
+export function beijingStamp(d = new Date()): string {
+  const t = new Date(d.getTime() + 8 * 3600_000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
+}
+
 export function appendProgress(workspaceDir: string, line: string): void {
   const path = join(workspaceDir, "PROGRESS.md");
   if (!existsSync(path)) {
     writeFileSync(path, `# 执行进度\n\n`);
   }
-  appendFileSync(path, `- ${new Date().toISOString()} ${line}\n`);
+  appendFileSync(path, `- ${beijingStamp()} ${line}\n`);
 }

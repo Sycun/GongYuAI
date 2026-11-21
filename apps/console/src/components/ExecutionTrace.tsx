@@ -37,26 +37,29 @@ type TraceNode = {
   timelineType: "default" | "ongoing" | "success" | "warning" | "error";
 };
 
-function parseIso(s: string): number {
+/** 兼容旧 UTC ISO 与新「2026-11-21 16:27」 */
+function parseTime(s: string): number {
+  if (!s) return 0;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) {
+    // 按北京时间理解
+    const t = Date.parse(s.replace(" ", "T") + "+08:00");
+    return Number.isFinite(t) ? t : 0;
+  }
   const t = Date.parse(s);
   return Number.isFinite(t) ? t : 0;
 }
 
-function formatClock(iso: string): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
+function formatClock(at: string): string {
+  if (!at) return "";
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(at)) return at;
+  const ms = parseTime(at);
+  if (!ms) return at;
+  const t = new Date(ms + 8 * 3600_000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
 }
 
-/** `2026-11-21T…Z 第 10 步 · 工具 shell · Token 66626` */
+/** `2026-11-21 16:27 第 10 步 · 工具 shell · Token 66626`（旧行仍可能是 ISO Z） */
 function parseProgressLine(line: string): {
   at: string;
   body: string;
@@ -64,7 +67,9 @@ function parseProgressLine(line: string): {
   tools: string[];
   tokens?: number;
 } {
-  const m = line.match(/^(\S+)\s+(.*)$/);
+  const m = line.match(
+    /^(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z)?)?)\s+(.*)$/,
+  );
   const at = m?.[1] ?? "";
   const body = m?.[2] ?? line;
   const stepM = body.match(/第\s*(\d+)\s*步/);
@@ -88,7 +93,7 @@ function parseProgressLine(line: string): {
 
 function buildTrace(progress: string[], facts: TraceFact[], active: boolean): TraceNode[] {
   const progressChrono = [...progress];
-  const factChrono = [...facts].sort((a, b) => parseIso(a.createdAt) - parseIso(b.createdAt));
+  const factChrono = [...facts].sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
 
   const nodes: TraceNode[] = progressChrono.map((line, idx) => {
     const p = parseProgressLine(line);
@@ -119,11 +124,11 @@ function buildTrace(progress: string[], facts: TraceFact[], active: boolean): Tr
   });
 
   // 按时间窗把事实挂到对应进度节点：落在 (prev.at, curr.at] 内
-  const times = nodes.map((n) => parseIso(n.at));
+  const times = nodes.map((n) => parseTime(n.at));
   const used = new Set<number>();
   for (let fi = 0; fi < factChrono.length; fi++) {
     const f = factChrono[fi];
-    const ft = parseIso(f.createdAt);
+    const ft = parseTime(f.createdAt);
     let assigned = -1;
     for (let i = 0; i < nodes.length; i++) {
       const start = i === 0 ? 0 : times[i - 1];
@@ -168,7 +173,7 @@ function buildTrace(progress: string[], facts: TraceFact[], active: boolean): Tr
       timelineType: "default" as const,
     }));
 
-  return [...nodes, ...orphanNodes].sort((a, b) => parseIso(a.at) - parseIso(b.at));
+  return [...nodes, ...orphanNodes].sort((a, b) => parseTime(a.at) - parseTime(b.at));
 }
 
 function ToolChain({ tools }: { tools: string[] }) {
