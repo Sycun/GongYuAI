@@ -25,10 +25,15 @@ pnpm --filter @gongyuai/control-plane build
 pnpm --filter @gongyuai/worker build
 pnpm --filter @gongyuai/console build
 
-fuser -k 8877/tcp 2>/dev/null || true
-sleep 1
-nohup pnpm gy serve --host 0.0.0.0 --port 8877 >/tmp/gy-serve.log 2>&1 &
-disown || true
+# Prefer systemd autostart unit when present
+if systemctl cat gongyuai.service >/dev/null 2>&1; then
+  sudo systemctl restart gongyuai.service
+else
+  fuser -k 8877/tcp 2>/dev/null || true
+  sleep 1
+  nohup pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir "$GY/.gongyuai" >/tmp/gy-serve.log 2>&1 &
+  disown || true
+fi
 sleep 4
 curl -sf http://127.0.0.1:8877/health
 echo

@@ -11,6 +11,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import {
+  BUDGET_UNLIMITED,
   resolveExploreWorkerCount,
   type TaskRecord,
   type WorkerManifest,
@@ -20,7 +21,13 @@ import { durableDbForSlot, manifestPathForSlot, taskPaths } from "./paths.js";
 import type { ControlStore } from "./store.js";
 import type { SettingsStore } from "./settings.js";
 
-const TERMINAL = new Set(["stopped", "failed", "completed", "budget_exhausted"]);
+const TERMINAL = new Set([
+  "stopped",
+  "failed",
+  "completed",
+  "budget_exhausted",
+  "incomplete",
+]);
 const ACTIVE = new Set(["queued", "initializing", "running", "recovering"]);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -192,6 +199,9 @@ export class WorkerRunner {
     }
 
     task.status = "queued";
+    // Wall clock must restart — keeping the original startedAt makes watchdog
+    // instantly re-fire maxWallMs on "开始" after a long idle.
+    task.startedAt = null;
     task.finishedAt = null;
     task.error = null;
     task.workerPid = null;
@@ -200,6 +210,14 @@ export class WorkerRunner {
     task.containerIds = [];
     task.leaseOwner = null;
     task.leaseUntil = null;
+    // Resume as unlimited unless the operator later sets explicit --max-* caps.
+    task.budget = {
+      ...task.budget,
+      maxWallMs: BUDGET_UNLIMITED,
+      maxToolCalls: BUDGET_UNLIMITED,
+      maxTokens: BUDGET_UNLIMITED,
+      maxInstalls: BUDGET_UNLIMITED,
+    };
     this.store.save(task);
   }
 

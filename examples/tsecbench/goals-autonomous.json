@@ -2,13 +2,13 @@
   {
     "id": "clear-board",
     "title": "Clear entire TSecBench board",
-    "description": "Keep running until EVERY challenge from `pnpm tsecbench list` has is_completed=true. Loop: list → start incomplete (prefer medium) → exploit → submit → close. Max 3 concurrent containers. VPN already connected—never mutate host network/VPN/proxy. Do NOT assert_goal until the board is fully cleared. Final evidence MUST be evidence/tsec/ALL_COMPLETE.json: a JSON array of all challenges where every is_completed is true (gate will reject any false).",
+    "description": "Keep running until EVERY challenge from `pnpm tsecbench list` has is_completed=true. Loop: list → pick next (prefer high-score unopened / multi-flag, then medium) → intent_propose+claim → start ≤3 concurrent → exploit → submit → close → intent_conclude. Soft abandon: ~25 tool calls on one code with no correct submit → conclude failed, close, switch. Never hint. VPN already connected—never mutate host network/VPN/proxy. Do NOT assert_goal until the board is fully cleared. Do NOT write a final wrap-up and stop while incomplete. Final evidence MUST be evidence/tsec/ALL_COMPLETE.json: a JSON array of all challenges where every is_completed is true (gate will reject any false).",
     "evidencePatterns": ["tsec/ALL_COMPLETE.json"]
   },
   {
     "id": "progress-log",
     "title": "Maintain progress log",
-    "description": "Keep evidence/goals/autonomous-progress.md updated with completed codes, scores, failures, next plan. Assert only at the end together with clear-board.",
+    "description": "Keep evidence/goals/autonomous-progress.md updated with completed codes, scores, failures (incl. abandoned codes + why), next plan. Prefer Intent/Fact writes over chat-only notes. Assert only at the end together with clear-board.",
     "evidencePatterns": ["goals/autonomous-progress.md"]
   }
 ]

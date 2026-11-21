@@ -393,7 +393,7 @@ export function handleGraphTool(
 export function kickoffUserMessage(phase: WorkerPhase): string {
   const p = asGraphPhase(phase);
   if (p === "bootstrap") {
-    return "从 Bootstrap 开始：写入首批 Fact、提出候选 Intent，然后 phase_set(explore)。完成语义以 assert_goal / evidence gate 为准；禁止口头 DONE；禁止改主机网络/VPN/代理。";
+    return "从 Bootstrap 开始：写入首批 Fact、提出候选 Intent，然后 phase_set(explore)。这是长程任务，禁止因预算/时间估计提前收口。完成语义以 assert_goal / evidence gate 为准；禁止口头 DONE；禁止改主机网络/VPN/代理。";
   }
-  return "按当前图相位推进未通过 Goals。Explore 一次一个 Intent；Reason 在无 open Explore 时运行。全部 assert_goal 成功后可回复 DONE。禁止改主机网络/VPN/代理。";
+  return "按当前图相位推进未通过 Goals（长程，勿提前收口）。Explore 一次一个 Intent；Reason 在无 open Explore 时运行。全部 assert_goal 成功后可回复 DONE。禁止改主机网络/VPN/代理。";
 }

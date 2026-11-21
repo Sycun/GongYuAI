@@ -2,7 +2,11 @@
  * Passive asset discovery via FOFA / 鹰图(Hunter) / custom HTTP collectors.
  * Results are written through History.recordAsset (same inventory as console).
  */
-import type { WorkerAssetCollector, WorkerManifest } from "@gongyuai/contracts";
+import {
+  isBudgetHit,
+  type WorkerAssetCollector,
+  type WorkerManifest,
+} from "@gongyuai/contracts";
 import { writeEvidence, type ToolContext } from "./tools.js";
 
 export type AssetSearchHit = {
@@ -314,7 +318,7 @@ export async function runAssetSearch(
   const size = args.size ?? 50;
 
   ctx.usage.toolCalls += 1;
-  if (ctx.usage.toolCalls > ctx.manifest.budget.maxToolCalls) {
+  if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
     throw new Error("maxToolCalls exceeded");
   }
 

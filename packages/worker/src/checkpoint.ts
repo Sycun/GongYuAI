@@ -17,6 +17,10 @@ export type CheckpointState = {
   toolCallsSinceRelay: number;
   /** Currently claimed Explore intent (at most one). */
   activeIntentId: string | null;
+  /** Soft pace: last tool-call milestone advised (never stops the run). */
+  lastSoftToolMilestone: number;
+  /** Soft pace: last wall-index advised (never stops the run). */
+  lastSoftWallMilestone: number;
   lastError: string | null;
   updatedAt: string;
 };
@@ -31,6 +35,8 @@ const DEFAULT: CheckpointState = {
   tokensSinceRelay: 0,
   toolCallsSinceRelay: 0,
   activeIntentId: null,
+  lastSoftToolMilestone: 0,
+  lastSoftWallMilestone: 0,
   lastError: null,
   updatedAt: new Date().toISOString(),
 };
@@ -69,6 +75,8 @@ export class CheckpointStore {
       tokensSinceRelay: parsed.tokensSinceRelay ?? parsed.tokens ?? 0,
       toolCallsSinceRelay: parsed.toolCallsSinceRelay ?? 0,
       activeIntentId: parsed.activeIntentId ?? null,
+      lastSoftToolMilestone: parsed.lastSoftToolMilestone ?? 0,
+      lastSoftWallMilestone: parsed.lastSoftWallMilestone ?? 0,
     };
   }
 

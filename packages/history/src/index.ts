@@ -417,6 +417,87 @@ export class HistoryStore {
     return this.rowToFact(r);
   }
 
+  /**
+   * Structured neighborhood for drill-down (Resurface discipline):
+   * same `intentId` chain, ordered by write-time. Missing intent → empty neighbors.
+   * Never invents event timestamps; `recordedAt` is History write time only.
+   */
+  getFactNeighborhood(
+    taskId: string,
+    factId: string,
+    window = 2,
+  ): {
+    fact: Fact | null;
+    before: Array<{
+      id: string;
+      title: string;
+      layer: FactLayer;
+      intentId: string | null;
+      recordedAt: string;
+    }>;
+    after: Array<{
+      id: string;
+      title: string;
+      layer: FactLayer;
+      intentId: string | null;
+      recordedAt: string;
+    }>;
+  } {
+    const fact = this.getFact(taskId, factId);
+    if (!fact) {
+      return { fact: null, before: [], after: [] };
+    }
+    const win = Math.max(0, Math.min(8, Math.floor(window)));
+    if (!fact.intentId) {
+      return { fact, before: [], after: [] };
+    }
+    const chain = this.db
+      .prepare(
+        `SELECT * FROM facts WHERE task_id = ? AND intent_id = ? ORDER BY created_at ASC, rowid ASC`,
+      )
+      .all(taskId, fact.intentId) as Array<Record<string, unknown>>;
+    const facts = chain.map((r) => this.rowToFact(r));
+    const idx = facts.findIndex((f) => f.id === factId);
+    if (idx < 0) {
+      return { fact, before: [], after: [] };
+    }
+    const toSummary = (f: Fact) => ({
+      id: f.id,
+      title: f.title,
+      layer: f.layer,
+      intentId: f.intentId,
+      recordedAt: f.createdAt,
+    });
+    return {
+      fact,
+      before: facts.slice(Math.max(0, idx - win), idx).map(toSummary),
+      after: facts.slice(idx + 1, idx + 1 + win).map(toSummary),
+    };
+  }
+
+  /** Drill payload: Fact + neighbors; labels write-time as recordedAt (no invented event time). */
+  formatFactDrill(taskId: string, factId: string, window = 2): Record<string, unknown> {
+    const { fact, before, after } = this.getFactNeighborhood(taskId, factId, window);
+    if (!fact) {
+      return { ok: false, reason: `unknown fact: ${factId}` };
+    }
+    return {
+      ok: true,
+      fact: {
+        id: fact.id,
+        taskId: fact.taskId,
+        layer: fact.layer,
+        title: fact.title,
+        summary: fact.summary,
+        evidencePath: fact.evidencePath,
+        tags: fact.tags,
+        intentId: fact.intentId,
+        recordedAt: fact.createdAt,
+      },
+      neighbors: { before, after },
+    };
+  }
+
   private rowToFact(r: Record<string, unknown>): Fact {
     return {
       id: String(r.id),
@@ -738,6 +819,24 @@ export class HistoryStore {
 
   recordRelay(taskId: string, generation: number, trigger: string): void {
     this.emit(taskId, "relay_written", { generation, trigger });
+  }
+
+  /** P5 tool single-gate audit: allow and deny both recorded. */
+  recordToolGate(
+    taskId: string,
+    input: {
+      tool: string;
+      ok: boolean;
+      reason?: string;
+      detail?: Record<string, unknown>;
+    },
+  ): void {
+    this.emit(taskId, "tool_gate", {
+      tool: input.tool,
+      ok: input.ok,
+      ...(input.reason ? { reason: input.reason } : {}),
+      ...(input.detail ?? {}),
+    });
   }
 
   /** P4 Hint: human/system tactical injection into the blackboard. */

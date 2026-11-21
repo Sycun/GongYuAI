@@ -3,12 +3,16 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { openHistory } from "@gongyuai/history";
 import {
   appendProgress,
   assertCommandAllowed,
   extractHosts,
+  gateCommand,
   hostInTargets,
+  type ToolContext,
 } from "./tools.js";
+import { writeTerminalReport } from "./report.js";
 import type { WorkerManifest } from "@gongyuai/contracts";
 
 function manifest(targets: string[]): WorkerManifest {
@@ -106,4 +110,54 @@ test("appendProgress mirrors into worker.log for Logs tab", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("gateCommand audits deny and allow on History", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-gate-"));
+  const evidenceDir = join(root, "evidence");
+  const workspaceDir = join(root, "workspace");
+  mkdirSync(evidenceDir, { recursive: true });
+  mkdirSync(workspaceDir, { recursive: true });
+  const history = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const m = manifest(["example.com"]);
+  m.taskId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  m.dataDir = root;
+  m.workspaceDir = workspaceDir;
+  m.evidenceDir = evidenceDir;
+  m.auth.capability = "observe";
+  const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+  assert.throws(
+    () =>
+      gateCommand(ctx, "shell", "curl -s http://example.com", () =>
+        assertCommandAllowed(m, "curl -s http://example.com"),
+      ),
+    /observe/,
+  );
+  const denied = history.listEvents(m.taskId).filter((e) => e.kind === "tool_gate");
+  assert.equal(denied.length, 1);
+  assert.equal(denied[0]!.payload.ok, false);
+
+  m.auth.capability = "scan";
+  gateCommand(ctx, "shell", "curl -s http://example.com", () =>
+    assertCommandAllowed(m, "curl -s http://example.com"),
+  );
+  const gates = history.listEvents(m.taskId).filter((e) => e.kind === "tool_gate");
+  assert.equal(gates.length, 2);
+  // listEvents is newest-first
+  assert.equal(gates[0]!.payload.ok, true);
+  assert.equal(gates[1]!.payload.ok, false);
+
+  writeTerminalReport(m, history, {
+    status: "budget_exhausted",
+    reason: "maxToolCalls exceeded",
+  });
+  const report = readFileSync(join(root, "report.md"), "utf8");
+  assert.match(report, /Status: budget_exhausted/);
+  assert.match(report, /maxToolCalls exceeded/);
+
+  history.close();
+  rmSync(root, { recursive: true, force: true });
 });

@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { CreateTaskRequestSchema } from "@gongyuai/contracts";
+import {
+  BUDGET_UNLIMITED,
+  CreateTaskRequestSchema,
+} from "@gongyuai/contracts";
 import { bootControlPlane } from "@gongyuai/control-plane";
 
 type GlobalOpts = {
@@ -19,11 +22,14 @@ Usage:
   gy run --goals FILE --target URL [--target URL ...] --auth NOTE [--name NAME]
        [--mock] [--wait] [--concurrency N]
        [--capability observe|scan|active-lab|full]
+       [--max-wall-ms MS] [--max-tool-calls N] [--max-tokens N] [--max-installs N]
   gy status [taskId]
   gy hint <taskId> "<text>"     # inject tactical Hint into History
   gy logs <taskId>
   gy report <taskId>
   gy stop <taskId>
+
+Defaults: all budget gates unlimited (0). Pass --max-* only when you want a hard cap.
 
 Environment:
   GY_DATA_DIR  GY_HOST  GY_PORT  GY_RUNTIME  OPENAI_API_KEY
@@ -159,10 +165,10 @@ async function main(): Promise<void> {
         maxConcurrentExplores: concurrency,
       },
       budget: {
-        maxTokens: 2_000_000,
-        maxWallMs: Number(flag(rest, "--max-wall-ms") ?? 600_000),
-        maxToolCalls: Number(flag(rest, "--max-tool-calls") ?? 200),
-        maxInstalls: Number(flag(rest, "--max-installs") ?? 20),
+        maxTokens: Number(flag(rest, "--max-tokens") ?? BUDGET_UNLIMITED),
+        maxWallMs: Number(flag(rest, "--max-wall-ms") ?? BUDGET_UNLIMITED),
+        maxToolCalls: Number(flag(rest, "--max-tool-calls") ?? BUDGET_UNLIMITED),
+        maxInstalls: Number(flag(rest, "--max-installs") ?? BUDGET_UNLIMITED),
         relayTokenThreshold: Number(
           flag(rest, "--relay-token-threshold") ??
             process.env.GY_RELAY_TOKEN_THRESHOLD ??
@@ -192,7 +198,13 @@ async function main(): Promise<void> {
           const t = (st.json as { task: { id: string; status: string } }).task;
           process.stderr.write(`\r[gy] status=${t.status}   `);
           if (
-            ["completed", "failed", "budget_exhausted", "stopped"].includes(t.status)
+            [
+              "completed",
+              "failed",
+              "budget_exhausted",
+              "incomplete",
+              "stopped",
+            ].includes(t.status)
           ) {
             console.log();
             console.log(JSON.stringify(t, null, 2));

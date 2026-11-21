@@ -1,7 +1,8 @@
 # Long-run contract
 
 长跑契约 = **租约保活** + **检查点恢复** + **图状态一致性** + **证据闸门** + **会话接力**。  
-对照：Cairn/Intentest（图 FSM）、sapper（分层史 + 自恢复）、CHAP（protocol 接力）。  
+对照：Cairn/Intentest（图 FSM）、sapper（分层史 + 自恢复）、CHAP（protocol 接力）；  
+机制补丁：[Resurface](https://github.com/lilysttail/Resurface)（证据邻域 / 不编造）、[ARIA-X](https://github.com/01NGVI-QINGYI/ARIA-X)（收卷报告 / 工具单闸）——细则 [absorb-resurface-aria-x.md](./absorb-resurface-aria-x.md)。  
 理论展开：[theory-fact-intent-dag.md](./theory-fact-intent-dag.md)；分期落地：[dev-handbook.md](./dev-handbook.md)。
 
 ## Lease
@@ -30,8 +31,11 @@ After crash, resume from last phase (`init → loop → report → done`)。
 
 - Append-only；`layer`：`title`（索引）→ `summary`（可进 prompt）→ `evidence`（路径指向 `evidence/`）。
 - **Worker Observe**：默认只注入 Goals + title 层 + open Intents；summary/evidence 经 `history_read_fact` / `history_list_layer` 按需下钻。
+- **证据邻域（P5）**：`history_read_fact` 返回目标 Fact 时附带同 `intentId` 链上的前后邻 Fact（title 层摘要）；无邻域则空列表，**不编造**。
+- **元数据保真（P5）**：事件时间 / 缺字段不得用「现在」或占位文案填假；未知即省略。
 - 报告 / 控制台可用 `overview`（Observe + 近期 summary）。
 - 写 Fact 时应带 `intentId`（若由某 Intent 产生），形成 Intent→Fact 回边。
+- **禁止**把 chat / Relay π 的语义检索结果直接写成 Fact；图邻域是结构化邻接，不是 RAG。
 
 ### Intent FSM
 
@@ -150,12 +154,28 @@ Worker OpenAI loop 按 Durable `phase` 过滤工具面：
 
 ## Worker budget
 
-Loop exits on any of: all goals pass, `maxToolCalls`, `maxTokens`, `maxWallMs`, or fatal error.
+**默认不设硬预算**：`maxWallMs` / `maxToolCalls` / `maxTokens` / `maxInstalls` 为 **0 = unlimited**。Worker 一直跑到目标全过、致命错误或操作者停止。仅当 CLI/API 显式传入正数 `--max-*` 时才启用对应闸门。
+
+Prompt **禁止**把预算说成倒计时，禁止「还剩 N 分钟 / 本轮收口」提前停工。清板类任务另注入单题软限额与 Intent 纪律（见 `board-policy.ts`）。
+
+**软节奏提示**（`soft-pace.ts`）：默认每 50 次工具调用、每 2 小时墙钟注入一次用户侧提醒（换题/续跑）。**只提示，从不终止循环**，绝不写成 `budget_exhausted`。可用 `GY_SOFT_TOOL_STEP` / `GY_SOFT_WALL_MS` 调整。
+
+Loop exits on any of: all goals pass, optional hard gate, fatal error, or operator stop.
 
 - `completed` only when all goals pass.
-- Otherwise terminal status is `budget_exhausted` (or `failed` / `stopped`).
+- `budget_exhausted` **only** when a finite hard gate actually fired.
+- `incomplete` when the loop ended without all goals **and** without hitting a gate; Pi path **re-kicks** while goals remain.
+- `failed` / `stopped` for errors / operator stop.
+- 重启任务必须重置 `startedAt`，并把预算恢复为 unlimited（避免旧墙钟秒杀）。
+- **预算尽仍出报告（P5）**：硬闸或 incomplete 收卷仍落盘 `report.md`，禁止静默退出无报告。
 - Tool results are truncated for the chat buffer；权威细节在 evidence + History。
 - Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`.
+
+## Tool single gate（P5）
+
+- Worker 侧工具执行经**统一入口**（现有 `runTool` / 等价分发）：能力阶梯、禁主机网络变更、预算计数、结果截断、History 审计事件同一路径完成。
+- 拒绝（缺权 / 策略 / 预算）也写审计事件，禁止旁路 `exec` 绕过入口。
+- 不引入第二套审批产品面；人工 `ask` 闸属后续可选，非本刀。
 
 ## Auth capability ladder
 

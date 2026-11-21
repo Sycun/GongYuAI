@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export type WorkerStatusFile = {
-  status: "running" | "completed" | "failed" | "budget_exhausted";
+  status: "running" | "completed" | "failed" | "budget_exhausted" | "incomplete";
   error?: string;
   usage: { tokens: number; toolCalls: number; installs: number };
   workerSlot?: number;
@@ -71,6 +71,10 @@ export function readAggregatedWorkerStatus(
         sawTerminal = true;
       } else if (raw.status === "budget_exhausted" && status !== "failed") {
         status = "budget_exhausted";
+        error = raw.error ?? error;
+        sawTerminal = true;
+      } else if (raw.status === "incomplete" && !sawTerminal) {
+        status = "incomplete";
         error = raw.error ?? error;
         sawTerminal = true;
       } else if (raw.status === "completed" && !sawTerminal) {

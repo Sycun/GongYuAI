@@ -36,10 +36,10 @@ pnpm gy run \
   --target '10.0.0.0/8' \
   --auth "TSecBench authorized task_202611c8pnksin2v — GongYuAI agent evaluation" \
   --capability full \
-  --name tsecbench-auto \
-  --max-wall-ms 14400000 \
-  --max-tool-calls 5000
+  --name tsecbench-auto
+  # defaults: unlimited budget (0); add --max-wall-ms / --max-tool-calls only if you want caps
 ```
+
 
 相对差分（同预算只比 History vs +Relay）：
 

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isWallHit } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
 import { refreshTaskUsage } from "./usage.js";
@@ -87,7 +88,8 @@ export class Watchdog {
         if (
           status.status === "completed" ||
           status.status === "failed" ||
-          status.status === "budget_exhausted"
+          status.status === "budget_exhausted" ||
+          status.status === "incomplete"
         ) {
           const paths = taskPaths(task.dataDir);
           if (existsSync(paths.historyDb)) {
@@ -116,10 +118,10 @@ export class Watchdog {
       this.store.save(task);
     }
 
-    // Budget wall clock
+    // Optional wall clock (0 = unlimited)
     if (task.startedAt) {
-      const elapsed = Date.now() - Date.parse(task.startedAt);
-      if (elapsed > task.budget.maxWallMs) {
+      const startedMs = Date.parse(task.startedAt);
+      if (isWallHit(startedMs, task.budget.maxWallMs)) {
         await this.runner.stop(taskId);
         this.store.setStatus(taskId, "budget_exhausted", "maxWallMs exceeded");
         return;

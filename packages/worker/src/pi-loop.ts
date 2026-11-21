@@ -1,6 +1,11 @@
-import { writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isExploreLeader, type WorkerManifest } from "@gongyuai/contracts";
+import {
+  isBudgetHit,
+  isExploreLeader,
+  isWallHit,
+  type WorkerManifest,
+} from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { CheckpointStore, type CheckpointState } from "./checkpoint.js";
 import {
@@ -13,7 +18,10 @@ import {
   type ToolContext,
 } from "./tools.js";
 import { collectorsPromptBlock, runAssetSearch } from "./asset-collectors.js";
+import { boardClearPolicyBlock } from "./board-policy.js";
+import { takeSoftPaceAdvice } from "./soft-pace.js";
 import { writeWorkerStatus } from "./status.js";
+import { writeTerminalReport } from "./report.js";
 import { isMcpToolName, openMcpHub, type McpHub } from "./mcp/client.js";
 import { openSkillHub, type SkillHub } from "./skills/runtime.js";
 import {
@@ -54,12 +62,18 @@ async function waitForLeaderBootstrap(
 }
 
 export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
+  const workerStartedAt = Date.now();
   const history = openHistory({
     dbPath: manifest.historyDb,
     evidenceDir: manifest.evidenceDir,
   });
   const ckpt = new CheckpointStore(`${manifest.durableDb}.ckpt.sqlite`);
   let state = ckpt.load();
+  // Wall clock restarts with this process; soft wall milestones must too.
+  if (state.lastSoftWallMilestone !== 0) {
+    state.lastSoftWallMilestone = 0;
+    ckpt.save(state);
+  }
   const ctx: ToolContext = {
     manifest,
     history,
@@ -130,19 +144,57 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
     const mcpHub = await openMcpHub(manifest, ctx);
     const skillHub = openSkillHub(manifest, history);
     try {
-      const started = await tryPiDurable(manifest, ctx, state, ckpt, mcpHub, skillHub);
+      const started = await tryPiDurable(
+        manifest,
+        ctx,
+        state,
+        ckpt,
+        mcpHub,
+        skillHub,
+        workerStartedAt,
+      );
       if (!started) {
-        await runOpenAiToolLoop(manifest, ctx, state, ckpt, mcpHub, skillHub);
+        await runOpenAiToolLoop(
+          manifest,
+          ctx,
+          state,
+          ckpt,
+          mcpHub,
+          skillHub,
+          workerStartedAt,
+        );
       }
     } finally {
       await mcpHub.close();
     }
 
     const allPass = history.allGoalsPass(manifest.taskId);
+    // Followers may finish early; only leader promotes task-level terminal.
+    // budget_exhausted ONLY when a hard gate fired — not "goals still open".
+    const terminalStatus = classifyTerminalStatus({
+      allPass,
+      leader,
+      usageToolCalls: ctx.usage.toolCalls,
+      tokens: state.tokens,
+      budget: manifest.budget,
+      workerStartedAt,
+      lastError: state.lastError,
+    });
     if (leader) {
-      const report = `# GongYuAI Report\n\n${history.overview(manifest.taskId)}\n`;
-      writeFileSync(join(manifest.dataDir, "report.md"), report);
-      history.recordReport(manifest.taskId, "report.md");
+      writeTerminalReport(manifest, history, {
+        status:
+          terminalStatus === "completed"
+            ? "completed"
+            : terminalStatus === "budget_exhausted"
+              ? "budget_exhausted"
+              : "incomplete",
+        reason:
+          terminalStatus === "budget_exhausted"
+            ? state.lastError ?? "hard budget gate"
+            : terminalStatus === "incomplete"
+              ? "loop exited before all goals passed (not a budget gate)"
+              : undefined,
+      });
     }
     state.phase = "done";
     ckpt.save(state);
@@ -150,13 +202,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
     writeWorkerStatus(
       manifest.dataDir,
       {
-        // Never report "completed" while goals still FAIL (e.g. hard round-cap exit).
-        // Followers may finish early; only leader promotes task-level completed.
-        status: allPass
-          ? "completed"
-          : leader
-            ? "budget_exhausted"
-            : "completed",
+        status: terminalStatus,
         usage: {
           tokens: state.tokens,
           toolCalls: ctx.usage.toolCalls,
@@ -171,10 +217,21 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     state.lastError = message;
     ckpt.save(state);
+    const budgetHit = /maxWallMs|maxToolCalls|maxTokens/i.test(message);
+    if (leader) {
+      try {
+        writeTerminalReport(manifest, history, {
+          status: budgetHit ? "budget_exhausted" : "failed",
+          reason: message,
+        });
+      } catch {
+        /* report best-effort on failure path */
+      }
+    }
     writeWorkerStatus(
       manifest.dataDir,
       {
-        status: "failed",
+        status: budgetHit ? "budget_exhausted" : "failed",
         error: message,
         usage: {
           tokens: state.tokens,
@@ -283,6 +340,7 @@ async function tryPiDurable(
   ckpt: CheckpointStore,
   mcpHub: McpHub,
   skillHub: SkillHub,
+  workerStartedAt: number,
 ): Promise<boolean> {
   try {
     const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
@@ -406,16 +464,17 @@ async function tryPiDurable(
 
     const history_read_fact = defineTool({
       name: "history_read_fact",
-      description: "Drill into one Fact by id (summary / evidencePath on demand)",
+      description:
+        "Drill into one Fact by id with same-intent neighbors. recordedAt is History write time — never invent event time.",
       parameters: obj({ factId: str() }),
       replay: "safe",
       execute: async (args: { factId: string }) => {
-        const fact = ctx.history.getFact(manifest.taskId, args.factId);
+        const drill = ctx.history.formatFactDrill(manifest.taskId, args.factId);
         return {
           output: [
             {
               type: "text",
-              text: fact ? JSON.stringify(fact) : `unknown fact: ${args.factId}`,
+              text: JSON.stringify(drill),
             },
           ],
         };
@@ -799,9 +858,10 @@ async function tryPiDurable(
     );
     flushUsage(manifest, ctx, state);
 
-    const prompt = [
+    const kickoff = [
       "你是 GongYuAI 授权安全评估执行节点。对操作者可见的说明尽量用中文。",
-      "请用工具完成所有未通过目标；未经 assert_goal 成功不得宣称通过。",
+      "这是长程任务（可连续跑数日）。请用工具完成所有未通过目标；未经 assert_goal 成功不得宣称通过。",
+      "禁止因预算/剩余时间估计提前收口或写最终汇报；目标未全过就继续。",
       "严格留在 auth.targets 范围内，优先小步意图。",
       "图调度：Bootstrap → Explore → Reason（phase_set / intent_*）；工具面按相位过滤。",
       "全部目标通过后回复 DONE。",
@@ -811,11 +871,7 @@ async function tryPiDurable(
       sessionBootstrapText(manifest, ctx.history.observe(manifest.taskId)),
     ].join("\n");
 
-    const submission = await root.submit(
-      { type: "input", content: prompt, requestId: `gy-${manifest.taskId}-main` },
-      context,
-    );
-    // Heartbeat: Pi wait can run for hours; keep Live token/toolCounters moving.
+    // Heartbeat: Pi wait can run for days; keep Live token/toolCounters moving.
     const heartbeat = setInterval(() => {
       void (async () => {
         try {
@@ -829,48 +885,106 @@ async function tryPiDurable(
         }
       })();
     }, 5_000);
-    let settled: Awaited<ReturnType<typeof submission.wait>>;
+
     try {
-      settled = await submission.wait(context);
+      let round = 0;
+      for (;;) {
+        round += 1;
+        const softPace = maybeSoftPaceMessage(state, ctx, workerStartedAt);
+        if (softPace) ckpt.save(state);
+        const content =
+          round === 1
+            ? softPace
+              ? `${kickoff}\n\n${softPace}`
+              : kickoff
+            : [
+                `长程续跑 #${round}：目标仍未全部通过。禁止收口/最终汇报。`,
+                "请继续用工具推进；完成语义以 assert_goal / evidence gate 为准。",
+                softPace ?? "",
+                "",
+                sessionBootstrapText(
+                  manifest,
+                  ctx.history.observe(manifest.taskId),
+                ),
+              ]
+                .filter((line) => line !== "")
+                .join("\n");
+
+        const submission = await root.submit(
+          {
+            type: "input",
+            content,
+            requestId: `gy-${manifest.taskId}-r${round}`,
+          },
+          context,
+        );
+        const settled = await submission.wait(context);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const settledAny = settled as any;
+        if (
+          settledAny?.status === "unanswered" ||
+          settledAny?.reason === "no_model" ||
+          (typeof settledAny?.status === "string" &&
+            settledAny.status !== "done" &&
+            settledAny.status !== "answered")
+        ) {
+          appendProgress(
+            manifest.workspaceDir,
+            `Pi Durable 无可用模型（${settledAny?.reason ?? settledAny?.status}），改用 OpenAI 工具循环`,
+          );
+          return false;
+        }
+        if (settled.status === "done" && settled.type === "input") {
+          await root.commit(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (tx: any) => tx.entry(AssistantEntry, settled.answer),
+            context,
+          );
+        }
+
+        state.toolCalls = ctx.usage.toolCalls;
+        state.installs = ctx.usage.installs;
+        flushUsage(manifest, ctx, state);
+        try {
+          ckpt.save(state);
+        } catch {
+          /* best-effort */
+        }
+
+        if (round === 1 && ctx.usage.toolCalls === 0 && !ctx.history.allGoalsPass(manifest.taskId)) {
+          appendProgress(
+            manifest.workspaceDir,
+            "Pi Durable 未调用工具，改用 OpenAI 工具循环",
+          );
+          return false;
+        }
+        if (ctx.history.allGoalsPass(manifest.taskId)) {
+          appendProgress(manifest.workspaceDir, "全部目标已通过，结束 Pi 循环");
+          break;
+        }
+        if (isBudgetHit(ctx.usage.toolCalls, manifest.budget.maxToolCalls)) {
+          state.lastError = "maxToolCalls exceeded";
+          appendProgress(manifest.workspaceDir, "达到 maxToolCalls，结束循环");
+          break;
+        }
+        if (isBudgetHit(state.tokens, manifest.budget.maxTokens)) {
+          state.lastError = "maxTokens exceeded";
+          appendProgress(manifest.workspaceDir, "达到 maxTokens，结束循环");
+          break;
+        }
+        if (isWallHit(workerStartedAt, manifest.budget.maxWallMs)) {
+          state.lastError = "maxWallMs exceeded";
+          appendProgress(manifest.workspaceDir, "达到 maxWallMs，结束循环");
+          break;
+        }
+        appendProgress(
+          manifest.workspaceDir,
+          `Pi 会话结束但目标未清 → 续跑 #${round + 1}`,
+        );
+      }
     } finally {
       clearInterval(heartbeat);
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const settledAny = settled as any;
-    if (
-      settledAny?.status === "unanswered" ||
-      settledAny?.reason === "no_model" ||
-      (typeof settledAny?.status === "string" &&
-        settledAny.status !== "done" &&
-        settledAny.status !== "answered")
-    ) {
       await harness.close(context);
-      appendProgress(
-        manifest.workspaceDir,
-        `Pi Durable 无可用模型（${settledAny?.reason ?? settledAny?.status}），改用 OpenAI 工具循环`,
-      );
-      return false;
-    }
-    if (settled.status === "done" && settled.type === "input") {
-      await root.commit(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (tx: any) => tx.entry(AssistantEntry, settled.answer),
-        context,
-      );
-    }
-
-    await harness.close(context);
-    state.toolCalls = ctx.usage.toolCalls;
-    state.installs = ctx.usage.installs;
-    ckpt.save(state);
-    flushUsage(manifest, ctx, state);
-    // If Pi never called tools and goals remain, prefer OpenAI-compatible loop (e.g. DeepSeek).
-    if (ctx.usage.toolCalls === 0 && !ctx.history.allGoalsPass(manifest.taskId)) {
-      appendProgress(
-        manifest.workspaceDir,
-        "Pi Durable 未调用工具，改用 OpenAI 工具循环",
-      );
-      return false;
     }
     return true;
   } catch (err) {
@@ -907,6 +1021,56 @@ function sumPiTokens(usage: {
     n += u.totalTokens ?? 0;
   }
   return n;
+}
+
+function classifyTerminalStatus(opts: {
+  allPass: boolean;
+  leader: boolean;
+  usageToolCalls: number;
+  tokens: number;
+  budget: WorkerManifest["budget"];
+  workerStartedAt: number;
+  lastError: string | null;
+}): "completed" | "budget_exhausted" | "incomplete" {
+  if (opts.allPass) return "completed";
+  // Followers finishing early are not a board-level failure.
+  if (!opts.leader) return "completed";
+  const hitGate =
+    isBudgetHit(opts.usageToolCalls, opts.budget.maxToolCalls) ||
+    isBudgetHit(opts.tokens, opts.budget.maxTokens) ||
+    isWallHit(opts.workerStartedAt, opts.budget.maxWallMs) ||
+    (opts.lastError != null &&
+      /maxWallMs|maxToolCalls|maxTokens|maxInstalls/i.test(opts.lastError));
+  return hitGate ? "budget_exhausted" : "incomplete";
+}
+
+function formatBudgetLine(manifest: WorkerManifest): string {
+  const b = manifest.budget;
+  const fmt = (n: number, unit: string) =>
+    n > 0 ? `${n}${unit}` : "不限";
+  return `无硬性倒计时（默认不限）。当前硬闸 tools=${fmt(b.maxToolCalls, "")} tokens=${fmt(b.maxTokens, "")} wall=${fmt(b.maxWallMs, "ms")} installs=${fmt(b.maxInstalls, "")}。另有软节奏提示（工具次数/墙钟里程碑），只是提醒换题或续跑，绝不是预算耗尽、绝不是停工令；未设硬闸则一直跑到目标全过或操作者停止。`;
+}
+
+/** Soft milestone nudge — updates checkpoint markers; never stops the run. */
+function maybeSoftPaceMessage(
+  state: CheckpointState,
+  ctx: ToolContext,
+  workerStartedAt: number,
+): string | null {
+  const advice = takeSoftPaceAdvice({
+    toolCalls: Math.max(state.toolCalls, ctx.usage.toolCalls),
+    wallMs: Date.now() - workerStartedAt,
+    lastSoftToolMilestone: state.lastSoftToolMilestone,
+    lastSoftWallMilestone: state.lastSoftWallMilestone,
+  });
+  if (!advice) return null;
+  state.lastSoftToolMilestone = advice.next.lastSoftToolMilestone;
+  state.lastSoftWallMilestone = advice.next.lastSoftWallMilestone;
+  appendProgress(
+    ctx.manifest.workspaceDir,
+    `软节奏提示（非停工） tools=${ctx.usage.toolCalls} wallMs=${Date.now() - workerStartedAt}`,
+  );
+  return advice.message;
 }
 
 function flushUsage(
@@ -975,12 +1139,13 @@ function systemPrompt(
 授权说明：${manifest.auth.authorizationNote}
 目标允许列表：${manifest.auth.targets.join("、")}
 范围外：${manifest.auth.outOfScope.join("、") || "（无）"}
-预算：maxToolCalls=${manifest.budget.maxToolCalls} maxTokens=${manifest.budget.maxTokens} maxWallMs=${manifest.budget.maxWallMs}
+预算：${formatBudgetLine(manifest)}
 Explore 并发：configured=${manifest.execution?.maxConcurrentExplores ?? 1} effective=${workerCount}
 
 硬规则：
 - 必须使用工具，不得虚构证据。
 - 完成只能靠 assert_goal（evidence gate）；口头 DONE 在目标未通过时无效。
+- **禁止**因「预算将尽 / 还剩 N 分钟 / 本轮收口」提前停工或写最终汇报；目标未全过就继续推进。
 - 禁止修改主机网络/VPN/代理/路由；靶场 VPN 须任务前已连接。
 - 只探测 auth.targets（主机/URL/IPv4 CIDR/\`*.domain\`/裸域；即便目标含 * 也禁止主机网络改动）。
 - 资产清单双向：Observe 含「资产清单」；发现子域/IP 必须 asset_record（自动按 CIDR/通配准入或标 oos）；控制台同一投影。勿静默改 auth.targets。
@@ -997,7 +1162,7 @@ ${poolLine}
 - Skill：系统只给路由表。需要方法论时 load_skill(id)；按阶段加载，不要一次灌入全部正文。
 - TSecBench：默认禁止批量 hint；平台 409 already finished 视为终态，停止重试并写 blocked 证据。
 ${visionLine}
-${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}
+${boardClearPolicyBlock(manifest)}${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}
 当前 Observe（History）：
 ${observeText}
 `;
@@ -1033,6 +1198,7 @@ async function runOpenAiToolLoop(
   ckpt: CheckpointStore,
   mcpHub: McpHub,
   skillHub: SkillHub,
+  workerStartedAt: number,
 ): Promise<void> {
   const apiKey = process.env[manifest.model?.apiKeyEnv ?? "OPENAI_API_KEY"];
   if (!apiKey) {
@@ -1072,7 +1238,8 @@ async function runOpenAiToolLoop(
       type: "function" as const,
       function: {
         name: "history_read_fact",
-        description: "Drill into one Fact by id (summary / evidencePath)",
+        description:
+          "Drill into one Fact by id with same-intent neighbors. recordedAt is History write time — do not invent event time.",
         parameters: {
           type: "object",
           properties: { factId: { type: "string" } },
@@ -1392,21 +1559,33 @@ async function runOpenAiToolLoop(
   );
   flushUsage(manifest, ctx, state);
 
-  const loopStartedAt = Date.now();
-  const maxRounds = Math.max(manifest.budget.maxToolCalls, 40);
+  const maxRounds =
+    manifest.budget.maxToolCalls > 0
+      ? Math.max(manifest.budget.maxToolCalls, 40)
+      : Number.MAX_SAFE_INTEGER;
   for (let i = 0; i < maxRounds; i++) {
     if (ctx.history.allGoalsPass(manifest.taskId)) break;
-    if (ctx.usage.toolCalls >= manifest.budget.maxToolCalls) {
+    if (isBudgetHit(ctx.usage.toolCalls, manifest.budget.maxToolCalls)) {
+      state.lastError = "maxToolCalls exceeded";
       appendProgress(manifest.workspaceDir, "达到 maxToolCalls，结束循环");
       break;
     }
-    if (state.tokens >= manifest.budget.maxTokens) {
+    if (isBudgetHit(state.tokens, manifest.budget.maxTokens)) {
+      state.lastError = "maxTokens exceeded";
       appendProgress(manifest.workspaceDir, "达到 maxTokens，结束循环");
       break;
     }
-    if (Date.now() - loopStartedAt >= manifest.budget.maxWallMs) {
+    if (isWallHit(workerStartedAt, manifest.budget.maxWallMs)) {
+      state.lastError = "maxWallMs exceeded";
       appendProgress(manifest.workspaceDir, "达到 maxWallMs，结束循环");
       break;
+    }
+
+    // Soft pace: advisory only — never break / never mark budget_exhausted.
+    const softPace = maybeSoftPaceMessage(state, ctx, workerStartedAt);
+    if (softPace) {
+      messages.push({ role: "user", content: softPace });
+      ckpt.save(state);
     }
 
     // Auto Session Relay when token threshold crossed (never on Watchdog crash).
@@ -1504,14 +1683,15 @@ async function runOpenAiToolLoop(
         messages.push({
           role: "user",
           content:
-            "目标仍未通过，禁止宣称 DONE。请继续用工具推进；完成语义以 evidence gate / assert_goal 为准。",
+            "目标仍未通过，禁止宣称 DONE，也禁止因预算/剩余时间提前收口。请继续用工具推进；完成语义以 evidence gate / assert_goal 为准。",
         });
         flushUsage(manifest, ctx, state);
         continue;
       }
       messages.push({
         role: "user",
-        content: "请继续用工具推进未通过目标，全部通过后回复 DONE。",
+        content:
+          "请继续用工具推进未通过目标（长程任务，勿提前收口），全部通过后回复 DONE。",
       });
       flushUsage(manifest, ctx, state);
       continue;
@@ -1577,8 +1757,9 @@ async function runOpenAiToolLoop(
             );
             break;
           case "history_read_fact": {
-            const fact = ctx.history.getFact(manifest.taskId, args.factId ?? "");
-            result = fact ? JSON.stringify(fact) : `unknown fact: ${args.factId ?? ""}`;
+            result = JSON.stringify(
+              ctx.history.formatFactDrill(manifest.taskId, args.factId ?? ""),
+            );
             break;
           }
           case "history_list_layer": {

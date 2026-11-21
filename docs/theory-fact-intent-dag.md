@@ -198,13 +198,18 @@ Bootstrap / Explore / Reason 是 **图状态机算子**，不是「侦察→利�
 | Session Relay πₙ | `workspace/relay/` | P1 |
 | 资产投影（发现回流） | Fact tags + `asset_record`；见 asset-inventory | 已落地 |
 | 五段检索 / 离线意图图 | 可选建议层 | P3+，非默认 |
+| 图邻域下钻（非向量） | `history_read_fact` 同 Intent 邻 Fact | P5（Resurface 纪律） |
+| 预算尽仍报告 / 工具单闸 | Worker 收卷 + 统一入口审计 | P5（ARIA-X 纪律） |
+
+对照备忘：[absorb-resurface-aria-x.md](./absorb-resurface-aria-x.md)。**图邻域 ≠ 五段 RAG**；chat/π 语义检索默认不开。
 
 反模式（与本理论冲突则停）：
 
 1. 把 chat transcript 当跨会话真相。  
 2. 口头 DONE 关闭 Goal。  
 3. Watchdog 写战术。  
-4. 未硬化授权层就上多 Worker / 五段 RAG。
+4. 未硬化授权层就上多 Worker / 五段 RAG。  
+5. 从 AGPL 仓（Cairn / ARIA-X）拷代码进本仓。
 
 ---
 

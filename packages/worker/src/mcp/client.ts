@@ -1,4 +1,8 @@
-import type { WorkerManifest, WorkerMcpServer } from "@gongyuai/contracts";
+import {
+  isBudgetHit,
+  type WorkerManifest,
+  type WorkerMcpServer,
+} from "@gongyuai/contracts";
 import type { ToolContext } from "../tools.js";
 import { appendProgress } from "../tools.js";
 import { loadToolsRuntime, saveToolsRuntime } from "../tools-runtime.js";
@@ -193,7 +197,7 @@ export async function openMcpHub(
       const session = sessions.get(parsed.serverId);
       if (!session) return `MCP 会话丢失: ${parsed.serverId}`;
       ctx.usage.toolCalls += 1;
-      if (ctx.usage.toolCalls > ctx.manifest.budget.maxToolCalls) {
+      if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
         throw new Error("maxToolCalls exceeded");
       }
       const r = await session.callTool(parsed.toolName, args);
@@ -206,7 +210,7 @@ export async function openMcpHub(
       const session = sessions.get(serverId);
       if (!session) return `MCP 会话丢失: ${serverId}`;
       ctx.usage.toolCalls += 1;
-      if (ctx.usage.toolCalls > ctx.manifest.budget.maxToolCalls) {
+      if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
         throw new Error("maxToolCalls exceeded");
       }
       const r = await session.callTool(toolName, args);

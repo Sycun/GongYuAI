@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AuthCapability, WorkerManifest } from "@gongyuai/contracts";
-import { targetAllows } from "@gongyuai/contracts";
+import { isBudgetHit, targetAllows } from "@gongyuai/contracts";
 import type { HistoryStore } from "@gongyuai/history";
 
 const CAPABILITY_RANK: Record<AuthCapability, number> = {
@@ -123,6 +123,35 @@ export function assertCommandAllowed(manifest: WorkerManifest, command: string):
   }
 }
 
+/**
+ * P5 single gate: run policy checks and always audit allow/deny on History.
+ * Callers that already hold ToolContext should prefer this over bare assert*.
+ */
+export function gateCommand(
+  ctx: ToolContext,
+  tool: string,
+  command: string,
+  check: () => void,
+): void {
+  try {
+    check();
+    ctx.history.recordToolGate(ctx.manifest.taskId, {
+      tool,
+      ok: true,
+      detail: { commandPreview: command.slice(0, 200) },
+    });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    ctx.history.recordToolGate(ctx.manifest.taskId, {
+      tool,
+      ok: false,
+      reason,
+      detail: { commandPreview: command.slice(0, 200) },
+    });
+    throw err;
+  }
+}
+
 export function runShell(
   ctx: ToolContext,
   command: string,
@@ -132,9 +161,14 @@ export function runShell(
   stdout: string;
   stderr: string;
 } {
-  assertCommandAllowed(ctx.manifest, command);
+  gateCommand(ctx, "shell", command, () => assertCommandAllowed(ctx.manifest, command));
   ctx.usage.toolCalls += 1;
-  if (ctx.usage.toolCalls > ctx.manifest.budget.maxToolCalls) {
+  if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
+    ctx.history.recordToolGate(ctx.manifest.taskId, {
+      tool: "shell",
+      ok: false,
+      reason: "maxToolCalls exceeded",
+    });
     throw new Error("maxToolCalls exceeded");
   }
   const result = spawnSync("bash", ["-lc", command], {
@@ -165,8 +199,23 @@ export function installTool(
   ctx: ToolContext,
   spec: { name: string; method?: "apt" | "which"; package?: string },
 ): { ok: boolean; detail: string } {
-  assertCapabilityAllows(ctx.manifest, "install");
-  if (ctx.usage.installs >= ctx.manifest.budget.maxInstalls) {
+  try {
+    gateCommand(ctx, "install", spec.name, () =>
+      assertCapabilityAllows(ctx.manifest, "install"),
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+  if (isBudgetHit(ctx.usage.installs + 1, ctx.manifest.budget.maxInstalls)) {
+    ctx.history.recordToolGate(ctx.manifest.taskId, {
+      tool: "install",
+      ok: false,
+      reason: "maxInstalls exceeded",
+      detail: { name: spec.name },
+    });
     return { ok: false, detail: "maxInstalls exceeded" };
   }
   const name = spec.name;

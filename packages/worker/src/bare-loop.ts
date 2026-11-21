@@ -10,7 +10,12 @@ import {
   statSync,
 } from "node:fs";
 import { join } from "node:path";
-import type { GoalSpec, WorkerManifest } from "@gongyuai/contracts";
+import {
+  isBudgetHit,
+  isWallHit,
+  type GoalSpec,
+  type WorkerManifest,
+} from "@gongyuai/contracts";
 import { minimatch, validateAllCompleteEvidence } from "@gongyuai/history";
 import { CheckpointStore } from "./checkpoint.js";
 import { appendProgress, runShell, writeEvidence, type ToolContext } from "./tools.js";
@@ -126,7 +131,7 @@ async function runBareMock(manifest: WorkerManifest): Promise<void> {
     ckpt.save(state);
 
     writeWorkerStatus(manifest.dataDir, {
-      status: allGoalsSatisfied(manifest) ? "completed" : "budget_exhausted",
+      status: allGoalsSatisfied(manifest) ? "completed" : "incomplete",
       usage: {
         tokens: state.tokens,
         toolCalls: ctx.usage.toolCalls,
@@ -251,14 +256,17 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
 
   appendProgress(manifest.workspaceDir, "bare=openai loop");
   const started = Date.now();
-  const maxRounds = Math.max(manifest.budget.maxToolCalls, 20);
+  const maxRounds =
+    manifest.budget.maxToolCalls > 0
+      ? Math.max(manifest.budget.maxToolCalls, 20)
+      : Number.MAX_SAFE_INTEGER;
 
   try {
     for (let i = 0; i < maxRounds; i++) {
       if (allGoalsSatisfied(manifest)) break;
-      if (ctx.usage.toolCalls >= manifest.budget.maxToolCalls) break;
-      if (state.tokens >= manifest.budget.maxTokens) break;
-      if (Date.now() - started >= manifest.budget.maxWallMs) break;
+      if (isBudgetHit(ctx.usage.toolCalls, manifest.budget.maxToolCalls)) break;
+      if (isBudgetHit(state.tokens, manifest.budget.maxTokens)) break;
+      if (isWallHit(started, manifest.budget.maxWallMs)) break;
 
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
@@ -361,7 +369,7 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
     state.phase = "done";
     ckpt.save(state);
     writeWorkerStatus(manifest.dataDir, {
-      status: allGoalsSatisfied(manifest) ? "completed" : "budget_exhausted",
+      status: allGoalsSatisfied(manifest) ? "completed" : "incomplete",
       usage: {
         tokens: state.tokens,
         toolCalls: ctx.usage.toolCalls,

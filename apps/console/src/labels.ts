@@ -1,3 +1,5 @@
+import { formatDateTime } from "./time";
+
 export const STATUS_LABEL: Record<string, string> = {
   queued: "排队中",
   initializing: "初始化",
@@ -6,6 +8,7 @@ export const STATUS_LABEL: Record<string, string> = {
   completed: "已完成",
   failed: "失败",
   budget_exhausted: "预算耗尽",
+  incomplete: "未完成退出",
   stopped: "已停止",
   ok: "通过",
   pending: "未完成",
@@ -30,6 +33,7 @@ export const STARTABLE_STATUSES = new Set([
   "failed",
   "completed",
   "budget_exhausted",
+  "incomplete",
 ]);
 
 export function isActiveStatus(status: string): boolean {
@@ -63,7 +67,7 @@ export function formatWorkerStatus(ws: unknown): Array<{ key: string; value: str
     },
     {
       key: "更新时间",
-      value: typeof o.updatedAt === "string" ? o.updatedAt : "—",
+      value: typeof o.updatedAt === "string" ? formatDateTime(o.updatedAt, true) : "—",
     },
     ...(typeof o.error === "string" && o.error
       ? [{ key: "错误", value: o.error }]
@@ -81,13 +85,12 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   evidence: { title: "证据", subtitle: "证据文件" },
   report: { title: "报告", subtitle: "任务报告" },
   logs: { title: "日志", subtitle: "执行节点日志" },
-  settings: { title: "设置", subtitle: "模型 · 资产收集 · Token · 静默更新" },
+  settings: { title: "设置", subtitle: "模型 · 资产 · MCP · Skill · Token · 更新" },
   "settings-model": { title: "模型配置", subtitle: "OpenAI 兼容 API · 视觉能力" },
   "settings-assets": {
     title: "资产收集",
     subtitle: "FOFA · 鹰图 · 自定义 API · AI 自动发现写入清单",
   },
-  "settings-tools": { title: "工具增强", subtitle: "MCP · Skill" },
   "settings-mcp": {
     title: "MCP",
     subtitle: "按工具拆分的 Kali 渗透 MCP · 开关控制模型可见性",
@@ -155,6 +158,7 @@ export function statusColor(status: string): "green" | "orange" | "red" | "grey"
     return "orange";
   }
   if (["failed", "budget_exhausted", "stopped", "expired"].includes(status)) return "red";
+  if (status === "incomplete") return "orange";
   if (["title", "summary", "evidence"].includes(status)) return "blue";
   if (status === "pending") return "grey";
   return "grey";

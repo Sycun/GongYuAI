@@ -8,7 +8,6 @@ import {
   IconHistogram,
   IconDownload,
   IconServer,
-  IconWrench,
   IconPuzzle,
   IconCode,
   IconSearch,
@@ -36,16 +35,15 @@ type Route =
   | SettingsRoute
   | DetailTab;
 
-/** 设置 / 工具增强 默认展开 */
-const DEFAULT_OPEN_KEYS = ["settings", "settings-tools"];
+/** 设置默认展开 */
+const DEFAULT_OPEN_KEYS = ["settings"];
 
 function isDetailRoute(route: Route): boolean {
   return DETAIL_TABS.some((t) => t.key === route);
 }
 
 function normalizeRoute(route: string): Route {
-  if (route === "settings") return "settings-model";
-  if (route === "settings-tools") return "settings-mcp";
+  if (route === "settings" || route === "settings-tools") return "settings-model";
   return (route || "overview") as Route;
 }
 
@@ -138,7 +136,7 @@ export function App() {
           onOpenChange={({ openKeys: next }) => setOpenKeys(next ?? [])}
           onSelect={({ itemKey }) => {
             const key = String(itemKey);
-            if (key === "settings" || key === "settings-tools") return;
+            if (key === "settings") return;
             navigate(key as Route);
           }}
           header={{
@@ -169,10 +167,8 @@ export function App() {
           <Nav.Sub itemKey="settings" text="设置" icon={<IconSetting />}>
             <Nav.Item itemKey="settings-model" text="模型配置" icon={<IconBolt />} />
             <Nav.Item itemKey="settings-assets" text="资产收集" icon={<IconSearch />} />
-            <Nav.Sub itemKey="settings-tools" text="工具增强" icon={<IconWrench />}>
-              <Nav.Item itemKey="settings-mcp" text="MCP" icon={<IconCode />} />
-              <Nav.Item itemKey="settings-skills" text="Skill" icon={<IconPuzzle />} />
-            </Nav.Sub>
+            <Nav.Item itemKey="settings-mcp" text="MCP" icon={<IconCode />} />
+            <Nav.Item itemKey="settings-skills" text="Skill" icon={<IconPuzzle />} />
             <Nav.Item itemKey="settings-usage" text="Token 统计" icon={<IconHistogram />} />
             <Nav.Item itemKey="settings-update" text="一键更新" icon={<IconDownload />} />
             <Nav.Item itemKey="settings-runtime" text="运行时" icon={<IconServer />} />

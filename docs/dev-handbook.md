@@ -41,6 +41,11 @@ MCP / Skill 是弹药，不是产品定义。
 | Hint API | **有** | `POST /tasks/:id/hints` + 控制台注入；Observe 吸收 |
 | 同族迁移 | **有** | `technique_transfer` → transferable Fact + 对端 Intent 扇出 |
 | 资产清单 + CIDR/通配准入 | seed / asset_record / 控制台资产 Tab | 扇出预算可再收紧 |
+| 证据邻域 / 元数据保真 | **有（P5）** | `formatFactDrill` + `recordedAt` |
+| 预算尽报告 / 工具单闸 | **有（P5）** | `writeTerminalReport` + `tool_gate` |
+| 默认不限预算 + 假耗尽修复 | **有** | `0=unlimited`；`incomplete`≠`budget_exhausted`；重启重置 `startedAt` |
+| 软节奏提示（非停工） | **有** | `soft-pace.ts`：工具/墙钟里程碑只注入提示，不结束任务 |
+| 清板卡题/Intent 纪律 | **软注入** | `board-policy.ts` + `goals-autonomous.json`；硬闸仍靠图 |
 
 ---
 
@@ -93,6 +98,19 @@ MCP / Skill 是弹药，不是产品定义。
 3. **同族迁移**：验证打法后 `technique_transfer` → `transferable` Fact + 对端非 oos 资产 Intent 扇出 + family Hint。  
 
 **不要**默认做成 sapper tmux 军团；并行与迁移都是图调度倍率，不是产品形态。
+
+### P5 — Resurface / ARIA-X 机制补丁 ✅
+
+对照：[absorb-resurface-aria-x.md](./absorb-resurface-aria-x.md)。只吸机制，不迁仓；**不做** chat/π 语义检索层。
+
+1. **证据邻域**：`getFactNeighborhood` / `formatFactDrill`；Worker `history_read_fact` 返回同 `intentId` 前后邻。  
+2. **元数据保真**：drill 用 `recordedAt`（写入时间），不暴露/不编造事件时间。  
+3. **预算尽仍出报告**：`writeTerminalReport`；正常收卷与 catch 路径均落盘 `report.md` + `Status:`。  
+4. **工具单闸审计**：`gateCommand` / `recordToolGate`（`tool_gate` 事件）；shell/install 经统一入口。
+
+**验收**：`pnpm --filter @gongyuai/history test`；`pnpm --filter @gongyuai/worker test`；`pnpm smoke`。
+
+**明确不做（本刀）**：嵌入/RRF、ARIA-X 代码、专家军团、五段 RAG。
 
 ---
 
@@ -152,13 +170,14 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 - 多 Agent **禁止点对点真相同步**，只写图。  
 - Intent 检索要结构化过滤，忌纯词重叠 RAG 噪音。
 
-### sapper-v2
+### sapper-v2 / 女娲测试
 
 - 价值在 harness：调度 / 记忆 / 自愈；模型可换。  
 - 分层 History；指挥官不下工具；Watchdog 零策略。  
-- 上下文饱和 → 写交接再读（≈ Relay）。  
+- 上下文饱和 → 写交接再读（≈ Relay）；文中 85%/90% 阈值仅作调参参考。  
 - 同族迁移 = Fact 广播成熟打法（P4 灵感）。  
-- **竞赛军规与 tmux 编制不是 GongYuAI 产品面。**
+- **竞赛军规与 tmux 编制不是 GongYuAI 产品面。**  
+- 对照全文：[absorb-sapper-v2-nuwa.md](./absorb-sapper-v2-nuwa.md)。
 
 ### CHAP (LAST-X 2026)
 
@@ -192,7 +211,7 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ## 9. 下一件最小可做事项
 
-**P0–P4 已落地**（含 Explore 并发、Hint API、同族迁移）。下一刀按真实缺口选：TSecBench 子集差分、控制台 UX、或同族 key 启发式增强。
+**P0–P5 已落地**。下一刀按真实缺口选：TSecBench 子集差分、控制台 UX、或同族 key 启发式增强。History/Relay 语义检索层仍默认不做。
 
 验收：
 

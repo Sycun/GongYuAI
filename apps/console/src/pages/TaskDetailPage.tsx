@@ -38,6 +38,7 @@ import {
 import { StatusTag } from "../components/StatusTag";
 import { ExecutionTrace } from "../components/ExecutionTrace";
 import { FactIntentDag } from "../components/dag/FactIntentDag";
+import { formatDateTime } from "../time";
 
 type Props = {
   task: TaskRecord | null;
@@ -318,15 +319,22 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                   data={[
                     {
                       key: "工具调用",
-                      value: `${usage.toolCalls} / ${task.budget.maxToolCalls}`,
+                      value: `${usage.toolCalls} / ${task.budget.maxToolCalls > 0 ? task.budget.maxToolCalls : "∞"}`,
                     },
                     {
                       key: "安装次数",
-                      value: `${usage.installs} / ${task.budget.maxInstalls}`,
+                      value: `${usage.installs} / ${task.budget.maxInstalls > 0 ? task.budget.maxInstalls : "∞"}`,
                     },
                     {
                       key: "Token",
-                      value: `${usage.tokens} / ${task.budget.maxTokens}`,
+                      value: `${usage.tokens} / ${task.budget.maxTokens > 0 ? task.budget.maxTokens : "∞"}`,
+                    },
+                    {
+                      key: "墙钟上限",
+                      value:
+                        task.budget.maxWallMs > 0
+                          ? `${Math.round(task.budget.maxWallMs / 3_600_000)}h`
+                          : "∞",
                     },
                     { key: "授权说明", value: task.auth.authorizationNote || "—" },
                   ]}
@@ -384,7 +392,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                         main={
                           <div>
                             <Typography.Text type="tertiary" size="small">
-                              {h.source} · {h.createdAt}
+                              {h.source} · {formatDateTime(h.createdAt, true)}
                             </Typography.Text>
                             <div>{h.text}</div>
                           </div>
@@ -481,7 +489,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                     title: "更新",
                     dataIndex: "createdAt",
                     width: 180,
-                    render: (t: string) => t?.replace("T", " ").slice(0, 19) ?? "—",
+                    render: (t: string) => formatDateTime(t, true),
                   },
                 ]}
               />

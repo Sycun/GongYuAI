@@ -121,10 +121,16 @@ Watchdog **零策略**：只保活（续租、死进程重启、预算截止收�
 
 | 来源 | 吸收 | 明确不抄 |
 | --- | --- | --- |
-| [Cairn](https://github.com/oritera/Cairn) | Fact/Intent/Hint 黑板；Bootstrap/Reason/Explore；stigmergy | AGPL 代码；「零 MCP」教条 |
+| [Cairn](https://github.com/oritera/Cairn) | Fact/Intent/Hint 黑板；Bootstrap/Reason/Explore；stigmergy | AGPL 代码；「零 MCP」教条；细则 [absorb-cairn.md](./absorb-cairn.md) |
 | [Intentest / A2](https://arxiv.org/abs/2609.07344) | Fact–Intent DAG；Intent FSM；无因探索禁令；Intent 检索过滤思路 | 照搬五段 RAG 算法细节 |
-| [sapper-v2](https://github.com/N1nEmAn/sapper-v2) | 分层 History；指挥官不下工具；Watchdog 零策略；上下文饱和写交接 | tmux 军团产品形态；角色戏为默认 |
+| [sapper-v2](https://github.com/N1nEmAn/sapper-v2) + [女娲测试文](https://mp.weixin.qq.com/s/nibHYWmDTf6TkNhPhtvFdw) | 分层 History；指挥官不下工具；Watchdog 零策略；上下文饱和写交接；hint 同构迁移 | tmux 军团 / 兵种涌现当产品面；「零 MCP」教条；示踪剂未开源臆造 |
 | [CHAP / A22](https://www.ndss-symposium.org/wp-content/uploads/lastx2026-42.pdf) | 结构化 protocol 接力；双触发（阈值阈值阈值阈值 / 自然检查点）；会话内全量、边界压缩 | 把 History 整表扔进摘要代替图 |
+| [Resurface](https://github.com/lilysttail/Resurface) | 证据邻域下钻；缺元数据不编造；写入幂等；检索只交证据不答 | 对话记忆服务当地二真相；chat/π 向量 RAG |
+| [ARIA-X](https://github.com/01NGVI-QINGYI/ARIA-X) | 预算尽仍出报告；工具单闸审计；报告从图渲染 | AGPL 源码；专家军团；其工具目录整迁 |
+
+细则与 P5 验收：[absorb-resurface-aria-x.md](./absorb-resurface-aria-x.md)。
+
+**History/Relay 检索层默认不做**：跨会话权威是 Fact–Intent 图；π 只是工作记忆。结构化图邻域 ≠ 语义检索。有窗口压力或 TSecBench 差分痛点再开建议层。
 
 ## Differentiation
 

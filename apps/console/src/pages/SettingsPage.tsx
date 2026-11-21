@@ -25,6 +25,7 @@ import {
   type UpdateJobStatus,
 } from "../api";
 import type { SettingsSection } from "../labels";
+import { formatDateTime } from "../time";
 
 const UPDATE_RECONNECT_MS = 180_000;
 
@@ -145,7 +146,6 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
       const r = await api.saveUpdateCfg({
         githubUrl: String(values.githubUrl ?? ""),
         branch: String(values.branch ?? "main"),
-        githubToken: String(values.githubToken ?? ""),
       });
       setSettings(r.json);
       if (!opts?.quiet) Toast.success("更新源已保存");
@@ -178,7 +178,6 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
       ({
         githubUrl: settings.update.githubUrl,
         branch: settings.update.branch,
-        githubToken: "",
       } as Record<string, unknown>);
     lastCommitBeforeUpdate.current = settings.update.lastCommit;
     updateStartedAt.current = Date.now();
@@ -852,7 +851,8 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
     return (
       <Card title="一键更新" style={cardStyle}>
         <Typography.Paragraph type="tertiary" style={{ marginTop: 0 }}>
-          Mac 推送到 GitHub 后点此同步 Kali：优先 git 硬同步，保留 .gongyuai / 模型配置，构建后自动重启。
+          填 GitHub 仓库地址即可。Mac 推送后点此同步：优先 git 硬同步，保留 .gongyuai /
+          模型配置，构建后自动重启。公开库无需凭据；私有库走本机 git / gh auth。
         </Typography.Paragraph>
         <Form
           labelPosition="left"
@@ -863,24 +863,15 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
           initValues={{
             githubUrl: settings.update.githubUrl,
             branch: settings.update.branch,
-            githubToken: settings.update.githubTokenConfigured
-              ? settings.update.githubTokenMask
-              : "",
           }}
           onSubmit={(v) => void saveUpdateCfg(v)}
         >
-          <Form.Input field="githubUrl" label="仓库" placeholder="https://github.com/Sycun/GongYuAI" />
-          <Form.Input field="branch" label="分支" placeholder="main" />
           <Form.Input
-            field="githubToken"
-            label="Token"
-            mode="password"
-            placeholder={
-              settings.update.githubTokenConfigured
-                ? "已配置（私有库可选）"
-                : "私有库 PAT / 或本机 gh auth"
-            }
+            field="githubUrl"
+            label="仓库"
+            placeholder="https://github.com/Sycun/GongYuAI"
           />
+          <Form.Input field="branch" label="分支" placeholder="main" />
           <Space>
             <Button htmlType="submit" type="tertiary">
               保存更新源
@@ -935,7 +926,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
         <Typography.Text type="quaternary" size="small" style={{ display: "block", marginTop: 12 }}>
           当前版本 {settings.version}
           {settings.update.lastUpdatedAt
-            ? ` · 上次更新 ${settings.update.lastUpdatedAt}`
+            ? ` · 上次更新 ${formatDateTime(settings.update.lastUpdatedAt, true)}`
             : ""}
           {settings.update.lastCommit ? ` · ${settings.update.lastCommit}` : ""}
         </Typography.Text>

@@ -1,0 +1,29 @@
+[Unit]
+Description=GongYuAI control plane
+Documentation=https://github.com/Sycun/GongYuAI
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=parallels
+Group=parallels
+WorkingDirectory=/home/parallels/GongYuAI
+Environment=HOME=/home/parallels
+Environment=PATH=/home/parallels/.n/bin:/home/parallels/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GY_HOST=0.0.0.0
+Environment=GY_PORT=8877
+# Optional local secrets (create if needed; never commit):
+# EnvironmentFile=-/home/parallels/GongYuAI/.env
+EnvironmentFile=-/home/parallels/GongYuAI/.gongyuai/tsecbench/env
+ExecStart=/home/parallels/.npm-global/bin/pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir /home/parallels/GongYuAI/.gongyuai
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -197,6 +197,73 @@ test("observe is title + open Intents only; summary/evidence on demand", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test("getFactNeighborhood returns same-intent chain; no invent without intentId", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-nbr-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "77777777-7777-4777-8777-777777777777";
+  const orphan = store.appendFact({
+    taskId,
+    layer: "title",
+    title: "orphan no intent",
+  });
+  const emptyNbr = store.getFactNeighborhood(taskId, orphan.id);
+  assert.equal(emptyNbr.before.length, 0);
+  assert.equal(emptyNbr.after.length, 0);
+
+  const intent = store.proposeIntent({
+    taskId,
+    title: "chain explore",
+    sourceFactIds: [orphan.id],
+  });
+  const a = store.appendFact({
+    taskId,
+    layer: "title",
+    title: "first",
+    intentId: intent.id,
+  });
+  const b = store.appendFact({
+    taskId,
+    layer: "summary",
+    title: "middle",
+    summary: "mid body",
+    intentId: intent.id,
+  });
+  const c = store.appendFact({
+    taskId,
+    layer: "title",
+    title: "last",
+    intentId: intent.id,
+  });
+
+  const mid = store.getFactNeighborhood(taskId, b.id, 2);
+  assert.equal(mid.before.map((x) => x.id).join(","), a.id);
+  assert.equal(mid.after.map((x) => x.id).join(","), c.id);
+  assert.equal(mid.before[0]!.recordedAt, a.createdAt);
+
+  const drill = store.formatFactDrill(taskId, b.id);
+  assert.equal(drill.ok, true);
+  const factPayload = drill.fact as { recordedAt: string; createdAt?: string };
+  assert.equal(factPayload.recordedAt, b.createdAt);
+  assert.equal(factPayload.createdAt, undefined);
+
+  store.recordToolGate(taskId, {
+    tool: "shell",
+    ok: false,
+    reason: "denied: test",
+  });
+  const events = store.listEvents(taskId).filter((e) => e.kind === "tool_gate");
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.payload.ok, false);
+
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("expireStaleIntents moves claimed to expired", () => {
   const root = mkdtempSync(join(tmpdir(), "gy-hist-exp-"));
   const evidenceDir = join(root, "evidence");

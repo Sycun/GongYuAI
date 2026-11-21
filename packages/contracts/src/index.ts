@@ -12,15 +12,54 @@ export const TaskStatusSchema = z.enum([
   "completed",
   "failed",
   "budget_exhausted",
+  /** Loop ended without all goals and without hitting a hard budget gate. */
+  "incomplete",
   "stopped",
 ]);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 
+/**
+ * Budget hard gates. **0 = unlimited** (default): no wall/tool/token/install ceiling;
+ * the worker runs until goals pass, fatal error, or operator stop.
+ * Pass a positive value via CLI/API only when you want an explicit cap.
+ */
+export const BUDGET_UNLIMITED = 0;
+
+export function isBudgetUnlimited(max: number | null | undefined): boolean {
+  return max == null || max <= 0;
+}
+
+/** True when `used` has hit a finite gate. Unlimited max never trips. */
+export function isBudgetHit(used: number, max: number | null | undefined): boolean {
+  if (isBudgetUnlimited(max)) return false;
+  return used >= (max as number);
+}
+
+/** True when wall clock since `startedAtMs` exceeds a finite maxWallMs. */
+export function isWallHit(
+  startedAtMs: number,
+  maxWallMs: number | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (isBudgetUnlimited(maxWallMs)) return false;
+  return nowMs - startedAtMs >= (maxWallMs as number);
+}
+
+/** Optional finite presets (only if you opt in via --max-*). */
+export const LONG_RUN_MAX_WALL_MS = 3 * 24 * 60 * 60 * 1000; // 259_200_000
+export const LONG_RUN_MAX_TOOL_CALLS = 100_000;
+export const LONG_RUN_MAX_TOKENS = 50_000_000;
+export const LONG_RUN_MAX_INSTALLS = 200;
+
 export const BudgetSchema = z.object({
-  maxTokens: z.number().int().positive().default(2_000_000),
-  maxWallMs: z.number().int().positive().default(3_600_000),
-  maxToolCalls: z.number().int().positive().default(500),
-  maxInstalls: z.number().int().positive().default(50),
+  /** 0 = unlimited */
+  maxTokens: z.number().int().nonnegative().default(BUDGET_UNLIMITED),
+  /** 0 = unlimited */
+  maxWallMs: z.number().int().nonnegative().default(BUDGET_UNLIMITED),
+  /** 0 = unlimited */
+  maxToolCalls: z.number().int().nonnegative().default(BUDGET_UNLIMITED),
+  /** 0 = unlimited */
+  maxInstalls: z.number().int().nonnegative().default(BUDGET_UNLIMITED),
   /**
    * Session Relay auto-trigger: cumulative tokens since last π.
    * Override with env GY_RELAY_TOKEN_THRESHOLD. Default 30_000 (CHAP-aligned, conservative).
@@ -145,10 +184,10 @@ export const CreateTaskRequestSchema = z.object({
   auth: AuthScopeSchema,
   goals: z.array(GoalSpecSchema).min(1),
   budget: BudgetSchema.optional().default({
-    maxTokens: 2_000_000,
-    maxWallMs: 3_600_000,
-    maxToolCalls: 500,
-    maxInstalls: 50,
+    maxTokens: BUDGET_UNLIMITED,
+    maxWallMs: BUDGET_UNLIMITED,
+    maxToolCalls: BUDGET_UNLIMITED,
+    maxInstalls: BUDGET_UNLIMITED,
     relayTokenThreshold: 30_000,
     relayMinToolCalls: 2,
   }),
@@ -259,6 +298,7 @@ export const HistoryEventKindSchema = z.enum([
   "intent_expired",
   "goal_asserted",
   "tool_installed",
+  "tool_gate",
   "lease_acquired",
   "lease_lost",
   "worker_started",

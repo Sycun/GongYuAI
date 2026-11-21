@@ -122,6 +122,7 @@ export class ControlStore {
       status === "completed" ||
       status === "failed" ||
       status === "budget_exhausted" ||
+      status === "incomplete" ||
       status === "stopped"
     ) {
       t.finishedAt = this.now();

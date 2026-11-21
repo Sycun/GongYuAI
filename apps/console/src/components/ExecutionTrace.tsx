@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Collapsible, Empty, Space, Tag, Timeline, Typography } from "@douyinfe/semi-ui";
 import { IconChevronDown, IconChevronRight } from "@douyinfe/semi-icons";
 import { STATUS_LABEL } from "../labels";
+import { formatDateTime, parseTime } from "../time";
 
 export type TraceFact = {
   title: string;
@@ -36,32 +37,6 @@ type TraceNode = {
   kind: "step" | "event";
   timelineType: "default" | "ongoing" | "success" | "warning" | "error";
 };
-
-/** 兼容旧 UTC ISO 与新「2026-11-21 16:27」 */
-function parseTime(s: string): number {
-  if (!s) return 0;
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) {
-    // 按北京时间理解
-    const t = Date.parse(s.replace(" ", "T") + "+08:00");
-    return Number.isFinite(t) ? t : 0;
-  }
-  const t = Date.parse(s);
-  return Number.isFinite(t) ? t : 0;
-}
-
-function formatClock(at: string): string {
-  if (!at) return "";
-  // Already Beijing local from worker PROGRESS.md
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(at)) {
-    return at.slice(0, 16);
-  }
-  const ms = parseTime(at);
-  if (!ms) return at;
-  // History Fact createdAt is UTC ISO → display as Beijing
-  const t = new Date(ms + 8 * 3600_000);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
-}
 
 /** `2026-11-21 16:27 第 10 步 · 工具 shell · Token 66626`（旧行仍可能是 ISO Z） */
 function parseProgressLine(line: string): {
@@ -292,7 +267,7 @@ export function ExecutionTrace({
           return (
             <Timeline.Item
               key={n.id}
-              time={formatClock(n.at)}
+              time={formatDateTime(n.at)}
               type={n.timelineType}
               extra={
                 <Typography.Text type="quaternary" size="small">
