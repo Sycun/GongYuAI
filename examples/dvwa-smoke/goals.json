@@ -1,0 +1,14 @@
+[
+  {
+    "id": "recon",
+    "title": "HTTP recon",
+    "description": "Capture HTTP response headers or banner for the authorized target.",
+    "evidencePatterns": ["recon/*.txt"]
+  },
+  {
+    "id": "report",
+    "title": "Write findings note",
+    "description": "Leave a short findings note under evidence/goals/.",
+    "evidencePatterns": ["goals/*.md"]
+  }
+]
