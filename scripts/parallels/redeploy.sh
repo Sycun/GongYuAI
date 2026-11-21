@@ -15,8 +15,15 @@ fi
 
 cd "$GY"
 echo "pull $REMOTE/$BRANCH -> $GY"
+BEFORE=$(git rev-parse HEAD)
 git fetch "$REMOTE"
 git pull --ff-only "$REMOTE" "$BRANCH"
+AFTER=$(git rev-parse HEAD)
+# Script may have changed on pull; re-exec so restart logic is never stale.
+if [[ "$BEFORE" != "$AFTER" && "${GONGYUAI_REDEPLOY_REEXEC:-}" != "1" ]]; then
+  export GONGYUAI_REDEPLOY_REEXEC=1
+  exec bash "$GY/scripts/parallels/redeploy.sh"
+fi
 
 pnpm install
 pnpm --filter @gongyuai/contracts build
