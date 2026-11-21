@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Banner,
   Button,
@@ -13,6 +13,7 @@ import {
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
+import type { FormApi } from "@douyinfe/semi-ui/lib/es/form/interface";
 import { IconRefresh, IconSave, IconLink, IconDelete, IconPlus } from "@douyinfe/semi-icons";
 import {
   api,
@@ -23,6 +24,8 @@ import {
   type UpdateJobStatus,
 } from "../api";
 import type { SettingsSection } from "../labels";
+
+const UPDATE_RECONNECT_MS = 180_000;
 
 function formatNum(n: number): string {
   return n.toLocaleString("zh-CN");
@@ -35,11 +38,15 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
   const [testing, setTesting] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateJobStatus | null>(null);
+  const updateFormApi = useRef<FormApi | null>(null);
+  const updateStartedAt = useRef<number>(0);
+  const lastCommitBeforeUpdate = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
     const [s, u] = await Promise.all([api.settings(), api.usage()]);
     setSettings(s.json);
     setUsage(u.json);
+    return s.json;
   }, []);
 
   useEffect(() => {
@@ -49,24 +56,58 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
   useEffect(() => {
     if (!updating) return;
     const timer = window.setInterval(() => {
-      void api
-        .updateStatus()
-        .then((r) => {
+      void (async () => {
+        try {
+          const r = await api.updateStatus();
           setUpdateStatus(r.json);
           if (r.json.phase === "done") {
             setUpdating(false);
-            Toast.success("已静默更新完成");
+            const msg =
+              r.json.message === "已是最新" ? "已是最新，无需重启" : "更新完成，即将刷新";
+            Toast.success(msg);
             void reload();
-            window.setTimeout(() => window.location.reload(), 1200);
+            if (r.json.message !== "已是最新") {
+              window.setTimeout(() => window.location.reload(), 1200);
+            }
+            return;
           }
           if (r.json.phase === "failed") {
             setUpdating(false);
-            Toast.error(r.json.error || r.json.message || "更新失败");
+            Toast.error(r.json.message || "更新失败");
+            return;
           }
-        })
-        .catch(() => {
+          // After restart the new process hydrates to done; also accept lastCommit flip.
+          if (r.json.phase === "restarting" || r.json.phase === "building") {
+            try {
+              const s = await api.settings();
+              const next = s.json.update.lastCommit;
+              if (
+                next &&
+                lastCommitBeforeUpdate.current &&
+                next !== lastCommitBeforeUpdate.current
+              ) {
+                setUpdating(false);
+                setUpdateStatus({
+                  ...r.json,
+                  phase: "done",
+                  message: "已更新",
+                });
+                Toast.success("更新完成，即将刷新");
+                void reload();
+                window.setTimeout(() => window.location.reload(), 1200);
+              }
+            } catch {
+              /* still restarting */
+            }
+          }
+        } catch {
           // restart may drop connection — keep polling quietly
-        });
+          if (Date.now() - updateStartedAt.current > UPDATE_RECONNECT_MS) {
+            setUpdating(false);
+            Toast.error("重启超时，请查看 /tmp/gy-serve.log");
+          }
+        }
+      })();
     }, 1500);
     return () => window.clearInterval(timer);
   }, [updating, reload]);
@@ -95,7 +136,10 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
     }
   };
 
-  const saveUpdateCfg = async (values: Record<string, unknown>) => {
+  const saveUpdateCfg = async (
+    values: Record<string, unknown>,
+    opts?: { quiet?: boolean },
+  ) => {
     try {
       const r = await api.saveUpdateCfg({
         githubUrl: String(values.githubUrl ?? ""),
@@ -103,9 +147,11 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
         githubToken: String(values.githubToken ?? ""),
       });
       setSettings(r.json);
-      Toast.success("更新源已保存");
+      if (!opts?.quiet) Toast.success("更新源已保存");
+      return r.json;
     } catch (e) {
       Toast.error(e instanceof Error ? e.message : String(e));
+      throw e;
     }
   };
 
@@ -126,14 +172,34 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
   };
 
   const runSilentUpdate = async () => {
-    setUpdating(true);
-    try {
-      await api.saveUpdateCfg({
+    const values =
+      updateFormApi.current?.getValues?.() ??
+      ({
         githubUrl: settings.update.githubUrl,
         branch: settings.update.branch,
-      });
+        githubToken: "",
+      } as Record<string, unknown>);
+    lastCommitBeforeUpdate.current = settings.update.lastCommit;
+    updateStartedAt.current = Date.now();
+    setUpdating(true);
+    setUpdateStatus(null);
+    try {
+      await saveUpdateCfg(values, { quiet: true });
       const r = await api.runUpdate();
       setUpdateStatus(r.json);
+      if (r.json.phase === "done") {
+        setUpdating(false);
+        const msg =
+          r.json.message === "已是最新" ? "已是最新，无需重启" : "更新完成，即将刷新";
+        Toast.success(msg);
+        void reload();
+        if (r.json.message !== "已是最新") {
+          window.setTimeout(() => window.location.reload(), 1200);
+        }
+      } else if (r.json.phase === "failed") {
+        setUpdating(false);
+        Toast.error(r.json.message || "更新失败");
+      }
     } catch (e) {
       setUpdating(false);
       Toast.error(e instanceof Error ? e.message : String(e));
@@ -506,14 +572,18 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
   }
 
   if (section === "update") {
+    const showProgress = updating || phase === "failed" || phase === "done" || phase === "restarting";
     return (
       <Card title="一键更新" style={cardStyle}>
         <Typography.Paragraph type="tertiary" style={{ marginTop: 0 }}>
-          从 GitHub 静默拉取并覆盖安装目录，保留本机数据与模型配置，构建后自动重启。对用户无感。
+          Mac 推送到 GitHub 后点此同步 Kali：优先 git 硬同步，保留 .gongyuai / 模型配置，构建后自动重启。
         </Typography.Paragraph>
         <Form
           labelPosition="left"
           labelWidth={90}
+          getFormApi={(api) => {
+            updateFormApi.current = api;
+          }}
           initValues={{
             githubUrl: settings.update.githubUrl,
             branch: settings.update.branch,
@@ -544,7 +614,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
             </Button>
           </Space>
         </Form>
-        {(updating || (phase && phase !== "idle")) && (
+        {showProgress && (
           <div style={{ marginTop: 16 }}>
             <Progress
               percent={
@@ -569,6 +639,21 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
               {updateStatus?.message || "…"}
               {updateStatus?.commit ? ` · ${updateStatus.commit}` : ""}
             </Typography.Text>
+            {phase === "failed" && updateStatus?.error ? (
+              <Typography.Paragraph
+                type="danger"
+                style={{
+                  marginTop: 8,
+                  whiteSpace: "pre-wrap",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontSize: 12,
+                  maxHeight: 240,
+                  overflow: "auto",
+                }}
+              >
+                {updateStatus.error}
+              </Typography.Paragraph>
+            ) : null}
           </div>
         )}
         <Typography.Text type="quaternary" size="small" style={{ display: "block", marginTop: 12 }}>
