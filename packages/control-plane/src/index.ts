@@ -7,15 +7,17 @@ export { mergeUsageFromDisk, refreshTaskUsage } from "./usage.js";
 
 import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { ControlStore } from "./store.js";
 import { WorkerRunner } from "./runner.js";
 import { Watchdog } from "./watchdog.js";
 import { SettingsStore } from "./settings.js";
 import { SilentUpdater, resolveInstallRoot } from "./updater.js";
+import { migrateLegacyHomeDataRoot, resolveCanonicalDataRoot } from "./data-root.js";
 export { startControlServer as startServer } from "./server.js";
 export { SettingsStore } from "./settings.js";
-export { SilentUpdater } from "./updater.js";
+export { SilentUpdater, resolveInstallRoot } from "./updater.js";
+export { resolveCanonicalDataRoot, migrateDataRoot, migrateLegacyHomeDataRoot } from "./data-root.js";
 
 export type BootOptions = {
   dataRoot?: string;
@@ -39,18 +41,29 @@ function readPackageVersion(installRoot: string): string {
 }
 
 export async function bootControlPlane(opts: BootOptions = {}) {
-  const dataRoot = resolve(opts.dataRoot ?? process.env.GY_DATA_DIR ?? ".gongyuai");
+  const installRoot = resolveInstallRoot();
+  const dataRoot = resolveCanonicalDataRoot({
+    installRoot,
+    explicit: opts.dataRoot,
+    envValue: process.env.GY_DATA_DIR,
+  });
+  const migrated = migrateLegacyHomeDataRoot(dataRoot);
+  if (migrated.migrated > 0) {
+    console.error(
+      `[gy] migrated ${migrated.migrated} task(s) from ${migrated.from} -> ${dataRoot}`,
+    );
+  }
   const host = opts.host ?? process.env.GY_HOST ?? "127.0.0.1";
   const port = opts.port ?? Number(process.env.GY_PORT ?? 8787);
   const runtime = (opts.runtime ?? process.env.GY_RUNTIME ?? "local") as "local" | "docker";
   const leaseMs = opts.leaseMs ?? Number(process.env.GY_LEASE_MS ?? 15_000);
   const watchdogMs = opts.watchdogMs ?? Number(process.env.GY_WATCHDOG_MS ?? 5_000);
   const ownerId = `cp-${hostname()}-${process.pid}`;
-  const installRoot = resolveInstallRoot();
   const version = readPackageVersion(installRoot);
 
   process.env.GY_HOST = host;
   process.env.GY_PORT = String(port);
+  process.env.GY_DATA_DIR = dataRoot;
 
   const store = new ControlStore(dataRoot);
   const settings = new SettingsStore(dataRoot, installRoot);

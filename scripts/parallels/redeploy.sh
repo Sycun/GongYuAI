@@ -25,17 +25,25 @@ pnpm --filter @gongyuai/control-plane build
 pnpm --filter @gongyuai/worker build
 pnpm --filter @gongyuai/console build
 
-# Prefer systemd autostart unit when present
-if systemctl cat gongyuai.service >/dev/null 2>&1; then
-  sudo systemctl restart gongyuai.service
-else
+DATA_DIR="$GY/.gongyuai"
+restart_nohup() {
   fuser -k 8877/tcp 2>/dev/null || true
   sleep 1
-  nohup pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir "$GY/.gongyuai" >/tmp/gy-serve.log 2>&1 &
+  nohup pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir "$DATA_DIR" >/tmp/gy-serve.log 2>&1 &
   disown || true
+}
+
+# Prefer systemd when passwordless restart works; otherwise fall back to nohup.
+if systemctl cat gongyuai.service >/dev/null 2>&1 && sudo -n systemctl restart gongyuai.service; then
+  echo "restarted gongyuai.service"
+else
+  echo "restart via nohup (data-dir=$DATA_DIR)"
+  restart_nohup
 fi
 sleep 4
 curl -sf http://127.0.0.1:8877/health
+echo
+curl -sf http://127.0.0.1:8877/tasks | head -c 200
 echo
 curl -sf http://127.0.0.1:8877/settings | head -c 400
 echo

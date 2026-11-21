@@ -5,7 +5,11 @@ import {
   BUDGET_UNLIMITED,
   CreateTaskRequestSchema,
 } from "@gongyuai/contracts";
-import { bootControlPlane } from "@gongyuai/control-plane";
+import {
+  bootControlPlane,
+  resolveCanonicalDataRoot,
+  resolveInstallRoot,
+} from "@gongyuai/control-plane";
 
 type GlobalOpts = {
   dataDir: string;
@@ -30,6 +34,7 @@ Usage:
   gy stop <taskId>
 
 Defaults: all budget gates unlimited (0). Pass --max-* only when you want a hard cap.
+Data dir defaults to <repo>/.gongyuai (not cwd). Legacy ~/.gongyuai tasks are imported on boot.
 
 Environment:
   GY_DATA_DIR  GY_HOST  GY_PORT  GY_RUNTIME  OPENAI_API_KEY
@@ -50,7 +55,8 @@ function flags(rest: string[], name: string): string[] {
 
 function parseGlobal(argv: string[]): { cmd: string; rest: string[]; opts: GlobalOpts } {
   const opts: GlobalOpts = {
-    dataDir: process.env.GY_DATA_DIR ?? ".gongyuai",
+    // Empty → control-plane resolves to <installRoot>/.gongyuai (never cwd-relative).
+    dataDir: process.env.GY_DATA_DIR ?? "",
     host: process.env.GY_HOST ?? "127.0.0.1",
     port: Number(process.env.GY_PORT ?? 8787),
   };
@@ -108,7 +114,7 @@ async function ensureServer(opts: GlobalOpts): Promise<{ close?: () => Promise<v
     /* start local */
   }
   const plane = await bootControlPlane({
-    dataRoot: resolve(opts.dataDir),
+    dataRoot: opts.dataDir || undefined,
     host: opts.host,
     port: opts.port,
   });
@@ -125,7 +131,7 @@ async function main(): Promise<void> {
 
   if (cmd === "serve") {
     const plane = await bootControlPlane({
-      dataRoot: resolve(opts.dataDir),
+      dataRoot: opts.dataDir || undefined,
       host: opts.host,
       port: opts.port,
     });
@@ -302,7 +308,12 @@ async function main(): Promise<void> {
   // Direct local status from data dir without server
   if (cmd === "inspect") {
     const id = rest[0];
-    const p = resolve(opts.dataDir, "tasks", id ?? "", "worker-status.json");
+    const dataRoot = resolveCanonicalDataRoot({
+      installRoot: resolveInstallRoot(),
+      explicit: opts.dataDir || undefined,
+      envValue: process.env.GY_DATA_DIR,
+    });
+    const p = resolve(dataRoot, "tasks", id ?? "", "worker-status.json");
     if (!existsSync(p)) throw new Error(`missing ${p}`);
     console.log(readFileSync(p, "utf8"));
     return;

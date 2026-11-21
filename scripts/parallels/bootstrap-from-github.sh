@@ -52,13 +52,20 @@ pnpm --filter @gongyuai/control-plane build
 pnpm --filter @gongyuai/worker build
 pnpm --filter @gongyuai/console build
 
+DATA_DIR="$GY/.gongyuai"
+# Absorb any leftover ~/.gongyuai tasks before first serve (boot also migrates).
+if [[ -d /home/parallels/.gongyuai/tasks && ! -d "$DATA_DIR/tasks" ]]; then
+  mkdir -p "$DATA_DIR"
+fi
+
 fuser -k 8877/tcp 2>/dev/null || true
 sleep 1
-nohup pnpm gy serve --host 0.0.0.0 --port 8877 >/tmp/gy-serve.log 2>&1 &
+nohup pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir "$DATA_DIR" >/tmp/gy-serve.log 2>&1 &
 disown || true
 sleep 4
 curl -sf http://127.0.0.1:8877/health
 echo
 
-echo "OK: $GY is a git checkout. Old tree kept at $OLD (delete after you confirm)."
+echo "OK: $GY is a git checkout. data-dir=$DATA_DIR"
+echo "Old tree kept at $OLD (delete after you confirm)."
 echo "Also removable when confirmed: /home/parallels/GongYuAI.bak.*"
