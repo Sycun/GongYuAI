@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
@@ -373,6 +373,13 @@ export class HistoryStore {
       }
     }
 
+    // Semantic gate: ALL_COMPLETE.json must prove every challenge is_completed.
+    for (const p of normalized) {
+      if (!/(^|\/)ALL_COMPLETE\.json$/i.test(p)) continue;
+      const verdict = validateAllCompleteEvidence(join(this.evidenceDir, p));
+      if (verdict) return { ok: false, reason: verdict };
+    }
+
     const assertedAt = this.now();
     this.db
       .prepare(
@@ -446,6 +453,38 @@ export class HistoryStore {
   relativeEvidencePath(absPath: string): string {
     return relative(this.evidenceDir, absPath).replace(/\\/g, "/");
   }
+}
+
+/** Validate board-clearance evidence used by autonomous TSecBench goals. */
+export function validateAllCompleteEvidence(absPath: string): string | null {
+  let raw: string;
+  try {
+    raw = readFileSync(absPath, "utf8");
+  } catch {
+    return `cannot read ALL_COMPLETE evidence: ${absPath}`;
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return "ALL_COMPLETE.json must be valid JSON";
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    return "ALL_COMPLETE.json must be a non-empty challenge array";
+  }
+  const incomplete: string[] = [];
+  for (const row of data) {
+    if (!row || typeof row !== "object") {
+      return "ALL_COMPLETE.json entries must be objects";
+    }
+    const rec = row as { unique_code?: unknown; is_completed?: unknown };
+    const code = typeof rec.unique_code === "string" ? rec.unique_code : "?";
+    if (rec.is_completed !== true) incomplete.push(code);
+  }
+  if (incomplete.length > 0) {
+    return `ALL_COMPLETE.json still has incomplete challenges: ${incomplete.slice(0, 12).join(", ")}${incomplete.length > 12 ? "…" : ""}`;
+  }
+  return null;
 }
 
 export function openHistory(opts: OpenHistoryOptions): HistoryStore {

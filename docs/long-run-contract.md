@@ -16,8 +16,18 @@ Worker persists `{ phase, step, toolCalls, installs, tokens }` before advancing.
 
 1. Each `evidencePatterns` entry matches at least one provided relative path.
 2. Every provided path exists under `evidence/`.
+3. If a path is `**/ALL_COMPLETE.json`, the JSON must be a non-empty challenge array and **every** `is_completed` must be `true` (used by autonomous board-clearance goals).
 
-No file ⇒ no pass. Model self-report is insufficient.
+No file ⇒ no pass. Model self-report / verbal DONE is insufficient.
+
+## Worker budget (OpenAI-compatible loop)
+
+Loop exits on any of: all goals pass, `maxToolCalls`, `maxTokens`, `maxWallMs`, or fatal error.
+
+- `completed` only when all goals pass.
+- Otherwise terminal status is `budget_exhausted` (or `failed` / `stopped`).
+- Tool results are truncated; chat history is trimmed to recent turns.
+- Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`.
 
 ## Idempotency
 

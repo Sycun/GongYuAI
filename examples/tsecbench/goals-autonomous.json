@@ -1,14 +1,14 @@
 [
   {
-    "id": "board-loop",
-    "title": "Autonomous TSecBench loop",
-    "description": "You own the full loop without human help. Use pnpm tsecbench list/status/start/submit/close. Rules: (1) max 3 concurrent started containers; (2) prefer incomplete medium then hard; (3) skip already is_completed=true; (4) after each flag submit, close that challenge; (5) if container broken, close then start again; (6) VPN is already connected—never hunt VPN or change host routes; (7) write every cycle under evidence/tsec/<code>/ with board.json, recon-*.txt, submit-*.json; (8) keep going across multiple challenges until budget ends. Hint costs score—avoid unless truly stuck.",
-    "evidencePatterns": ["tsec/**/submit-*"]
+    "id": "clear-board",
+    "title": "Clear entire TSecBench board",
+    "description": "Keep running until EVERY challenge from `pnpm tsecbench list` has is_completed=true. Loop: list → start incomplete (prefer medium) → exploit → submit → close. Max 3 concurrent containers. VPN already connected—never mutate host network/VPN/proxy. Do NOT assert_goal until the board is fully cleared. Final evidence MUST be evidence/tsec/ALL_COMPLETE.json: a JSON array of all challenges where every is_completed is true (gate will reject any false).",
+    "evidencePatterns": ["tsec/ALL_COMPLETE.json"]
   },
   {
     "id": "progress-log",
     "title": "Maintain progress log",
-    "description": "Keep evidence/goals/autonomous-progress.md updated with which unique_codes completed, scores awarded, and next planned code.",
+    "description": "Keep evidence/goals/autonomous-progress.md updated with completed codes, scores, failures, next plan. Assert only at the end together with clear-board.",
     "evidencePatterns": ["goals/autonomous-progress.md"]
   }
 ]

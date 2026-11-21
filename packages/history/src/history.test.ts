@@ -40,3 +40,48 @@ test("evidence gate blocks pass without files", () => {
   store.close();
   rmSync(root, { recursive: true, force: true });
 });
+
+test("ALL_COMPLETE.json requires every is_completed=true", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-ac-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(join(evidenceDir, "tsec"), { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "22222222-2222-4222-8222-222222222222";
+  store.seedGoals(taskId, [
+    {
+      id: "clear-board",
+      title: "Clear board",
+      description: "all done",
+      evidencePatterns: ["tsec/ALL_COMPLETE.json"],
+      passes: false,
+      evidencePaths: [],
+      assertedAt: null,
+    },
+  ]);
+
+  writeFileSync(
+    join(evidenceDir, "tsec", "ALL_COMPLETE.json"),
+    JSON.stringify([
+      { unique_code: "e1-01", is_completed: true },
+      { unique_code: "e1-02", is_completed: false },
+    ]),
+  );
+  const blocked = store.assertGoal(taskId, "clear-board", ["tsec/ALL_COMPLETE.json"]);
+  assert.equal(blocked.ok, false);
+
+  writeFileSync(
+    join(evidenceDir, "tsec", "ALL_COMPLETE.json"),
+    JSON.stringify([
+      { unique_code: "e1-01", is_completed: true },
+      { unique_code: "e1-02", is_completed: true },
+    ]),
+  );
+  const ok = store.assertGoal(taskId, "clear-board", ["tsec/ALL_COMPLETE.json"]);
+  assert.equal(ok.ok, true);
+
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});

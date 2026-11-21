@@ -27,17 +27,17 @@ pnpm gy serve --port 8877
 pnpm --filter @gongyuai/console dev   # http://127.0.0.1:5173
 ```
 
-Launch a task (VPN must be up; target `*` allows dynamic container IPs):
+Launch autonomous board clear (VPN must be up **before** start; prefer CIDR over bare `*`):
 
 ```bash
 pnpm gy run \
   --base-url http://127.0.0.1:8877 \
-  --goals examples/tsecbench/goals.json \
-  --target '*' \
-  --auth "TSecBench authorized task task_202611fkretwo5ka — GongYuAI agent evaluation" \
-  --name tsecbench-e1 \
-  --max-wall-ms 3600000 \
-  --max-tool-calls 400
+  --goals examples/tsecbench/goals-autonomous.json \
+  --target '10.0.0.0/8' \
+  --auth "TSecBench authorized task_202611fkretwo5ka — GongYuAI agent evaluation" \
+  --name tsecbench-auto \
+  --max-wall-ms 14400000 \
+  --max-tool-calls 5000
 ```
 
-Watch: console Live / Tasks, or `pnpm gy status --base-url http://127.0.0.1:8877`.
+Watch: **http://127.0.0.1:8877/** (Mission Control). Host network/VPN mutation is denied by the worker.

@@ -440,16 +440,19 @@ function systemPrompt(manifest: WorkerManifest, overview: string): string {
   const visionLine = visionOn
     ? `- 视觉能力已开启。截图/界面证据优先使用 visionModelId=${manifest.model?.visionModelId || manifest.model?.modelId || "default"}。`
     : `- 视觉能力已关闭；不要依赖图像理解。`;
-  return `你是 GongYuAI 授权安全评估执行节点。对操作者可见的说明、事实标题与摘要尽量使用中文。
+  return `你是 GongYuAI 授权安全评估执行节点（Mission Control worker）。对操作者可见的说明、事实标题与摘要尽量使用中文。
 授权说明：${manifest.auth.authorizationNote}
-目标范围：${manifest.auth.targets.join("、")}
+目标允许列表：${manifest.auth.targets.join("、")}
 范围外：${manifest.auth.outOfScope.join("、") || "（无）"}
+预算：maxToolCalls=${manifest.budget.maxToolCalls} maxTokens=${manifest.budget.maxTokens} maxWallMs=${manifest.budget.maxWallMs}
 
-规则：
+硬规则：
 - 必须使用工具，不得虚构证据。
-- assert_goal 需要真实证据文件。
+- 完成只能靠 assert_goal（evidence gate）；口头 DONE 在目标未通过时无效。
+- 禁止修改主机网络/VPN/代理/路由；靶场 VPN 须任务前已连接。
+- 只探测 auth.targets（主机/URL/CIDR；即便目标含 * 也禁止主机网络改动）。
+- 大输出写入 evidence，对话里只留摘要；持续更新 History。
 - 缺少二进制时用 install_tool。
-- 持续用 title/summary/evidence 事实更新 History。
 ${visionLine}
 
 当前 History：
@@ -463,6 +466,17 @@ type ChatMessage = {
   tool_call_id?: string;
   tool_calls?: unknown[];
 };
+
+/** Keep system prompt + recent turns so long runs do not explode context. */
+function trimMessages(messages: ChatMessage[], maxMessages = 48): void {
+  if (messages.length <= maxMessages) return;
+  const system = messages[0]?.role === "system" ? [messages[0]!] : [];
+  const rest = messages.slice(system.length);
+  const kept = rest.slice(-(maxMessages - system.length));
+  // Drop orphan tool results without a preceding assistant tool_calls turn.
+  while (kept.length && kept[0]!.role === "tool") kept.shift();
+  messages.splice(0, messages.length, ...system, ...kept);
+}
 
 async function runOpenAiToolLoop(
   manifest: WorkerManifest,
@@ -553,7 +567,8 @@ async function runOpenAiToolLoop(
       type: "function",
       function: {
         name: "assert_goal",
-        description: "Evidence-gated goal pass",
+        description:
+          "Evidence-gated goal pass. For board-clearance goals, ALL_COMPLETE.json must list every challenge with is_completed=true.",
         parameters: {
           type: "object",
           properties: {
@@ -571,18 +586,31 @@ async function runOpenAiToolLoop(
     {
       role: "user",
       content:
-        "请完成所有未通过目标。使用工具推进；全部通过后回复 DONE。对外说明尽量用中文。",
+        "请完成所有未通过目标。使用工具推进；全部通过（assert_goal 成功）后才可回复 DONE。禁止改动主机网络/VPN/代理。对外说明尽量用中文。",
     },
   ];
 
   appendProgress(manifest.workspaceDir, "进入模型工具循环");
   flushUsage(manifest, ctx, state);
 
-  // LLM rounds follow task budget (old hard cap of 40 caused false "completed").
+  const loopStartedAt = Date.now();
   const maxRounds = Math.max(manifest.budget.maxToolCalls, 40);
   for (let i = 0; i < maxRounds; i++) {
     if (ctx.history.allGoalsPass(manifest.taskId)) break;
-    if (ctx.usage.toolCalls >= manifest.budget.maxToolCalls) break;
+    if (ctx.usage.toolCalls >= manifest.budget.maxToolCalls) {
+      appendProgress(manifest.workspaceDir, "达到 maxToolCalls，结束循环");
+      break;
+    }
+    if (state.tokens >= manifest.budget.maxTokens) {
+      appendProgress(manifest.workspaceDir, "达到 maxTokens，结束循环");
+      break;
+    }
+    if (Date.now() - loopStartedAt >= manifest.budget.maxWallMs) {
+      appendProgress(manifest.workspaceDir, "达到 maxWallMs，结束循环");
+      break;
+    }
+
+    trimMessages(messages);
 
     let res: Response | undefined;
     let lastFetchErr: unknown;
@@ -650,7 +678,16 @@ async function runOpenAiToolLoop(
     });
 
     if (!msg.tool_calls?.length) {
-      if ((msg.content ?? "").includes("DONE")) break;
+      if ((msg.content ?? "").includes("DONE")) {
+        if (ctx.history.allGoalsPass(manifest.taskId)) break;
+        messages.push({
+          role: "user",
+          content:
+            "目标仍未通过，禁止宣称 DONE。请继续用工具推进；完成语义以 evidence gate / assert_goal 为准。",
+        });
+        flushUsage(manifest, ctx, state);
+        continue;
+      }
       messages.push({
         role: "user",
         content: "请继续用工具推进未通过目标，全部通过后回复 DONE。",
@@ -739,7 +776,7 @@ async function runOpenAiToolLoop(
       messages.push({
         role: "tool",
         tool_call_id: call.id,
-        content: result.slice(0, 12_000),
+        content: result.slice(0, 4_000),
       });
     }
 
