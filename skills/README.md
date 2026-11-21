@@ -1,13 +1,18 @@
 # GongYuAI Skill 目录
 
-每个子目录一份独立 Skill（含 `SKILL.md`），彼此解耦。
+每个子目录一份独立 Skill（含 `SKILL.md`）。
 
 ```
 skills/
-  builtin/<id>/SKILL.md   # 预设（含 GongYuAI 短包 + 从 Kali CyberStrikeAI/skills 复制的 CSAI 包）
-  user/<id>/SKILL.md      # 你自备的 Skill；平台自动发现
+  builtin/<id>/   # 预设（GongYuAI 短包 + CSAI 复制包）
+  user/<id>/      # 自备包
+  routing.json    # 触发词路由表（进 system prompt 的是目录行，不是全文）
 ```
 
-也可放在 `.gongyuai/skills/user/<id>/`。控制台：**设置 → 工具增强 → Skill**。
+## Token 策略
 
-CSAI 导入包默认关闭（`skill.json` → `defaultEnabled: false`），在 UI 里按需打开，避免一次注入过多正文。
+- **路由表常驻**：id / 名称 / 短描述 / 触发词
+- **正文按需**：Worker 工具 `load_skill(id)` 才读 `SKILL.md`
+- UI「参与路由」：关掉 = 不出现在路由表（极少用）
+
+控制台：**设置 → 工具增强 → Skill**

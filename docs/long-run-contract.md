@@ -29,7 +29,8 @@ After crash, resume from last phase (`init → loop → report → done`)。
 ### Fact
 
 - Append-only；`layer`：`title`（索引）→ `summary`（可进 prompt）→ `evidence`（路径指向 `evidence/`）。
-- 大输出落盘，对话与 Reason 只带 title/summary；需要时再下钻 evidence（sapper / 女娲分层史）。
+- **Worker Observe**：默认只注入 Goals + title 层 + open Intents；summary/evidence 经 `history_read_fact` / `history_list_layer` 按需下钻。
+- 报告 / 控制台可用 `overview`（Observe + 近期 summary）。
 - 写 Fact 时应带 `intentId`（若由某 Intent 产生），形成 Intent→Fact 回边。
 
 ### Intent FSM

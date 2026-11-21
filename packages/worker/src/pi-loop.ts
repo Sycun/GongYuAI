@@ -399,23 +399,14 @@ async function tryPiDurable(
         return { output: [{ type: "text", text }] };
       },
     } as never);
-    const enable_skill = defineTool({
-      name: "enable_skill",
-      description: "Unlock a Skill pack for this task only.",
+    const load_skill = defineTool({
+      name: "load_skill",
+      description:
+        "Load full SKILL.md for one skill id from the routing table (on-demand; do not load all).",
       parameters: obj({ id: str(), reason: str() }),
       replay: "none",
       execute: async (args: { id: string; reason: string }) => {
-        const text = skillHub.enable(args.id, args.reason || "needed");
-        return { output: [{ type: "text", text }] };
-      },
-    } as never);
-    const disable_skill = defineTool({
-      name: "disable_skill",
-      description: "Disable a Skill pack for this task.",
-      parameters: obj({ id: str(), reason: str() }),
-      replay: "none",
-      execute: async (args: { id: string; reason: string }) => {
-        const text = skillHub.disable(args.id, args.reason || "no longer needed");
+        const text = skillHub.load(args.id, args.reason || "needed for current phase");
         return { output: [{ type: "text", text }] };
       },
     } as never);
@@ -455,8 +446,7 @@ async function tryPiDurable(
           assert_goal,
           enable_mcp,
           disable_mcp,
-          enable_skill,
-          disable_skill,
+          load_skill,
           mcp_invoke,
           ...mcpPiTools,
         ],
@@ -598,10 +588,13 @@ function systemPrompt(
   const mcpCatalogBlock = mcpCatalog.length
     ? `\n可按需解锁的 MCP（先 enable_mcp，再调用）：\n${mcpCatalog.join("\n")}\n`
     : "";
-  const skillBlock = skillHub?.promptBlock() ?? "";
-  const skillCatalog = skillHub?.catalogLines() ?? [];
-  const skillCatalogBlock = skillCatalog.length
-    ? `\n可按需解锁的 Skill（enable_skill）：\n${skillCatalog.join("\n")}\n`
+  const skillRoutes = skillHub?.routingTable() ?? [];
+  const skillHints = skillHub?.suggestForGoals() ?? [];
+  const skillRouteBlock = skillRoutes.length
+    ? `\nSkill 路由表（仅目录；正文用 load_skill(id)，单次任务勿连续加载超过 2～3 个）：\n${skillRoutes.join("\n")}\n`
+    : "\n无可用 Skill 路由。\n";
+  const skillHintBlock = skillHints.length
+    ? `\n目标相关推荐 Skill（仍须 load_skill）：${skillHints.map((id) => `\`${id}\``).join("、")}\n`
     : "";
   return `你是 GongYuAI 授权安全评估执行节点（Mission Control worker）。对操作者可见的说明、事实标题与摘要尽量使用中文。
 授权说明：${manifest.auth.authorizationNote}
@@ -617,10 +610,10 @@ function systemPrompt(
 - Observe 默认只看 title 层 Fact + 进行中 Intent；summary/evidence 用 history_read_fact 或 history_list_layer 按需下钻。
 - 大输出写入 evidence；持续用 history_append_fact 更新 History。
 - 缺少二进制时用 install_tool。
-- 工具面采用按需解锁：常开核以外用 enable_mcp / enable_skill（写清 reason）；不需要时 disable_*。
-- 未 enable 的 MCP 不可调用。
+- MCP：常开核以外用 enable_mcp 再调用；未 enable 的 MCP 不可调用。
+- Skill：系统只给路由表。需要方法论时 load_skill(id)；按阶段加载，不要一次灌入全部正文。
 ${visionLine}
-${mcpBlock}${mcpCatalogBlock}${skillBlock}${skillCatalogBlock}
+${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}
 当前 Observe（History）：
 ${observeText}
 `;
@@ -680,8 +673,33 @@ async function runOpenAiToolLoop(
       type: "function" as const,
       function: {
         name: "history_overview",
-        description: "Read History overview",
+        description:
+          "Observe History: Goals + title Facts + open Intents (no summary/evidence body)",
         parameters: { type: "object", properties: {} },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "history_read_fact",
+        description: "Drill into one Fact by id (summary / evidencePath)",
+        parameters: {
+          type: "object",
+          properties: { factId: { type: "string" } },
+          required: ["factId"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "history_list_layer",
+        description: "List Facts for one layer (summary|evidence|title) on demand",
+        parameters: {
+          type: "object",
+          properties: { layer: { type: "string" } },
+          required: ["layer"],
+        },
       },
     },
     {
@@ -780,23 +798,9 @@ async function runOpenAiToolLoop(
     {
       type: "function" as const,
       function: {
-        name: "enable_skill",
-        description: "Unlock a Skill pack for this task only.",
-        parameters: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            reason: { type: "string" },
-          },
-          required: ["id", "reason"],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "disable_skill",
-        description: "Disable a task-local Skill pack.",
+        name: "load_skill",
+        description:
+          "Load full SKILL.md for one id from the routing table (on-demand; do not load all).",
         parameters: {
           type: "object",
           properties: {
@@ -828,7 +832,7 @@ async function runOpenAiToolLoop(
   const liveTools = () => [...baseTools, ...mcpHub.openaiTools];
 
   const refreshSystem = () =>
-    systemPrompt(manifest, ctx.history.overview(manifest.taskId), mcpHub, skillHub);
+    systemPrompt(manifest, ctx.history.observe(manifest.taskId), mcpHub, skillHub);
 
   const messages: ChatMessage[] = [
     {
@@ -967,8 +971,24 @@ async function runOpenAiToolLoop(
             break;
           }
           case "history_overview":
-            result = ctx.history.overview(manifest.taskId);
+            result = ctx.history.observe(manifest.taskId);
             break;
+          case "history_read_fact": {
+            const fact = ctx.history.getFact(manifest.taskId, args.factId ?? "");
+            result = fact ? JSON.stringify(fact) : `unknown fact: ${args.factId ?? ""}`;
+            break;
+          }
+          case "history_list_layer": {
+            const layer = args.layer as "title" | "summary" | "evidence";
+            if (!["title", "summary", "evidence"].includes(layer)) {
+              result = `invalid layer: ${args.layer ?? ""}`;
+            } else {
+              result = JSON.stringify(
+                ctx.history.listFacts(manifest.taskId, layer).slice(-30),
+              );
+            }
+            break;
+          }
           case "write_evidence":
             result = writeEvidence(ctx, args.relativePath ?? "note.txt", args.content ?? "");
             ctx.history.appendFact({
@@ -1027,13 +1047,18 @@ async function runOpenAiToolLoop(
             result = await mcpHub.disable(args.id ?? "", args.reason ?? "done");
             messages[0] = { role: "system", content: refreshSystem() };
             break;
+          case "load_skill":
+            result = skillHub.load(
+              args.id ?? "",
+              args.reason ?? "needed for current phase",
+            );
+            break;
           case "enable_skill":
-            result = skillHub.enable(args.id ?? "", args.reason ?? "needed");
-            messages[0] = { role: "system", content: refreshSystem() };
+            // Back-compat alias → load_skill (no system-prompt body dump).
+            result = skillHub.load(args.id ?? "", args.reason ?? "needed");
             break;
           case "disable_skill":
-            result = skillHub.disable(args.id ?? "", args.reason ?? "done");
-            messages[0] = { role: "system", content: refreshSystem() };
+            result = `Skill 无需 disable；路由表常驻，正文仅在 load_skill 时进入对话。`;
             break;
           case "mcp_invoke": {
             let parsed: Record<string, unknown> = {};

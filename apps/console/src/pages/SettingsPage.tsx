@@ -404,7 +404,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
                 render: (v: string) => (v === "builtin" ? "内置" : "用户"),
               },
               {
-                title: "模型可见",
+                title: "参与路由",
                 dataIndex: "enabled",
                 width: 90,
                 render: (v: boolean, row: SkillPackPublic) => (

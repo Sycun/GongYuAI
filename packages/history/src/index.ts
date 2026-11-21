@@ -565,7 +565,7 @@ export class HistoryStore {
       lines.push("- （无）");
     } else {
       for (const f of summaries) {
-        lines.push(`- [${f.id.slice(0, 8)}] ${f.title}: ${f.summary.slice(0, 240)}`);
+        lines.push(`- [${f.id}] ${f.title}: ${f.summary.slice(0, 240)}`);
       }
     }
     return lines.join("\n");
@@ -585,8 +585,8 @@ export class HistoryStore {
     }
     lines.push("", "## 事实标题（title 层）");
     for (const f of titles) {
-      const intent = f.intentId ? ` ←intent ${f.intentId.slice(0, 8)}` : "";
-      lines.push(`- [${f.id.slice(0, 8)}] ${f.title}${intent}`);
+      const intent = f.intentId ? ` ←intent ${f.intentId}` : "";
+      lines.push(`- [${f.id}] ${f.title}${intent}`);
     }
     lines.push("", "## 进行中意图");
     if (open.length === 0) {
@@ -594,7 +594,7 @@ export class HistoryStore {
     } else {
       for (const i of open) {
         const src = i.sourceFactIds.join(",");
-        lines.push(`- [${i.id.slice(0, 8)}] (${i.status}) ${i.title} ←facts ${src}`);
+        lines.push(`- [${i.id}] (${i.status}) ${i.title} ←facts ${src}`);
       }
     }
     return lines;

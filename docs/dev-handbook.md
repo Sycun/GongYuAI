@@ -28,7 +28,7 @@ MCP / Skill 是弹药，不是产品定义。
 | 能力 | 现状 | 缺口 |
 | --- | --- | --- |
 | Lease / Watchdog / checkpoint | 有 | 保持零策略 |
-| Fact 分层 + append | 有 | Intent 回边使用率、title 优先注入 |
+| Fact 分层 + append | title Observe + 按需下钻 | Intent 回边使用率继续抬 |
 | Intent propose/claim/conclude | `sourceFactIds` + 成功回写 Fact | heartbeat → expire |
 | Goal + evidence gate | 有 | 语义断言扩展（除 ALL_COMPLETE） |
 | Router ≠ shell | 有 | 控制台展示图前沿即可 |
@@ -182,10 +182,11 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ## 9. 下一件最小可做事项
 
-P0.1–P0.2 已落地。接着只做 **P0.3–P0.4**（仍属 P0，勿开 P1）：
+**P0 已完成**（图语义硬化：`sourceFactIds`、成功回写、Observe title 优先、单测）。  
 
-1. Worker 系统提示：Observe 只拉 title 层 + open Intents；summary/evidence 按需。  
-2. 确认单测覆盖：claim CAS、无 `sourceFactIds` 拒绝、Goal 无文件不通过（后两项已有；补齐 prompt 行为验收即可）。  
+下一里程碑只做 **P1 — Session Relay**（勿并行开 P2+）：
 
-P0 整段验收：`pnpm smoke`；手工跑 DVWA mock 后 `history.sqlite` 可见 Fact←Intent 链。  
-做完再开 P1 Relay。不要并行开 P3/P4。
+1. contracts：`RelayProtocol` schema（字段见 long-run-contract）。  
+2. 工具：`relay`；写 `workspace/relay/π{n}.json`；bump `relayGeneration`。  
+
+验收见上文 P1；做完再开 P2 图驱动调度。

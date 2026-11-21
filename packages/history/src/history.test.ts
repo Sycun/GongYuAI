@@ -129,6 +129,74 @@ test("proposeIntent rejects empty sourceFactIds; origin allowed", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test("observe is title + open Intents only; summary/evidence on demand", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-obs-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "55555555-5555-4555-8555-555555555555";
+  store.seedGoals(taskId, [
+    {
+      id: "g1",
+      title: "Goal One",
+      description: "d",
+      evidencePatterns: ["x.txt"],
+      passes: false,
+      evidencePaths: [],
+      assertedAt: null,
+    },
+  ]);
+
+  const title = store.appendFact({
+    taskId,
+    layer: "title",
+    title: "Visible title fact",
+  });
+  store.appendFact({
+    taskId,
+    layer: "summary",
+    title: "Hidden summary fact",
+    summary: "SECRET_SUMMARY_BODY_SHOULD_NOT_BE_IN_OBSERVE",
+  });
+  store.appendFact({
+    taskId,
+    layer: "evidence",
+    title: "Hidden evidence fact",
+    summary: "SECRET_EVIDENCE_BODY",
+    evidencePath: "x.txt",
+  });
+  store.proposeIntent({
+    taskId,
+    title: "Open explore",
+    sourceFactIds: [title.id],
+  });
+
+  const obs = store.observe(taskId);
+  assert.match(obs, /Visible title fact/);
+  assert.match(obs, /Open explore/);
+  assert.match(obs, /Goal One/);
+  assert.doesNotMatch(obs, /SECRET_SUMMARY_BODY_SHOULD_NOT_BE_IN_OBSERVE/);
+  assert.doesNotMatch(obs, /SECRET_EVIDENCE_BODY/);
+  assert.doesNotMatch(obs, /## 近期摘要/);
+
+  const drilled = store.getFact(taskId, title.id);
+  assert.ok(drilled);
+  assert.equal(drilled!.title, "Visible title fact");
+
+  const summaries = store.listFacts(taskId, "summary");
+  assert.equal(summaries.length, 1);
+  assert.match(summaries[0]!.summary, /SECRET_SUMMARY/);
+
+  const full = store.overview(taskId);
+  assert.match(full, /SECRET_SUMMARY_BODY_SHOULD_NOT_BE_IN_OBSERVE/);
+
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("claimIntent is CAS on proposed; succeed conclude requires Fact writeback", () => {
   const root = mkdtempSync(join(tmpdir(), "gy-hist-cas-"));
   const evidenceDir = join(root, "evidence");
