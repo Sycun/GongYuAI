@@ -11,10 +11,16 @@ import {
   type ToolContext,
 } from "./tools.js";
 import { writeWorkerStatus } from "./status.js";
+import {
+  canRelay,
+  formatRelayInjection,
+  listRelayProtocols,
+  writeRelayProtocol,
+} from "./relay.js";
 
 /**
  * Scripted closed-loop worker for smoke / CI without an LLM.
- * Exercises History, evidence gate, install_tool, checkpoint resume, report.
+ * Exercises History DAG, evidence gate, graph phases, Session Relay, report.
  */
 export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
   const history = openHistory({
@@ -35,55 +41,163 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
     usage: { tokens: state.tokens, toolCalls: ctx.usage.toolCalls, installs: ctx.usage.installs },
   });
 
+  const sourceFromHistory = (): string[] => {
+    const facts = history.listFacts(manifest.taskId);
+    const last = facts[facts.length - 1];
+    return last ? [last.id] : [ORIGIN_FACT_ID];
+  };
+
+  const save = () => {
+    state.toolCalls = ctx.usage.toolCalls;
+    state.installs = ctx.usage.installs;
+    ckpt.save(state);
+  };
+
+  const doRelay = (trigger: "auto" | "agent", reason: string) => {
+    const check = canRelay({
+      manifest,
+      tokensSinceRelay: state.tokensSinceRelay,
+      toolCallsSinceRelay: state.toolCallsSinceRelay,
+      forceAgent: trigger === "agent",
+    });
+    if (!check.ok) {
+      appendProgress(manifest.workspaceDir, `relay skipped: ${check.reason}`);
+      return false;
+    }
+    const prevPhase = state.phase;
+    state.phase = "relay";
+    save();
+    const protocol = writeRelayProtocol(manifest, history, {
+      trigger: check.trigger,
+      reason,
+      current_position: `mock · step=${state.step}`,
+      network_map: manifest.auth.targets.join(", "),
+      tried: "mock install_tool + recon curl",
+      foothold: "mock worker; re-read History observe + π",
+      unexplored_surface: "remaining goals without evidence",
+      tokens: state.tokens,
+      toolCalls: ctx.usage.toolCalls,
+      generation: state.relayGeneration,
+    });
+    history.recordRelay(manifest.taskId, protocol.generation, check.trigger);
+    state.relayGeneration += 1;
+    state.tokensSinceRelay = 0;
+    state.toolCallsSinceRelay = 0;
+    appendProgress(
+      manifest.workspaceDir,
+      `relay π${protocol.generation} (${check.trigger}): ${reason}`,
+    );
+    // Resume prior graph phase (relay is a session boundary, not a crash).
+    state.phase = prevPhase === "relay" ? "explore" : prevPhase;
+    save();
+    return true;
+  };
+
   try {
-    if (state.phase === "init") {
-      mkdirSync(manifest.workspaceDir, { recursive: true });
-      writeFileSync(
-        join(manifest.workspaceDir, "PROGRESS.md"),
-        `# 执行进度\n\n任务 ${manifest.taskId} 初始化\n\n`,
+    // Crash recovery must NOT invent π — only Durable + History (P1.5).
+    const existingPi = listRelayProtocols(manifest.workspaceDir);
+    if (existingPi.length) {
+      appendProgress(
+        manifest.workspaceDir,
+        `注入既有 Relay ×${existingPi.length}（Watchdog 重启不写新 π）`,
       );
-      history.appendFact({
-        taskId: manifest.taskId,
-        layer: "title",
-        title: "任务已初始化",
-        summary: `授权目标：${manifest.auth.targets.join("、")}`,
-      });
-      history.appendFact({
-        taskId: manifest.taskId,
-        layer: "summary",
-        title: "已加载授权范围",
-        summary: manifest.auth.authorizationNote.slice(0, 500),
-      });
-      appendProgress(manifest.workspaceDir, "初始化完成");
-      state.phase = "loop";
+    }
+
+    if (state.phase === "init" || state.phase === "loop") {
+      state.phase = "bootstrap";
+      save();
+    }
+
+    if (state.phase === "bootstrap") {
+      mkdirSync(manifest.workspaceDir, { recursive: true });
+      if (state.step === 0) {
+        writeFileSync(
+          join(manifest.workspaceDir, "PROGRESS.md"),
+          `# 执行进度\n\n任务 ${manifest.taskId} 初始化\n\n`,
+        );
+        history.appendFact({
+          taskId: manifest.taskId,
+          layer: "title",
+          title: "任务已初始化",
+          summary: `授权目标：${manifest.auth.targets.join("、")}`,
+        });
+        history.appendFact({
+          taskId: manifest.taskId,
+          layer: "summary",
+          title: "已加载授权范围",
+          summary: manifest.auth.authorizationNote.slice(0, 500),
+        });
+        appendProgress(manifest.workspaceDir, "phase=bootstrap");
+        state.step = 1;
+        save();
+      }
+      state.phase = "explore";
       state.step = 0;
-      ckpt.save(state);
+      save();
     }
 
     const target = manifest.auth.targets[0] ?? "127.0.0.1";
-    /** Prefer last real Fact as predecessor; fall back to origin pseudo Fact. */
-    const sourceFromHistory = (): string[] => {
-      const facts = history.listFacts(manifest.taskId);
-      const last = facts[facts.length - 1];
-      return last ? [last.id] : [ORIGIN_FACT_ID];
-    };
 
-    while (state.phase === "loop") {
+    while (state.phase === "explore" || state.phase === "reason") {
       const pauseMs = Number(process.env.GY_SMOKE_PAUSE_MS ?? 0);
       if (pauseMs > 0) {
         await new Promise((r) => setTimeout(r, pauseMs));
       }
-      if (!history.allGoalsPass(manifest.taskId)) {
-        // Step 0: ensure curl exists (may stub-install)
+
+      if (history.allGoalsPass(manifest.taskId)) {
+        state.phase = "report";
+        save();
+        break;
+      }
+
+      // Reason 互斥：有 open Explore 时不跑 Reason
+      const open = history.openIntents(manifest.taskId);
+      if (open.some((i) => i.status === "proposed")) {
+        state.phase = "explore";
+      } else if (open.some((i) => i.status === "claimed" || i.status === "running")) {
+        state.phase = "explore";
+      } else if (state.phase === "explore" && state.step >= 2) {
+        state.phase = "reason";
+      }
+
+      if (state.phase === "explore") {
+        appendProgress(manifest.workspaceDir, `phase=explore step=${state.step}`);
+
+        // Auto relay when token threshold artificially low (GY_RELAY_TOKEN_THRESHOLD)
+        if (state.tokensSinceRelay > 0 || ctx.usage.toolCalls > 0) {
+          // bump mock tokens so auto-relay can fire under low threshold
+          const thr = Number(process.env.GY_RELAY_TOKEN_THRESHOLD ?? 0);
+          if (thr > 0 && state.tokensSinceRelay < thr) {
+            state.tokens += thr;
+            state.tokensSinceRelay += thr;
+          }
+          if (
+            canRelay({
+              manifest,
+              tokensSinceRelay: state.tokensSinceRelay,
+              toolCallsSinceRelay: state.toolCallsSinceRelay,
+              forceAgent: false,
+            }).ok
+          ) {
+            doRelay("auto", "mock auto threshold");
+          }
+        }
+
         if (state.step === 0) {
+          // Explore: propose → claim exactly one
           const intent = history.proposeIntent({
             taskId: manifest.taskId,
             title: "Ensure curl available",
             summary: "install_tool if missing",
             sourceFactIds: sourceFromHistory(),
           });
-          history.claimIntent(manifest.taskId, intent.id, "mock-worker");
+          const claimed = history.claimIntent(manifest.taskId, intent.id, "mock-worker");
+          if (!claimed) throw new Error("failed to claim install intent");
+          state.activeIntentId = intent.id;
+          save();
+
           const installed = installTool(ctx, { name: "curl" });
+          state.toolCallsSinceRelay += 1;
           if (installed.ok) {
             history.concludeIntent(manifest.taskId, intent.id, "succeeded", installed.detail, {
               facts: [
@@ -97,14 +211,12 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           } else {
             history.concludeIntent(manifest.taskId, intent.id, "failed", installed.detail);
           }
+          state.activeIntentId = null;
           state.step = 1;
-          state.toolCalls = ctx.usage.toolCalls;
-          state.installs = ctx.usage.installs;
-          ckpt.save(state);
+          save();
           continue;
         }
 
-        // Step 1: recon evidence
         if (state.step === 1) {
           const intent = history.proposeIntent({
             taskId: manifest.taskId,
@@ -112,7 +224,9 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             summary: `Probe ${target}`,
             sourceFactIds: sourceFromHistory(),
           });
-          history.claimIntent(manifest.taskId, intent.id, "mock-worker");
+          const claimed = history.claimIntent(manifest.taskId, intent.id, "mock-worker");
+          if (!claimed) throw new Error("failed to claim recon intent");
+          state.activeIntentId = intent.id;
 
           let banner = "";
           try {
@@ -124,6 +238,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           } catch (err) {
             banner = `probe error: ${err instanceof Error ? err.message : String(err)}`;
           }
+          state.toolCallsSinceRelay += 1;
 
           const evidencePath = writeEvidence(
             ctx,
@@ -135,9 +250,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           const recon = goals.find((g) => g.id === "recon") ?? goals[0];
           if (recon) {
             const asserted = history.assertGoal(manifest.taskId, recon.id, [evidencePath]);
-            if (!asserted.ok) {
-              throw new Error(asserted.reason);
-            }
+            if (!asserted.ok) throw new Error(asserted.reason);
           }
 
           history.concludeIntent(manifest.taskId, intent.id, "succeeded", "banner saved", {
@@ -154,59 +267,70 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
               },
             ],
           });
+          state.activeIntentId = null;
           appendProgress(manifest.workspaceDir, "recon goal passed");
           state.step = 2;
-          state.toolCalls = ctx.usage.toolCalls;
-          state.installs = ctx.usage.installs;
-          ckpt.save(state);
+          save();
+
+          // Natural checkpoint: agent relay after foothold evidence
+          doRelay("agent", "post-recon foothold");
+          state.phase = "reason";
+          save();
           continue;
         }
 
-        // Step 2: report goal if present
-        if (state.step >= 2) {
-          const goals = history.listGoals(manifest.taskId);
-          const remaining = goals.filter((g) => !g.passes);
-          if (remaining.length === 0) {
-            state.phase = "report";
-            ckpt.save(state);
-            break;
-          }
-          for (const g of remaining) {
-            const path = writeEvidence(
-              ctx,
-              `goals/${g.id}.md`,
-              `# ${g.title}\n\n${g.description}\n\nMock evidence for ${g.id}.\n`,
-            );
-            const asserted = history.assertGoal(manifest.taskId, g.id, [path]);
-            if (!asserted.ok) {
-              // If patterns don't match goals/*.md, try first pattern filename
-              const fallback = writeEvidence(
-                ctx,
-                g.evidencePatterns[0]!.replace(/\*/g, "mock"),
-                `mock evidence for ${g.id}\n`,
-              );
-              const again = history.assertGoal(manifest.taskId, g.id, [fallback]);
-              if (!again.ok) throw new Error(again.reason);
-            } else {
-              void path;
-            }
-          }
-          state.phase = "report";
-          ckpt.save(state);
+        state.phase = "reason";
+        save();
+        continue;
+      }
+
+      if (state.phase === "reason") {
+        appendProgress(manifest.workspaceDir, "phase=reason");
+        if (history.openIntents(manifest.taskId).length > 0) {
+          state.phase = "explore";
+          save();
+          continue;
         }
-      } else {
+        const goals = history.listGoals(manifest.taskId);
+        const remaining = goals.filter((g) => !g.passes);
+        if (remaining.length === 0) {
+          state.phase = "report";
+          save();
+          break;
+        }
+        for (const g of remaining) {
+          const path = writeEvidence(
+            ctx,
+            `goals/${g.id}.md`,
+            `# ${g.title}\n\n${g.description}\n\nMock evidence for ${g.id}.\n`,
+          );
+          const asserted = history.assertGoal(manifest.taskId, g.id, [path]);
+          if (!asserted.ok) {
+            const fallback = writeEvidence(
+              ctx,
+              g.evidencePatterns[0]!.replace(/\*/g, "mock"),
+              `mock evidence for ${g.id}\n`,
+            );
+            const again = history.assertGoal(manifest.taskId, g.id, [fallback]);
+            if (!again.ok) throw new Error(again.reason);
+          }
+        }
         state.phase = "report";
-        ckpt.save(state);
+        save();
       }
     }
 
     if (state.phase === "report") {
-      const report = buildReport(manifest, history.overview(manifest.taskId));
+      const relays = formatRelayInjection(listRelayProtocols(manifest.workspaceDir));
+      const report = buildReport(
+        manifest,
+        `${history.overview(manifest.taskId)}\n\n${relays}`,
+      );
       writeFileSync(join(manifest.dataDir, "report.md"), report);
       history.recordReport(manifest.taskId, "report.md");
-      appendProgress(manifest.workspaceDir, "report written");
+      appendProgress(manifest.workspaceDir, "phase=report written");
       state.phase = "done";
-      ckpt.save(state);
+      save();
     }
 
     writeWorkerStatus(manifest.dataDir, {

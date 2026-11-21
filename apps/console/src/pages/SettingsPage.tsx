@@ -382,7 +382,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
         <Banner
           type="info"
           closeIcon={null}
-          description="全局开关是默认基线；任务内可用 enable_skill 按需解锁（常开核含 recon/证据纪律）。目录：skills/builtin|user。"
+          description="路由表 + load_skill：开关只表示是否进入路由目录（建议全开）。不会把全部 SKILL.md 灌进上下文；模型按阶段 load_skill(id) 读正文。目录：skills/builtin|user + routing.json。"
         />
         <Button icon={<IconRefresh />} onClick={() => void rescan()}>
           重扫目录

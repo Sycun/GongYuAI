@@ -10,7 +10,6 @@ import {
   AddUserMcpSchema,
   AppSettingsSchema,
   CORE_MCP_IDS,
-  CORE_SKILL_IDS,
   ImportSkillSchema,
   McpServerConfigSchema,
   SkillPackConfigSchema,

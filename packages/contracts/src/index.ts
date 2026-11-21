@@ -21,8 +21,24 @@ export const BudgetSchema = z.object({
   maxWallMs: z.number().int().positive().default(3_600_000),
   maxToolCalls: z.number().int().positive().default(500),
   maxInstalls: z.number().int().positive().default(50),
+  /**
+   * Session Relay auto-trigger: cumulative tokens since last π.
+   * Override with env GY_RELAY_TOKEN_THRESHOLD. Default 30_000 (CHAP-aligned, conservative).
+   */
+  relayTokenThreshold: z.number().int().positive().default(30_000),
+  /** Min tool calls between two Relays (guard against empty handoffs). */
+  relayMinToolCalls: z.number().int().nonnegative().default(2),
 });
 export type Budget = z.infer<typeof BudgetSchema>;
+
+/** Capability ladder (P3): tools filtered by level; VPN/proxy mutations always denied. */
+export const AuthCapabilitySchema = z.enum([
+  "observe",
+  "scan",
+  "active-lab",
+  "full",
+]);
+export type AuthCapability = z.infer<typeof AuthCapabilitySchema>;
 
 export const AuthScopeSchema = z.object({
   /** Explicit written authorization note (required). */
@@ -31,8 +47,48 @@ export const AuthScopeSchema = z.object({
   targets: z.array(z.string().min(1)).min(1),
   /** Optional notes on out-of-scope assets. */
   outOfScope: z.array(z.string()).default([]),
+  /** Default lowest rung; raise explicitly per task. */
+  capability: AuthCapabilitySchema.default("observe"),
 });
 export type AuthScope = z.infer<typeof AuthScopeSchema>;
+
+/** Graph-driven worker phases (P2). Crash recovery still uses Durable; Relay ≠ crash. */
+export const WorkerPhaseSchema = z.enum([
+  "init",
+  "bootstrap",
+  "explore",
+  "reason",
+  "relay",
+  "report",
+  "done",
+  /** Legacy single-loop; treated as explore|reason continuum. */
+  "loop",
+]);
+export type WorkerPhase = z.infer<typeof WorkerPhaseSchema>;
+
+/**
+ * Session Relay protocol πₙ (CHAP-aligned). Written to workspace/relay/π{n}.json.
+ * Incremental vs prior π; History remains authoritative on conflict.
+ */
+export const RelayProtocolSchema = z.object({
+  generation: z.number().int().nonnegative(),
+  createdAt: z.string().datetime(),
+  trigger: z.enum(["auto", "agent"]),
+  reason: z.string().default(""),
+  current_position: z.string().default(""),
+  network_map: z.string().default(""),
+  tried: z.string().default(""),
+  active_sessions: z.string().default(""),
+  foothold: z.string().default(""),
+  unexplored_surface: z.string().default(""),
+  open_intents: z.array(z.string()).default([]),
+  budget_spent: z.object({
+    tokens: z.number().int().nonnegative().default(0),
+    toolCalls: z.number().int().nonnegative().default(0),
+    wallMs: z.number().int().nonnegative().default(0),
+  }),
+});
+export type RelayProtocol = z.infer<typeof RelayProtocolSchema>;
 
 export const GoalSpecSchema = z.object({
   id: z.string().min(1),
@@ -148,6 +204,7 @@ export const HistoryEventKindSchema = z.enum([
   "intent_proposed",
   "intent_claimed",
   "intent_concluded",
+  "intent_expired",
   "goal_asserted",
   "tool_installed",
   "lease_acquired",
@@ -156,6 +213,7 @@ export const HistoryEventKindSchema = z.enum([
   "worker_stopped",
   "budget_tick",
   "report_written",
+  "relay_written",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 

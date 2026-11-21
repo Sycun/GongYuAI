@@ -5,7 +5,7 @@ import zh_CN from "@douyinfe/semi-ui/lib/es/locale/source/zh_CN";
 import { App } from "./App";
 import "./styles.css";
 
-document.body.setAttribute("theme-mode", "dark");
+document.body.removeAttribute("theme-mode");
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

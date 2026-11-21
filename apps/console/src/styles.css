@@ -5,18 +5,23 @@ body,
   margin: 0;
 }
 
+html {
+  color-scheme: light;
+}
+
 body {
   color: var(--semi-color-text-0);
   background-color: var(--semi-color-bg-0);
-  font-family: "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+  font-family: "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei",
     sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 .gy-mono {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.55;
   color: var(--semi-color-text-1);
@@ -25,7 +30,7 @@ body {
 }
 
 .gy-list-active {
-  background: var(--semi-color-fill-0);
+  background: var(--semi-color-primary-light-default);
   border-radius: 8px;
 }
 

@@ -1,8 +1,60 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { WorkerManifest } from "@gongyuai/contracts";
+import type { AuthCapability, WorkerManifest } from "@gongyuai/contracts";
 import type { HistoryStore } from "@gongyuai/history";
+
+const CAPABILITY_RANK: Record<AuthCapability, number> = {
+  observe: 0,
+  scan: 1,
+  "active-lab": 2,
+  full: 3,
+};
+
+/** True if task capability is at least `need`. */
+export function capabilityAtLeast(
+  have: AuthCapability | undefined,
+  need: AuthCapability,
+): boolean {
+  const h = CAPABILITY_RANK[have ?? "observe"] ?? 0;
+  return h >= CAPABILITY_RANK[need];
+}
+
+/**
+ * Tool-surface gate by auth.capability ladder.
+ * Host VPN/proxy mutations remain denied at every level.
+ */
+export function assertCapabilityAllows(
+  manifest: WorkerManifest,
+  action: "shell" | "install" | "mcp-scan" | "mcp-active",
+): void {
+  const cap = manifest.auth.capability ?? "observe";
+  if (action === "shell" && !capabilityAtLeast(cap, "scan")) {
+    throw new Error(
+      `denied: shell requires auth.capability≥scan (have ${cap}); observe is read-only`,
+    );
+  }
+  if (action === "install" && !capabilityAtLeast(cap, "scan")) {
+    throw new Error(`denied: install_tool requires auth.capability≥scan (have ${cap})`);
+  }
+  if (action === "mcp-scan" && !capabilityAtLeast(cap, "scan")) {
+    throw new Error(`denied: scan MCP requires auth.capability≥scan (have ${cap})`);
+  }
+  if (action === "mcp-active" && !capabilityAtLeast(cap, "active-lab")) {
+    throw new Error(
+      `denied: active MCP requires auth.capability≥active-lab (have ${cap})`,
+    );
+  }
+}
+
+/** Core recon MCP ids allowed at scan; the rest need active-lab+. */
+const SCAN_MCP_IDS = new Set(["nmap", "httpx", "gobuster", "ffuf"]);
+
+export function mcpActionForServer(serverId: string): "mcp-scan" | "mcp-active" {
+  const id = serverId.replace(/^mcp__/, "").split("__")[0] ?? serverId;
+  if (SCAN_MCP_IDS.has(id) || SCAN_MCP_IDS.has(serverId)) return "mcp-scan";
+  return "mcp-active";
+}
 
 export type ToolContext = {
   manifest: WorkerManifest;
@@ -80,6 +132,7 @@ export function extractHosts(command: string): string[] {
 }
 
 export function assertCommandAllowed(manifest: WorkerManifest, command: string): void {
+  assertCapabilityAllows(manifest, "shell");
   if (HOST_NETWORK_DENY.test(command)) {
     throw new Error(
       "denied: host network/VPN/proxy mutation is forbidden; connect lab VPN before the task",
@@ -144,6 +197,7 @@ export function installTool(
   ctx: ToolContext,
   spec: { name: string; method?: "apt" | "which"; package?: string },
 ): { ok: boolean; detail: string } {
+  assertCapabilityAllows(ctx.manifest, "install");
   if (ctx.usage.installs >= ctx.manifest.budget.maxInstalls) {
     return { ok: false, detail: "maxInstalls exceeded" };
   }

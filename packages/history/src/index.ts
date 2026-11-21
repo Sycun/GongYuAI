@@ -439,6 +439,42 @@ export class HistoryStore {
     return rows.map((r) => this.rowToIntent(r));
   }
 
+  /**
+   * Heartbeat / lease timeout: claimed|running older than maxAgeMs → expired
+   * (re-claimable after re-propose, or caller may re-propose). Zero tactical policy.
+   */
+  expireStaleIntents(taskId: string, maxAgeMs: number): Intent[] {
+    const now = Date.now();
+    const open = this.listIntents(taskId).filter((i) =>
+      ["claimed", "running"].includes(i.status),
+    );
+    const expired: Intent[] = [];
+    for (const intent of open) {
+      const updated = Date.parse(intent.updatedAt);
+      if (!Number.isFinite(updated) || now - updated < maxAgeMs) continue;
+      const result = this.db
+        .prepare(
+          `UPDATE intents
+           SET status = 'expired', updated_at = ?
+           WHERE id = ? AND task_id = ? AND status IN ('claimed', 'running')`,
+        )
+        .run(this.now(), intent.id, taskId);
+      if ((result.changes ?? 0) > 0) {
+        this.emit(taskId, "intent_expired", { intentId: intent.id });
+        const row = this.getIntent(taskId, intent.id);
+        if (row) expired.push(row);
+      }
+    }
+    return expired;
+  }
+
+  /** Open Explore intents (proposed|claimed|running). */
+  openIntents(taskId: string): Intent[] {
+    return this.listIntents(taskId).filter((i) =>
+      ["proposed", "claimed", "running"].includes(i.status),
+    );
+  }
+
   private rowToIntent(r: Record<string, unknown>): Intent {
     let sourceFactIds: string[] = [ORIGIN_FACT_ID];
     try {
@@ -526,6 +562,10 @@ export class HistoryStore {
 
   recordReport(taskId: string, reportPath: string): void {
     this.emit(taskId, "report_written", { reportPath });
+  }
+
+  recordRelay(taskId: string, generation: number, trigger: string): void {
+    this.emit(taskId, "relay_written", { generation, trigger });
   }
 
   listEvents(taskId: string, limit = 200): HistoryEvent[] {

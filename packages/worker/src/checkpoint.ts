@@ -1,13 +1,22 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { WorkerPhase } from "@gongyuai/contracts";
 
 export type CheckpointState = {
-  phase: "init" | "loop" | "report" | "done";
+  phase: WorkerPhase;
   step: number;
   toolCalls: number;
   installs: number;
   tokens: number;
+  /** Session Relay generation; next π index to write. */
+  relayGeneration: number;
+  /** Tokens accumulated since last successful relay (auto trigger). */
+  tokensSinceRelay: number;
+  /** Tool calls since last successful relay (min-interval guard). */
+  toolCallsSinceRelay: number;
+  /** Currently claimed Explore intent (at most one). */
+  activeIntentId: string | null;
   lastError: string | null;
   updatedAt: string;
 };
@@ -18,6 +27,10 @@ const DEFAULT: CheckpointState = {
   toolCalls: 0,
   installs: 0,
   tokens: 0,
+  relayGeneration: 0,
+  tokensSinceRelay: 0,
+  toolCallsSinceRelay: 0,
+  activeIntentId: null,
   lastError: null,
   updatedAt: new Date().toISOString(),
 };
@@ -42,7 +55,19 @@ export class CheckpointStore {
       | { json: string }
       | undefined;
     if (!row) return { ...DEFAULT, updatedAt: new Date().toISOString() };
-    return { ...DEFAULT, ...(JSON.parse(row.json) as CheckpointState) };
+    const parsed = JSON.parse(row.json) as Partial<CheckpointState>;
+    // Map legacy "loop" into explore for graph-driven scheduling.
+    let phase = parsed.phase ?? DEFAULT.phase;
+    if (phase === "loop") phase = "explore";
+    return {
+      ...DEFAULT,
+      ...parsed,
+      phase,
+      relayGeneration: parsed.relayGeneration ?? 0,
+      tokensSinceRelay: parsed.tokensSinceRelay ?? parsed.tokens ?? 0,
+      toolCallsSinceRelay: parsed.toolCallsSinceRelay ?? 0,
+      activeIntentId: parsed.activeIntentId ?? null,
+    };
   }
 
   save(state: CheckpointState): void {
