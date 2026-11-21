@@ -3,6 +3,10 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  AssetKind,
+  AssetRecord,
+  AssetSource,
+  AuthScope,
   Fact,
   FactLayer,
   GoalState,
@@ -11,8 +15,20 @@ import type {
   Intent,
   IntentStatus,
 } from "@gongyuai/contracts";
-import { ORIGIN_FACT_ID } from "@gongyuai/contracts";
+import {
+  ASSET_KIND_RANK,
+  ASSET_TAG,
+  ORIGIN_FACT_ID,
+  admitAddress,
+  assetTags,
+  normalizeTargetPattern,
+  parseAssetAddrFromTags,
+  parseAssetKindFromTags,
+  parseAssetSourceFromTags,
+} from "@gongyuai/contracts";
 import { minimatch } from "./minimatch.js";
+
+export { minimatch } from "./minimatch.js";
 
 export type ConcludeFactInput = {
   layer: FactLayer;
@@ -39,6 +55,8 @@ export class HistoryStore {
     mkdirSync(opts.evidenceDir, { recursive: true });
     this.db = new DatabaseSync(opts.dbPath);
     this.db.exec("PRAGMA journal_mode = WAL;");
+    // Multi-Explore workers share history.sqlite; wait briefly on lock contention.
+    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.migrate();
   }
@@ -162,6 +180,146 @@ export class HistoryStore {
       this.db.exec("ROLLBACK");
       throw err;
     }
+  }
+
+  /**
+   * Idempotent: each auth.targets entry → one seed asset Fact (projection row).
+   * Call on task create and again on worker bootstrap; duplicates are skipped.
+   */
+  seedAssetsFromAuth(taskId: string, auth: Pick<AuthScope, "targets">): Fact[] {
+    const written: Fact[] = [];
+    for (const raw of auth.targets) {
+      const address = normalizeTargetPattern(raw);
+      if (!address) continue;
+      const existing = this.findAssetFact(taskId, address);
+      if (existing) continue;
+      written.push(
+        this.appendFact({
+          taskId,
+          layer: "title",
+          title: `资产 · seed · ${address}`,
+          summary: `授权靶标（auth.targets）：${raw.trim()}`,
+          tags: assetTags({ kind: "seed", address, source: "auth" }),
+        }),
+      );
+    }
+    return written;
+  }
+
+  /**
+   * Record a discovered (or promoted) asset. Auto-admits against auth when kind omitted.
+   * Append-only: upgrades write a new Fact; listAssets keeps the highest kind per address.
+   */
+  recordAsset(input: {
+    taskId: string;
+    address: string;
+    auth: Pick<AuthScope, "targets" | "outOfScope">;
+    /** Force kind; default = admitAddress result (admitted|oos). */
+    kind?: AssetKind;
+    source?: AssetSource;
+    summary?: string;
+    intentId?: string | null;
+    /** If true and address is in-scope, write kind=live. */
+    live?: boolean;
+  }): { fact: Fact; asset: AssetRecord; created: boolean } {
+    const address = normalizeTargetPattern(input.address) || input.address.trim().toLowerCase();
+    if (!address) throw new Error("asset address required");
+
+    let kind: AssetKind =
+      input.kind ??
+      admitAddress(
+        { targets: input.auth.targets, outOfScope: input.auth.outOfScope },
+        address,
+      ).kind;
+    if (input.live) {
+      const gate = admitAddress(
+        { targets: input.auth.targets, outOfScope: input.auth.outOfScope },
+        address,
+      );
+      if (gate.kind === "oos") kind = "oos";
+      else kind = "live";
+    }
+
+    const source: AssetSource = input.source ?? "discover";
+    const current = this.listAssets(input.taskId).find((a) => a.address === address);
+    if (current && ASSET_KIND_RANK[current.kind] >= ASSET_KIND_RANK[kind]) {
+      return {
+        fact: this.getFact(input.taskId, current.factId)!,
+        asset: current,
+        created: false,
+      };
+    }
+
+    const admission = admitAddress(
+      { targets: input.auth.targets, outOfScope: input.auth.outOfScope },
+      address,
+    );
+    const summary =
+      input.summary ??
+      (kind === "oos"
+        ? `范围外（未匹配 auth.targets）`
+        : kind === "live"
+          ? `已核实存活 · 匹配 ${admission.matchedBy ?? "auth.targets"}`
+          : `自动准入 · 匹配 ${admission.matchedBy ?? "auth.targets"}`);
+
+    const fact = this.appendFact({
+      taskId: input.taskId,
+      layer: "title",
+      title: `资产 · ${kind} · ${address}`,
+      summary,
+      tags: assetTags({ kind, address, source }),
+      intentId: input.intentId ?? null,
+    });
+    return {
+      fact,
+      asset: this.factToAsset(fact)!,
+      created: true,
+    };
+  }
+
+  /** Deduped inventory: highest kind per address. */
+  listAssets(taskId: string): AssetRecord[] {
+    const byAddr = new Map<string, AssetRecord>();
+    for (const fact of this.listFacts(taskId)) {
+      if (!fact.tags.includes(ASSET_TAG)) continue;
+      const asset = this.factToAsset(fact);
+      if (!asset) continue;
+      const prev = byAddr.get(asset.address);
+      if (!prev || ASSET_KIND_RANK[asset.kind] > ASSET_KIND_RANK[prev.kind]) {
+        byAddr.set(asset.address, asset);
+      } else if (
+        prev &&
+        ASSET_KIND_RANK[asset.kind] === ASSET_KIND_RANK[prev.kind] &&
+        asset.createdAt > prev.createdAt
+      ) {
+        byAddr.set(asset.address, asset);
+      }
+    }
+    return [...byAddr.values()].sort((a, b) => a.address.localeCompare(b.address));
+  }
+
+  private findAssetFact(taskId: string, address: string): Fact | null {
+    const needle = `asset.addr:${address}`;
+    for (const fact of this.listFacts(taskId)) {
+      if (fact.tags.includes(ASSET_TAG) && fact.tags.includes(needle)) return fact;
+    }
+    return null;
+  }
+
+  private factToAsset(fact: Fact): AssetRecord | null {
+    const kind = parseAssetKindFromTags(fact.tags);
+    const address = parseAssetAddrFromTags(fact.tags);
+    if (!kind || !address) return null;
+    return {
+      address,
+      kind,
+      factId: fact.id,
+      title: fact.title,
+      summary: fact.summary,
+      source: parseAssetSourceFromTags(fact.tags),
+      createdAt: fact.createdAt,
+      intentId: fact.intentId,
+    };
   }
 
   listGoals(taskId: string): GoalState[] {
@@ -613,6 +771,7 @@ export class HistoryStore {
 
   private observeCore(taskId: string): string[] {
     const goals = this.listGoals(taskId);
+    const assets = this.listAssets(taskId);
     const titles = this.listFacts(taskId, "title").slice(-50);
     const open = this.listIntents(taskId).filter((i) =>
       ["proposed", "claimed", "running"].includes(i.status),
@@ -622,6 +781,19 @@ export class HistoryStore {
     lines.push("## 目标");
     for (const g of goals) {
       lines.push(`- [${g.passes ? "通过" : "未通过"}] ${g.id}: ${g.title}`);
+    }
+    lines.push("", `## 资产清单（${assets.length}）`);
+    if (assets.length === 0) {
+      lines.push("- （无；Bootstrap / seedAssetsFromAuth 应写入 auth.targets）");
+    } else {
+      for (const a of assets) {
+        lines.push(
+          `- [${a.kind}] ${a.address} ←fact ${a.factId} · ${a.source}${a.intentId ? ` ←intent ${a.intentId}` : ""}`,
+        );
+      }
+      lines.push(
+        "（seed/admitted/live 可作 Intent 前驱继续测；oos 禁止作为利用 Intent 唯一前驱；发现用 asset_record。）",
+      );
     }
     lines.push("", "## 事实标题（title 层）");
     for (const f of titles) {

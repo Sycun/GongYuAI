@@ -35,6 +35,10 @@ function manifest(workspaceDir: string): WorkerManifest {
       relayTokenThreshold: 100,
       relayMinToolCalls: 2,
     },
+    execution: { maxConcurrentExplores: 1 },
+    workerId: "w0",
+    workerSlot: 0,
+    workerCount: 1,
     mock: true,
     mcpServers: [],
     mcpPool: [],
@@ -42,6 +46,7 @@ function manifest(workspaceDir: string): WorkerManifest {
     skillPacks: [],
     skillPool: [],
     skillCatalog: [],
+    assetCollectors: [],
   };
 }
 

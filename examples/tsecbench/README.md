@@ -34,7 +34,7 @@ pnpm gy run \
   --base-url http://127.0.0.1:8877 \
   --goals examples/tsecbench/goals-autonomous.json \
   --target '10.0.0.0/8' \
-  --auth "TSecBench authorized task_202611fkretwo5ka — GongYuAI agent evaluation" \
+  --auth "TSecBench authorized task_202611c8pnksin2v — GongYuAI agent evaluation" \
   --capability full \
   --name tsecbench-auto \
   --max-wall-ms 14400000 \

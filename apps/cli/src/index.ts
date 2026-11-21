@@ -16,7 +16,8 @@ function printHelp(): void {
 
 Usage:
   gy serve [--data-dir DIR] [--port N]
-  gy run --goals FILE --target URL --auth NOTE [--name NAME] [--mock] [--wait]
+  gy run --goals FILE --target URL [--target URL ...] --auth NOTE [--name NAME]
+       [--mock] [--wait] [--concurrency N]
        [--capability observe|scan|active-lab|full]
   gy status [taskId]
   gy logs <taskId>
@@ -27,6 +28,17 @@ Environment:
   GY_DATA_DIR  GY_HOST  GY_PORT  GY_RUNTIME  OPENAI_API_KEY
   GY_RELAY_TOKEN_THRESHOLD  GY_RELAY_MIN_TOOL_CALLS
 `);
+}
+
+/** Collect repeated --flag value pairs (e.g. multiple --target). */
+function flags(rest: string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === name && rest[i + 1]) {
+      out.push(rest[++i]!);
+    }
+  }
+  return out;
 }
 
 function parseGlobal(argv: string[]): { cmd: string; rest: string[]; opts: GlobalOpts } {
@@ -116,17 +128,18 @@ async function main(): Promise<void> {
 
   if (cmd === "run") {
     const goalsPath = flag(rest, "--goals");
-    const target = flag(rest, "--target");
+    const targets = flags(rest, "--target");
     const auth = flag(rest, "--auth");
     const name = flag(rest, "--name") ?? "mvp-run";
     const mock = has(rest, "--mock");
     const wait = has(rest, "--wait");
+    const concurrency = Number(flag(rest, "--concurrency") ?? 1);
     const capability = (flag(rest, "--capability") ?? "active-lab") as
       | "observe"
       | "scan"
       | "active-lab"
       | "full";
-    if (!goalsPath || !target || !auth) {
+    if (!goalsPath || !targets.length || !auth) {
       throw new Error("gy run requires --goals --target --auth");
     }
     const goals = JSON.parse(readFileSync(resolve(goalsPath), "utf8"));
@@ -136,11 +149,14 @@ async function main(): Promise<void> {
       mock,
       auth: {
         authorizationNote: auth,
-        targets: [target],
+        targets,
         outOfScope: [],
         capability,
       },
       goals,
+      execution: {
+        maxConcurrentExplores: concurrency,
+      },
       budget: {
         maxTokens: 2_000_000,
         maxWallMs: Number(flag(rest, "--max-wall-ms") ?? 600_000),

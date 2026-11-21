@@ -60,6 +60,14 @@ Worker 在提出新 Intent 前必须能指出「基于哪些 Fact」。
 **已硬化**：`proposeIntent` 拒绝空 / 未知 `sourceFactIds`；允许伪 Fact id `origin`（`ORIGIN_FACT_ID`）。  
 Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fact←Intent 边。
 
+### 资产清单与范围匹配
+
+- 创建任务即 `seedAssetsFromAuth`：每条 `auth.targets` → 一行 seed 资产（控制台立刻可见）。  
+- 发现物经 `asset_record` 写入；`admitAddress` **自动**判定 admitted / oos（IPv4 CIDR、`*.domain`、裸域后缀、`*`）。  
+- `outOfScope` 覆盖 targets。  
+- Observe 注入「资产清单」；`GET /tasks/:id/assets` 供控制台轮询。  
+- 细则：[asset-inventory.md](./asset-inventory.md)；匹配实现：`packages/contracts/src/scope.ts`。
+
 ## Evidence gate
 
 `assertGoal(goalId, paths)` succeeds only when:
@@ -116,6 +124,18 @@ No file ⇒ no pass. Model self-report / verbal DONE is insufficient.
 - 接力后需重新定向，成功题可能多耗若干轮。
 - 大上下文模型上增益变小；小窗口 / 长攻击链上更有价值。
 - pass@k 多跑可能收敛——应用 **同预算相对裸 agent 差分** 验收，不迷信单次分。
+
+## Graph phase tool protocol（真模型）
+
+Worker OpenAI loop 按 Durable `phase` 过滤工具面：
+
+| phase | 允许（摘要） |
+| --- | --- |
+| bootstrap | History 读写、`intent_propose`、`phase_set`、Skill；无 shell/MCP 执行 |
+| explore | claim/conclude + shell/MCP/install/`assert_goal`；**每 worker** 一次一个 `activeIntentId`；多 worker 靠 Intent CAS 并行 |
+| reason | propose / assert / History；**有 open Intent 时强制回 explore** |
+
+`GY_HARNESS=bare` 关闭 History DAG 与 Relay，仅作差分基线。
 
 ## Worker budget
 

@@ -48,12 +48,15 @@ Overview          KPI + 最近任务 + 恢复事件
 Tasks             任务列表 / 新建入口（CLI 先，Web 后）
   └ Task detail
        Live       状态 / lease / phase / 预算燃烧
-       Goals      证据闸门清单
-       History    Fact / Intent 分层
+       Assets     授权靶标 + 运行中发现（与 History 资产投影同表，轮询实时）
+       Goals      证据闸门清单 + Fact–Intent DAG
+       History    Fact–Intent DAG + 分层列表
        Evidence   证据文件
        Report     报告
        Logs       worker 日志
 Settings          runtime / model / dataDir（先只读）
 ```
+
+资产 Tab 定案见 [asset-inventory.md](./asset-inventory.md)：开局 N 条 seed、发现后 N+M，人机双向同一清单。
 
 视觉：深色操作台、等宽数据、侧栏导航；避免紫霓虹仿 ARTEX Neon，也避免奶油纸风。

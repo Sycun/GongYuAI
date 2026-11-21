@@ -58,6 +58,7 @@ export class ControlStore {
       auth: req.auth,
       goals: goalsFromSpecs(req.goals),
       budget: req.budget,
+      execution: req.execution ?? { maxConcurrentExplores: 1 },
       mock: req.mock,
       createdAt: now,
       updatedAt: now,
@@ -68,6 +69,8 @@ export class ControlStore {
       fence: 0,
       containerId: null,
       workerPid: null,
+      workerPids: [],
+      containerIds: [],
       dataDir,
       error: null,
       usage: { tokens: 0, toolCalls: 0, installs: 0 },
@@ -86,18 +89,27 @@ export class ControlStore {
       .run(record.id, JSON.stringify(record));
   }
 
+  private normalize(record: TaskRecord): TaskRecord {
+    if (!record.execution) {
+      record.execution = { maxConcurrentExplores: 1 };
+    }
+    if (!Array.isArray(record.workerPids)) record.workerPids = [];
+    if (!Array.isArray(record.containerIds)) record.containerIds = [];
+    return record;
+  }
+
   get(taskId: string): TaskRecord | null {
     const row = this.db.prepare(`SELECT json FROM tasks WHERE id = ?`).get(taskId) as
       | { json: string }
       | undefined;
     if (!row) return null;
-    return JSON.parse(row.json) as TaskRecord;
+    return this.normalize(JSON.parse(row.json) as TaskRecord);
   }
 
   list(): TaskRecord[] {
     const rows = this.db.prepare(`SELECT json FROM tasks`).all() as Array<{ json: string }>;
     return rows
-      .map((r) => JSON.parse(r.json) as TaskRecord)
+      .map((r) => this.normalize(JSON.parse(r.json) as TaskRecord))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 

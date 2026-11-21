@@ -51,19 +51,35 @@ export class Watchdog {
     }
   }
 
+  private readStatus(dataDir: string): {
+    status?: string;
+    error?: string;
+    usage?: { tokens?: number; toolCalls?: number; installs?: number };
+  } | null {
+    // Prefer leader aggregate; fall back to any slot file.
+    const primary = join(dataDir, "worker-status.json");
+    if (existsSync(primary)) {
+      try {
+        return JSON.parse(readFileSync(primary, "utf8")) as {
+          status?: string;
+          error?: string;
+          usage?: { tokens?: number; toolCalls?: number; installs?: number };
+        };
+      } catch {
+        /* fall through */
+      }
+    }
+    return null;
+  }
+
   private async handle(taskId: string): Promise<void> {
     const task = this.store.get(taskId);
     if (!task) return;
 
     // Sync usage / promote terminal from worker status sidecar
-    const statusPath = join(task.dataDir, "worker-status.json");
-    if (existsSync(statusPath)) {
+    const status = this.readStatus(task.dataDir);
+    if (status) {
       try {
-        const status = JSON.parse(readFileSync(statusPath, "utf8")) as {
-          status?: string;
-          error?: string;
-          usage?: { tokens?: number; toolCalls?: number; installs?: number };
-        };
         if (status.usage) {
           task.usage = {
             tokens: Math.max(status.usage.tokens ?? 0, task.usage.tokens),
@@ -76,7 +92,6 @@ export class Watchdog {
           status.status === "failed" ||
           status.status === "budget_exhausted"
         ) {
-          // Sync goals from history before terminal promotion
           const paths = taskPaths(task.dataDir);
           if (existsSync(paths.historyDb)) {
             const history = openHistory({
@@ -91,10 +106,11 @@ export class Watchdog {
           task.finishedAt = new Date().toISOString();
           task.leaseOwner = null;
           task.leaseUntil = null;
+          task.workerPid = null;
+          task.workerPids = [];
           this.store.save(task);
           return;
         }
-        // Running: persist usage so console / Token 统计可见
         this.store.save(task);
       } catch {
         /* ignore corrupt status */
@@ -123,11 +139,13 @@ export class Watchdog {
       return;
     }
 
-    // Dead worker: restart if still active
+    // Dead worker pool: restart if still active
     if (["queued", "initializing", "running", "recovering"].includes(task.status)) {
       task.status = "recovering";
       task.workerPid = null;
+      task.workerPids = [];
       task.containerId = null;
+      task.containerIds = [];
       this.store.save(task);
       await this.runner.start(taskId);
     }

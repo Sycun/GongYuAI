@@ -29,14 +29,16 @@ MCP / Skill 是弹药，不是产品定义。
 | --- | --- | --- |
 | Lease / Watchdog / checkpoint | 有；重启不写 π | 保持零策略 |
 | Fact 分层 + append | title Observe + 按需下钻 | — |
-| Intent propose/claim/conclude | `sourceFactIds` + 成功回写 + expire | — |
+| Intent propose/claim/conclude | `sourceFactIds` + 成功回写 + expire；真模型工具 `intent_*` | — |
 | Goal + evidence gate | 有（含 ALL_COMPLETE） | 更多语义断言可按需加 |
 | Router ≠ shell | 有 | — |
-| Bootstrap / Reason / Explore | Durable phase + mock 相位序列 | 真模型 loop 仍偏工具自由（可继续收紧） |
+| Bootstrap / Reason / Explore | Durable phase + mock + **真模型工具面按相位过滤** | Pi Durable 路径仍以 OpenAI fallback 为主纪律 |
 | Session Relay | πₙ + 双触发 + 启动注入 | — |
 | Auth ladder | `observe\|scan\|active-lab\|full` | — |
-| Harness 差分 | `pnpm diff-harness`（History vs +Relay） | 真·裸 OpenAI loop 仍可补 |
-| 多 Worker 并行 Explore | 无 | **P4 后置** |
+| Harness 差分 | `pnpm diff-harness`：**bare**（`GY_HARNESS=bare`）/ history / relay | — |
+| TSecBench CLI | hint 默认禁；409 终态快失败；`probe` + ticket 记账 | 平台 ticket 须人工重置 |
+| 多 Worker 并行 Explore | **有（可配）** | 新建任务 `execution.maxConcurrentExplores`；有效并发 = min(配置, 靶标数) |
+| 资产清单 + CIDR/通配准入 | seed / asset_record / 控制台资产 Tab | 扇出预算可再收紧 |
 
 ---
 
@@ -72,7 +74,7 @@ MCP / Skill 是弹药，不是产品定义。
 1. phase 写入 Durable：`bootstrap | explore | reason | relay | report | done`。
 2. Explore 一次只 claim **一个** Intent（mock 路径强制）。
 3. Reason 互斥：有 open Explore 时不跑 Reason。
-4. 控制台 Goals：显示 open Intents 与最近 Fact title。
+4. 控制台 Goals / History：Fact–Intent DAG 画布 + open Intents / 最近 Fact title。
 
 **验收**：smoke `PROGRESS.md` 含 `phase=bootstrap` / `phase=explore`。
 
@@ -82,10 +84,10 @@ MCP / Skill 是弹药，不是产品定义。
 2. `pnpm diff-harness --mock --goals …`：History vs +Relay 相对表。
 3. 主尺仍建议 TSecBench 子集；辅尺 DVWA smoke。只报差分。
 
-### P4 — 可选并行（明确后置）
+### P4 — 可选并行 ✅（MVP：可配 Explore 并发）
 
-多 Explore Worker / 同族迁移提示 / Hint API。  
-**不要**默认做成 sapper tmux 军团；并行是图调度的倍率，不是产品形态。
+多 Explore Worker（新建任务可设 `maxConcurrentExplores`，默认 1）/ 同族迁移提示 / Hint API 仍后置。  
+**不要**默认做成 sapper tmux 军团；并行是图调度的倍率：共享 History + Intent CAS，每 slot 独立 Durable。
 
 ---
 
@@ -185,10 +187,17 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ## 9. 下一件最小可做事项
 
-**P0–P3 MVP 已落地。** P4（多 Explore Worker / Hint API / 同族迁移）明确后置，默认不做。
+**P0–P3 + 手册打磨项已落地**（真模型相位协议、`GY_HARNESS=bare` 基线、TSec hint/409 硬化）。  
+P4 Explore 并发已可配（默认 1）；Hint API / 同族迁移仍后置。
 
-若继续打磨（非并行开花，择一）：
+验收：
 
-1. 真模型 OpenAI loop 收紧为显式 Bootstrap/Explore/Reason 工具协议。  
-2. `diff-harness` 补真正的裸 OpenAI baseline 进程。  
-3. 仅在有明确并行需求时开 P4。
+```bash
+pnpm smoke
+pnpm diff-harness --mock --goals examples/dvwa-smoke/goals.json \
+  --target https://example.com \
+  --auth "Written authorization: diff harness"
+pnpm --filter @gongyuai/worker test
+```
+
+仅在有明确并行需求时开 P4。

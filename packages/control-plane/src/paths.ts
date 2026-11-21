@@ -4,6 +4,17 @@ export function taskDataDir(root: string, taskId: string): string {
   return join(root, "tasks", taskId);
 }
 
+/** Per-Explore-slot Durable DB; slot 0 keeps legacy `durable.sqlite` path. */
+export function durableDbForSlot(dataDir: string, slot: number): string {
+  if (slot <= 0) return join(dataDir, "durable.sqlite");
+  return join(dataDir, `durable-w${slot}.sqlite`);
+}
+
+export function manifestPathForSlot(dataDir: string, slot: number): string {
+  if (slot <= 0) return join(dataDir, "manifest.json");
+  return join(dataDir, `manifest-w${slot}.json`);
+}
+
 export function taskPaths(dataDir: string) {
   return {
     dataDir,

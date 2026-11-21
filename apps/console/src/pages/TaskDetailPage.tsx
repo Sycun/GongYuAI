@@ -8,18 +8,22 @@ import {
   List,
   Row,
   Space,
+  Table,
   Tabs,
+  Tag,
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
 import { IconPlay, IconRefresh, IconStop } from "@douyinfe/semi-icons";
 import {
   api,
+  type AssetRecord,
   type HistoryPayload,
   type RuntimePayload,
   type TaskRecord,
 } from "../api";
 import {
+  ASSET_KIND_LABEL,
   DETAIL_TABS,
   type DetailTab,
   STATUS_LABEL,
@@ -27,9 +31,11 @@ import {
   isActiveStatus,
   isStartableStatus,
   shortId,
+  statusColor,
 } from "../labels";
 import { StatusTag } from "../components/StatusTag";
 import { ExecutionTrace } from "../components/ExecutionTrace";
+import { FactIntentDag } from "../components/dag/FactIntentDag";
 
 type Props = {
   task: TaskRecord | null;
@@ -40,6 +46,7 @@ type Props = {
 
 export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   const [history, setHistory] = useState<HistoryPayload | null>(null);
+  const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [runtime, setRuntime] = useState<RuntimePayload | null>(null);
   const [evidenceFiles, setEvidenceFiles] = useState<
     Array<{ path: string; size: number; mtime: string }>
@@ -64,6 +71,11 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           setHistory(h.json);
           setRuntime(r.json);
           if (r.json.usage) setLiveUsage(r.json.usage);
+        }
+        if (tab === "assets") {
+          const a = await api.assets(task!.id);
+          if (cancelled) return;
+          setAssets(a.json.assets ?? []);
         }
         if (tab === "evidence") {
           const ev = await api.evidence(task!.id);
@@ -93,7 +105,15 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   // 运行中自动刷新运行态 / 步骤，保持与任务状态一致
   useEffect(() => {
     if (!task || !isActiveStatus(task.status)) return;
-    if (tab !== "live" && tab !== "goals" && tab !== "history" && tab !== "logs") return;
+    if (
+      tab !== "live" &&
+      tab !== "goals" &&
+      tab !== "history" &&
+      tab !== "assets" &&
+      tab !== "logs"
+    ) {
+      return;
+    }
     let cancelled = false;
     const tick = async () => {
       try {
@@ -103,6 +123,11 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           setHistory(h.json);
           setRuntime(r.json);
           if (r.json.usage) setLiveUsage(r.json.usage);
+        }
+        if (tab === "assets") {
+          const a = await api.assets(task.id);
+          if (cancelled) return;
+          setAssets(a.json.assets ?? []);
         }
         if (tab === "logs") {
           const r = await api.logs(task.id);
@@ -259,7 +284,23 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                     { key: "租约到期", value: runtime?.leaseUntil || "—" },
                     { key: "栅栏号", value: String(runtime?.fence ?? task.fence) },
                     { key: "检查点", value: runtime?.hasCheckpoint ? "有" : "无" },
-                    { key: "工作进程", value: String(runtime?.workerPid ?? "—") },
+                    {
+                      key: "Explore 并发",
+                      value: String(
+                        runtime?.execution?.maxConcurrentExplores ??
+                          task.execution?.maxConcurrentExplores ??
+                          1,
+                      ),
+                    },
+                    {
+                      key: "工作进程",
+                      value: (runtime?.workerPids?.length
+                        ? runtime.workerPids
+                        : runtime?.workerPid
+                          ? [runtime.workerPid]
+                          : []
+                      ).join(", ") || "—",
+                    },
                   ]}
                 />
               </Card>
@@ -309,9 +350,93 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           </Row>
         )}
 
+        {tab === "assets" && (
+          <Card
+            title={`资产清单 · ${assets.length} 条`}
+            style={{ background: "var(--semi-color-bg-1)" }}
+            headerExtraContent={
+              <Typography.Text type="tertiary" size="small">
+                与 AI Observe 同表 · 发现经 asset_record 自动准入
+              </Typography.Text>
+            }
+          >
+            {assets.length === 0 ? (
+              <Empty
+                title="暂无资产"
+                description="创建任务后会从 auth.targets 写入种子行；运行中发现会追加。"
+              />
+            ) : (
+              <Table
+                size="small"
+                pagination={assets.length > 20 ? { pageSize: 20 } : false}
+                dataSource={assets.map((a) => ({ ...a, key: a.address }))}
+                columns={[
+                  {
+                    title: "地址 / 模式",
+                    dataIndex: "address",
+                    render: (v: string) => (
+                      <Typography.Text
+                        style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+                      >
+                        {v}
+                      </Typography.Text>
+                    ),
+                  },
+                  {
+                    title: "状态",
+                    dataIndex: "kind",
+                    width: 100,
+                    render: (k: string) => (
+                      <Tag color={statusColor(k === "oos" ? "failed" : k === "live" ? "ok" : "running")} size="small">
+                        {ASSET_KIND_LABEL[k] ?? k}
+                      </Tag>
+                    ),
+                  },
+                  {
+                    title: "来源",
+                    dataIndex: "source",
+                    width: 90,
+                    render: (s: string) => (s === "auth" ? "授权" : "发现"),
+                  },
+                  {
+                    title: "说明",
+                    dataIndex: "summary",
+                    ellipsis: true,
+                  },
+                  {
+                    title: "Fact",
+                    dataIndex: "factId",
+                    width: 100,
+                    render: (id: string) => shortId(id),
+                  },
+                  {
+                    title: "更新",
+                    dataIndex: "createdAt",
+                    width: 180,
+                    render: (t: string) => t?.replace("T", " ").slice(0, 19) ?? "—",
+                  },
+                ]}
+              />
+            )}
+          </Card>
+        )}
+
         {tab === "goals" && (
           <Row gutter={16}>
-            <Col span={14}>
+            <Col span={24}>
+              <Card
+                title="Fact–Intent DAG"
+                style={{ background: "var(--semi-color-bg-1)" }}
+                bodyStyle={{ paddingTop: 12 }}
+              >
+                <FactIntentDag
+                  facts={history?.facts ?? []}
+                  intents={history?.intents ?? []}
+                  height={380}
+                />
+              </Card>
+            </Col>
+            <Col span={14} style={{ marginTop: 16 }}>
               <Card
                 title="目标契约"
                 style={{ background: "var(--semi-color-bg-1)" }}
@@ -345,7 +470,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                 />
               </Card>
             </Col>
-            <Col span={10}>
+            <Col span={10} style={{ marginTop: 16 }}>
               <Card title="图前沿 · 开放意图" style={{ background: "var(--semi-color-bg-1)" }}>
                 <List
                   dataSource={(history?.intents ?? []).filter((i) =>
@@ -387,12 +512,25 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
 
         {tab === "history" && (
           <Row gutter={16}>
-            <Col span={12}>
+            <Col span={24}>
+              <Card
+                title="Fact–Intent DAG"
+                style={{ background: "var(--semi-color-bg-1)" }}
+                bodyStyle={{ paddingTop: 12 }}
+              >
+                <FactIntentDag
+                  facts={history?.facts ?? []}
+                  intents={history?.intents ?? []}
+                  height={420}
+                />
+              </Card>
+            </Col>
+            <Col span={12} style={{ marginTop: 16 }}>
               <Card title="总览" style={{ background: "var(--semi-color-bg-1)" }}>
                 <pre className="gy-mono">{history?.overview || "—"}</pre>
               </Card>
             </Col>
-            <Col span={12}>
+            <Col span={12} style={{ marginTop: 16 }}>
               <Card title="意图" style={{ background: "var(--semi-color-bg-1)" }}>
                 <List
                   dataSource={

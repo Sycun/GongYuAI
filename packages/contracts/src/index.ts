@@ -43,14 +43,20 @@ export type AuthCapability = z.infer<typeof AuthCapabilitySchema>;
 export const AuthScopeSchema = z.object({
   /** Explicit written authorization note (required). */
   authorizationNote: z.string().min(8),
-  /** Allowed targets: hosts, CIDRs, or URLs. */
+  /**
+   * Allowed targets: host, URL host, IPv4 CIDR (`10.0.0.0/8`),
+   * wildcard (`*.example.com`), bare domain (covers subdomains), or `*`.
+   * Matching is formalized in `scope.ts` (`targetAllows` / `admitAddress`).
+   */
   targets: z.array(z.string().min(1)).min(1),
-  /** Optional notes on out-of-scope assets. */
+  /** Patterns that always deny even if they also match targets. */
   outOfScope: z.array(z.string()).default([]),
   /** Default lowest rung; raise explicitly per task. */
   capability: AuthCapabilitySchema.default("observe"),
 });
 export type AuthScope = z.infer<typeof AuthScopeSchema>;
+
+export * from "./scope.js";
 
 /** Graph-driven worker phases (P2). Crash recovery still uses Durable; Relay ≠ crash. */
 export const WorkerPhaseSchema = z.enum([
@@ -99,6 +105,40 @@ export const GoalSpecSchema = z.object({
 });
 export type GoalSpec = z.infer<typeof GoalSpecSchema>;
 
+/**
+ * P4 — bounded Explore concurrency (user-set at task create).
+ * Default 1 = serial single-worker (current behavior).
+ * Hard ceiling 16; effective spawn count is resolved at start.
+ */
+export const MAX_CONCURRENT_EXPLORES = 16 as const;
+
+export const ExecutionConfigSchema = z.object({
+  /**
+   * Max concurrent Explore workers for this task.
+   * Shared History + Intent CAS; each worker keeps its own Durable checkpoint.
+   */
+  maxConcurrentExplores: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_CONCURRENT_EXPLORES)
+    .default(1),
+});
+export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
+
+/** Resolve how many Explore processes to spawn (never above configured or target count). */
+export function resolveExploreWorkerCount(opts: {
+  maxConcurrentExplores: number;
+  targetCount: number;
+}): number {
+  const configured = Math.min(
+    MAX_CONCURRENT_EXPLORES,
+    Math.max(1, Math.floor(opts.maxConcurrentExplores) || 1),
+  );
+  const targets = Math.max(1, Math.floor(opts.targetCount) || 1);
+  return Math.min(configured, targets);
+}
+
 export const CreateTaskRequestSchema = z.object({
   tenantId: z.string().min(1).default("default"),
   name: z.string().min(1).default("untitled"),
@@ -111,6 +151,10 @@ export const CreateTaskRequestSchema = z.object({
     maxInstalls: 50,
     relayTokenThreshold: 30_000,
     relayMinToolCalls: 2,
+  }),
+  /** Parallel Explore pool size (default 1 = serial). */
+  execution: ExecutionConfigSchema.optional().default({
+    maxConcurrentExplores: 1,
   }),
   /** When true, worker uses scripted mock agent (no LLM). */
   mock: z.boolean().default(false),
@@ -136,6 +180,7 @@ export const TaskRecordSchema = z.object({
   auth: AuthScopeSchema,
   goals: z.array(GoalStateSchema),
   budget: BudgetSchema,
+  execution: ExecutionConfigSchema.default({ maxConcurrentExplores: 1 }),
   mock: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -145,7 +190,12 @@ export const TaskRecordSchema = z.object({
   leaseUntil: z.string().datetime().nullable(),
   fence: z.number().int().nonnegative(),
   containerId: z.string().nullable(),
+  /** Leader / primary worker pid (slot 0); see workerPids for the full pool. */
   workerPid: z.number().int().nullable(),
+  /** All local Explore worker pids (slot order). Empty when docker runtime. */
+  workerPids: z.array(z.number().int()).default([]),
+  /** Docker container ids when runtime=docker (one per Explore slot). */
+  containerIds: z.array(z.string()).default([]),
   dataDir: z.string(),
   error: z.string().nullable(),
   usage: z.object({
@@ -297,6 +347,135 @@ export const CORE_SKILL_IDS = [
   "recon",
 ] as const;
 
+/** Passive asset discovery APIs (FOFA / 鹰图 Hunter / user-built). */
+export const AssetCollectorKindSchema = z.enum(["fofa", "hunter", "custom"]);
+export type AssetCollectorKind = z.infer<typeof AssetCollectorKindSchema>;
+
+export const AssetCollectorConfigSchema = z.object({
+  id: z.string().min(1).regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
+  name: z.string().min(1),
+  kind: AssetCollectorKindSchema,
+  enabled: z.boolean().default(false),
+  builtin: z.boolean().default(false),
+  /** FOFA email; unused for hunter/custom unless custom auth needs it. */
+  email: z.string().default(""),
+  apiKey: z.string().default(""),
+  baseUrl: z.string().default(""),
+  /** custom only */
+  method: z.enum(["GET", "POST"]).default("GET"),
+  authHeader: z.string().default(""),
+  authQueryParam: z.string().default(""),
+  queryParam: z.string().default("q"),
+  queryEncoding: z.enum(["plain", "base64"]).default("plain"),
+  bodyTemplate: z.string().default(""),
+  resultPath: z.string().default(""),
+  addressFields: z.array(z.string()).default(["host", "ip", "domain", "url"]),
+});
+export type AssetCollectorConfig = z.infer<typeof AssetCollectorConfigSchema>;
+
+/** Worker-facing collector (secrets via env, not plaintext in manifest). */
+export const WorkerAssetCollectorSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  kind: AssetCollectorKindSchema,
+  enabled: z.boolean(),
+  baseUrl: z.string(),
+  emailEnv: z.string().optional(),
+  apiKeyEnv: z.string(),
+  method: z.enum(["GET", "POST"]).default("GET"),
+  authHeader: z.string().default(""),
+  authQueryParam: z.string().default(""),
+  queryParam: z.string().default("q"),
+  queryEncoding: z.enum(["plain", "base64"]).default("plain"),
+  bodyTemplate: z.string().default(""),
+  resultPath: z.string().default(""),
+  addressFields: z.array(z.string()).default(["host", "ip", "domain", "url"]),
+});
+export type WorkerAssetCollector = z.infer<typeof WorkerAssetCollectorSchema>;
+
+export const BUILTIN_ASSET_COLLECTORS: AssetCollectorConfig[] = [
+  {
+    id: "fofa",
+    name: "FOFA",
+    kind: "fofa",
+    enabled: false,
+    builtin: true,
+    email: "",
+    apiKey: "",
+    baseUrl: "https://fofa.info/api/v1/search/all",
+    method: "GET",
+    authHeader: "",
+    authQueryParam: "",
+    queryParam: "qbase64",
+    queryEncoding: "base64",
+    bodyTemplate: "",
+    resultPath: "results",
+    addressFields: ["host", "ip", "domain"],
+  },
+  {
+    id: "hunter",
+    name: "鹰图 (Hunter)",
+    kind: "hunter",
+    enabled: false,
+    builtin: true,
+    email: "",
+    apiKey: "",
+    baseUrl: "https://hunter.qianxin.com/openApi/search",
+    method: "GET",
+    authHeader: "",
+    authQueryParam: "",
+    queryParam: "search",
+    queryEncoding: "base64",
+    bodyTemplate: "",
+    resultPath: "data.arr",
+    addressFields: ["url", "domain", "ip"],
+  },
+];
+
+/** Keep builtin FOFA/Hunter; preserve user credentials + enabled; append custom. */
+export function mergeAssetCollectors(
+  existing: AssetCollectorConfig[],
+): AssetCollectorConfig[] {
+  const prev = new Map(existing.map((c) => [c.id, c]));
+  const out: AssetCollectorConfig[] = [];
+  const seen = new Set<string>();
+  for (const item of BUILTIN_ASSET_COLLECTORS) {
+    const old = prev.get(item.id);
+    out.push(
+      AssetCollectorConfigSchema.parse({
+        ...item,
+        enabled: old?.enabled ?? item.enabled,
+        email: old?.email ?? item.email,
+        apiKey: old?.apiKey ?? item.apiKey,
+        baseUrl: old?.baseUrl || item.baseUrl,
+      }),
+    );
+    seen.add(item.id);
+  }
+  for (const rest of existing) {
+    if (seen.has(rest.id)) continue;
+    out.push(
+      AssetCollectorConfigSchema.parse({
+        ...rest,
+        builtin: false,
+        kind: rest.kind === "custom" ? "custom" : rest.kind,
+      }),
+    );
+  }
+  return out;
+}
+
+export function assetCollectorEnvNames(id: string): {
+  emailEnv: string;
+  apiKeyEnv: string;
+} {
+  const slug = id.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  return {
+    emailEnv: `GY_ASSET_${slug}_EMAIL`,
+    apiKeyEnv: `GY_ASSET_${slug}_KEY`,
+  };
+}
+
 export const WorkerManifestSchema = z.object({
   taskId: z.string().uuid(),
   dataDir: z.string(),
@@ -307,6 +486,13 @@ export const WorkerManifestSchema = z.object({
   auth: AuthScopeSchema,
   goals: z.array(GoalStateSchema),
   budget: BudgetSchema,
+  execution: ExecutionConfigSchema.default({ maxConcurrentExplores: 1 }),
+  /** Stable id for Intent claim CAS (unique per Explore slot). */
+  workerId: z.string().min(1).default("w0"),
+  /** 0-based Explore slot; slot 0 is bootstrap/reason/report leader. */
+  workerSlot: z.number().int().nonnegative().default(0),
+  /** Total Explore workers spawned for this task. */
+  workerCount: z.number().int().positive().default(1),
   mock: z.boolean(),
   model: z
     .object({
@@ -327,8 +513,15 @@ export const WorkerManifestSchema = z.object({
   skillPacks: z.array(WorkerSkillPackSchema).default([]),
   skillPool: z.array(WorkerSkillPackSchema).default([]),
   skillCatalog: z.array(ToolCatalogEntrySchema).default([]),
+  /** Enabled asset collectors (FOFA / 鹰图 / custom) for asset_search. */
+  assetCollectors: z.array(WorkerAssetCollectorSchema).default([]),
 });
 export type WorkerManifest = z.infer<typeof WorkerManifestSchema>;
+
+/** True when this process should run Bootstrap / Reason / Report. */
+export function isExploreLeader(manifest: Pick<WorkerManifest, "workerSlot" | "workerCount">): boolean {
+  return (manifest.workerCount ?? 1) <= 1 || (manifest.workerSlot ?? 0) === 0;
+}
 
 export const ModelSettingsSchema = z.object({
   provider: z.string().default("openai"),
@@ -419,6 +612,7 @@ export const AppSettingsSchema = z.object({
   }),
   mcpServers: z.array(McpServerConfigSchema).default([]),
   skillPacks: z.array(SkillPackConfigSchema).default([]),
+  assetCollectors: z.array(AssetCollectorConfigSchema).default([]),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
@@ -427,6 +621,20 @@ export type ModelSettingsPatch = z.infer<typeof ModelSettingsPatchSchema>;
 
 export const UpdateSettingsPatchSchema = UpdateSettingsSchema.partial();
 export type UpdateSettingsPatch = z.infer<typeof UpdateSettingsPatchSchema>;
+
+export const AssetCollectorPatchSchema = AssetCollectorConfigSchema.partial().extend({
+  id: z.string().min(1),
+});
+export type AssetCollectorPatch = z.infer<typeof AssetCollectorPatchSchema>;
+
+export const AddAssetCollectorSchema = AssetCollectorConfigSchema.omit({
+  builtin: true,
+}).extend({
+  kind: z.literal("custom"),
+  builtin: z.literal(false).default(false),
+  enabled: z.boolean().default(true),
+});
+export type AddAssetCollector = z.infer<typeof AddAssetCollectorSchema>;
 
 export const AddUserMcpSchema = z.object({
   id: z.string().min(1).regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),

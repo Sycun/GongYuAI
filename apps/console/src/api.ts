@@ -7,7 +7,9 @@ export type TaskRecord = {
   leaseOwner: string | null;
   leaseUntil: string | null;
   workerPid: number | null;
+  workerPids?: number[];
   containerId: string | null;
+  containerIds?: string[];
   dataDir: string;
   auth: {
     authorizationNote: string;
@@ -29,6 +31,9 @@ export type TaskRecord = {
     maxToolCalls: number;
     maxInstalls: number;
   };
+  execution?: {
+    maxConcurrentExplores: number;
+  };
   usage: { tokens: number; toolCalls: number; installs: number };
   error: string | null;
   createdAt: string;
@@ -42,6 +47,17 @@ export type Overview = {
   recent: TaskRecord[];
 };
 
+export type AssetRecord = {
+  address: string;
+  kind: "seed" | "candidate" | "admitted" | "live" | "oos" | string;
+  factId: string;
+  title: string;
+  summary: string;
+  source: "auth" | "discover" | string;
+  createdAt: string;
+  intentId?: string | null;
+};
+
 export type HistoryPayload = {
   overview: string;
   goals: TaskRecord["goals"];
@@ -51,9 +67,24 @@ export type HistoryPayload = {
     title: string;
     summary: string;
     createdAt: string;
+    intentId?: string | null;
+    evidencePath?: string | null;
+    tags?: string[];
   }>;
-  intents: Array<{ id: string; title: string; status: string }>;
+  intents: Array<{
+    id: string;
+    title: string;
+    status: string;
+    summary?: string;
+    sourceFactIds?: string[];
+    claimedBy?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+    concludedAt?: string | null;
+    conclusion?: string | null;
+  }>;
   events: unknown[];
+  assets?: AssetRecord[];
 };
 
 export type RuntimePayload = {
@@ -61,7 +92,10 @@ export type RuntimePayload = {
   leaseUntil: string | null;
   fence: number;
   workerPid: number | null;
+  workerPids?: number[];
   containerId: string | null;
+  containerIds?: string[];
+  execution?: { maxConcurrentExplores: number };
   workerStatus: unknown;
   hasCheckpoint: boolean;
   dataDir: string;
@@ -123,6 +157,27 @@ export type SkillPackPublic = {
   rootDir: string;
 };
 
+export type AssetCollectorPublic = {
+  id: string;
+  name: string;
+  kind: "fofa" | "hunter" | "custom";
+  enabled: boolean;
+  builtin: boolean;
+  baseUrl: string;
+  method: "GET" | "POST";
+  authHeader: string;
+  authQueryParam: string;
+  queryParam: string;
+  queryEncoding: "plain" | "base64";
+  bodyTemplate: string;
+  resultPath: string;
+  addressFields: string[];
+  emailConfigured: boolean;
+  apiKeyConfigured: boolean;
+  emailMask: string;
+  apiKeyMask: string;
+};
+
 export type PublicSettings = {
   model: {
     provider: string;
@@ -144,6 +199,7 @@ export type PublicSettings = {
   };
   mcpServers: McpServerPublic[];
   skillPacks: SkillPackPublic[];
+  assetCollectors: AssetCollectorPublic[];
   version: string;
 };
 
@@ -190,6 +246,9 @@ export type CreateTaskBody = {
     maxToolCalls?: number;
     maxInstalls?: number;
   };
+  execution?: {
+    maxConcurrentExplores: number;
+  };
 };
 
 export const api = {
@@ -205,6 +264,7 @@ export const api = {
   stop: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/stop`, { method: "POST" }),
   start: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/start`, { method: "POST" }),
   history: (id: string) => request<HistoryPayload>(`/tasks/${id}/history`),
+  assets: (id: string) => request<{ assets: AssetRecord[] }>(`/tasks/${id}/assets`),
   runtime: (id: string) => request<RuntimePayload>(`/tasks/${id}/runtime`),
   evidence: (id: string) => request<EvidenceList>(`/tasks/${id}/evidence`),
   evidenceFile: (id: string, path: string) =>
@@ -263,6 +323,28 @@ export const api = {
     }),
   removeSkill: (id: string) =>
     request<PublicSettings>(`/settings/tools/skills/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  saveAssetCollector: (body: Record<string, unknown>) =>
+    request<PublicSettings>("/settings/asset-collectors", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  addAssetCollector: (body: Record<string, unknown>) =>
+    request<PublicSettings>("/settings/asset-collectors", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  toggleAssetCollector: (body: { id: string; enabled: boolean }) =>
+    request<PublicSettings>("/settings/asset-collectors/toggle", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  removeAssetCollector: (id: string) =>
+    request<PublicSettings>(`/settings/asset-collectors/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
 };

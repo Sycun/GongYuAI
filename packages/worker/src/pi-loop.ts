@@ -1,6 +1,6 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { WorkerManifest } from "@gongyuai/contracts";
+import { isExploreLeader, type WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { CheckpointStore, type CheckpointState } from "./checkpoint.js";
 import {
@@ -12,6 +12,7 @@ import {
   writeEvidence,
   type ToolContext,
 } from "./tools.js";
+import { collectorsPromptBlock, runAssetSearch } from "./asset-collectors.js";
 import { writeWorkerStatus } from "./status.js";
 import { isMcpToolName, openMcpHub, type McpHub } from "./mcp/client.js";
 import { openSkillHub, type SkillHub } from "./skills/runtime.js";
@@ -21,11 +22,37 @@ import {
   listRelayProtocols,
   writeRelayProtocol,
 } from "./relay.js";
+import {
+  GRAPH_PHASE_TOOLS,
+  allowedToolNames,
+  asGraphPhase,
+  filterOpenAiTools,
+  handleGraphTool,
+  kickoffUserMessage,
+  phaseDirective,
+  syncGraphPhase,
+} from "./graph-phase.js";
 
 /**
  * Pi Durable-backed worker. Falls back to OpenAI tool loop if durable harness
  * cannot start (missing key / experimental API drift).
  */
+async function waitForLeaderBootstrap(
+  history: ReturnType<typeof openHistory>,
+  taskId: string,
+  timeoutMs = 120_000,
+): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const facts = history.listFacts(taskId);
+    const open = history.openIntents(taskId);
+    if (facts.length > 0 || open.length > 0 || history.allGoalsPass(taskId)) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
 export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
   const history = openHistory({
     dbPath: manifest.historyDb,
@@ -38,35 +65,61 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
     history,
     usage: { toolCalls: state.toolCalls, installs: state.installs },
   };
+  const leader = isExploreLeader(manifest);
+  const slot = manifest.workerSlot ?? 0;
 
-  writeWorkerStatus(manifest.dataDir, {
-    status: "running",
-    usage: { tokens: state.tokens, toolCalls: ctx.usage.toolCalls, installs: ctx.usage.installs },
-  });
+  writeWorkerStatus(
+    manifest.dataDir,
+    {
+      status: "running",
+      usage: {
+        tokens: state.tokens,
+        toolCalls: ctx.usage.toolCalls,
+        installs: ctx.usage.installs,
+      },
+      workerSlot: slot,
+      workerId: manifest.workerId,
+    },
+    slot,
+  );
 
   try {
     mkdirSync(manifest.workspaceDir, { recursive: true });
-    if (state.phase === "init") {
+    if (leader && state.phase === "init") {
       writeFileSync(
         join(manifest.workspaceDir, "PROGRESS.md"),
-        `# 执行进度\n\n任务 ${manifest.taskId} 初始化\n`,
+        `# 执行进度\n\n任务 ${manifest.taskId} 初始化\n并发 Explore=${manifest.workerCount}\n`,
       );
       history.seedGoals(manifest.taskId, manifest.goals);
+      history.seedAssetsFromAuth(manifest.taskId, manifest.auth);
       history.appendFact({
         taskId: manifest.taskId,
         layer: "title",
         title: "执行节点已启动",
-        summary: `目标范围：${manifest.auth.targets.join("、") || "—"}`,
+        summary: `目标范围：${manifest.auth.targets.join("、") || "—"}；Explore 并发=${manifest.workerCount}`,
       });
-      appendProgress(manifest.workspaceDir, "phase=bootstrap");
+      appendProgress(
+        manifest.workspaceDir,
+        `phase=bootstrap workers=${manifest.workerCount}`,
+      );
       state.phase = "bootstrap";
       ckpt.save(state);
+      // Stay in bootstrap until agent phase_set(explore) or sync sees open Intents.
+    } else if (!leader && (state.phase === "init" || state.phase === "bootstrap")) {
+      appendProgress(
+        manifest.workspaceDir,
+        `phase=explore follower slot=${slot} waiting for leader bootstrap`,
+      );
+      await waitForLeaderBootstrap(history, manifest.taskId);
       state.phase = "explore";
       ckpt.save(state);
     }
 
     // Crash recovery: expire stale claims; never auto-write π (P1.5).
-    history.expireStaleIntents(manifest.taskId, 30 * 60_000);
+    // Only leader expires — avoids N workers racing the same sweep.
+    if (leader) {
+      history.expireStaleIntents(manifest.taskId, 30 * 60_000);
+    }
     if (listRelayProtocols(manifest.workspaceDir).length) {
       appendProgress(
         manifest.workspaceDir,
@@ -85,35 +138,54 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
       await mcpHub.close();
     }
 
-    const report = `# GongYuAI Report\n\n${history.overview(manifest.taskId)}\n`;
-    writeFileSync(join(manifest.dataDir, "report.md"), report);
-    history.recordReport(manifest.taskId, "report.md");
+    const allPass = history.allGoalsPass(manifest.taskId);
+    if (leader) {
+      const report = `# GongYuAI Report\n\n${history.overview(manifest.taskId)}\n`;
+      writeFileSync(join(manifest.dataDir, "report.md"), report);
+      history.recordReport(manifest.taskId, "report.md");
+    }
     state.phase = "done";
     ckpt.save(state);
 
-    const allPass = history.allGoalsPass(manifest.taskId);
-    writeWorkerStatus(manifest.dataDir, {
-      // Never report "completed" while goals still FAIL (e.g. hard round-cap exit).
-      status: allPass ? "completed" : "budget_exhausted",
-      usage: {
-        tokens: state.tokens,
-        toolCalls: ctx.usage.toolCalls,
-        installs: ctx.usage.installs,
+    writeWorkerStatus(
+      manifest.dataDir,
+      {
+        // Never report "completed" while goals still FAIL (e.g. hard round-cap exit).
+        // Followers may finish early; only leader promotes task-level completed.
+        status: allPass
+          ? "completed"
+          : leader
+            ? "budget_exhausted"
+            : "completed",
+        usage: {
+          tokens: state.tokens,
+          toolCalls: ctx.usage.toolCalls,
+          installs: ctx.usage.installs,
+        },
+        workerSlot: slot,
+        workerId: manifest.workerId,
       },
-    });
+      slot,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     state.lastError = message;
     ckpt.save(state);
-    writeWorkerStatus(manifest.dataDir, {
-      status: "failed",
-      error: message,
-      usage: {
-        tokens: state.tokens,
-        toolCalls: ctx.usage.toolCalls,
-        installs: ctx.usage.installs,
+    writeWorkerStatus(
+      manifest.dataDir,
+      {
+        status: "failed",
+        error: message,
+        usage: {
+          tokens: state.tokens,
+          toolCalls: ctx.usage.toolCalls,
+          installs: ctx.usage.installs,
+        },
+        workerSlot: slot,
+        workerId: manifest.workerId,
       },
-    });
+      slot,
+    );
     throw err;
   } finally {
     ckpt.close();
@@ -340,6 +412,68 @@ async function tryPiDurable(
       },
     } as never);
 
+    const asset_list = defineTool({
+      name: "asset_list",
+      description:
+        "List the bidirectional asset inventory (seed + discovered). Same rows as console 资产表.",
+      parameters: obj({}),
+      replay: "safe",
+      execute: async () => {
+        const assets = ctx.history.listAssets(manifest.taskId);
+        return { output: [{ type: "text", text: JSON.stringify(assets) }] };
+      },
+    } as never);
+
+    const asset_record = defineTool({
+      name: "asset_record",
+      description:
+        "Record a discovered host/URL into the asset inventory. Auto-admits against auth.targets (CIDR / *.domain / suffix); out-of-scope → oos. Set live=true after probe confirms up.",
+      parameters: obj({
+        address: str(),
+        summary: str(),
+        live: str(),
+      }),
+      replay: "safe",
+      execute: async (args: { address: string; summary?: string; live?: string }) => {
+        const live =
+          args.live === "true" || args.live === "1" || args.live === "yes";
+        const r = ctx.history.recordAsset({
+          taskId: manifest.taskId,
+          address: args.address,
+          auth: manifest.auth,
+          summary: args.summary,
+          live,
+          source: "discover",
+          intentId: state.activeIntentId,
+        });
+        return { output: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    } as never);
+
+    const asset_search = defineTool({
+      name: "asset_search",
+      description:
+        "Query an enabled asset collector (FOFA / 鹰图 Hunter / custom). Hits are auto-recorded into the asset inventory (admit/oos). Prefer this over browser scraping when configured.",
+      parameters: obj({
+        collectorId: str(),
+        query: str(),
+        size: str(),
+      }),
+      replay: "none",
+      execute: async (args: { collectorId: string; query: string; size?: string }) => {
+        const size = args.size ? Number(args.size) : 50;
+        const r = await runAssetSearch(ctx, {
+          collectorId: args.collectorId,
+          query: args.query,
+          size: Number.isFinite(size) ? size : 50,
+          intentId: state.activeIntentId,
+        });
+        state.toolCalls = ctx.usage.toolCalls;
+        ckpt.save(state);
+        return { output: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    } as never);
+
     const write_evidence = defineTool({
       name: "write_evidence",
       description: "Write an evidence file under evidence/",
@@ -468,6 +602,9 @@ async function tryPiDurable(
           history_read_fact,
           history_list_layer,
           history_append_fact,
+          asset_list,
+          asset_record,
+          asset_search,
           write_evidence,
           install_tool,
           assert_goal,
@@ -590,14 +727,21 @@ function flushUsage(
   ctx: ToolContext,
   state: CheckpointState,
 ): void {
-  writeWorkerStatus(manifest.dataDir, {
-    status: "running",
-    usage: {
-      tokens: state.tokens,
-      toolCalls: ctx.usage.toolCalls,
-      installs: ctx.usage.installs,
+  const slot = manifest.workerSlot ?? 0;
+  writeWorkerStatus(
+    manifest.dataDir,
+    {
+      status: "running",
+      usage: {
+        tokens: state.tokens,
+        toolCalls: ctx.usage.toolCalls,
+        installs: ctx.usage.installs,
+      },
+      workerSlot: slot,
+      workerId: manifest.workerId,
     },
-  });
+    slot,
+  );
 }
 
 function systemPrompt(
@@ -626,26 +770,38 @@ function systemPrompt(
   const skillHintBlock = skillHints.length
     ? `\n目标相关推荐 Skill（仍须 load_skill）：${skillHints.map((id) => `\`${id}\``).join("、")}\n`
     : "";
+  const workerCount = manifest.workerCount ?? 1;
+  const workerSlot = manifest.workerSlot ?? 0;
+  const poolLine =
+    workerCount > 1
+      ? `- 本节点为 Explore pool slot ${workerSlot}/${workerCount}（workerId=${manifest.workerId}）。共享 History；用 intent_claim CAS 抢未占用 Intent。${workerSlot === 0 ? "你是 leader：负责 Bootstrap / Reason / Report。" : "你是 follower：跳过 Bootstrap，专注 claim 并 Explore；勿抢 Reason/Report。"}多靶标时优先推进不同靶标相关 Intent。`
+      : `- 单 Explore worker（串行）。`;
   return `你是 GongYuAI 授权安全评估执行节点（Mission Control worker）。对操作者可见的说明、事实标题与摘要尽量使用中文。
 授权说明：${manifest.auth.authorizationNote}
 目标允许列表：${manifest.auth.targets.join("、")}
 范围外：${manifest.auth.outOfScope.join("、") || "（无）"}
 预算：maxToolCalls=${manifest.budget.maxToolCalls} maxTokens=${manifest.budget.maxTokens} maxWallMs=${manifest.budget.maxWallMs}
+Explore 并发：configured=${manifest.execution?.maxConcurrentExplores ?? 1} effective=${workerCount}
 
 硬规则：
 - 必须使用工具，不得虚构证据。
 - 完成只能靠 assert_goal（evidence gate）；口头 DONE 在目标未通过时无效。
 - 禁止修改主机网络/VPN/代理/路由；靶场 VPN 须任务前已连接。
-- 只探测 auth.targets（主机/URL/CIDR；即便目标含 * 也禁止主机网络改动）。
-- Observe 默认只看 title 层 Fact + 进行中 Intent；summary/evidence 用 history_read_fact 或 history_list_layer 按需下钻。
-- 大输出写入 evidence；持续用 history_append_fact 更新 History。
+- 只探测 auth.targets（主机/URL/IPv4 CIDR/\`*.domain\`/裸域；即便目标含 * 也禁止主机网络改动）。
+- 资产清单双向：Observe 含「资产清单」；发现子域/IP 必须 asset_record（自动按 CIDR/通配准入或标 oos）；控制台同一投影。勿静默改 auth.targets。
+- 被动资产收集：配置启用后用 asset_search(collectorId, query) 调 FOFA/鹰图/自定义 API，命中自动写入清单（勿把原始 JSON 只塞进 chat）。
+- 图调度：显式 Bootstrap → Explore → Reason（phase_set / intent_*）；工具面按相位过滤。
+${poolLine}
+- Observe 默认看 Goals + 资产清单 + title 层 Fact + 进行中 Intent；summary/evidence 按需下钻。
+- 大输出写入 evidence；Explore 成功用 intent_conclude 写回 Fact←Intent；也可用 history_append_fact / asset_record。
 - 上下文饱和或自然检查点用 relay 工具写 π（Session Relay）；冲突以 History 为准。
 - 能力阶梯 auth.capability=${manifest.auth.capability ?? "observe"}（observe→scan→active-lab→full）；缺权工具会被拒绝。
 - 缺少二进制时用 install_tool（需 ≥scan）。
 - MCP：常开核以外用 enable_mcp 再调用；未 enable 的 MCP 不可调用。
 - Skill：系统只给路由表。需要方法论时 load_skill(id)；按阶段加载，不要一次灌入全部正文。
+- TSecBench：默认禁止批量 hint；平台 409 already finished 视为终态，停止重试并写 blocked 证据。
 ${visionLine}
-${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}
+${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}
 当前 Observe（History）：
 ${observeText}
 `;
@@ -694,6 +850,7 @@ async function runOpenAiToolLoop(
   const model = manifest.model?.modelId ?? process.env.GY_MODEL ?? "gpt-4.1-mini";
 
   const baseTools = [
+    ...GRAPH_PHASE_TOOLS,
     {
       type: "function" as const,
       function: {
@@ -795,6 +952,48 @@ async function runOpenAiToolLoop(
     {
       type: "function" as const,
       function: {
+        name: "asset_list",
+        description: "List asset inventory (same as console 资产表)",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "asset_record",
+        description:
+          "Record discovered host/URL; auto-admit via CIDR/wildcard against auth.targets. live=true after probe.",
+        parameters: {
+          type: "object",
+          properties: {
+            address: { type: "string" },
+            summary: { type: "string" },
+            live: { type: "string" },
+          },
+          required: ["address"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "asset_search",
+        description:
+          "Query FOFA / 鹰图(Hunter) / custom collector; hits auto-recorded to asset inventory. collectorId from settings.",
+        parameters: {
+          type: "object",
+          properties: {
+            collectorId: { type: "string" },
+            query: { type: "string" },
+            size: { type: "string" },
+          },
+          required: ["collectorId", "query"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
         name: "install_tool",
         description: "Install missing tool",
         parameters: {
@@ -887,15 +1086,39 @@ async function runOpenAiToolLoop(
     },
   ];
 
-  const liveTools = () => [...baseTools, ...mcpHub.openaiTools];
+  const liveTools = () => {
+    state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase);
+    const mcpNames = mcpHub.openaiTools.map((t) => t.function.name);
+    const allowed = allowedToolNames(state.phase, mcpNames);
+    return filterOpenAiTools([...baseTools, ...mcpHub.openaiTools], allowed);
+  };
 
-  const refreshSystem = () =>
-    systemPrompt(
+  const refreshSystem = () => {
+    state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase);
+    const open = ctx.history.openIntents(manifest.taskId);
+    const observe = sessionBootstrapText(
       manifest,
-      sessionBootstrapText(manifest, ctx.history.observe(manifest.taskId)),
-      mcpHub,
-      skillHub,
+      ctx.history.observe(manifest.taskId),
     );
+    const phaseBlock = phaseDirective(state.phase, {
+      openIntentCount: open.length,
+      activeIntentId: state.activeIntentId,
+    });
+    return systemPrompt(manifest, `${phaseBlock}\n\n${observe}`, mcpHub, skillHub);
+  };
+
+  const graphCtx = () => ({
+    history: ctx.history,
+    taskId: manifest.taskId,
+    workspaceDir: manifest.workspaceDir,
+    state,
+    workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
+    save: () => {
+      state.toolCalls = ctx.usage.toolCalls;
+      state.installs = ctx.usage.installs;
+      ckpt.save(state);
+    },
+  });
 
   /** Clear chat buffer after Session Relay; re-inject Observe + all π. */
   const resetMessagesAfterRelay = () => {
@@ -963,12 +1186,14 @@ async function runOpenAiToolLoop(
     },
     {
       role: "user",
-      content:
-        "请完成所有未通过目标。使用工具推进；全部通过（assert_goal 成功）后才可回复 DONE。禁止改动主机网络/VPN/代理。对外说明尽量用中文。",
+      content: kickoffUserMessage(state.phase),
     },
   ];
 
-  appendProgress(manifest.workspaceDir, "进入模型工具循环");
+  appendProgress(
+    manifest.workspaceDir,
+    `进入模型工具循环 phase=${asGraphPhase(state.phase)}`,
+  );
   flushUsage(manifest, ctx, state);
 
   const loopStartedAt = Date.now();
@@ -1005,6 +1230,10 @@ async function runOpenAiToolLoop(
     }
 
     trimMessages(messages);
+    // Keep system prompt phase-aware each round.
+    if (messages[0]?.role === "system") {
+      messages[0] = { role: "system", content: refreshSystem() };
+    }
 
     let res: Response | undefined;
     let lastFetchErr: unknown;
@@ -1093,11 +1322,46 @@ async function runOpenAiToolLoop(
     }
 
     const toolNames: string[] = [];
+    const allowedNow = allowedToolNames(
+      syncGraphPhase(ctx.history, manifest.taskId, state.phase),
+      mcpHub.openaiTools.map((t) => t.function.name),
+    );
     for (const call of msg.tool_calls) {
       const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
       let result = "";
       toolNames.push(call.function.name);
       try {
+        if (!allowedNow.has(call.function.name) && !isMcpToolName(call.function.name)) {
+          result = `denied: tool ${call.function.name} not allowed in phase=${asGraphPhase(state.phase)}`;
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: result.slice(0, 4_000),
+          });
+          continue;
+        }
+        if (isMcpToolName(call.function.name) && !allowedNow.has(call.function.name)) {
+          // MCP only in explore
+          if (asGraphPhase(state.phase) !== "explore" && asGraphPhase(state.phase) !== "relay") {
+            result = `denied: MCP ${call.function.name} requires explore phase (have ${state.phase})`;
+            messages.push({
+              role: "tool",
+              tool_call_id: call.id,
+              content: result.slice(0, 4_000),
+            });
+            continue;
+          }
+        }
+        const graphResult = handleGraphTool(call.function.name, args, graphCtx());
+        if (graphResult != null) {
+          result = graphResult;
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: result.slice(0, 4_000),
+          });
+          continue;
+        }
         switch (call.function.name) {
           case "shell": {
             const r = runShell(ctx, args.command ?? "");
@@ -1165,6 +1429,37 @@ async function runOpenAiToolLoop(
               }),
             );
             break;
+          case "asset_list":
+            result = JSON.stringify(ctx.history.listAssets(manifest.taskId));
+            break;
+          case "asset_record": {
+            const live =
+              args.live === "true" || args.live === "1" || args.live === "yes";
+            result = JSON.stringify(
+              ctx.history.recordAsset({
+                taskId: manifest.taskId,
+                address: args.address ?? "",
+                auth: manifest.auth,
+                summary: args.summary,
+                live,
+                source: "discover",
+                intentId: state.activeIntentId,
+              }),
+            );
+            break;
+          }
+          case "asset_search": {
+            const size = args.size ? Number(args.size) : 50;
+            result = JSON.stringify(
+              await runAssetSearch(ctx, {
+                collectorId: args.collectorId ?? "",
+                query: args.query ?? "",
+                size: Number.isFinite(size) ? size : 50,
+                intentId: state.activeIntentId,
+              }),
+            );
+            break;
+          }
           case "install_tool":
             result = JSON.stringify(
               installTool(ctx, { name: args.name ?? "", package: args.package }),

@@ -3,10 +3,11 @@
 AI-native **long-running** authorized pentest agent，产品面定位为 **Mission Control**（不是裸 API、也不是聊天壳）。
 
 - **Web 控制台**：Overview / Tasks / Live / Goals / History / Evidence / Report / Logs
-- **Pi Durable** worker（OpenAI 兼容回退）
+- **Pi Durable** worker（OpenAI 兼容回退；图相位 Bootstrap→Explore→Reason）
 - **分层 History（Fact / Intent / Goal）** + **证据闸门**
 - **Control plane + Watchdog**：lease / 崩溃恢复 / 每任务 Docker 或 local worker
-- **Session Relay（规划中）**：上下文边界结构化接力，图仍为权威
+- **Session Relay**：上下文边界结构化接力（πₙ）；图仍为权威
+- **Harness 差分**：`pnpm diff-harness`（bare / history / relay）
 - **单用户 MVP** CLI（`gy`）；多人后置
 
 文档入口：[docs/README.md](docs/README.md)。后续开发按 [docs/dev-handbook.md](docs/dev-handbook.md)。

@@ -1,6 +1,6 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { ORIGIN_FACT_ID, type WorkerManifest } from "@gongyuai/contracts";
+import { isExploreLeader, ORIGIN_FACT_ID, type WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { CheckpointStore } from "./checkpoint.js";
 import {
@@ -18,17 +18,62 @@ import {
   writeRelayProtocol,
 } from "./relay.js";
 
+/** Follower mock slots wait for leader goals; avoids scripted propose/claim races. */
+async function runMockFollower(manifest: WorkerManifest): Promise<void> {
+  const history = openHistory({
+    dbPath: manifest.historyDb,
+    evidenceDir: manifest.evidenceDir,
+  });
+  const slot = manifest.workerSlot ?? 0;
+  writeWorkerStatus(
+    manifest.dataDir,
+    {
+      status: "running",
+      usage: { tokens: 0, toolCalls: 0, installs: 0 },
+      workerSlot: slot,
+      workerId: manifest.workerId,
+    },
+    slot,
+  );
+  const start = Date.now();
+  const timeoutMs = Math.min(manifest.budget.maxWallMs, 120_000);
+  try {
+    while (Date.now() - start < timeoutMs) {
+      if (history.allGoalsPass(manifest.taskId)) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    writeWorkerStatus(
+      manifest.dataDir,
+      {
+        status: "completed",
+        usage: { tokens: 0, toolCalls: 0, installs: 0 },
+        workerSlot: slot,
+        workerId: manifest.workerId,
+      },
+      slot,
+    );
+  } finally {
+    history.close();
+  }
+}
+
 /**
  * Scripted closed-loop worker for smoke / CI without an LLM.
  * Exercises History DAG, evidence gate, graph phases, Session Relay, report.
  */
 export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
+  if (!isExploreLeader(manifest)) {
+    await runMockFollower(manifest);
+    return;
+  }
+
   const history = openHistory({
     dbPath: manifest.historyDb,
     evidenceDir: manifest.evidenceDir,
   });
   const ckpt = new CheckpointStore(manifest.durableDb);
   let state = ckpt.load();
+  const slot = manifest.workerSlot ?? 0;
 
   const ctx: ToolContext = {
     manifest,
@@ -36,10 +81,20 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
     usage: { toolCalls: state.toolCalls, installs: state.installs },
   };
 
-  writeWorkerStatus(manifest.dataDir, {
-    status: "running",
-    usage: { tokens: state.tokens, toolCalls: ctx.usage.toolCalls, installs: ctx.usage.installs },
-  });
+  writeWorkerStatus(
+    manifest.dataDir,
+    {
+      status: "running",
+      usage: {
+        tokens: state.tokens,
+        toolCalls: ctx.usage.toolCalls,
+        installs: ctx.usage.installs,
+      },
+      workerSlot: slot,
+      workerId: manifest.workerId,
+    },
+    slot,
+  );
 
   const sourceFromHistory = (): string[] => {
     const facts = history.listFacts(manifest.taskId);
@@ -115,6 +170,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           join(manifest.workspaceDir, "PROGRESS.md"),
           `# 执行进度\n\n任务 ${manifest.taskId} 初始化\n\n`,
         );
+        history.seedAssetsFromAuth(manifest.taskId, manifest.auth);
         history.appendFact({
           taskId: manifest.taskId,
           layer: "title",
@@ -127,6 +183,19 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           title: "已加载授权范围",
           summary: manifest.auth.authorizationNote.slice(0, 500),
         });
+        // Simulate discovery under first target pattern so 资产表 grows past seeds.
+        const seed0 = manifest.auth.targets[0];
+        if (seed0) {
+          history.recordAsset({
+            taskId: manifest.taskId,
+            address: seed0.includes("/")
+              ? "10.0.188.64"
+              : `discovered.${seed0.replace(/^https?:\/\//, "").split("/")[0] ?? "example.com"}`,
+            auth: manifest.auth,
+            summary: "mock 发现资产（自动准入）",
+            source: "discover",
+          });
+        }
         appendProgress(manifest.workspaceDir, "phase=bootstrap");
         state.step = 1;
         save();
@@ -191,7 +260,11 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             summary: "install_tool if missing",
             sourceFactIds: sourceFromHistory(),
           });
-          const claimed = history.claimIntent(manifest.taskId, intent.id, "mock-worker");
+          const claimed = history.claimIntent(
+            manifest.taskId,
+            intent.id,
+            manifest.workerId || "mock-worker",
+          );
           if (!claimed) throw new Error("failed to claim install intent");
           state.activeIntentId = intent.id;
           save();
@@ -224,7 +297,11 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             summary: `Probe ${target}`,
             sourceFactIds: sourceFromHistory(),
           });
-          const claimed = history.claimIntent(manifest.taskId, intent.id, "mock-worker");
+          const claimed = history.claimIntent(
+            manifest.taskId,
+            intent.id,
+            manifest.workerId || "mock-worker",
+          );
           if (!claimed) throw new Error("failed to claim recon intent");
           state.activeIntentId = intent.id;
 
@@ -333,29 +410,41 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
       save();
     }
 
-    writeWorkerStatus(manifest.dataDir, {
-      status: "completed",
-      usage: {
-        tokens: state.tokens,
-        toolCalls: ctx.usage.toolCalls,
-        installs: ctx.usage.installs,
+    writeWorkerStatus(
+      manifest.dataDir,
+      {
+        status: "completed",
+        usage: {
+          tokens: state.tokens,
+          toolCalls: ctx.usage.toolCalls,
+          installs: ctx.usage.installs,
+        },
+        workerSlot: slot,
+        workerId: manifest.workerId,
       },
-    });
+      slot,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     state.lastError = message;
     ckpt.save(state);
-    writeWorkerStatus(manifest.dataDir, {
-      status: message.includes("maxWallMs") || message.includes("maxToolCalls")
-        ? "budget_exhausted"
-        : "failed",
-      error: message,
-      usage: {
-        tokens: state.tokens,
-        toolCalls: ctx.usage.toolCalls,
-        installs: ctx.usage.installs,
+    writeWorkerStatus(
+      manifest.dataDir,
+      {
+        status: message.includes("maxWallMs") || message.includes("maxToolCalls")
+          ? "budget_exhausted"
+          : "failed",
+        error: message,
+        usage: {
+          tokens: state.tokens,
+          toolCalls: ctx.usage.toolCalls,
+          installs: ctx.usage.installs,
+        },
+        workerSlot: slot,
+        workerId: manifest.workerId,
       },
-    });
+      slot,
+    );
     throw err;
   } finally {
     ckpt.close();

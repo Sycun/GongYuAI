@@ -3,12 +3,6 @@ import { Layout, Nav, Typography, Badge } from "@douyinfe/semi-ui";
 import {
   IconHome,
   IconList,
-  IconPulse,
-  IconCheckboxTick,
-  IconHistory,
-  IconFolder,
-  IconFile,
-  IconTerminal,
   IconSetting,
   IconBolt,
   IconHistogram,
@@ -17,6 +11,7 @@ import {
   IconWrench,
   IconPuzzle,
   IconCode,
+  IconSearch,
 } from "@douyinfe/semi-icons";
 import { api, type Overview, type TaskRecord } from "./api";
 import {
@@ -41,8 +36,12 @@ type Route =
   | SettingsRoute
   | DetailTab;
 
-/** 任务深潜 / 设置 / 工具增强 默认全展开 */
-const DEFAULT_OPEN_KEYS = ["dive", "settings", "settings-tools"];
+/** 设置 / 工具增强 默认展开 */
+const DEFAULT_OPEN_KEYS = ["settings", "settings-tools"];
+
+function isDetailRoute(route: Route): boolean {
+  return DETAIL_TABS.some((t) => t.key === route);
+}
 
 function normalizeRoute(route: string): Route {
   if (route === "settings") return "settings-model";
@@ -84,11 +83,7 @@ export function App() {
     setRoute(resolvedRoute);
     const id = nextTaskId === undefined ? taskId : nextTaskId;
     let resolved = id;
-    if (
-      DETAIL_TABS.some((t) => t.key === resolvedRoute) &&
-      !resolved &&
-      tasks.length
-    ) {
+    if (isDetailRoute(resolvedRoute) && !resolved && tasks.length) {
       resolved = tasks[tasks.length - 1]!.id;
       setTaskId(resolved);
     } else if (nextTaskId !== undefined) {
@@ -130,7 +125,8 @@ export function App() {
 
   const openTask = (id: string) => navigate("live", id);
 
-  const selectedKeys = [route === "tasks" && taskId ? "tasks" : route];
+  // 深潜分区只在任务页内用 Tab；侧栏高亮「任务」
+  const selectedKeys = [isDetailRoute(route) || (route === "tasks" && taskId) ? "tasks" : route];
 
   return (
     <Layout style={{ height: "100vh", background: "var(--semi-color-bg-0)" }}>
@@ -142,7 +138,7 @@ export function App() {
           onOpenChange={({ openKeys: next }) => setOpenKeys(next ?? [])}
           onSelect={({ itemKey }) => {
             const key = String(itemKey);
-            if (key === "dive" || key === "settings" || key === "settings-tools") return;
+            if (key === "settings" || key === "settings-tools") return;
             navigate(key as Route);
           }}
           header={{
@@ -170,16 +166,9 @@ export function App() {
         >
           <Nav.Item itemKey="overview" text="总览" icon={<IconHome />} />
           <Nav.Item itemKey="tasks" text="任务" icon={<IconList />} />
-          <Nav.Sub itemKey="dive" text="任务深潜">
-            <Nav.Item itemKey="live" text="运行态" icon={<IconPulse />} />
-            <Nav.Item itemKey="goals" text="目标" icon={<IconCheckboxTick />} />
-            <Nav.Item itemKey="history" text="历史" icon={<IconHistory />} />
-            <Nav.Item itemKey="evidence" text="证据" icon={<IconFolder />} />
-            <Nav.Item itemKey="report" text="报告" icon={<IconFile />} />
-            <Nav.Item itemKey="logs" text="日志" icon={<IconTerminal />} />
-          </Nav.Sub>
           <Nav.Sub itemKey="settings" text="设置" icon={<IconSetting />}>
             <Nav.Item itemKey="settings-model" text="模型配置" icon={<IconBolt />} />
+            <Nav.Item itemKey="settings-assets" text="资产收集" icon={<IconSearch />} />
             <Nav.Sub itemKey="settings-tools" text="工具增强" icon={<IconWrench />}>
               <Nav.Item itemKey="settings-mcp" text="MCP" icon={<IconCode />} />
               <Nav.Item itemKey="settings-skills" text="Skill" icon={<IconPuzzle />} />
@@ -237,7 +226,7 @@ export function App() {
           {isSettingsRoute(route) && (
             <SettingsPage section={settingsSectionOf(route)} />
           )}
-          {DETAIL_TABS.some((t) => t.key === route) && (
+          {isDetailRoute(route) && (
             <TaskDetailPage
               task={selectedTask}
               tab={route as DetailTab}

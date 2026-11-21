@@ -15,7 +15,8 @@ Long-running authorized pentest agents fail for four reasons: context windows fi
 3. **Router / Worker split** — Control plane never executes shell. Workers own tools.（对应 sapper「指挥官永不亲手执行」）
 4. **Evidence gate** — Goals stay `passes:false` until matching files exist under `evidence/`.
 5. **AI-native policy** — Human supplies auth scope, budget, and goal contracts. Exploration path is model-driven (or mock script for CI).
-6. **Session Relay（规划中）** — 会话边界写入结构化 handoff protocol，再启新 worker 实例；会话内保留完整工具输出，只在边界压缩。
+6. **Session Relay** — 会话边界写入结构化 handoff protocol（πₙ），再启新会话；会话内保留完整工具输出，只在边界压缩。Watchdog 崩溃恢复不写 π。
+7. **Harness differential** — `bare`（无 History/Relay）vs History vs +Relay，只报相对差分。
 
 ## Core graph: Fact–Intent–Goal
 
@@ -27,6 +28,7 @@ Long-running authorized pentest agents fail for four reasons: context windows fi
 | **Intent** | 基于既有 Fact 的探索承诺（尚未完成） | `intents` 表；CAS claim；`proposed → claimed → running → succeeded\|failed` |
 | **Goal** | 宏观终态契约 | `goals` + `evidencePatterns`；证据文件闸门，不可口头完成 |
 | **Hint**（可选） | 人类战术注入 | 控制台 / API 写入，下次 Observe 吸收（对应 Cairn Hint / Intentest prompt 表） |
+| **Asset**（投影） | 测试资产清单 | 带 `asset` 标签的 Fact；控制台「资产」与 Observe 同表；见 [asset-inventory.md](./asset-inventory.md) |
 
 因果边（Intentest 形式化，GongYuAI 目标语义）：
 
@@ -41,6 +43,7 @@ Fact  ──front──▶  Intent  ──back──▶  Fact'
 - 新 Intent **必须**挂在已有 Fact（或 origin）上，禁止无因探索。
 - Fact 一经写入不可改；纠错只能追加否定/修正 Fact。
 - 协作只通过图（stigmergy），禁止 Worker 间私聊成为真相源。
+- 运行中发现的子域/主机经 `asset_record` 写入资产投影；**自动**按 `auth.targets`（含 IPv4 CIDR / `*.domain`）准入，不另开资产库、不静默改授权列表。
 
 ### Worker 任务原语（Cairn 三件套 → GongYuAI）
 
@@ -52,7 +55,7 @@ Fact  ──front──▶  Intent  ──back──▶  Fact'
 | **Explore** | 存在未 claim 的 Intent | 单 Intent → 验证 → 0..n 新 Fact |
 | **Reason** | 有新 Fact / Hint，且无待 Explore | Complete 判定 / 新 Intent / no-op |
 
-MVP 可先在单 Worker 循环内用工具模拟三类动作；并行多 Explore 后置。
+默认单 Worker；任务创建时可设 `execution.maxConcurrentExplores`（1–16），控制面按 min(配置, 靶标数) 拉起多 Explore 进程，共享 History（Intent claim CAS），slot 0 任 Bootstrap/Reason/Report leader。
 
 ## Control plane vs Worker
 
@@ -83,7 +86,7 @@ Watchdog **零策略**：只保活（续租、死进程重启、预算截止收�
 | `@gongyuai/worker` | Pi Durable / OpenAI / mock loop + tools + relay hooks |
 | `@gongyuai/cli` | `gy` single-user CLI |
 
-\* Relay schema 见 [long-run-contract.md](./long-run-contract.md)；实现按 [dev-handbook.md](./dev-handbook.md) 分期。
+\* Relay / 图相位 / bare harness 见 [long-run-contract.md](./long-run-contract.md) 与 [dev-handbook.md](./dev-handbook.md)。
 
 ## Data layout (per task)
 

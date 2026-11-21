@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
+  appendProgress,
   assertCommandAllowed,
   extractHosts,
   hostInTargets,
@@ -30,6 +34,10 @@ function manifest(targets: string[]): WorkerManifest {
       relayTokenThreshold: 30_000,
       relayMinToolCalls: 2,
     },
+    execution: { maxConcurrentExplores: 1 },
+    workerId: "w0",
+    workerSlot: 0,
+    workerCount: 1,
     mock: false,
     mcpServers: [],
     mcpPool: [],
@@ -37,6 +45,7 @@ function manifest(targets: string[]): WorkerManifest {
     skillPacks: [],
     skillPool: [],
     skillCatalog: [],
+    assetCollectors: [],
   };
 }
 
@@ -48,11 +57,14 @@ test("capability ladder blocks shell at observe", () => {
   assert.doesNotThrow(() => assertCommandAllowed(m, "curl -s http://example.com"));
 });
 
-test("hostInTargets supports CIDR and exact host", () => {
+test("hostInTargets supports CIDR, wildcard, and exact host", () => {
   assert.equal(hostInTargets(["10.0.0.0/8"], "10.0.188.64"), true);
   assert.equal(hostInTargets(["10.0.0.0/8"], "11.0.0.1"), false);
   assert.equal(hostInTargets(["http://10.0.188.64"], "10.0.188.64"), true);
+  assert.equal(hostInTargets(["*.example.com"], "api.example.com"), true);
+  assert.equal(hostInTargets(["example.com"], "www.example.com"), true);
   assert.equal(hostInTargets(["*"], "1.2.3.4"), true);
+  assert.equal(hostInTargets(["10.0.0.0/8"], "10.0.0.1", ["10.0.0.1"]), false);
 });
 
 test("extractHosts finds curl targets", () => {
@@ -79,4 +91,19 @@ test("assertCommandAllowed denies out-of-scope hosts", () => {
   assert.doesNotThrow(() =>
     assertCommandAllowed(manifest(["10.0.0.0/8"]), "curl -s http://10.0.188.64/"),
   );
+});
+
+test("appendProgress mirrors into worker.log for Logs tab", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-progress-"));
+  const workspaceDir = join(root, "workspace");
+  mkdirSync(workspaceDir, { recursive: true });
+  try {
+    appendProgress(workspaceDir, "phase=bootstrap");
+    const progress = readFileSync(join(workspaceDir, "PROGRESS.md"), "utf8");
+    const log = readFileSync(join(root, "worker.log"), "utf8");
+    assert.match(progress, /phase=bootstrap/);
+    assert.match(log, /\[progress\].*phase=bootstrap/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

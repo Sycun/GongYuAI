@@ -1,9 +1,9 @@
 /**
- * P3 harness differential scaffold.
+ * P3 harness differential.
  *
  * Runs the same goals/budget under three modes and prints a relative table
  * (never absolute myth scores):
- *   bare     — thin OpenAI tool loop without History/Relay (GY_HARNESS=bare)
+ *   bare     — thin OpenAI/mock loop without History/Relay (GY_HARNESS=bare)
  *   history  — GongYuAI History DAG (default mock/real worker)
  *   relay    — History + forced low relay threshold
  *
@@ -60,6 +60,11 @@ async function runMode(
   },
 ): Promise<{ mode: Mode; status: string; tokens: number; toolCalls: number }> {
   process.env.GY_ALLOW_STUB_INSTALL = "1";
+  if (mode === "bare") {
+    process.env.GY_HARNESS = "bare";
+  } else {
+    delete process.env.GY_HARNESS;
+  }
   if (mode === "relay") {
     process.env.GY_RELAY_TOKEN_THRESHOLD = "1";
     process.env.GY_RELAY_MIN_TOOL_CALLS = "1";
@@ -67,8 +72,7 @@ async function runMode(
     delete process.env.GY_RELAY_TOKEN_THRESHOLD;
     delete process.env.GY_RELAY_MIN_TOOL_CALLS;
   }
-  // bare: still uses GongYuAI worker mock today — documented as "History off" aspiration;
-  // report labels make the comparison intent clear until a true bare loop lands.
+
   const plane = await bootControlPlane({
     dataRoot: opts.dataRoot,
     host: "127.0.0.1",
@@ -113,6 +117,7 @@ async function runMode(
     };
   } finally {
     await plane.close();
+    delete process.env.GY_HARNESS;
   }
 }
 
@@ -123,14 +128,24 @@ async function main() {
   const auth =
     flag(argv, "--auth") ?? "Written authorization: diff-harness owned by operator";
   const mock = argv.includes("--mock");
+  const modes = (
+    argv.includes("--modes")
+      ? (flag(argv, "--modes") ?? "bare,history,relay").split(",")
+      : (["bare", "history", "relay"] as Mode[])
+  )
+    .map((s) => s.trim())
+    .filter((s): s is Mode => s === "bare" || s === "history" || s === "relay");
+
   if (!goalsPath) {
-    console.error("usage: diff-harness --goals FILE [--target URL] [--auth NOTE] [--mock]");
+    console.error(
+      "usage: diff-harness --goals FILE [--target URL] [--auth NOTE] [--mock] [--modes bare,history,relay]",
+    );
     process.exit(2);
   }
   const goals = JSON.parse(readFileSync(resolve(goalsPath), "utf8"));
   const basePort = 8801;
   const rows = [];
-  for (const [i, mode] of (["history", "relay"] as Mode[]).entries()) {
+  for (const [i, mode] of modes.entries()) {
     const dataRoot = resolve(`.gongyuai/diff-${mode}-${Date.now()}`);
     console.error(`[diff] running mode=${mode}…`);
     rows.push(
@@ -152,9 +167,9 @@ async function main() {
     console.log(`| ${r.mode} | ${r.status} | ${r.tokens} | ${r.toolCalls} |`);
   }
   console.log(
-    "\nNote: `bare` OpenAI-only loop is not yet a separate binary; compare History vs +Relay first.",
+    "\n`bare` = GY_HARNESS=bare (no History DAG / no Session Relay). Report deltas only.",
   );
-  console.log("TSecBench: drop --mock, fix budget, report deltas only.\n");
+  console.log("TSecBench: drop --mock, fix budget, VPN up; never batch hint.\n");
 }
 
 main().catch((err) => {

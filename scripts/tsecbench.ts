@@ -2,6 +2,10 @@
 /**
  * Thin TSecBench Challenges API client for GongYuAI workers / operators.
  * Credentials: BENCHMARK_BASE_URL + BENCHMARK_TOKEN (env or .gongyuai/tsecbench/env).
+ *
+ * Ticket lifecycle: one BENCHMARK_TOKEN ↔ one platform task. When the task is
+ * finished (409 invalid_state), the ticket is dead — reset on the platform.
+ * Hint is scarce (≈5/task historically); default-denied unless GY_TSEC_ALLOW_HINT=1.
  */
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -13,6 +17,7 @@ const ENV_CANDIDATES = [
   resolve(process.env.HOME ?? "", ".config/tsecbench/env"),
   resolve(ROOT, ".env"),
 ];
+const TICKET_PATH = resolve(ROOT, ".gongyuai/tsecbench/ticket.json");
 
 type Challenge = {
   unique_code: string;
@@ -25,6 +30,16 @@ type Challenge = {
   is_completed: boolean;
   container_status: string;
   container_addr: string[];
+};
+
+type TicketState = {
+  tokenFingerprint: string;
+  taskIdHint?: string;
+  hintCount: number;
+  finished: boolean;
+  finishedAt?: string;
+  lastError?: string;
+  updatedAt: string;
 };
 
 function loadEnvFile(path: string): void {
@@ -53,12 +68,63 @@ function requireCreds(): { base: string; token: string } {
   return { base, token };
 }
 
+function tokenFingerprint(token: string): string {
+  return `${token.slice(0, 8)}…${token.slice(-4)}`;
+}
+
+function loadTicket(token: string): TicketState {
+  const fp = tokenFingerprint(token);
+  if (existsSync(TICKET_PATH)) {
+    try {
+      const raw = JSON.parse(readFileSync(TICKET_PATH, "utf8")) as TicketState;
+      if (raw.tokenFingerprint === fp) return raw;
+    } catch {
+      /* reset */
+    }
+  }
+  return {
+    tokenFingerprint: fp,
+    hintCount: 0,
+    finished: false,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function saveTicket(t: TicketState): void {
+  mkdirSync(dirname(TICKET_PATH), { recursive: true });
+  t.updatedAt = new Date().toISOString();
+  writeFileSync(TICKET_PATH, JSON.stringify(t, null, 2));
+}
+
+class PlatformTaskFinishedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PlatformTaskFinishedError";
+  }
+}
+
+function isPlatformFinished(status: number, body: unknown, text: string): boolean {
+  if (status !== 409) return false;
+  const msg =
+    typeof body === "object" && body && "message" in body
+      ? String((body as { message: unknown }).message)
+      : text;
+  return /already finished|invalid_state/i.test(msg);
+}
+
 async function api(
   method: string,
   path: string,
   opts?: { query?: Record<string, string>; body?: unknown },
 ): Promise<{ status: number; json: unknown; text: string }> {
   const { base, token } = requireCreds();
+  const ticket = loadTicket(token);
+  if (ticket.finished) {
+    throw new PlatformTaskFinishedError(
+      `ticket finished (${ticket.finishedAt ?? "?"}): ${ticket.lastError ?? "platform task dead"}; reset BENCHMARK_TOKEN on TSecBench`,
+    );
+  }
+
   const url = new URL(`${base}${path}`);
   if (opts?.query) {
     for (const [k, v] of Object.entries(opts.query)) url.searchParams.set(k, v);
@@ -78,6 +144,33 @@ async function api(
   } catch {
     json = undefined;
   }
+
+  if (isPlatformFinished(res.status, json, text)) {
+    ticket.finished = true;
+    ticket.finishedAt = new Date().toISOString();
+    ticket.lastError = text.slice(0, 500);
+    saveTicket(ticket);
+    const outDir = resolve(ROOT, ".gongyuai/tsecbench");
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(
+      resolve(outDir, "BLOCKER_409.json"),
+      JSON.stringify(
+        {
+          at: ticket.finishedAt,
+          path,
+          status: res.status,
+          body: json ?? text,
+          hintCount: ticket.hintCount,
+        },
+        null,
+        2,
+      ),
+    );
+    throw new PlatformTaskFinishedError(
+      `platform task finished (409): stop all calls; rotate BENCHMARK_TOKEN. raw=${text.slice(0, 300)}`,
+    );
+  }
+
   return { status: res.status, json, text };
 }
 
@@ -91,13 +184,15 @@ function usage(): void {
 Usage:
   pnpm tsecbench list [--json]
   pnpm tsecbench start <unique_code>
-  pnpm tsecbench hint <unique_code>
+  pnpm tsecbench hint <unique_code>   # requires GY_TSEC_ALLOW_HINT=1
   pnpm tsecbench submit <unique_code> <flag>
   pnpm tsecbench close <unique_code>
   pnpm tsecbench status [unique_code]
   pnpm tsecbench snapshot   # write challenges JSON under .gongyuai/tsecbench/
+  pnpm tsecbench probe      # ticket health (list once; detect 409)
 
 Env: BENCHMARK_BASE_URL, BENCHMARK_TOKEN
+     GY_TSEC_ALLOW_HINT=1 to enable hint (default off; ≤5/task historically)
 `);
 }
 
@@ -131,6 +226,11 @@ async function cmdStart(code: string): Promise<void> {
   if (r.status >= 400) throw new Error(r.text);
   print(r.json);
   const addr = (r.json as { container_addr?: string[] }).container_addr ?? [];
+  if (!addr.length) {
+    console.error(
+      "[tsecbench] WARN: container_addr empty — treat as platform issue; do not burn token on unreachable targets",
+    );
+  }
   const outDir = resolve(ROOT, ".gongyuai/tsecbench");
   mkdirSync(outDir, { recursive: true });
   writeFileSync(
@@ -144,10 +244,25 @@ async function cmdStart(code: string): Promise<void> {
 }
 
 async function cmdHint(code: string): Promise<void> {
+  if (process.env.GY_TSEC_ALLOW_HINT !== "1") {
+    throw new Error(
+      "hint denied: set GY_TSEC_ALLOW_HINT=1 for a single explicit call (batch hint can finish the platform task)",
+    );
+  }
+  const { token } = requireCreds();
+  const ticket = loadTicket(token);
+  if (ticket.hintCount >= 5) {
+    throw new Error(
+      `hint denied: local counter=${ticket.hintCount} (historical platform cap ≈5); refusing further hints`,
+    );
+  }
   const r = await api("GET", "/openapi/v1/challenges/hint", {
     query: { unique_code: code },
   });
   if (r.status >= 400) throw new Error(r.text);
+  ticket.hintCount += 1;
+  saveTicket(ticket);
+  console.error(`[tsecbench] hint used ${ticket.hintCount}/5 (local counter)`);
   print(r.json);
 }
 
@@ -195,6 +310,39 @@ async function cmdSnapshot(): Promise<void> {
   console.log(path);
 }
 
+async function cmdProbe(): Promise<void> {
+  const { token } = requireCreds();
+  const ticket = loadTicket(token);
+  print({
+    tokenFingerprint: ticket.tokenFingerprint,
+    finished: ticket.finished,
+    hintCount: ticket.hintCount,
+    finishedAt: ticket.finishedAt ?? null,
+  });
+  if (ticket.finished) {
+    console.error("[tsecbench] ticket already marked finished — rotate token");
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    const r = await api("GET", "/openapi/v1/challenges");
+    if (r.status >= 400) throw new Error(r.text);
+    const list = r.json as Challenge[];
+    print({
+      ok: true,
+      total: list.length,
+      completed: list.filter((c) => c.is_completed).length,
+    });
+  } catch (err) {
+    if (err instanceof PlatformTaskFinishedError) {
+      console.error(err.message);
+      process.exitCode = 2;
+      return;
+    }
+    throw err;
+  }
+}
+
 async function main(): Promise<void> {
   const [cmd, a, b] = process.argv.slice(2);
   if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
@@ -216,10 +364,11 @@ async function main(): Promise<void> {
     await cmdClose(a);
   } else if (cmd === "status") await cmdStatus(a);
   else if (cmd === "snapshot") await cmdSnapshot();
+  else if (cmd === "probe") await cmdProbe();
   else throw new Error(`unknown command: ${cmd}`);
 }
 
 main().catch((err) => {
   console.error(err instanceof Error ? err.message : err);
-  process.exit(1);
+  process.exit(err instanceof PlatformTaskFinishedError ? 2 : 1);
 });

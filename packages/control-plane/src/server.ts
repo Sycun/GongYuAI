@@ -3,7 +3,9 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AddAssetCollectorSchema,
   AddUserMcpSchema,
+  AssetCollectorPatchSchema,
   CreateTaskRequestSchema,
   ImportSkillSchema,
   ModelSettingsPatchSchema,
@@ -64,6 +66,22 @@ function send(res: ServerResponse, status: number, body: unknown): void {
     "content-length": Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+/** Prefer shared worker.log; fall back to concatenating per-slot logs. */
+function readTaskWorkerLogs(dataDir: string): string {
+  if (!existsSync(dataDir)) return "";
+  const shared = join(dataDir, "worker.log");
+  if (existsSync(shared)) {
+    return readFileSync(shared, "utf8");
+  }
+  const slotLogs = readdirSync(dataDir)
+    .filter((n) => /^worker-w\d+\.log$/.test(n))
+    .sort();
+  if (slotLogs.length === 0) return "";
+  return slotLogs
+    .map((n) => `===== ${n} =====\n${readFileSync(join(dataDir, n), "utf8")}`)
+    .join("\n");
 }
 
 function sendFile(res: ServerResponse, abs: string, cache = false): boolean {
@@ -223,6 +241,33 @@ export function startControlServer(opts: ServerOptions) {
         return send(res, 200, settings.removeUserSkill(decodeURIComponent(skillDelete[1]!)));
       }
 
+      if (method === "PUT" && url.pathname === "/settings/asset-collectors") {
+        const body = AssetCollectorPatchSchema.parse(await readJson(req));
+        return send(res, 200, settings.patchAssetCollector(body));
+      }
+
+      if (method === "POST" && url.pathname === "/settings/asset-collectors") {
+        const body = AddAssetCollectorSchema.parse(await readJson(req));
+        return send(res, 201, settings.addAssetCollector(body));
+      }
+
+      if (method === "PATCH" && url.pathname === "/settings/asset-collectors/toggle") {
+        const body = (await readJson(req)) as { id?: string; enabled?: boolean };
+        if (!body.id || typeof body.enabled !== "boolean") {
+          return send(res, 400, { error: "需要 id 与 enabled" });
+        }
+        return send(res, 200, settings.toggleAssetCollector(body.id, body.enabled));
+      }
+
+      const collectorDelete = url.pathname.match(/^\/settings\/asset-collectors\/([^/]+)$/);
+      if (method === "DELETE" && collectorDelete) {
+        return send(
+          res,
+          200,
+          settings.removeAssetCollector(decodeURIComponent(collectorDelete[1]!)),
+        );
+      }
+
       if (method === "GET" && url.pathname === "/tasks") {
         return send(res, 200, { tasks: store.list() });
       }
@@ -230,6 +275,20 @@ export function startControlServer(opts: ServerOptions) {
       if (method === "POST" && url.pathname === "/tasks") {
         const body = CreateTaskRequestSchema.parse(await readJson(req));
         const task = store.createTask(body);
+        // Seed goals + asset inventory before start so console 资产表 shows targets immediately.
+        {
+          const paths = taskPaths(task.dataDir);
+          const history = openHistory({
+            dbPath: paths.historyDb,
+            evidenceDir: paths.evidenceDir,
+          });
+          try {
+            history.seedGoals(task.id, task.goals);
+            history.seedAssetsFromAuth(task.id, task.auth);
+          } finally {
+            history.close();
+          }
+        }
         const started = await runner.start(task.id);
         return send(res, 201, { task: started });
       }
@@ -253,8 +312,7 @@ export function startControlServer(opts: ServerOptions) {
           return send(res, 200, { task: started });
         }
         if (method === "GET" && rest === "/logs") {
-          const logPath = join(task.dataDir, "worker.log");
-          const text = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
+          const text = readTaskWorkerLogs(task.dataDir);
           res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
           res.end(text.slice(-200_000));
           return;
@@ -269,7 +327,14 @@ export function startControlServer(opts: ServerOptions) {
         if (method === "GET" && rest === "/history") {
           const paths = taskPaths(task.dataDir);
           if (!existsSync(paths.historyDb)) {
-            return send(res, 200, { overview: "", goals: [], facts: [], intents: [], events: [] });
+            return send(res, 200, {
+              overview: "",
+              goals: [],
+              facts: [],
+              intents: [],
+              events: [],
+              assets: [],
+            });
           }
           const history = openHistory({
             dbPath: paths.historyDb,
@@ -282,7 +347,35 @@ export function startControlServer(opts: ServerOptions) {
               facts: history.listFacts(task.id),
               intents: history.listIntents(task.id),
               events: history.listEvents(task.id, 100),
+              assets: history.listAssets(task.id),
             });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "GET" && rest === "/assets") {
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) {
+            // Create empty history + seed from auth so the console shows targets immediately.
+            const history = openHistory({
+              dbPath: paths.historyDb,
+              evidenceDir: paths.evidenceDir,
+            });
+            try {
+              history.seedGoals(task.id, task.goals);
+              history.seedAssetsFromAuth(task.id, task.auth);
+              return send(res, 200, { assets: history.listAssets(task.id) });
+            } finally {
+              history.close();
+            }
+          }
+          const history = openHistory({
+            dbPath: paths.historyDb,
+            evidenceDir: paths.evidenceDir,
+          });
+          try {
+            history.seedAssetsFromAuth(task.id, task.auth);
+            return send(res, 200, { assets: history.listAssets(task.id) });
           } finally {
             history.close();
           }
@@ -390,7 +483,10 @@ export function startControlServer(opts: ServerOptions) {
             leaseUntil: task.leaseUntil,
             fence: task.fence,
             workerPid: task.workerPid,
+            workerPids: task.workerPids ?? [],
             containerId: task.containerId,
+            containerIds: task.containerIds ?? [],
+            execution: task.execution ?? { maxConcurrentExplores: 1 },
             workerStatus: existsSync(statusPath)
               ? JSON.parse(readFileSync(statusPath, "utf8"))
               : null,

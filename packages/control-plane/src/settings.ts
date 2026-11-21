@@ -7,18 +7,26 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import {
+  AddAssetCollectorSchema,
   AddUserMcpSchema,
   AppSettingsSchema,
+  AssetCollectorConfigSchema,
+  AssetCollectorPatchSchema,
   CORE_MCP_IDS,
   ImportSkillSchema,
   McpServerConfigSchema,
   SkillPackConfigSchema,
   ToggleToolsItemSchema,
   ToolsSettingsPatchSchema,
+  assetCollectorEnvNames,
+  mergeAssetCollectors,
   mergeMcpServers,
   mergeSkillPacks,
+  type AddAssetCollector,
   type AddUserMcp,
   type AppSettings,
+  type AssetCollectorConfig,
+  type AssetCollectorPatch,
   type ImportSkill,
   type McpServerConfig,
   type ModelSettings,
@@ -27,6 +35,7 @@ import {
   type ToggleToolsItem,
   type ToolsSettingsPatch,
   type UpdateSettingsPatch,
+  type WorkerAssetCollector,
   type WorkerMcpServer,
   type WorkerSkillPack,
 } from "@gongyuai/contracts";
@@ -55,6 +64,14 @@ export type PublicSettings = {
     }
   >;
   skillPacks: SkillPackConfig[];
+  assetCollectors: Array<
+    Omit<AssetCollectorConfig, "apiKey" | "email"> & {
+      emailConfigured: boolean;
+      apiKeyConfigured: boolean;
+      emailMask: string;
+      apiKeyMask: string;
+    }
+  >;
   version: string;
 };
 
@@ -106,6 +123,7 @@ export class SettingsStore {
       ...parsed,
       mcpServers: mergeMcpServers(parsed.mcpServers ?? [], this.catalogMcp()),
       skillPacks: mergeSkillPacks(parsed.skillPacks ?? [], this.catalogSkills()),
+      assetCollectors: mergeAssetCollectors(parsed.assetCollectors ?? []),
     };
     this.write(merged);
     return merged;
@@ -174,6 +192,26 @@ export class SettingsStore {
         envKeys: Object.keys(s.env ?? {}),
       })),
       skillPacks: this.data.skillPacks,
+      assetCollectors: this.data.assetCollectors.map((c) => ({
+        id: c.id,
+        name: c.name,
+        kind: c.kind,
+        enabled: c.enabled,
+        builtin: c.builtin,
+        baseUrl: c.baseUrl,
+        method: c.method,
+        authHeader: c.authHeader,
+        authQueryParam: c.authQueryParam,
+        queryParam: c.queryParam,
+        queryEncoding: c.queryEncoding,
+        bodyTemplate: c.bodyTemplate,
+        resultPath: c.resultPath,
+        addressFields: c.addressFields,
+        emailConfigured: Boolean(c.email),
+        apiKeyConfigured: Boolean(c.apiKey),
+        emailMask: maskSecret(c.email),
+        apiKeyMask: maskSecret(c.apiKey),
+      })),
       version,
     };
   }
@@ -319,6 +357,59 @@ export class SettingsStore {
     return this.publicView(process.env.npm_package_version ?? "0.1.0");
   }
 
+  patchAssetCollector(patch: AssetCollectorPatch): PublicSettings {
+    const body = AssetCollectorPatchSchema.parse(patch);
+    const list = [...this.data.assetCollectors];
+    const idx = list.findIndex((c) => c.id === body.id);
+    if (idx < 0) throw new Error(`asset collector not found: ${body.id}`);
+    const cur = list[idx]!;
+    const next = {
+      ...cur,
+      ...body,
+      id: cur.id,
+      kind: cur.builtin ? cur.kind : (body.kind ?? cur.kind),
+      builtin: cur.builtin,
+    };
+    if (isMaskedOrEmpty(body.apiKey)) next.apiKey = cur.apiKey;
+    if (isMaskedOrEmpty(body.email)) next.email = cur.email;
+    list[idx] = AssetCollectorConfigSchema.parse(next);
+    this.write({ ...this.data, assetCollectors: mergeAssetCollectors(list) });
+    return this.publicView(process.env.npm_package_version ?? "0.1.0");
+  }
+
+  addAssetCollector(input: AddAssetCollector): PublicSettings {
+    const body = AddAssetCollectorSchema.parse(input);
+    if (this.data.assetCollectors.some((c) => c.id === body.id)) {
+      throw new Error(`asset collector id already exists: ${body.id}`);
+    }
+    if (!body.baseUrl) throw new Error("自定义收集器需要 baseUrl");
+    const entry = AssetCollectorConfigSchema.parse({
+      ...body,
+      kind: "custom",
+      builtin: false,
+    });
+    this.write({
+      ...this.data,
+      assetCollectors: mergeAssetCollectors([...this.data.assetCollectors, entry]),
+    });
+    return this.publicView(process.env.npm_package_version ?? "0.1.0");
+  }
+
+  removeAssetCollector(id: string): PublicSettings {
+    const hit = this.data.assetCollectors.find((c) => c.id === id);
+    if (!hit) throw new Error(`asset collector not found: ${id}`);
+    if (hit.builtin) throw new Error("不可删除内置收集器，只能关闭或改密钥");
+    this.write({
+      ...this.data,
+      assetCollectors: this.data.assetCollectors.filter((c) => c.id !== id),
+    });
+    return this.publicView(process.env.npm_package_version ?? "0.1.0");
+  }
+
+  toggleAssetCollector(id: string, enabled: boolean): PublicSettings {
+    return this.patchAssetCollector({ id, enabled });
+  }
+
   markUpdated(meta: { commit: string | null }): void {
     this.write({
       ...this.data,
@@ -336,13 +427,52 @@ export class SettingsStore {
     const key = m.apiKey || process.env.OPENAI_API_KEY || "";
     const base = m.baseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
     const model = m.modelId || process.env.GY_MODEL || "gpt-4.1-mini";
-    return {
+    const env: Record<string, string> = {
       OPENAI_API_KEY: key,
       OPENAI_BASE_URL: base,
       GY_MODEL: model,
       GY_VISION: m.visionEnabled ? "1" : "0",
       GY_VISION_MODEL: m.visionModelId || "",
     };
+    for (const c of this.data.assetCollectors) {
+      if (!c.enabled) continue;
+      const names = assetCollectorEnvNames(c.id);
+      if (c.email) env[names.emailEnv] = c.email;
+      if (c.apiKey) env[names.apiKeyEnv] = c.apiKey;
+    }
+    return env;
+  }
+
+  private toWorkerCollector(c: AssetCollectorConfig): WorkerAssetCollector {
+    const names = assetCollectorEnvNames(c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      kind: c.kind,
+      enabled: c.enabled,
+      baseUrl: c.baseUrl,
+      emailEnv: c.kind === "fofa" || c.email ? names.emailEnv : undefined,
+      apiKeyEnv: names.apiKeyEnv,
+      method: c.method,
+      authHeader: c.authHeader,
+      authQueryParam: c.authQueryParam,
+      queryParam: c.queryParam,
+      queryEncoding: c.queryEncoding,
+      bodyTemplate: c.bodyTemplate,
+      resultPath: c.resultPath,
+      addressFields: c.addressFields,
+    };
+  }
+
+  /** Enabled collectors that have credentials (ready for asset_search). */
+  enabledAssetCollectorsForManifest(): WorkerAssetCollector[] {
+    return this.data.assetCollectors
+      .filter((c) => {
+        if (!c.enabled || !c.apiKey) return false;
+        if (c.kind === "fofa" && !c.email) return false;
+        return true;
+      })
+      .map((c) => this.toWorkerCollector(c));
   }
 
   modelForManifest(): NonNullable<import("@gongyuai/contracts").WorkerManifest["model"]> {

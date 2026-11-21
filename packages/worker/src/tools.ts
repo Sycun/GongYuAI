@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { AuthCapability, WorkerManifest } from "@gongyuai/contracts";
+import { targetAllows } from "@gongyuai/contracts";
 import type { HistoryStore } from "@gongyuai/history";
 
 const CAPABILITY_RANK: Record<AuthCapability, number> = {
@@ -70,48 +71,13 @@ const HOST_NETWORK_DENY =
 const DESTRUCTIVE_DENY =
   /\b(rm\s+-rf\s+\/|mkfs\.|dd\s+if=.*of=\/dev\/|diskutil\s+erase|shutdown\b|reboot\b|halt\b)\b/i;
 
-function parseIpv4(host: string): number | null {
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!m) return null;
-  const parts = m.slice(1).map(Number);
-  if (parts.some((n) => n > 255)) return null;
-  return ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0;
-}
-
-function cidrContains(cidr: string, host: string): boolean {
-  const [base, bitsRaw] = cidr.split("/");
-  if (!base || bitsRaw == null) return false;
-  const ip = parseIpv4(host);
-  const net = parseIpv4(base);
-  const bits = Number(bitsRaw);
-  if (ip == null || net == null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
-    return false;
-  }
-  if (bits === 0) return true;
-  const mask = bits === 32 ? 0xffffffff : (~((1 << (32 - bits)) - 1)) >>> 0;
-  return (ip & mask) === (net & mask);
-}
-
-export function hostInTargets(targets: string[], host: string): boolean {
-  const h = host.toLowerCase().replace(/\.$/, "");
-  if (!h) return false;
-  if (targets.some((t) => t.trim() === "*")) return true;
-  for (const raw of targets) {
-    const t = raw.trim().toLowerCase();
-    if (!t) continue;
-    if (t.includes("/")) {
-      const bare = t.replace(/^https?:\/\//, "").split("/")[0]!;
-      // CIDR like 10.0.0.0/8
-      if (/^\d+\.\d+\.\d+\.\d+\/\d+$/.test(t) && cidrContains(t, h)) return true;
-      if (h === bare || h.endsWith(`.${bare}`)) return true;
-      continue;
-    }
-    const bare = t.replace(/^https?:\/\//, "").split("/")[0]!.split(":")[0]!;
-    if (h === bare || h.endsWith(`.${bare}`) || bare.includes(h) || h.includes(bare)) {
-      return true;
-    }
-  }
-  return false;
+/** Formal scope match (CIDR / wildcard / suffix / *) — see @gongyuai/contracts scope. */
+export function hostInTargets(
+  targets: string[],
+  host: string,
+  outOfScope: string[] = [],
+): boolean {
+  return targetAllows(targets, host, outOfScope);
 }
 
 export function extractHosts(command: string): string[] {
@@ -149,8 +115,9 @@ export function assertCommandAllowed(manifest: WorkerManifest, command: string):
   }
 
   const hosts = extractHosts(command);
+  const outOfScope = manifest.auth.outOfScope ?? [];
   for (const host of hosts) {
-    if (!hostInTargets(targets, host)) {
+    if (!hostInTargets(targets, host, outOfScope)) {
       throw new Error(`target host ${host} not in auth.targets`);
     }
   }
@@ -282,10 +249,22 @@ export function beijingStamp(d = new Date()): string {
   return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
 }
 
+/** Mirror progress into dataDir/worker.log so the Logs tab matches Live. */
+function mirrorProgressToWorkerLog(workspaceDir: string, stampedLine: string): void {
+  try {
+    appendFileSync(join(workspaceDir, "..", "worker.log"), `[progress] ${stampedLine}\n`);
+  } catch {
+    /* log mirror must not break the loop */
+  }
+}
+
 export function appendProgress(workspaceDir: string, line: string): void {
+  const stamp = beijingStamp();
+  const stamped = `${stamp} ${line}`;
   const path = join(workspaceDir, "PROGRESS.md");
   if (!existsSync(path)) {
     writeFileSync(path, `# 执行进度\n\n`);
   }
-  appendFileSync(path, `- ${beijingStamp()} ${line}\n`);
+  appendFileSync(path, `- ${stamped}\n`);
+  mirrorProgressToWorkerLog(workspaceDir, stamped);
 }

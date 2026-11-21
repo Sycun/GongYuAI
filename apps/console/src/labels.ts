@@ -75,13 +75,18 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   overview: { title: "总览", subtitle: "系统态势 · 活跃任务与恢复" },
   tasks: { title: "任务", subtitle: "任务列表 · 点选进入深潜" },
   live: { title: "运行态", subtitle: "租约 / 检查点 / 预算" },
-  goals: { title: "目标", subtitle: "证据闸门清单" },
-  history: { title: "历史", subtitle: "分层事实 / 意图" },
+  assets: { title: "资产", subtitle: "授权靶标 · 运行中发现 · 与 AI 同表" },
+  goals: { title: "目标", subtitle: "证据闸门 · Fact–Intent DAG" },
+  history: { title: "历史", subtitle: "Fact–Intent DAG · 分层事实" },
   evidence: { title: "证据", subtitle: "证据文件" },
   report: { title: "报告", subtitle: "任务报告" },
   logs: { title: "日志", subtitle: "执行节点日志" },
   settings: { title: "设置", subtitle: "模型 · Token · 静默更新" },
   "settings-model": { title: "模型配置", subtitle: "OpenAI 兼容 API · 视觉能力" },
+  "settings-assets": {
+    title: "资产收集",
+    subtitle: "FOFA · 鹰图 · 自定义 API · AI 自动发现写入清单",
+  },
   "settings-tools": { title: "工具增强", subtitle: "MCP · Skill" },
   "settings-mcp": {
     title: "MCP",
@@ -98,6 +103,7 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
 
 export const DETAIL_TABS = [
   { key: "live", label: "运行态" },
+  { key: "assets", label: "资产" },
   { key: "goals", label: "目标" },
   { key: "history", label: "历史" },
   { key: "evidence", label: "证据" },
@@ -105,10 +111,19 @@ export const DETAIL_TABS = [
   { key: "logs", label: "日志" },
 ] as const;
 
+export const ASSET_KIND_LABEL: Record<string, string> = {
+  seed: "种子",
+  candidate: "候选",
+  admitted: "已准入",
+  live: "存活",
+  oos: "范围外",
+};
+
 export type DetailTab = (typeof DETAIL_TABS)[number]["key"];
 
 export const SETTINGS_SECTIONS = [
   { key: "settings-model", label: "模型配置", section: "model" },
+  { key: "settings-assets", label: "资产收集", section: "assets" },
   { key: "settings-mcp", label: "MCP", section: "mcp" },
   { key: "settings-skills", label: "Skill", section: "skills" },
   { key: "settings-usage", label: "Token 统计", section: "usage" },

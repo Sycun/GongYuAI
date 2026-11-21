@@ -28,6 +28,10 @@ function baseManifest(
       relayTokenThreshold: 30_000,
       relayMinToolCalls: 2,
     },
+    execution: { maxConcurrentExplores: 1 },
+    workerId: "w0",
+    workerSlot: 0,
+    workerCount: 1,
     mock: false,
     mcpServers: [],
     mcpPool: [],
@@ -35,6 +39,7 @@ function baseManifest(
     skillPacks: [],
     skillPool: [],
     skillCatalog: [],
+    assetCollectors: [],
     model,
   };
 }

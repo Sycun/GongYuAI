@@ -263,3 +263,56 @@ test("claimIntent is CAS on proposed; succeed conclude requires Fact writeback",
   store.close();
   rmSync(root, { recursive: true, force: true });
 });
+
+test("asset inventory seeds, auto-admits under CIDR, and observes", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-asset-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "55555555-5555-4555-8555-555555555555";
+  const auth = { targets: ["10.0.0.0/8", "*.example.com"], outOfScope: ["admin.example.com"] };
+
+  const seeded = store.seedAssetsFromAuth(taskId, auth);
+  assert.equal(seeded.length, 2);
+  assert.equal(store.seedAssetsFromAuth(taskId, auth).length, 0);
+
+  const hit = store.recordAsset({
+    taskId,
+    address: "10.0.9.9",
+    auth,
+    summary: "fofa hit",
+  });
+  assert.equal(hit.created, true);
+  assert.equal(hit.asset.kind, "admitted");
+
+  const oos = store.recordAsset({
+    taskId,
+    address: "admin.example.com",
+    auth,
+  });
+  assert.equal(oos.asset.kind, "oos");
+
+  const live = store.recordAsset({
+    taskId,
+    address: "10.0.9.9",
+    auth,
+    live: true,
+  });
+  assert.equal(live.created, true);
+  assert.equal(live.asset.kind, "live");
+
+  const assets = store.listAssets(taskId);
+  assert.equal(assets.length, 4);
+  assert.ok(assets.some((a) => a.address === "10.0.0.0/8" && a.kind === "seed"));
+  assert.ok(assets.some((a) => a.address === "10.0.9.9" && a.kind === "live"));
+
+  const obs = store.observe(taskId);
+  assert.match(obs, /资产清单（4）/);
+  assert.match(obs, /10\.0\.9\.9/);
+
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
