@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Run inside Parallels Ubuntu/Kali. Syncs host GongYuAI via Shared Folder, rebuilds, restarts serve.
+# Run inside Parallels Ubuntu/Kali. Syncs host GongYuAI, rebuilds, restarts serve on :8877.
 set -euo pipefail
 export PATH="/home/parallels/.n/bin:/home/parallels/.npm-global/bin:${PATH:-}"
 GY=/home/parallels/GongYuAI
-SRC=/media/psf/Home/GongYuAI
 
-if [[ ! -d "$SRC" ]]; then
-  echo "missing shared source: $SRC" >&2
+# Prefer full Home share; fall back to Downloads sync drop (psf often only mirrors Downloads).
+if [[ -d /media/psf/Home/GongYuAI ]]; then
+  SRC=/media/psf/Home/GongYuAI
+elif [[ -d /media/psf/Home/Downloads/GongYuAI-sync ]]; then
+  SRC=/media/psf/Home/Downloads/GongYuAI-sync
+else
+  echo "missing shared source (expected /media/psf/Home/GongYuAI or .../Downloads/GongYuAI-sync)" >&2
   exit 1
 fi
 
+echo "sync $SRC -> $GY"
 rsync -a --delete \
   --exclude node_modules \
   --exclude .gongyuai \
