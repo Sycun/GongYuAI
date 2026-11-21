@@ -1,0 +1,10 @@
+{
+  "id": "attack-surface-recon",
+  "name": "attack-surface-recon",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

@@ -3,8 +3,12 @@ import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AddUserMcpSchema,
   CreateTaskRequestSchema,
+  ImportSkillSchema,
   ModelSettingsPatchSchema,
+  ToggleToolsItemSchema,
+  ToolsSettingsPatchSchema,
   UpdateSettingsPatchSchema,
 } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
@@ -183,6 +187,40 @@ export function startControlServer(opts: ServerOptions) {
 
       if (method === "POST" && url.pathname === "/settings/update/run") {
         return send(res, 202, updater.start());
+      }
+
+      if (method === "POST" && url.pathname === "/settings/tools/rescan") {
+        return send(res, 200, settings.rescanCatalog());
+      }
+
+      if (method === "PUT" && url.pathname === "/settings/tools") {
+        const patch = ToolsSettingsPatchSchema.parse(await readJson(req));
+        return send(res, 200, settings.patchTools(patch));
+      }
+
+      if (method === "PATCH" && url.pathname === "/settings/tools/toggle") {
+        const body = ToggleToolsItemSchema.parse(await readJson(req));
+        return send(res, 200, settings.toggleToolsItem(body));
+      }
+
+      if (method === "POST" && url.pathname === "/settings/tools/mcp") {
+        const body = AddUserMcpSchema.parse(await readJson(req));
+        return send(res, 201, settings.addUserMcp(body));
+      }
+
+      const mcpDelete = url.pathname.match(/^\/settings\/tools\/mcp\/([^/]+)$/);
+      if (method === "DELETE" && mcpDelete) {
+        return send(res, 200, settings.removeUserMcp(decodeURIComponent(mcpDelete[1]!)));
+      }
+
+      if (method === "POST" && url.pathname === "/settings/tools/skills/import") {
+        const body = ImportSkillSchema.parse(await readJson(req));
+        return send(res, 201, settings.importSkill(body));
+      }
+
+      const skillDelete = url.pathname.match(/^\/settings\/tools\/skills\/([^/]+)$/);
+      if (method === "DELETE" && skillDelete) {
+        return send(res, 200, settings.removeUserSkill(decodeURIComponent(skillDelete[1]!)));
       }
 
       if (method === "GET" && url.pathname === "/tasks") {

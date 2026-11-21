@@ -1,0 +1,10 @@
+{
+  "id": "redteam-opsec",
+  "name": "redteam-opsec",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

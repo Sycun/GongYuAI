@@ -1,0 +1,16 @@
+{
+  "id": "naabu",
+  "name": "naabu",
+  "description": "快速端口发现",
+  "category": "network",
+  "transport": "builtin",
+  "binary": "naabu",
+  "defaultEnabled": false,
+  "defaultFlags": "-silent",
+  "toolName": "run",
+  "toolDescription": "Run naabu against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

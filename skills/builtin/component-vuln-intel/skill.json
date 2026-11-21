@@ -1,0 +1,10 @@
+{
+  "id": "component-vuln-intel",
+  "name": "component-vuln-intel",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

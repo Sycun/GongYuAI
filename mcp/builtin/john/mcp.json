@@ -1,0 +1,16 @@
+{
+  "id": "john",
+  "name": "john",
+  "description": "离线哈希破解",
+  "category": "creds",
+  "transport": "builtin",
+  "binary": "john",
+  "defaultEnabled": false,
+  "defaultFlags": "",
+  "toolName": "run",
+  "toolDescription": "Run john against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

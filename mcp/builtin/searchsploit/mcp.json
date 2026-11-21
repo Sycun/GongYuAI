@@ -1,0 +1,16 @@
+{
+  "id": "searchsploit",
+  "name": "searchsploit",
+  "description": "Exploit-DB 检索",
+  "category": "exploit",
+  "transport": "builtin",
+  "binary": "searchsploit",
+  "defaultEnabled": false,
+  "defaultFlags": "",
+  "toolName": "run",
+  "toolDescription": "Run searchsploit against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

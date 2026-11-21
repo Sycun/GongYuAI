@@ -17,7 +17,9 @@
     "test": "pnpm -r run test",
     "smoke": "tsx scripts/smoke.ts",
     "tsecbench": "tsx scripts/tsecbench.ts",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "smoke:tools": "tsx scripts/smoke-tools.ts",
+    "smoke:unlock": "tsx scripts/smoke-tools-unlock.ts"
   },
   "dependencies": {
     "@gongyuai/control-plane": "workspace:*",

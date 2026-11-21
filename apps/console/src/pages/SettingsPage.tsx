@@ -8,12 +8,20 @@ import {
   Progress,
   Row,
   Space,
+  Switch,
   Table,
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
-import { IconRefresh, IconSave, IconLink } from "@douyinfe/semi-icons";
-import { api, type PublicSettings, type UsageStats, type UpdateJobStatus } from "../api";
+import { IconRefresh, IconSave, IconLink, IconDelete, IconPlus } from "@douyinfe/semi-icons";
+import {
+  api,
+  type McpServerPublic,
+  type PublicSettings,
+  type SkillPackPublic,
+  type UsageStats,
+  type UpdateJobStatus,
+} from "../api";
 import type { SettingsSection } from "../labels";
 
 function formatNum(n: number): string {
@@ -204,6 +212,249 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
           </Space>
         </Form>
       </Card>
+    );
+  }
+
+  if (section === "mcp") {
+    const toggleMcp = async (id: string, enabled: boolean) => {
+      try {
+        const r = await api.toggleTools({ kind: "mcp", id, enabled });
+        setSettings(r.json);
+        Toast.success(enabled ? `已启用 ${id}` : `已关闭 ${id}`);
+      } catch (e) {
+        Toast.error(e instanceof Error ? e.message : String(e));
+      }
+    };
+    const addMcp = async (values: Record<string, unknown>) => {
+      try {
+        const transport = String(values.transport ?? "stdio") as "stdio" | "http";
+        const r = await api.addMcp({
+          id: String(values.id ?? ""),
+          name: String(values.name ?? ""),
+          enabled: true,
+          transport,
+          command: transport === "stdio" ? String(values.command ?? "") : undefined,
+          args:
+            transport === "stdio" && values.args
+              ? String(values.args).split(/\s+/).filter(Boolean)
+              : [],
+          url: transport === "http" ? String(values.url ?? "") : undefined,
+        });
+        setSettings(r.json);
+        Toast.success("已添加用户 MCP");
+      } catch (e) {
+        Toast.error(e instanceof Error ? e.message : String(e));
+      }
+    };
+    const rescan = async () => {
+      try {
+        const r = await api.rescanTools();
+        setSettings(r.json);
+        Toast.success(`已重扫目录 · MCP ${r.json.mcpServers?.length ?? 0} 项`);
+      } catch (e) {
+        Toast.error(e instanceof Error ? e.message : String(e));
+      }
+    };
+    return (
+      <Space vertical align="start" style={{ width: "100%", maxWidth: 980 }}>
+        <Banner
+          type="info"
+          closeIcon={null}
+          description="全局开关是默认基线；任务内模型可用 enable_mcp 按需解锁（常开核 nmap/httpx/nuclei）。目录：mcp/builtin|user。一工具一目录，非单体 kali-mcp。"
+        />
+        <Space>
+          <Button icon={<IconRefresh />} onClick={() => void rescan()}>
+            重扫目录
+          </Button>
+        </Space>
+        <Card title="MCP 连接器" style={{ width: "100%", background: "var(--semi-color-bg-1)" }}>
+          <Table
+            size="small"
+            pagination={{ pageSize: 12 }}
+            rowKey="id"
+            dataSource={settings.mcpServers ?? []}
+            columns={[
+              { title: "ID", dataIndex: "id", width: 110 },
+              { title: "分类", dataIndex: "category", width: 90 },
+              { title: "说明", dataIndex: "description", ellipsis: true },
+              {
+                title: "来源",
+                dataIndex: "source",
+                width: 70,
+                render: (v: string) => (v === "builtin" ? "内置" : "用户"),
+              },
+              { title: "传输", dataIndex: "transport", width: 80 },
+              {
+                title: "模型可见",
+                dataIndex: "enabled",
+                width: 90,
+                render: (v: boolean, row: McpServerPublic) => (
+                  <Switch checked={v} onChange={(on) => void toggleMcp(row.id, on)} />
+                ),
+              },
+              {
+                title: "",
+                width: 56,
+                render: (_: unknown, row: McpServerPublic) =>
+                  row.builtin ? null : (
+                    <Button
+                      type="danger"
+                      theme="borderless"
+                      icon={<IconDelete />}
+                      onClick={() =>
+                        void api
+                          .removeMcp(row.id)
+                          .then((r) => {
+                            setSettings(r.json);
+                            Toast.success("已删除");
+                          })
+                          .catch((e) =>
+                            Toast.error(e instanceof Error ? e.message : String(e)),
+                          )
+                      }
+                    />
+                  ),
+              },
+            ]}
+          />
+          <Typography.Title heading={6} style={{ marginTop: 20 }}>
+            添加远程/stdio MCP
+          </Typography.Title>
+          <Form labelPosition="left" labelWidth={90} onSubmit={(v) => void addMcp(v)}>
+            <Form.Input field="id" label="ID" placeholder="my-scanner" rules={[{ required: true }]} />
+            <Form.Input field="name" label="名称" rules={[{ required: true }]} />
+            <Form.Select
+              field="transport"
+              label="传输"
+              initValue="stdio"
+              optionList={[
+                { value: "stdio", label: "stdio" },
+                { value: "http", label: "http" },
+              ]}
+            />
+            <Form.Input field="command" label="Command" placeholder="npx（stdio）" />
+            <Form.Input field="args" label="Args" placeholder="-y some-mcp" />
+            <Form.Input field="url" label="URL" placeholder="http://…（http）" />
+            <Button htmlType="submit" theme="solid" icon={<IconPlus />}>
+              添加
+            </Button>
+          </Form>
+        </Card>
+      </Space>
+    );
+  }
+
+  if (section === "skills") {
+    const toggleSkill = async (id: string, enabled: boolean) => {
+      try {
+        const r = await api.toggleTools({ kind: "skill", id, enabled });
+        setSettings(r.json);
+        Toast.success(enabled ? `已启用 ${id}` : `已关闭 ${id}`);
+      } catch (e) {
+        Toast.error(e instanceof Error ? e.message : String(e));
+      }
+    };
+    const importSkill = async (values: Record<string, unknown>) => {
+      try {
+        const r = await api.importSkill({
+          id: String(values.id ?? ""),
+          name: String(values.name ?? ""),
+          enabled: true,
+          skillMarkdown: String(values.skillMarkdown ?? ""),
+        });
+        setSettings(r.json);
+        Toast.success("已导入 Skill");
+      } catch (e) {
+        Toast.error(e instanceof Error ? e.message : String(e));
+      }
+    };
+    const rescan = async () => {
+      try {
+        const r = await api.rescanTools();
+        setSettings(r.json);
+        Toast.success(`已重扫目录 · Skill ${r.json.skillPacks?.length ?? 0} 项`);
+      } catch (e) {
+        Toast.error(e instanceof Error ? e.message : String(e));
+      }
+    };
+    return (
+      <Space vertical align="start" style={{ width: "100%", maxWidth: 980 }}>
+        <Banner
+          type="info"
+          closeIcon={null}
+          description="全局开关是默认基线；任务内可用 enable_skill 按需解锁（常开核含 recon/证据纪律）。目录：skills/builtin|user。"
+        />
+        <Button icon={<IconRefresh />} onClick={() => void rescan()}>
+          重扫目录
+        </Button>
+        <Card title="Skill 包" style={{ width: "100%", background: "var(--semi-color-bg-1)" }}>
+          <Table
+            size="small"
+            pagination={false}
+            rowKey="id"
+            dataSource={settings.skillPacks ?? []}
+            columns={[
+              { title: "ID", dataIndex: "id", width: 180 },
+              { title: "名称", dataIndex: "name", width: 140 },
+              { title: "说明", dataIndex: "description", ellipsis: true },
+              {
+                title: "来源",
+                dataIndex: "source",
+                width: 70,
+                render: (v: string) => (v === "builtin" ? "内置" : "用户"),
+              },
+              {
+                title: "模型可见",
+                dataIndex: "enabled",
+                width: 90,
+                render: (v: boolean, row: SkillPackPublic) => (
+                  <Switch checked={v} onChange={(on) => void toggleSkill(row.id, on)} />
+                ),
+              },
+              {
+                title: "",
+                width: 56,
+                render: (_: unknown, row: SkillPackPublic) =>
+                  row.builtin ? null : (
+                    <Button
+                      type="danger"
+                      theme="borderless"
+                      icon={<IconDelete />}
+                      onClick={() =>
+                        void api
+                          .removeSkill(row.id)
+                          .then((r) => {
+                            setSettings(r.json);
+                            Toast.success("已删除");
+                          })
+                          .catch((e) =>
+                            Toast.error(e instanceof Error ? e.message : String(e)),
+                          )
+                      }
+                    />
+                  ),
+              },
+            ]}
+          />
+          <Typography.Title heading={6} style={{ marginTop: 20 }}>
+            导入 Skill（SKILL.md）
+          </Typography.Title>
+          <Form labelPosition="left" labelWidth={90} onSubmit={(v) => void importSkill(v)}>
+            <Form.Input field="id" label="ID" rules={[{ required: true }]} />
+            <Form.Input field="name" label="名称" rules={[{ required: true }]} />
+            <Form.TextArea
+              field="skillMarkdown"
+              label="正文"
+              rows={8}
+              placeholder={"---\nname: …\ndescription: …\n---\n\n# …"}
+              rules={[{ required: true }]}
+            />
+            <Button htmlType="submit" theme="solid" icon={<IconPlus />}>
+              导入
+            </Button>
+          </Form>
+        </Card>
+      </Space>
     );
   }
 

@@ -1,0 +1,9 @@
+{
+  "id": "auth-scope-discipline",
+  "name": "授权范围纪律",
+  "defaultEnabled": true,
+  "refs": [
+    "https://github.com/kekurttel/pentest-skills",
+    "https://github.com/briiirussell/cybersecurity-skills"
+  ]
+}

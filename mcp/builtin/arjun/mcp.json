@@ -1,0 +1,16 @@
+{
+  "id": "arjun",
+  "name": "arjun",
+  "description": "隐藏参数发现",
+  "category": "inject",
+  "transport": "builtin",
+  "binary": "arjun",
+  "defaultEnabled": false,
+  "defaultFlags": "-u",
+  "toolName": "run",
+  "toolDescription": "Run arjun against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

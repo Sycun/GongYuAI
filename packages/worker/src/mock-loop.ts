@@ -1,6 +1,6 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { WorkerManifest } from "@gongyuai/contracts";
+import { ORIGIN_FACT_ID, type WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { CheckpointStore } from "./checkpoint.js";
 import {
@@ -61,6 +61,12 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
     }
 
     const target = manifest.auth.targets[0] ?? "127.0.0.1";
+    /** Prefer last real Fact as predecessor; fall back to origin pseudo Fact. */
+    const sourceFromHistory = (): string[] => {
+      const facts = history.listFacts(manifest.taskId);
+      const last = facts[facts.length - 1];
+      return last ? [last.id] : [ORIGIN_FACT_ID];
+    };
 
     while (state.phase === "loop") {
       const pauseMs = Number(process.env.GY_SMOKE_PAUSE_MS ?? 0);
@@ -74,15 +80,23 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             taskId: manifest.taskId,
             title: "Ensure curl available",
             summary: "install_tool if missing",
+            sourceFactIds: sourceFromHistory(),
           });
           history.claimIntent(manifest.taskId, intent.id, "mock-worker");
           const installed = installTool(ctx, { name: "curl" });
-          history.concludeIntent(
-            manifest.taskId,
-            intent.id,
-            installed.ok ? "succeeded" : "failed",
-            installed.detail,
-          );
+          if (installed.ok) {
+            history.concludeIntent(manifest.taskId, intent.id, "succeeded", installed.detail, {
+              facts: [
+                {
+                  layer: "title",
+                  title: "curl available",
+                  summary: installed.detail,
+                },
+              ],
+            });
+          } else {
+            history.concludeIntent(manifest.taskId, intent.id, "failed", installed.detail);
+          }
           state.step = 1;
           state.toolCalls = ctx.usage.toolCalls;
           state.installs = ctx.usage.installs;
@@ -96,6 +110,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             taskId: manifest.taskId,
             title: "Collect recon banner",
             summary: `Probe ${target}`,
+            sourceFactIds: sourceFromHistory(),
           });
           history.claimIntent(manifest.taskId, intent.id, "mock-worker");
 
@@ -115,19 +130,6 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             "recon/banner.txt",
             `target=${target}\n${banner}\n`,
           );
-          history.appendFact({
-            taskId: manifest.taskId,
-            layer: "evidence",
-            title: "HTTP banner captured",
-            summary: banner.slice(0, 200),
-            evidencePath,
-            intentId: intent.id,
-          });
-          history.appendFact({
-            taskId: manifest.taskId,
-            layer: "title",
-            title: `Recon done for ${target}`,
-          });
 
           const goals = history.listGoals(manifest.taskId);
           const recon = goals.find((g) => g.id === "recon") ?? goals[0];
@@ -138,7 +140,20 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             }
           }
 
-          history.concludeIntent(manifest.taskId, intent.id, "succeeded", "banner saved");
+          history.concludeIntent(manifest.taskId, intent.id, "succeeded", "banner saved", {
+            facts: [
+              {
+                layer: "evidence",
+                title: "HTTP banner captured",
+                summary: banner.slice(0, 200),
+                evidencePath,
+              },
+              {
+                layer: "title",
+                title: `Recon done for ${target}`,
+              },
+            ],
+          });
           appendProgress(manifest.workspaceDir, "recon goal passed");
           state.step = 2;
           state.toolCalls = ctx.usage.toolCalls;

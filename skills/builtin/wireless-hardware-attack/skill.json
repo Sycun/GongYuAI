@@ -1,0 +1,10 @@
+{
+  "id": "wireless-hardware-attack",
+  "name": "wireless-hardware-attack",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

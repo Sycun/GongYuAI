@@ -1,0 +1,16 @@
+{
+  "id": "wapiti",
+  "name": "wapiti",
+  "description": "Web 应用漏洞扫描",
+  "category": "web",
+  "transport": "builtin",
+  "binary": "wapiti",
+  "defaultEnabled": false,
+  "defaultFlags": "-u",
+  "toolName": "run",
+  "toolDescription": "Run wapiti against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

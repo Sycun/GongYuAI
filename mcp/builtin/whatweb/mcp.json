@@ -1,0 +1,16 @@
+{
+  "id": "whatweb",
+  "name": "whatweb",
+  "description": "Web 技术指纹",
+  "category": "web",
+  "transport": "builtin",
+  "binary": "whatweb",
+  "defaultEnabled": false,
+  "defaultFlags": "",
+  "toolName": "run",
+  "toolDescription": "Run whatweb against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

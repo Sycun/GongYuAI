@@ -1,0 +1,10 @@
+{
+  "id": "cbh-idor-bola",
+  "name": "cbh-idor-bola",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

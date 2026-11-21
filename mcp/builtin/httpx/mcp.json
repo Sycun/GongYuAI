@@ -1,0 +1,16 @@
+{
+  "id": "httpx",
+  "name": "httpx",
+  "description": "HTTP 存活与指纹",
+  "category": "web",
+  "transport": "builtin",
+  "binary": "httpx",
+  "defaultEnabled": true,
+  "defaultFlags": "-silent -status-code -title -tech-detect",
+  "toolName": "run",
+  "toolDescription": "Run httpx against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

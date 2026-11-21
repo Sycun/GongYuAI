@@ -1,0 +1,10 @@
+{
+  "id": "blockchain-contract-attack",
+  "name": "blockchain-contract-attack",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

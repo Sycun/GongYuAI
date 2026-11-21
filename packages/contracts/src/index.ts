@@ -124,12 +124,17 @@ export const IntentStatusSchema = z.enum([
 ]);
 export type IntentStatus = z.infer<typeof IntentStatusSchema>;
 
+/** Pseudo Fact id: Intent may hang on origin before any real Fact exists. */
+export const ORIGIN_FACT_ID = "origin";
+
 export const IntentSchema = z.object({
   id: z.string().uuid(),
   taskId: z.string().uuid(),
   title: z.string().min(1),
   summary: z.string().default(""),
   status: IntentStatusSchema,
+  /** Predecessor Fact ids (or `origin`); empty forbidden — no causeless explore. */
+  sourceFactIds: z.array(z.string().min(1)).min(1),
   claimedBy: z.string().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -163,6 +168,75 @@ export const HistoryEventSchema = z.object({
 });
 export type HistoryEvent = z.infer<typeof HistoryEventSchema>;
 
+/** One MCP = one tool directory under mcp/builtin|user. Never a monolithic kali-mcp. */
+export const McpTransportSchema = z.enum(["builtin", "stdio", "http"]);
+export type McpTransport = z.infer<typeof McpTransportSchema>;
+
+export const McpServerConfigSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  category: z.string().default("general"),
+  enabled: z.boolean().default(true),
+  builtin: z.boolean().default(false),
+  source: z.enum(["builtin", "user"]).default("user"),
+  transport: McpTransportSchema.default("stdio"),
+  rootDir: z.string().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).default([]),
+  url: z.string().optional(),
+  env: z.record(z.string(), z.string()).default({}),
+});
+export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
+
+export const SkillPackConfigSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  enabled: z.boolean().default(true),
+  builtin: z.boolean().default(false),
+  source: z.enum(["builtin", "user"]).default("user"),
+  rootDir: z.string().min(1),
+});
+export type SkillPackConfig = z.infer<typeof SkillPackConfigSchema>;
+
+export const WorkerMcpServerSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  transport: McpTransportSchema,
+  rootDir: z.string().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).default([]),
+  url: z.string().optional(),
+  env: z.record(z.string(), z.string()).default({}),
+});
+export type WorkerMcpServer = z.infer<typeof WorkerMcpServerSchema>;
+
+export const WorkerSkillPackSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  rootDir: z.string().min(1),
+});
+export type WorkerSkillPack = z.infer<typeof WorkerSkillPackSchema>;
+
+/** Short catalog entry so the model can unlock tools it has not enabled yet. */
+export const ToolCatalogEntrySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  category: z.string().default("general"),
+});
+export type ToolCatalogEntry = z.infer<typeof ToolCatalogEntrySchema>;
+
+/** Always-on MCP core for progressive unlock (task start). */
+export const CORE_MCP_IDS = ["nmap", "httpx", "nuclei"] as const;
+/** Always-on skill core. */
+export const CORE_SKILL_IDS = [
+  "auth-scope-discipline",
+  "evidence-first",
+  "recon",
+] as const;
+
 export const WorkerManifestSchema = z.object({
   taskId: z.string().uuid(),
   dataDir: z.string(),
@@ -180,11 +254,19 @@ export const WorkerManifestSchema = z.object({
       modelId: z.string(),
       baseUrl: z.string().optional(),
       apiKeyEnv: z.string().default("OPENAI_API_KEY"),
-      /** Pi / OpenAI-compat vision (image input). */
       visionEnabled: z.boolean().default(true),
       visionModelId: z.string().optional(),
     })
     .optional(),
+  /** Initially enabled MCP servers (settings ∪ core). */
+  mcpServers: z.array(WorkerMcpServerSchema).default([]),
+  /** Full pool for task-local enable_mcp. */
+  mcpPool: z.array(WorkerMcpServerSchema).default([]),
+  mcpCatalog: z.array(ToolCatalogEntrySchema).default([]),
+  /** Initially enabled skills. */
+  skillPacks: z.array(WorkerSkillPackSchema).default([]),
+  skillPool: z.array(WorkerSkillPackSchema).default([]),
+  skillCatalog: z.array(ToolCatalogEntrySchema).default([]),
 });
 export type WorkerManifest = z.infer<typeof WorkerManifestSchema>;
 
@@ -192,7 +274,6 @@ export const ModelSettingsSchema = z.object({
   provider: z.string().default("openai"),
   modelId: z.string().min(1).default("gpt-4.1-mini"),
   baseUrl: z.string().default("https://api.openai.com/v1"),
-  /** Stored locally only; never returned in full by API. */
   apiKey: z.string().default(""),
   visionEnabled: z.boolean().default(true),
   visionModelId: z.string().default(""),
@@ -202,13 +283,62 @@ export type ModelSettings = z.infer<typeof ModelSettingsSchema>;
 export const UpdateSettingsSchema = z.object({
   githubUrl: z.string().default("https://github.com/Sycun/GongYuAI"),
   branch: z.string().default("main"),
-  /** Optional PAT for private repos; masked in API. */
   githubToken: z.string().default(""),
   lastCheckedAt: z.string().nullable().default(null),
   lastUpdatedAt: z.string().nullable().default(null),
   lastCommit: z.string().nullable().default(null),
 });
 export type UpdateSettings = z.infer<typeof UpdateSettingsSchema>;
+
+/** Catalog from disk wins metadata; existing wins enabled when ids match. */
+export function mergeMcpServers(
+  existing: McpServerConfig[],
+  catalog: McpServerConfig[],
+): McpServerConfig[] {
+  const prev = new Map(existing.map((s) => [s.id, s]));
+  const out: McpServerConfig[] = [];
+  const seen = new Set<string>();
+  for (const item of catalog) {
+    const old = prev.get(item.id);
+    out.push(
+      McpServerConfigSchema.parse({
+        ...item,
+        enabled: old ? old.enabled : item.enabled,
+      }),
+    );
+    seen.add(item.id);
+  }
+  for (const rest of existing) {
+    if (seen.has(rest.id)) continue;
+    if (rest.rootDir) continue;
+    out.push(McpServerConfigSchema.parse(rest));
+  }
+  return out;
+}
+
+export function mergeSkillPacks(
+  existing: SkillPackConfig[],
+  catalog: SkillPackConfig[],
+): SkillPackConfig[] {
+  const prev = new Map(existing.map((s) => [s.id, s]));
+  const out: SkillPackConfig[] = [];
+  const seen = new Set<string>();
+  for (const item of catalog) {
+    const old = prev.get(item.id);
+    out.push(
+      SkillPackConfigSchema.parse({
+        ...item,
+        enabled: old ? old.enabled : item.enabled,
+      }),
+    );
+    seen.add(item.id);
+  }
+  for (const rest of existing) {
+    if (seen.has(rest.id)) continue;
+    out.push(SkillPackConfigSchema.parse(rest));
+  }
+  return out;
+}
 
 export const AppSettingsSchema = z.object({
   model: ModelSettingsSchema.default({
@@ -227,6 +357,8 @@ export const AppSettingsSchema = z.object({
     lastUpdatedAt: null,
     lastCommit: null,
   }),
+  mcpServers: z.array(McpServerConfigSchema).default([]),
+  skillPacks: z.array(SkillPackConfigSchema).default([]),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 
@@ -235,6 +367,40 @@ export type ModelSettingsPatch = z.infer<typeof ModelSettingsPatchSchema>;
 
 export const UpdateSettingsPatchSchema = UpdateSettingsSchema.partial();
 export type UpdateSettingsPatch = z.infer<typeof UpdateSettingsPatchSchema>;
+
+export const AddUserMcpSchema = z.object({
+  id: z.string().min(1).regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
+  name: z.string().min(1),
+  enabled: z.boolean().default(true),
+  transport: z.enum(["stdio", "http"]),
+  command: z.string().optional(),
+  args: z.array(z.string()).default([]),
+  url: z.string().optional(),
+  env: z.record(z.string(), z.string()).default({}),
+});
+export type AddUserMcp = z.infer<typeof AddUserMcpSchema>;
+
+export const ImportSkillSchema = z.object({
+  id: z.string().min(1).regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i),
+  name: z.string().min(1),
+  enabled: z.boolean().default(true),
+  rootDir: z.string().optional(),
+  skillMarkdown: z.string().optional(),
+});
+export type ImportSkill = z.infer<typeof ImportSkillSchema>;
+
+export const ToggleToolsItemSchema = z.object({
+  kind: z.enum(["mcp", "skill"]),
+  id: z.string().min(1),
+  enabled: z.boolean(),
+});
+export type ToggleToolsItem = z.infer<typeof ToggleToolsItemSchema>;
+
+export const ToolsSettingsPatchSchema = z.object({
+  mcpServers: z.array(McpServerConfigSchema).optional(),
+  skillPacks: z.array(SkillPackConfigSchema).optional(),
+});
+export type ToolsSettingsPatch = z.infer<typeof ToolsSettingsPatchSchema>;
 
 export function goalsFromSpecs(specs: GoalSpec[]): GoalState[] {
   return specs.map((g) => ({

@@ -1,0 +1,10 @@
+{
+  "id": "ai-llm-app-attack",
+  "name": "ai-llm-app-attack",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

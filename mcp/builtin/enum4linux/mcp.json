@@ -1,0 +1,16 @@
+{
+  "id": "enum4linux",
+  "name": "enum4linux",
+  "description": "SMB/Samba 枚举",
+  "category": "ad",
+  "transport": "builtin",
+  "binary": "enum4linux",
+  "defaultEnabled": false,
+  "defaultFlags": "-a",
+  "toolName": "run",
+  "toolDescription": "Run enum4linux against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

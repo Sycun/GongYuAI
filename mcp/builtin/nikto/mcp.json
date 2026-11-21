@@ -1,0 +1,16 @@
+{
+  "id": "nikto",
+  "name": "nikto",
+  "description": "Web 服务器漏洞扫描",
+  "category": "web",
+  "transport": "builtin",
+  "binary": "nikto",
+  "defaultEnabled": false,
+  "defaultFlags": "-h",
+  "toolName": "run",
+  "toolDescription": "Run nikto against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

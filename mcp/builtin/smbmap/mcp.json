@@ -1,0 +1,16 @@
+{
+  "id": "smbmap",
+  "name": "smbmap",
+  "description": "SMB 共享枚举",
+  "category": "ad",
+  "transport": "builtin",
+  "binary": "smbmap",
+  "defaultEnabled": false,
+  "defaultFlags": "-H",
+  "toolName": "run",
+  "toolDescription": "Run smbmap against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

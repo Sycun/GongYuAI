@@ -1,0 +1,16 @@
+{
+  "id": "nuclei",
+  "name": "nuclei",
+  "description": "模板化漏洞扫描",
+  "category": "web",
+  "transport": "builtin",
+  "binary": "nuclei",
+  "defaultEnabled": true,
+  "defaultFlags": "-silent",
+  "toolName": "run",
+  "toolDescription": "Run nuclei against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

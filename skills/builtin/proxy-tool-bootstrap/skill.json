@@ -1,0 +1,10 @@
+{
+  "id": "proxy-tool-bootstrap",
+  "name": "proxy-tool-bootstrap",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

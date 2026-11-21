@@ -1,0 +1,10 @@
+{
+  "id": "active-directory-attack",
+  "name": "active-directory-attack",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

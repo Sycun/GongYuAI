@@ -1,0 +1,16 @@
+{
+  "id": "sqlmap",
+  "name": "sqlmap",
+  "description": "SQL 注入检测",
+  "category": "inject",
+  "transport": "builtin",
+  "binary": "sqlmap",
+  "defaultEnabled": false,
+  "defaultFlags": "--batch --level=1 --risk=1",
+  "toolName": "run",
+  "toolDescription": "Run sqlmap against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

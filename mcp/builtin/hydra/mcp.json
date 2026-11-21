@@ -1,0 +1,16 @@
+{
+  "id": "hydra",
+  "name": "hydra",
+  "description": "在线口令爆破",
+  "category": "creds",
+  "transport": "builtin",
+  "binary": "hydra",
+  "defaultEnabled": false,
+  "defaultFlags": "",
+  "toolName": "run",
+  "toolDescription": "Run hydra against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

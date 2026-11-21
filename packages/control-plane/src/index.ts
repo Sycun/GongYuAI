@@ -52,7 +52,7 @@ export async function bootControlPlane(opts: BootOptions = {}) {
   process.env.GY_PORT = String(port);
 
   const store = new ControlStore(dataRoot);
-  const settings = new SettingsStore(dataRoot);
+  const settings = new SettingsStore(dataRoot, installRoot);
   // Seed env for this process so any child inherits defaults
   Object.assign(process.env, settings.workerEnv());
 

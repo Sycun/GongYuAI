@@ -1,0 +1,16 @@
+{
+  "id": "gobuster",
+  "name": "gobuster",
+  "description": "目录/DNS/VHost 爆破",
+  "category": "fuzz",
+  "transport": "builtin",
+  "binary": "gobuster",
+  "defaultEnabled": false,
+  "defaultFlags": "dir",
+  "toolName": "run",
+  "toolDescription": "Run gobuster against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

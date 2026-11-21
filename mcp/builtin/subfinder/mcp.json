@@ -1,0 +1,16 @@
+{
+  "id": "subfinder",
+  "name": "subfinder",
+  "description": "子域枚举",
+  "category": "dns",
+  "transport": "builtin",
+  "binary": "subfinder",
+  "defaultEnabled": true,
+  "defaultFlags": "-silent",
+  "toolName": "run",
+  "toolDescription": "Run subfinder against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

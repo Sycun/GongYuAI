@@ -1,0 +1,16 @@
+{
+  "id": "ffuf",
+  "name": "ffuf",
+  "description": "内容/参数 fuzz",
+  "category": "fuzz",
+  "transport": "builtin",
+  "binary": "ffuf",
+  "defaultEnabled": false,
+  "defaultFlags": "-mc 200,301,302,403",
+  "toolName": "run",
+  "toolDescription": "Run ffuf against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

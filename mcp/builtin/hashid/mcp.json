@@ -1,0 +1,16 @@
+{
+  "id": "hashid",
+  "name": "hashid",
+  "description": "哈希类型识别",
+  "category": "creds",
+  "transport": "builtin",
+  "binary": "hashid",
+  "defaultEnabled": false,
+  "defaultFlags": "",
+  "toolName": "run",
+  "toolDescription": "Run hashid against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

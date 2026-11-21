@@ -1,0 +1,10 @@
+{
+  "id": "initial-access-phishing",
+  "name": "initial-access-phishing",
+  "description": ">-",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

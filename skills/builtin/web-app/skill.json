@@ -1,0 +1,9 @@
+{
+  "id": "web-app",
+  "name": "Web 应用测试",
+  "defaultEnabled": true,
+  "refs": [
+    "https://github.com/kekurttel/pentest-skills",
+    "https://github.com/briiirussell/cybersecurity-skills"
+  ]
+}

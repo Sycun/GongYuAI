@@ -11,7 +11,16 @@ import type {
   Intent,
   IntentStatus,
 } from "@gongyuai/contracts";
+import { ORIGIN_FACT_ID } from "@gongyuai/contracts";
 import { minimatch } from "./minimatch.js";
+
+export type ConcludeFactInput = {
+  layer: FactLayer;
+  title: string;
+  summary?: string;
+  evidencePath?: string | null;
+  tags?: string[];
+};
 
 export type OpenHistoryOptions = {
   dbPath: string;
@@ -59,6 +68,7 @@ export class HistoryStore {
         title TEXT NOT NULL,
         summary TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL,
+        source_fact_ids_json TEXT NOT NULL DEFAULT '["origin"]',
         claimed_by TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -88,6 +98,18 @@ export class HistoryStore {
       );
       CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at);
     `);
+    this.ensureIntentSourceFactIdsColumn();
+  }
+
+  /** Migrate pre-P0 DBs that lack source_fact_ids_json. */
+  private ensureIntentSourceFactIdsColumn(): void {
+    const cols = this.db
+      .prepare(`PRAGMA table_info(intents)`)
+      .all() as Array<{ name: string }>;
+    if (cols.some((c) => c.name === "source_fact_ids_json")) return;
+    this.db.exec(
+      `ALTER TABLE intents ADD COLUMN source_fact_ids_json TEXT NOT NULL DEFAULT '["origin"]'`,
+    );
   }
 
   private now(): string {
@@ -229,11 +251,33 @@ export class HistoryStore {
     };
   }
 
+  private validateSourceFactIds(taskId: string, sourceFactIds: string[]): string[] {
+    if (!sourceFactIds.length) {
+      throw new Error("sourceFactIds required: Intent must hang on ≥1 Fact (or origin)");
+    }
+    const unique = [...new Set(sourceFactIds.map((id) => id.trim()).filter(Boolean))];
+    if (!unique.length) {
+      throw new Error("sourceFactIds required: Intent must hang on ≥1 Fact (or origin)");
+    }
+    for (const id of unique) {
+      if (id === ORIGIN_FACT_ID) continue;
+      const row = this.db
+        .prepare(`SELECT 1 AS ok FROM facts WHERE task_id = ? AND id = ?`)
+        .get(taskId, id) as { ok: number } | undefined;
+      if (!row) {
+        throw new Error(`unknown source fact: ${id}`);
+      }
+    }
+    return unique;
+  }
+
   proposeIntent(input: {
     taskId: string;
     title: string;
     summary?: string;
+    sourceFactIds: string[];
   }): Intent {
+    const sourceFactIds = this.validateSourceFactIds(input.taskId, input.sourceFactIds);
     const now = this.now();
     const intent: Intent = {
       id: randomUUID(),
@@ -241,6 +285,7 @@ export class HistoryStore {
       title: input.title,
       summary: input.summary ?? "",
       status: "proposed",
+      sourceFactIds,
       claimedBy: null,
       createdAt: now,
       updatedAt: now,
@@ -250,8 +295,8 @@ export class HistoryStore {
     this.db
       .prepare(
         `INSERT INTO intents
-          (id, task_id, title, summary, status, claimed_by, created_at, updated_at, concluded_at, conclusion)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, task_id, title, summary, status, source_fact_ids_json, claimed_by, created_at, updated_at, concluded_at, conclusion)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         intent.id,
@@ -259,13 +304,18 @@ export class HistoryStore {
         intent.title,
         intent.summary,
         intent.status,
+        JSON.stringify(intent.sourceFactIds),
         intent.claimedBy,
         intent.createdAt,
         intent.updatedAt,
         intent.concludedAt,
         intent.conclusion,
       );
-    this.emit(input.taskId, "intent_proposed", { intentId: intent.id, title: intent.title });
+    this.emit(input.taskId, "intent_proposed", {
+      intentId: intent.id,
+      title: intent.title,
+      sourceFactIds: intent.sourceFactIds,
+    });
     return intent;
   }
 
@@ -283,22 +333,82 @@ export class HistoryStore {
     return this.getIntent(taskId, intentId);
   }
 
+  /**
+   * Conclude an Intent. On `succeeded`, must append ≥1 Fact bound to this Intent
+   * (Fact←Intent back-edge) in the same call — no success without graph writeback.
+   */
   concludeIntent(
     taskId: string,
     intentId: string,
     status: Extract<IntentStatus, "succeeded" | "failed">,
     conclusion: string,
+    opts?: { facts?: ConcludeFactInput[] },
   ): Intent | null {
+    const facts = opts?.facts ?? [];
+    if (status === "succeeded" && facts.length === 0) {
+      throw new Error(
+        "conclude(succeeded) requires ≥1 Fact with intentId (Explore writeback)",
+      );
+    }
+
     const now = this.now();
-    const result = this.db
-      .prepare(
-        `UPDATE intents
-         SET status = ?, conclusion = ?, concluded_at = ?, updated_at = ?
-         WHERE id = ? AND task_id = ? AND status IN ('claimed', 'running', 'proposed')`,
-      )
-      .run(status, conclusion, now, now, intentId, taskId);
-    if ((result.changes ?? 0) === 0) return null;
-    this.emit(taskId, "intent_concluded", { intentId, status, conclusion });
+    this.db.exec("BEGIN");
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE intents
+           SET status = ?, conclusion = ?, concluded_at = ?, updated_at = ?
+           WHERE id = ? AND task_id = ? AND status IN ('claimed', 'running', 'proposed')`,
+        )
+        .run(status, conclusion, now, now, intentId, taskId);
+      if ((result.changes ?? 0) === 0) {
+        this.db.exec("ROLLBACK");
+        return null;
+      }
+
+      for (const f of facts) {
+        const fact: Fact = {
+          id: randomUUID(),
+          taskId,
+          layer: f.layer,
+          title: f.title,
+          summary: f.summary ?? "",
+          evidencePath: f.evidencePath ?? null,
+          tags: f.tags ?? [],
+          createdAt: now,
+          intentId,
+        };
+        this.db
+          .prepare(
+            `INSERT INTO facts
+              (id, task_id, layer, title, summary, evidence_path, tags_json, created_at, intent_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            fact.id,
+            fact.taskId,
+            fact.layer,
+            fact.title,
+            fact.summary,
+            fact.evidencePath,
+            JSON.stringify(fact.tags),
+            fact.createdAt,
+            fact.intentId,
+          );
+        this.emit(taskId, "fact_appended", {
+          factId: fact.id,
+          title: fact.title,
+          layer: fact.layer,
+          intentId,
+        });
+      }
+
+      this.emit(taskId, "intent_concluded", { intentId, status, conclusion });
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
     return this.getIntent(taskId, intentId);
   }
 
@@ -307,18 +417,7 @@ export class HistoryStore {
       .prepare(`SELECT * FROM intents WHERE task_id = ? AND id = ?`)
       .get(taskId, intentId) as Record<string, unknown> | undefined;
     if (!r) return null;
-    return {
-      id: String(r.id),
-      taskId: String(r.task_id),
-      title: String(r.title),
-      summary: String(r.summary),
-      status: r.status as IntentStatus,
-      claimedBy: (r.claimed_by as string | null) ?? null,
-      createdAt: String(r.created_at),
-      updatedAt: String(r.updated_at),
-      concludedAt: (r.concluded_at as string | null) ?? null,
-      conclusion: (r.conclusion as string | null) ?? null,
-    };
+    return this.rowToIntent(r);
   }
 
   listIntents(taskId: string, status?: IntentStatus): Intent[] {
@@ -329,18 +428,32 @@ export class HistoryStore {
       : (this.db
           .prepare(`SELECT * FROM intents WHERE task_id = ? ORDER BY created_at`)
           .all(taskId) as Array<Record<string, unknown>>);
-    return rows.map((r) => ({
+    return rows.map((r) => this.rowToIntent(r));
+  }
+
+  private rowToIntent(r: Record<string, unknown>): Intent {
+    let sourceFactIds: string[] = [ORIGIN_FACT_ID];
+    try {
+      const parsed = JSON.parse(String(r.source_fact_ids_json ?? "[]")) as unknown;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        sourceFactIds = parsed.map(String);
+      }
+    } catch {
+      sourceFactIds = [ORIGIN_FACT_ID];
+    }
+    return {
       id: String(r.id),
       taskId: String(r.task_id),
       title: String(r.title),
       summary: String(r.summary),
       status: r.status as IntentStatus,
+      sourceFactIds,
       claimedBy: (r.claimed_by as string | null) ?? null,
       createdAt: String(r.created_at),
       updatedAt: String(r.updated_at),
       concludedAt: (r.concluded_at as string | null) ?? null,
       conclusion: (r.conclusion as string | null) ?? null,
-    }));
+    };
   }
 
   assertGoal(

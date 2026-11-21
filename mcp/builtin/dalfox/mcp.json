@@ -1,0 +1,16 @@
+{
+  "id": "dalfox",
+  "name": "dalfox",
+  "description": "XSS 扫描",
+  "category": "inject",
+  "transport": "builtin",
+  "binary": "dalfox",
+  "defaultEnabled": false,
+  "defaultFlags": "url",
+  "toolName": "run",
+  "toolDescription": "Run dalfox against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

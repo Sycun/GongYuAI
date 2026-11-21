@@ -11,6 +11,8 @@ import {
   type ToolContext,
 } from "./tools.js";
 import { writeWorkerStatus } from "./status.js";
+import { isMcpToolName, openMcpHub, type McpHub } from "./mcp/client.js";
+import { openSkillHub, type SkillHub } from "./skills/runtime.js";
 
 /**
  * Pi Durable-backed worker. Falls back to OpenAI tool loop if durable harness
@@ -53,9 +55,15 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
       ckpt.save(state);
     }
 
-    const started = await tryPiDurable(manifest, ctx, state, ckpt);
-    if (!started) {
-      await runOpenAiToolLoop(manifest, ctx, state, ckpt);
+    const mcpHub = await openMcpHub(manifest, ctx);
+    const skillHub = openSkillHub(manifest, history);
+    try {
+      const started = await tryPiDurable(manifest, ctx, state, ckpt, mcpHub, skillHub);
+      if (!started) {
+        await runOpenAiToolLoop(manifest, ctx, state, ckpt, mcpHub, skillHub);
+      }
+    } finally {
+      await mcpHub.close();
     }
 
     const report = `# GongYuAI Report\n\n${history.overview(manifest.taskId)}\n`;
@@ -182,6 +190,8 @@ async function tryPiDurable(
   ctx: ToolContext,
   state: CheckpointState,
   ckpt: CheckpointStore,
+  mcpHub: McpHub,
+  skillHub: SkillHub,
 ): Promise<boolean> {
   try {
     const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
@@ -309,6 +319,91 @@ async function tryPiDurable(
       },
     } as never);
 
+    const mcpPiTools = mcpHub.openaiTools.map((t) => {
+      const fullName = t.function.name;
+      return defineTool({
+        name: fullName,
+        description: `${t.function.description} Pass JSON object as argsJson.`,
+        parameters: obj({ argsJson: str() }),
+        replay: "none",
+        execute: async (args: { argsJson?: string }) => {
+          let parsed: Record<string, unknown> = {};
+          if (args.argsJson) {
+            try {
+              parsed = JSON.parse(args.argsJson) as Record<string, unknown>;
+            } catch {
+              parsed = { raw: args.argsJson };
+            }
+          }
+          const text = await mcpHub.call(fullName, parsed);
+          state.toolCalls = ctx.usage.toolCalls;
+          ckpt.save(state);
+          return { output: [{ type: "text", text }] };
+        },
+      } as never);
+    });
+
+    const enable_mcp = defineTool({
+      name: "enable_mcp",
+      description: "Unlock an MCP from the catalog for this task only (progressive).",
+      parameters: obj({ id: str(), reason: str() }),
+      replay: "none",
+      execute: async (args: { id: string; reason: string }) => {
+        const text = await mcpHub.enable(args.id, args.reason || "needed");
+        return { output: [{ type: "text", text }] };
+      },
+    } as never);
+    const disable_mcp = defineTool({
+      name: "disable_mcp",
+      description: "Disable a previously unlocked MCP for this task.",
+      parameters: obj({ id: str(), reason: str() }),
+      replay: "none",
+      execute: async (args: { id: string; reason: string }) => {
+        const text = await mcpHub.disable(args.id, args.reason || "no longer needed");
+        return { output: [{ type: "text", text }] };
+      },
+    } as never);
+    const enable_skill = defineTool({
+      name: "enable_skill",
+      description: "Unlock a Skill pack for this task only.",
+      parameters: obj({ id: str(), reason: str() }),
+      replay: "none",
+      execute: async (args: { id: string; reason: string }) => {
+        const text = skillHub.enable(args.id, args.reason || "needed");
+        return { output: [{ type: "text", text }] };
+      },
+    } as never);
+    const disable_skill = defineTool({
+      name: "disable_skill",
+      description: "Disable a Skill pack for this task.",
+      parameters: obj({ id: str(), reason: str() }),
+      replay: "none",
+      execute: async (args: { id: string; reason: string }) => {
+        const text = skillHub.disable(args.id, args.reason || "no longer needed");
+        return { output: [{ type: "text", text }] };
+      },
+    } as never);
+    const mcp_invoke = defineTool({
+      name: "mcp_invoke",
+      description: "Call any enabled MCP tool by serverId + toolName (use after enable_mcp).",
+      parameters: obj({ serverId: str(), toolName: str(), argsJson: str() }),
+      replay: "none",
+      execute: async (args: { serverId: string; toolName: string; argsJson?: string }) => {
+        let parsed: Record<string, unknown> = {};
+        if (args.argsJson) {
+          try {
+            parsed = JSON.parse(args.argsJson) as Record<string, unknown>;
+          } catch {
+            parsed = { raw: args.argsJson };
+          }
+        }
+        const text = await mcpHub.invoke(args.serverId, args.toolName, parsed);
+        state.toolCalls = ctx.usage.toolCalls;
+        ckpt.save(state);
+        return { output: [{ type: "text", text }] };
+      },
+    } as never);
+
     const registry = createRegistry();
     registry.install(
       defineExtension({
@@ -320,11 +415,23 @@ async function tryPiDurable(
           write_evidence,
           install_tool,
           assert_goal,
+          enable_mcp,
+          disable_mcp,
+          enable_skill,
+          disable_skill,
+          mcp_invoke,
+          ...mcpPiTools,
         ],
         sections: [
           section(
             "gongyuai-system",
-            () => systemPrompt(manifest, ctx.history.overview(manifest.taskId)),
+            () =>
+              systemPrompt(
+                manifest,
+                ctx.history.overview(manifest.taskId),
+                mcpHub,
+                skillHub,
+              ),
             { tag: false },
           ),
         ],
@@ -435,11 +542,29 @@ function flushUsage(
   });
 }
 
-function systemPrompt(manifest: WorkerManifest, overview: string): string {
+function systemPrompt(
+  manifest: WorkerManifest,
+  overview: string,
+  mcpHub?: McpHub,
+  skillHub?: SkillHub,
+): string {
   const visionOn = manifest.model?.visionEnabled !== false;
   const visionLine = visionOn
     ? `- 视觉能力已开启。截图/界面证据优先使用 visionModelId=${manifest.model?.visionModelId || manifest.model?.modelId || "default"}。`
     : `- 视觉能力已关闭；不要依赖图像理解。`;
+  const mcpBlock =
+    mcpHub && mcpHub.promptLines.length
+      ? `\n已启用的 MCP（可直接调用 mcp__… 或 mcp_invoke）：\n${mcpHub.promptLines.join("\n")}\n`
+      : "\n当前无启用的 MCP。\n";
+  const mcpCatalog = mcpHub?.catalogLines() ?? [];
+  const mcpCatalogBlock = mcpCatalog.length
+    ? `\n可按需解锁的 MCP（先 enable_mcp，再调用）：\n${mcpCatalog.join("\n")}\n`
+    : "";
+  const skillBlock = skillHub?.promptBlock() ?? "";
+  const skillCatalog = skillHub?.catalogLines() ?? [];
+  const skillCatalogBlock = skillCatalog.length
+    ? `\n可按需解锁的 Skill（enable_skill）：\n${skillCatalog.join("\n")}\n`
+    : "";
   return `你是 GongYuAI 授权安全评估执行节点（Mission Control worker）。对操作者可见的说明、事实标题与摘要尽量使用中文。
 授权说明：${manifest.auth.authorizationNote}
 目标允许列表：${manifest.auth.targets.join("、")}
@@ -453,8 +578,10 @@ function systemPrompt(manifest: WorkerManifest, overview: string): string {
 - 只探测 auth.targets（主机/URL/CIDR；即便目标含 * 也禁止主机网络改动）。
 - 大输出写入 evidence，对话里只留摘要；持续更新 History。
 - 缺少二进制时用 install_tool。
+- 工具面采用按需解锁：常开核以外用 enable_mcp / enable_skill（写清 reason）；不需要时 disable_*。
+- 未 enable 的 MCP 不可调用。
 ${visionLine}
-
+${mcpBlock}${mcpCatalogBlock}${skillBlock}${skillCatalogBlock}
 当前 History：
 ${overview}
 `;
@@ -483,6 +610,8 @@ async function runOpenAiToolLoop(
   ctx: ToolContext,
   state: CheckpointState,
   ckpt: CheckpointStore,
+  mcpHub: McpHub,
+  skillHub: SkillHub,
 ): Promise<void> {
   const apiKey = process.env[manifest.model?.apiKeyEnv ?? "OPENAI_API_KEY"];
   if (!apiKey) {
@@ -495,9 +624,9 @@ async function runOpenAiToolLoop(
   ).replace(/\/$/, "");
   const model = manifest.model?.modelId ?? process.env.GY_MODEL ?? "gpt-4.1-mini";
 
-  const tools = [
+  const baseTools = [
     {
-      type: "function",
+      type: "function" as const,
       function: {
         name: "shell",
         description: "Run bash in workspace",
@@ -509,7 +638,7 @@ async function runOpenAiToolLoop(
       },
     },
     {
-      type: "function",
+      type: "function" as const,
       function: {
         name: "history_overview",
         description: "Read History overview",
@@ -517,7 +646,7 @@ async function runOpenAiToolLoop(
       },
     },
     {
-      type: "function",
+      type: "function" as const,
       function: {
         name: "write_evidence",
         description: "Write evidence file",
@@ -532,7 +661,7 @@ async function runOpenAiToolLoop(
       },
     },
     {
-      type: "function",
+      type: "function" as const,
       function: {
         name: "history_append_fact",
         description: "Append History fact",
@@ -549,7 +678,7 @@ async function runOpenAiToolLoop(
       },
     },
     {
-      type: "function",
+      type: "function" as const,
       function: {
         name: "install_tool",
         description: "Install missing tool",
@@ -564,7 +693,7 @@ async function runOpenAiToolLoop(
       },
     },
     {
-      type: "function",
+      type: "function" as const,
       function: {
         name: "assert_goal",
         description:
@@ -579,10 +708,94 @@ async function runOpenAiToolLoop(
         },
       },
     },
+    {
+      type: "function" as const,
+      function: {
+        name: "enable_mcp",
+        description: "Unlock an MCP from the catalog for this task only. Provide id + reason.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["id", "reason"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "disable_mcp",
+        description: "Disable a task-local MCP.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["id", "reason"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "enable_skill",
+        description: "Unlock a Skill pack for this task only.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["id", "reason"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "disable_skill",
+        description: "Disable a task-local Skill pack.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["id", "reason"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "mcp_invoke",
+        description: "Call enabled MCP by serverId + toolName + argsJson.",
+        parameters: {
+          type: "object",
+          properties: {
+            serverId: { type: "string" },
+            toolName: { type: "string" },
+            argsJson: { type: "string" },
+          },
+          required: ["serverId", "toolName"],
+        },
+      },
+    },
   ];
 
+  const liveTools = () => [...baseTools, ...mcpHub.openaiTools];
+
+  const refreshSystem = () =>
+    systemPrompt(manifest, ctx.history.overview(manifest.taskId), mcpHub, skillHub);
+
   const messages: ChatMessage[] = [
-    { role: "system", content: systemPrompt(manifest, ctx.history.overview(manifest.taskId)) },
+    {
+      role: "system",
+      content: refreshSystem(),
+    },
     {
       role: "user",
       content:
@@ -626,7 +839,7 @@ async function runOpenAiToolLoop(
           body: JSON.stringify({
             model,
             messages,
-            tools,
+            tools: liveTools(),
             tool_choice: "auto",
           }),
         });
@@ -767,8 +980,53 @@ async function runOpenAiToolLoop(
               summary: args.goalId ?? "",
             });
             break;
+          case "enable_mcp":
+            result = await mcpHub.enable(args.id ?? "", args.reason ?? "needed");
+            messages[0] = { role: "system", content: refreshSystem() };
+            break;
+          case "disable_mcp":
+            result = await mcpHub.disable(args.id ?? "", args.reason ?? "done");
+            messages[0] = { role: "system", content: refreshSystem() };
+            break;
+          case "enable_skill":
+            result = skillHub.enable(args.id ?? "", args.reason ?? "needed");
+            messages[0] = { role: "system", content: refreshSystem() };
+            break;
+          case "disable_skill":
+            result = skillHub.disable(args.id ?? "", args.reason ?? "done");
+            messages[0] = { role: "system", content: refreshSystem() };
+            break;
+          case "mcp_invoke": {
+            let parsed: Record<string, unknown> = {};
+            if (args.argsJson) {
+              try {
+                parsed = JSON.parse(args.argsJson) as Record<string, unknown>;
+              } catch {
+                parsed = { raw: args.argsJson };
+              }
+            }
+            result = await mcpHub.invoke(
+              args.serverId ?? "",
+              args.toolName ?? "",
+              parsed,
+            );
+            break;
+          }
           default:
-            result = `未知工具 ${call.function.name}`;
+            if (isMcpToolName(call.function.name)) {
+              result = await mcpHub.call(
+                call.function.name,
+                args as Record<string, unknown>,
+              );
+              ctx.history.appendFact({
+                taskId: manifest.taskId,
+                layer: "summary",
+                title: `MCP ${call.function.name}`,
+                summary: result.slice(0, 400),
+              });
+            } else {
+              result = `未知工具 ${call.function.name}`;
+            }
         }
       } catch (err) {
         result = `错误: ${err instanceof Error ? err.message : String(err)}`;

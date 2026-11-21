@@ -1,0 +1,10 @@
+{
+  "id": "aimy-complete",
+  "name": "aimy-complete",
+  "description": "完整 aimy-skill 3.7.5：全部 89 个 CLI 命令和 103 个专题技能；按当前任务检索技能、读取真实参数、执行并保存证据。",
+  "defaultEnabled": false,
+  "source": "csai",
+  "refs": [
+    "CyberStrikeAI/skills on Kali"
+  ]
+}

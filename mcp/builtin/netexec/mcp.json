@@ -1,0 +1,16 @@
+{
+  "id": "netexec",
+  "name": "netexec",
+  "description": "网络认证与横向（nxc）",
+  "category": "ad",
+  "transport": "builtin",
+  "binary": "netexec",
+  "defaultEnabled": false,
+  "defaultFlags": "smb",
+  "toolName": "run",
+  "toolDescription": "Run netexec against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "reporting",
+  "name": "报告与收口",
+  "defaultEnabled": true,
+  "refs": [
+    "https://github.com/kekurttel/pentest-skills",
+    "https://github.com/briiirussell/cybersecurity-skills"
+  ]
+}

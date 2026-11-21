@@ -1,0 +1,16 @@
+{
+  "id": "dig",
+  "name": "dig",
+  "description": "DNS 查询",
+  "category": "dns",
+  "transport": "builtin",
+  "binary": "dig",
+  "defaultEnabled": false,
+  "defaultFlags": "",
+  "toolName": "run",
+  "toolDescription": "Run dig against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

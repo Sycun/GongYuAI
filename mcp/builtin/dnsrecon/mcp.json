@@ -1,0 +1,16 @@
+{
+  "id": "dnsrecon",
+  "name": "dnsrecon",
+  "description": "DNS 枚举",
+  "category": "dns",
+  "transport": "builtin",
+  "binary": "dnsrecon",
+  "defaultEnabled": false,
+  "defaultFlags": "-d",
+  "toolName": "run",
+  "toolDescription": "Run dnsrecon against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

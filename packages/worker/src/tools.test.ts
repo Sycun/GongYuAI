@@ -23,6 +23,12 @@ function manifest(targets: string[]): WorkerManifest {
     goals: [],
     budget: { maxTokens: 1000, maxWallMs: 60_000, maxToolCalls: 10, maxInstalls: 2 },
     mock: false,
+    mcpServers: [],
+    mcpPool: [],
+    mcpCatalog: [],
+    skillPacks: [],
+    skillPool: [],
+    skillCatalog: [],
   };
 }
 

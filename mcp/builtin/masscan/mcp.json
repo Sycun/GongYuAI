@@ -1,0 +1,16 @@
+{
+  "id": "masscan",
+  "name": "masscan",
+  "description": "高速端口扫描",
+  "category": "network",
+  "transport": "builtin",
+  "binary": "masscan",
+  "defaultEnabled": false,
+  "defaultFlags": "-p1-1000 --rate 1000",
+  "toolName": "run",
+  "toolDescription": "Run masscan against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

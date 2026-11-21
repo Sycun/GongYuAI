@@ -1,0 +1,16 @@
+{
+  "id": "whois",
+  "name": "whois",
+  "description": "WHOIS 查询",
+  "category": "dns",
+  "transport": "builtin",
+  "binary": "whois",
+  "defaultEnabled": false,
+  "defaultFlags": "",
+  "toolName": "run",
+  "toolDescription": "Run whois against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

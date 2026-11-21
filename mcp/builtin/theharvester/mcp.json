@@ -1,0 +1,16 @@
+{
+  "id": "theharvester",
+  "name": "theharvester",
+  "description": "OSINT 邮箱/主机收集",
+  "category": "dns",
+  "transport": "builtin",
+  "binary": "theHarvester",
+  "defaultEnabled": false,
+  "defaultFlags": "-d",
+  "toolName": "run",
+  "toolDescription": "Run theHarvester against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

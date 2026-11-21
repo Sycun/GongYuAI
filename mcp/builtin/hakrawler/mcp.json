@@ -1,0 +1,16 @@
+{
+  "id": "hakrawler",
+  "name": "hakrawler",
+  "description": "链接爬取",
+  "category": "inject",
+  "transport": "builtin",
+  "binary": "hakrawler",
+  "defaultEnabled": false,
+  "defaultFlags": "",
+  "toolName": "run",
+  "toolDescription": "Run hakrawler against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

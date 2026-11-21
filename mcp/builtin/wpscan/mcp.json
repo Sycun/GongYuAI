@@ -1,0 +1,16 @@
+{
+  "id": "wpscan",
+  "name": "wpscan",
+  "description": "WordPress 扫描",
+  "category": "web",
+  "transport": "builtin",
+  "binary": "wpscan",
+  "defaultEnabled": false,
+  "defaultFlags": "--url",
+  "toolName": "run",
+  "toolDescription": "Run wpscan against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

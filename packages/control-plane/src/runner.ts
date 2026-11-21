@@ -45,6 +45,12 @@ function writeManifest(task: TaskRecord, settings: SettingsStore): WorkerManifes
     budget: task.budget,
     mock: task.mock,
     model,
+    mcpServers: settings.enabledMcpForManifest(),
+    mcpPool: settings.allMcpForManifest(),
+    mcpCatalog: settings.mcpCatalogForManifest(),
+    skillPacks: settings.enabledSkillsForManifest(),
+    skillPool: settings.allSkillsForManifest(),
+    skillCatalog: settings.skillCatalogForManifest(),
   };
   mkdirSync(task.dataDir, { recursive: true });
   writeFileSync(paths.manifestPath, JSON.stringify(manifest, null, 2));

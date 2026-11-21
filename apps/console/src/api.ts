@@ -91,6 +91,33 @@ async function request<T>(path: string, opts?: RequestInit): Promise<{ json: T; 
   return { json: (json ?? ({} as T)), text };
 }
 
+export type McpServerPublic = {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  enabled: boolean;
+  builtin: boolean;
+  source: "builtin" | "user";
+  transport: "builtin" | "stdio" | "http";
+  rootDir?: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  envConfigured: boolean;
+  envKeys: string[];
+};
+
+export type SkillPackPublic = {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  builtin: boolean;
+  source: "builtin" | "user";
+  rootDir: string;
+};
+
 export type PublicSettings = {
   model: {
     provider: string;
@@ -110,6 +137,8 @@ export type PublicSettings = {
     lastUpdatedAt: string | null;
     lastCommit: string | null;
   };
+  mcpServers: McpServerPublic[];
+  skillPacks: SkillPackPublic[];
   version: string;
 };
 
@@ -203,4 +232,32 @@ export const api = {
   updateStatus: () => request<UpdateJobStatus>("/settings/update/status"),
   runUpdate: () =>
     request<UpdateJobStatus>("/settings/update/run", { method: "POST" }),
+  rescanTools: () =>
+    request<PublicSettings>("/settings/tools/rescan", { method: "POST" }),
+  toggleTools: (body: { kind: "mcp" | "skill"; id: string; enabled: boolean }) =>
+    request<PublicSettings>("/settings/tools/toggle", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  addMcp: (body: Record<string, unknown>) =>
+    request<PublicSettings>("/settings/tools/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  removeMcp: (id: string) =>
+    request<PublicSettings>(`/settings/tools/mcp/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+  importSkill: (body: Record<string, unknown>) =>
+    request<PublicSettings>("/settings/tools/skills/import", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  removeSkill: (id: string) =>
+    request<PublicSettings>(`/settings/tools/skills/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 };

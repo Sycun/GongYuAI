@@ -1,0 +1,16 @@
+{
+  "id": "dirsearch",
+  "name": "dirsearch",
+  "description": "目录扫描",
+  "category": "fuzz",
+  "transport": "builtin",
+  "binary": "dirsearch",
+  "defaultEnabled": false,
+  "defaultFlags": "-u",
+  "toolName": "run",
+  "toolDescription": "Run dirsearch against an authorized target. Pass target and optional flags.",
+  "refs": [
+    "https://github.com/KoaBrown/pentest-mcp-toolkit",
+    "https://github.com/chfle/Pentest-MCP-Server"
+  ]
+}

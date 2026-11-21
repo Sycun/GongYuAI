@@ -1,0 +1,9 @@
+{
+  "id": "privilege-escalation",
+  "name": "权限提升检查",
+  "defaultEnabled": false,
+  "refs": [
+    "https://github.com/kekurttel/pentest-skills",
+    "https://github.com/briiirussell/cybersecurity-skills"
+  ]
+}
