@@ -266,8 +266,44 @@ export const HistoryEventKindSchema = z.enum([
   "budget_tick",
   "report_written",
   "relay_written",
+  "hint_appended",
+  "technique_broadcast",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
+
+/** Human / system tactical injection (Cairn Hint). Absorbed via Observe. */
+export const HintSourceSchema = z.enum(["human", "system", "family"]);
+export type HintSource = z.infer<typeof HintSourceSchema>;
+
+export const HintSchema = z.object({
+  id: z.string().uuid(),
+  taskId: z.string().uuid(),
+  text: z.string().min(1).max(4000),
+  source: HintSourceSchema.default("human"),
+  tags: z.array(z.string()).default([]),
+  createdAt: z.string().datetime(),
+});
+export type Hint = z.infer<typeof HintSchema>;
+
+export const CreateHintRequestSchema = z.object({
+  text: z.string().min(1).max(4000),
+  source: HintSourceSchema.optional().default("human"),
+  tags: z.array(z.string()).default([]),
+});
+export type CreateHintRequest = z.infer<typeof CreateHintRequestSchema>;
+
+/** Mark a confirmed technique Fact as reusable across peer assets (同族迁移). */
+export const TRANSFERABLE_TAG = "transferable";
+export const familyTag = (key: string) => `family:${key.trim().toLowerCase()}`;
+export function parseFamilyKeyFromTags(tags: string[]): string | null {
+  for (const t of tags) {
+    if (t.startsWith("family:")) {
+      const k = t.slice("family:".length).trim();
+      if (k) return k;
+    }
+  }
+  return null;
+}
 
 export const HistoryEventSchema = z.object({
   id: z.string().uuid(),

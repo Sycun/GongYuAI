@@ -6,6 +6,7 @@ import {
   AddAssetCollectorSchema,
   AddUserMcpSchema,
   AssetCollectorPatchSchema,
+  CreateHintRequestSchema,
   CreateTaskRequestSchema,
   ImportSkillSchema,
   ModelSettingsPatchSchema,
@@ -334,6 +335,7 @@ export function startControlServer(opts: ServerOptions) {
               intents: [],
               events: [],
               assets: [],
+              hints: [],
             });
           }
           const history = openHistory({
@@ -348,7 +350,39 @@ export function startControlServer(opts: ServerOptions) {
               intents: history.listIntents(task.id),
               events: history.listEvents(task.id, 100),
               assets: history.listAssets(task.id),
+              hints: history.listHints(task.id, 50),
             });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "GET" && rest === "/hints") {
+          const paths = taskPaths(task.dataDir);
+          const history = openHistory({
+            dbPath: paths.historyDb,
+            evidenceDir: paths.evidenceDir,
+          });
+          try {
+            return send(res, 200, { hints: history.listHints(task.id, 100) });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "POST" && rest === "/hints") {
+          const body = CreateHintRequestSchema.parse(await readJson(req));
+          const paths = taskPaths(task.dataDir);
+          const history = openHistory({
+            dbPath: paths.historyDb,
+            evidenceDir: paths.evidenceDir,
+          });
+          try {
+            const hint = history.appendHint({
+              taskId: task.id,
+              text: body.text,
+              source: body.source,
+              tags: body.tags,
+            });
+            return send(res, 201, { hint });
           } finally {
             history.close();
           }

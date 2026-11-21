@@ -66,9 +66,12 @@ test("bootstrap tool allowlist excludes shell; explore includes it", () => {
   assert.equal(allowedToolNames("bootstrap").has("shell"), false);
   assert.equal(allowedToolNames("bootstrap").has("intent_propose"), true);
   assert.equal(allowedToolNames("bootstrap").has("asset_record"), true);
+  assert.equal(allowedToolNames("bootstrap").has("asset_search"), true);
   assert.equal(allowedToolNames("explore").has("asset_list"), true);
+  assert.equal(allowedToolNames("explore").has("asset_search"), true);
   assert.equal(allowedToolNames("explore").has("shell"), true);
   assert.equal(allowedToolNames("reason").has("shell"), false);
+  assert.equal(allowedToolNames("reason").has("asset_search"), false);
   assert.equal(allowedToolNames("reason").has("assert_goal"), true);
 });
 

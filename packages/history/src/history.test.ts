@@ -316,3 +316,73 @@ test("asset inventory seeds, auto-admits under CIDR, and observes", () => {
   store.close();
   rmSync(root, { recursive: true, force: true });
 });
+
+test("hint append appears in Observe", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-hint-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "66666666-6666-4666-8666-666666666666";
+  const hint = store.appendHint({
+    taskId,
+    text: "优先测 /login 的 SQL 注入",
+    source: "human",
+  });
+  assert.ok(hint.id);
+  assert.equal(store.listHints(taskId).length, 1);
+  const obs = store.observe(taskId);
+  assert.match(obs, /Hint（战术注入）/);
+  assert.match(obs, /SQL 注入/);
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("broadcastTechnique fans out intents to peer assets", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-xfer-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "77777777-7777-4777-8777-777777777777";
+  const auth = { targets: ["*.example.com"], outOfScope: [] as string[] };
+  store.seedAssetsFromAuth(taskId, { targets: ["a.example.com", "b.example.com"] });
+  store.recordAsset({ taskId, address: "a.example.com", auth, live: true });
+  store.recordAsset({ taskId, address: "b.example.com", auth, live: true });
+
+  const source = store.appendFact({
+    taskId,
+    layer: "title",
+    title: "WAF bypass confirmed on a.example.com",
+    summary: "X-Forwarded-For: 127.0.0.1",
+  });
+
+  const out = store.broadcastTechnique({
+    taskId,
+    sourceFactIds: [source.id],
+    title: "WAF bypass via XFF",
+    summary: "X-Forwarded-For: 127.0.0.1 works",
+    familyKey: "example-waf",
+  });
+  assert.ok(out.techniqueFact.tags.includes("transferable"));
+  assert.ok(out.intents.length >= 2);
+  assert.match(store.observe(taskId), /可迁移打法/);
+  assert.match(store.observe(taskId), /同族迁移/);
+
+  // Idempotent-ish: second broadcast skips same open titles
+  const again = store.broadcastTechnique({
+    taskId,
+    sourceFactIds: [source.id],
+    title: "WAF bypass via XFF",
+    summary: "X-Forwarded-For: 127.0.0.1 works",
+    familyKey: "example-waf",
+  });
+  assert.ok(again.skipped.length >= 1);
+
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});

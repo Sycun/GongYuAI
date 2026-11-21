@@ -85,6 +85,22 @@ export type HistoryPayload = {
   }>;
   events: unknown[];
   assets?: AssetRecord[];
+  hints?: Array<{
+    id: string;
+    text: string;
+    source: string;
+    tags?: string[];
+    createdAt: string;
+  }>;
+};
+
+export type HintRecord = {
+  id: string;
+  taskId?: string;
+  text: string;
+  source: string;
+  tags?: string[];
+  createdAt: string;
 };
 
 export type RuntimePayload = {
@@ -265,6 +281,13 @@ export const api = {
   start: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/start`, { method: "POST" }),
   history: (id: string) => request<HistoryPayload>(`/tasks/${id}/history`),
   assets: (id: string) => request<{ assets: AssetRecord[] }>(`/tasks/${id}/assets`),
+  hints: (id: string) => request<{ hints: HintRecord[] }>(`/tasks/${id}/hints`),
+  createHint: (id: string, body: { text: string; source?: string; tags?: string[] }) =>
+    request<{ hint: HintRecord }>(`/tasks/${id}/hints`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   runtime: (id: string) => request<RuntimePayload>(`/tasks/${id}/runtime`),
   evidence: (id: string) => request<EvidenceList>(`/tasks/${id}/evidence`),
   evidenceFile: (id: string, path: string) =>

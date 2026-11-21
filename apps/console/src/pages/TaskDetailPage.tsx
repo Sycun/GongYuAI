@@ -11,6 +11,7 @@ import {
   Table,
   Tabs,
   Tag,
+  TextArea,
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
@@ -18,6 +19,7 @@ import { IconPlay, IconRefresh, IconStop } from "@douyinfe/semi-icons";
 import {
   api,
   type AssetRecord,
+  type HintRecord,
   type HistoryPayload,
   type RuntimePayload,
   type TaskRecord,
@@ -57,6 +59,9 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [liveUsage, setLiveUsage] = useState<TaskRecord["usage"] | null>(null);
+  const [hints, setHints] = useState<HintRecord[]>([]);
+  const [hintDraft, setHintDraft] = useState("");
+  const [hintBusy, setHintBusy] = useState(false);
 
   useEffect(() => {
     if (!task) return;
@@ -71,6 +76,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           setHistory(h.json);
           setRuntime(r.json);
           if (r.json.usage) setLiveUsage(r.json.usage);
+          setHints(h.json.hints ?? []);
         }
         if (tab === "assets") {
           const a = await api.assets(task!.id);
@@ -325,6 +331,68 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                     { key: "授权说明", value: task.auth.authorizationNote || "—" },
                   ]}
                 />
+              </Card>
+            </Col>
+            <Col span={24} style={{ marginTop: 16 }}>
+              <Card
+                title="战术 Hint"
+                style={{ background: "var(--semi-color-bg-1)" }}
+                headerExtraContent={
+                  <Typography.Text type="tertiary" size="small">
+                    写入 History · 下次 Observe 吸收
+                  </Typography.Text>
+                }
+              >
+                <TextArea
+                  value={hintDraft}
+                  onChange={(v) => setHintDraft(v)}
+                  placeholder="例如：优先测 /login 的 SQL 注入；WAF 可试 X-Forwarded-For"
+                  autosize={{ minRows: 2, maxRows: 5 }}
+                />
+                <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                  <Button
+                    theme="solid"
+                    loading={hintBusy}
+                    disabled={!hintDraft.trim()}
+                    onClick={() => {
+                      void (async () => {
+                        const text = hintDraft.trim();
+                        if (!text) return;
+                        setHintBusy(true);
+                        try {
+                          const r = await api.createHint(task.id, { text, source: "human" });
+                          setHints((prev) => [r.json.hint, ...prev]);
+                          setHintDraft("");
+                          Toast.success("Hint 已注入");
+                        } catch (e) {
+                          Toast.error(e instanceof Error ? e.message : String(e));
+                        } finally {
+                          setHintBusy(false);
+                        }
+                      })();
+                    }}
+                  >
+                    注入 Hint
+                  </Button>
+                </div>
+                {hints.length > 0 && (
+                  <List
+                    style={{ marginTop: 12 }}
+                    dataSource={hints.slice(0, 8)}
+                    renderItem={(h) => (
+                      <List.Item
+                        main={
+                          <div>
+                            <Typography.Text type="tertiary" size="small">
+                              {h.source} · {h.createdAt}
+                            </Typography.Text>
+                            <div>{h.text}</div>
+                          </div>
+                        }
+                      />
+                    )}
+                  />
+                )}
               </Card>
             </Col>
             <Col span={24} style={{ marginTop: 16 }}>

@@ -20,6 +20,7 @@ Usage:
        [--mock] [--wait] [--concurrency N]
        [--capability observe|scan|active-lab|full]
   gy status [taskId]
+  gy hint <taskId> "<text>"     # inject tactical Hint into History
   gy logs <taskId>
   gy report <taskId>
   gy stop <taskId>
@@ -223,6 +224,24 @@ async function main(): Promise<void> {
       }
       const one = await api(opts, "GET", `/tasks/${id}`);
       console.log(one.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "hint") {
+    const id = rest[0];
+    const text = rest.slice(1).join(" ").trim();
+    if (!id || !text) throw new Error('gy hint <taskId> "<text>"');
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/hints`, {
+        text,
+        source: "human",
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
     } finally {
       if (owned.close) await owned.close();
     }

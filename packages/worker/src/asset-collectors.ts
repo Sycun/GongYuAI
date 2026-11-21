@@ -3,7 +3,6 @@
  * Results are written through History.recordAsset (same inventory as console).
  */
 import type { WorkerAssetCollector, WorkerManifest } from "@gongyuai/contracts";
-import type { HistoryStore } from "@gongyuai/history";
 import { writeEvidence, type ToolContext } from "./tools.js";
 
 export type AssetSearchHit = {

@@ -81,7 +81,7 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   evidence: { title: "证据", subtitle: "证据文件" },
   report: { title: "报告", subtitle: "任务报告" },
   logs: { title: "日志", subtitle: "执行节点日志" },
-  settings: { title: "设置", subtitle: "模型 · Token · 静默更新" },
+  settings: { title: "设置", subtitle: "模型 · 资产收集 · Token · 静默更新" },
   "settings-model": { title: "模型配置", subtitle: "OpenAI 兼容 API · 视觉能力" },
   "settings-assets": {
     title: "资产收集",

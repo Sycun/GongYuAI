@@ -37,6 +37,7 @@ const EXPLORE = new Set([
   "intent_propose",
   "intent_claim",
   "intent_conclude",
+  "technique_transfer",
   "write_evidence",
   "asset_search",
   "shell",
@@ -51,6 +52,7 @@ const REASON = new Set([
   ...ALWAYS,
   "history_append_fact",
   "intent_propose",
+  "technique_transfer",
   "write_evidence",
   "assert_goal",
   "enable_mcp",
@@ -104,7 +106,7 @@ export function phaseDirective(
     );
   } else if (p === "reason") {
     lines.push(
-      "Reason：读资产清单 + 新 Fact → Complete / 有界扇出新 Intent / no-op。对 admitted/live 资产挂 sourceFactIds 继续测；oos 不扇出利用。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
+      "Reason：读资产清单 + Hint + 可迁移打法 + 新 Fact → Complete / 有界扇出新 Intent / technique_transfer 同族广播 / no-op。对 admitted/live 资产挂 sourceFactIds 继续测；oos 不扇出利用。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
     );
   }
   return lines.join("\n");
@@ -197,6 +199,25 @@ export const GRAPH_PHASE_TOOLS = [
           factsJson: { type: "string" },
         },
         required: ["intentId", "status", "conclusion"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "technique_transfer",
+      description:
+        "P4 同族迁移：把已验证打法写成 transferable Fact，并为对端非 oos 资产扇出 Intent（可选 targetAddresses 逗号列表；空=全部）。",
+      parameters: {
+        type: "object",
+        properties: {
+          sourceFactIds: { type: "string" },
+          title: { type: "string" },
+          summary: { type: "string" },
+          familyKey: { type: "string" },
+          targetAddresses: { type: "string" },
+        },
+        required: ["sourceFactIds", "title", "summary"],
       },
     },
   },
@@ -328,6 +349,39 @@ export function handleGraphTool(
         `intent_conclude ${done.id} → ${status}; phase=${ctx.state.phase}`,
       );
       return JSON.stringify(done);
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (name === "technique_transfer") {
+    const sourceFactIds = parseFactIds(args.sourceFactIds ?? "");
+    const targets = (args.targetAddresses ?? "")
+      .split(/[,;\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    try {
+      const out = ctx.history.broadcastTechnique({
+        taskId: ctx.taskId,
+        sourceFactIds,
+        title: args.title ?? "可迁移打法",
+        summary: args.summary ?? "",
+        familyKey: args.familyKey?.trim() || undefined,
+        targetAddresses: targets.length ? targets : undefined,
+      });
+      // New Intents → stay/return Explore
+      ctx.state.phase = "explore";
+      ctx.save();
+      appendProgress(
+        ctx.workspaceDir,
+        `technique_transfer ${out.techniqueFact.id} → intents=${out.intents.length} skipped=${out.skipped.length}`,
+      );
+      return JSON.stringify({
+        ok: true,
+        techniqueFactId: out.techniqueFact.id,
+        intentIds: out.intents.map((i) => i.id),
+        skipped: out.skipped,
+      });
     } catch (err) {
       return `错误: ${err instanceof Error ? err.message : String(err)}`;
     }

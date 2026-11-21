@@ -72,15 +72,16 @@ Worker shell 闸门与资产准入共用同一套规则。
 | 读者 | 入口 |
 | --- | --- |
 | 控制台 | `GET /tasks/:id/assets`；任务深潜 **资产** Tab；轮询实时更新 |
-| Worker | Observe 段「资产清单」；工具 `asset_list` / `asset_record` |
+| Worker | Observe 段「资产清单」；工具 `asset_list` / `asset_record` / `asset_search` |
 
 写入唯一合法路径：
 
 1. `seedAssetsFromAuth`（创建任务 / prepareManifest / bootstrap）  
 2. `asset_record`（发现 / 升 live）  
-3. （可选）Explore `conclude` 附带 asset tags 的 Fact  
+3. `asset_search`（设置中启用的 FOFA / 鹰图 / 自定义收集器；内部仍走 `recordAsset`）  
+4. （可选）Explore `conclude` 附带 asset tags 的 Fact  
 
-**不要**把 FOFA JSON 只塞进 chat / Relay 当真相。
+**不要**把 FOFA JSON 只塞进 chat / Relay 当真相。控制台「设置 → 资产收集」配置密钥后，Worker 才可见对应收集器。
 
 ## 扇出纪律
 

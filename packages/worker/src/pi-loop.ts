@@ -791,6 +791,7 @@ Explore 并发：configured=${manifest.execution?.maxConcurrentExplores ?? 1} ef
 - 资产清单双向：Observe 含「资产清单」；发现子域/IP 必须 asset_record（自动按 CIDR/通配准入或标 oos）；控制台同一投影。勿静默改 auth.targets。
 - 被动资产收集：配置启用后用 asset_search(collectorId, query) 调 FOFA/鹰图/自定义 API，命中自动写入清单（勿把原始 JSON 只塞进 chat）。
 - 图调度：显式 Bootstrap → Explore → Reason（phase_set / intent_*）；工具面按相位过滤。
+- Hint：Observe 含人类/同族战术注入，须吸收；验证打法后用 technique_transfer 做同族迁移（勿点对点私聊）。
 ${poolLine}
 - Observe 默认看 Goals + 资产清单 + title 层 Fact + 进行中 Intent；summary/evidence 按需下钻。
 - 大输出写入 evidence；Explore 成功用 intent_conclude 写回 Fact←Intent；也可用 history_append_fact / asset_record。

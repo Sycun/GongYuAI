@@ -10,6 +10,8 @@ import type {
   Fact,
   FactLayer,
   GoalState,
+  Hint,
+  HintSource,
   HistoryEvent,
   HistoryEventKind,
   Intent,
@@ -19,8 +21,10 @@ import {
   ASSET_KIND_RANK,
   ASSET_TAG,
   ORIGIN_FACT_ID,
+  TRANSFERABLE_TAG,
   admitAddress,
   assetTags,
+  familyTag,
   normalizeTargetPattern,
   parseAssetAddrFromTags,
   parseAssetKindFromTags,
@@ -115,6 +119,16 @@ export class HistoryStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS hints (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        text TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'human',
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_hints_task ON hints(task_id, created_at);
     `);
     this.ensureIntentSourceFactIdsColumn();
   }
@@ -726,6 +740,153 @@ export class HistoryStore {
     this.emit(taskId, "relay_written", { generation, trigger });
   }
 
+  /** P4 Hint: human/system tactical injection into the blackboard. */
+  appendHint(input: {
+    taskId: string;
+    text: string;
+    source?: HintSource;
+    tags?: string[];
+  }): Hint {
+    const text = input.text.trim();
+    if (!text) throw new Error("hint text required");
+    const hint: Hint = {
+      id: randomUUID(),
+      taskId: input.taskId,
+      text,
+      source: input.source ?? "human",
+      tags: input.tags ?? [],
+      createdAt: this.now(),
+    };
+    this.db
+      .prepare(
+        `INSERT INTO hints (id, task_id, text, source, tags_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        hint.id,
+        hint.taskId,
+        hint.text,
+        hint.source,
+        JSON.stringify(hint.tags),
+        hint.createdAt,
+      );
+    this.emit(input.taskId, "hint_appended", {
+      hintId: hint.id,
+      source: hint.source,
+      preview: hint.text.slice(0, 160),
+    });
+    return hint;
+  }
+
+  listHints(taskId: string, limit = 50): Hint[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM hints WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(taskId, limit) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: String(r.id),
+      taskId: String(r.task_id),
+      text: String(r.text),
+      source: r.source as HintSource,
+      tags: JSON.parse(String(r.tags_json ?? "[]")) as string[],
+      createdAt: String(r.created_at),
+    }));
+  }
+
+  listTransferableFacts(taskId: string): Fact[] {
+    return this.listFacts(taskId).filter((f) => f.tags.includes(TRANSFERABLE_TAG));
+  }
+
+  /**
+   * P4 同族迁移：把已验证打法写成 transferable Fact，并为对端资产扇出 Intent。
+   * 协作只写图（stigmergy），不点对点私聊。
+   */
+  broadcastTechnique(input: {
+    taskId: string;
+    sourceFactIds: string[];
+    title: string;
+    summary: string;
+    familyKey?: string;
+    /** Empty → all non-oos assets (admitted/live/seed). */
+    targetAddresses?: string[];
+  }): { techniqueFact: Fact; intents: Intent[]; skipped: string[] } {
+    const sources = input.sourceFactIds.map((s) => s.trim()).filter(Boolean);
+    if (!sources.length) throw new Error("broadcastTechnique requires sourceFactIds");
+    for (const id of sources) {
+      if (id === ORIGIN_FACT_ID) continue;
+      if (!this.getFact(input.taskId, id)) {
+        throw new Error(`unknown source fact: ${id}`);
+      }
+    }
+
+    const tags = [TRANSFERABLE_TAG];
+    const familyKey = input.familyKey?.trim();
+    if (familyKey) tags.push(familyTag(familyKey));
+
+    const techniqueFact = this.appendFact({
+      taskId: input.taskId,
+      layer: "title",
+      title: input.title.trim() || "可迁移打法",
+      summary: input.summary.trim(),
+      tags,
+    });
+
+    const assets = this.listAssets(input.taskId).filter((a) => a.kind !== "oos");
+    const wanted = input.targetAddresses?.map((a) => a.trim()).filter(Boolean);
+    const peers = wanted?.length
+      ? assets.filter((a) => wanted.includes(a.address))
+      : assets;
+
+    const intents: Intent[] = [];
+    const skipped: string[] = [];
+    const openTitles = new Set(
+      this.listIntents(input.taskId)
+        .filter((i) => ["proposed", "claimed", "running"].includes(i.status))
+        .map((i) => i.title),
+    );
+
+    for (const peer of peers) {
+      const title = `同族迁移：在 ${peer.address} 复用「${techniqueFact.title}」`;
+      if (openTitles.has(title)) {
+        skipped.push(peer.address);
+        continue;
+      }
+      const intent = this.proposeIntent({
+        taskId: input.taskId,
+        title,
+        summary:
+          `将已验证打法迁移到对端资产 ${peer.address}。` +
+          (familyKey ? ` family=${familyKey}。` : "") +
+          ` 手法摘要：${input.summary.trim().slice(0, 400)}`,
+        sourceFactIds: [techniqueFact.id, peer.factId, ...sources].slice(0, 8),
+      });
+      intents.push(intent);
+      openTitles.add(title);
+    }
+
+    this.emit(input.taskId, "technique_broadcast", {
+      techniqueFactId: techniqueFact.id,
+      familyKey: familyKey ?? null,
+      intentCount: intents.length,
+      skipped,
+    });
+
+    // Soft Hint so Observe surfaces the transfer even before intents are claimed.
+    this.appendHint({
+      taskId: input.taskId,
+      text:
+        `[同族迁移] ${techniqueFact.title}` +
+        (familyKey ? ` (family=${familyKey})` : "") +
+        ` → 已为 ${intents.length} 个资产提出 Intent` +
+        (skipped.length ? `；跳过已有 ${skipped.length}` : ""),
+      source: "family",
+      tags: [TRANSFERABLE_TAG, ...(familyKey ? [familyTag(familyKey)] : [])],
+    });
+
+    return { techniqueFact, intents, skipped };
+  }
+
   listEvents(taskId: string, limit = 200): HistoryEvent[] {
     const rows = this.db
       .prepare(
@@ -776,6 +937,8 @@ export class HistoryStore {
     const open = this.listIntents(taskId).filter((i) =>
       ["proposed", "claimed", "running"].includes(i.status),
     );
+    const hints = this.listHints(taskId, 20);
+    const transferable = this.listTransferableFacts(taskId).slice(-20);
 
     const lines: string[] = [];
     lines.push("## 目标");
@@ -794,6 +957,23 @@ export class HistoryStore {
       lines.push(
         "（seed/admitted/live 可作 Intent 前驱继续测；oos 禁止作为利用 Intent 唯一前驱；发现用 asset_record。）",
       );
+    }
+    lines.push("", "## Hint（战术注入）");
+    if (hints.length === 0) {
+      lines.push("- （无）");
+    } else {
+      for (const h of hints) {
+        lines.push(`- [${h.id}] (${h.source}) ${h.text.slice(0, 320)}`);
+      }
+      lines.push("（人类/同族 Hint 须吸收进下一轮 Explore/Reason；勿忽略。）");
+    }
+    lines.push("", "## 可迁移打法（同族）");
+    if (transferable.length === 0) {
+      lines.push("- （无；验证手法后用 technique_transfer 广播）");
+    } else {
+      for (const f of transferable) {
+        lines.push(`- [${f.id}] ${f.title}${f.summary ? `: ${f.summary.slice(0, 160)}` : ""}`);
+      }
     }
     lines.push("", "## 事实标题（title 层）");
     for (const f of titles) {

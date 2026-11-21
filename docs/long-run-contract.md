@@ -132,8 +132,19 @@ Worker OpenAI loop 按 Durable `phase` 过滤工具面：
 | phase | 允许（摘要） |
 | --- | --- |
 | bootstrap | History 读写、`intent_propose`、`phase_set`、Skill；无 shell/MCP 执行 |
-| explore | claim/conclude + shell/MCP/install/`assert_goal`；**每 worker** 一次一个 `activeIntentId`；多 worker 靠 Intent CAS 并行 |
-| reason | propose / assert / History；**有 open Intent 时强制回 explore** |
+| explore | claim/conclude + shell/MCP/install/`assert_goal`/`technique_transfer`；**每 worker** 一次一个 `activeIntentId`；多 worker 靠 Intent CAS 并行 |
+| reason | propose / assert / History / `technique_transfer`；**有 open Intent 时强制回 explore**；吸收 Hint |
+
+## Hint（P4）
+
+- `POST /tasks/:id/hints` `{ text, source?, tags? }` 写入 History `hints` 表（事件 `hint_appended`）。
+- Observe 含「Hint（战术注入）」；Worker 下一轮吸收，不另开私聊通道。
+- CLI：`gy hint <taskId> "<text>"`；控制台任务「运行态」可注入。
+
+## 同族迁移（P4）
+
+- 工具 `technique_transfer`：已验证手法 → `transferable` Fact（可选 `family:<key>`）→ 对端非 oos 资产各提出一条 Intent → 附带 `source=family` Hint。
+- 协作只写图；重复广播对同标题 open Intent 幂等跳过。
 
 `GY_HARNESS=bare` 关闭 History DAG 与 Relay，仅作差分基线。
 

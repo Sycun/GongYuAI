@@ -17,7 +17,9 @@ metadata:
   terminal: curl -s "https://crt.sh/?q=%.{domain}&output=json" | python3 -c "import sys,json;[print(x['name_value']) for x in json.load(sys.stdin)]" | sort -u
   terminal: dig +short {domain} @114.114.114.114; dig +short {domain} @8.8.8.8 (对比差异=CDN)
   terminal: curl -s "https://web.archive.org/cdx/search/cdx?url=*.{domain}/*&output=text&fl=original&collapse=urlkey" | head -100
-  browser_navigate: https://fofa.info/result?qbase64=$(echo -n 'domain="{domain}"' | base64)
+  asset_search: collectorId=fofa query=domain="{domain}"（设置已启用时优先；命中自动 asset_record）
+  asset_search: collectorId=hunter query=domain="{domain}"（鹰图；已启用时）
+  browser_navigate: https://fofa.info/result?qbase64=$(echo -n 'domain="{domain}"' | base64)（无 API 时回退）
   browser_navigate: https://www.shodan.io/search?query=hostname:{domain}
 主动流水线(逐步执行):
   terminal: subfinder -d {domain} -silent | tee subs.txt; amass enum -d {domain} -passive >> subs.txt; sort -u subs.txt -o subs.txt

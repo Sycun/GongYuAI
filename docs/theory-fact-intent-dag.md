@@ -193,7 +193,8 @@ Bootstrap / Explore / Reason 是 **图状态机算子**，不是「侦察→利�
 | 无因探索禁令 | propose 强制前驱 Fact | **P0** |
 | Explore 回写 Fact 绑 Intent | worker conclude 路径 | **P0** |
 | Bootstrap / Reason / Explore | Durable phase | P2 |
-| Hint | 控制台 / API 注入 | 后置 |
+| Hint | 控制台 / API 注入 | **P4 已落地** |
+| 同族迁移 | transferable Fact + Intent 扇出 | **P4 已落地** |
 | Session Relay πₙ | `workspace/relay/` | P1 |
 | 资产投影（发现回流） | Fact tags + `asset_record`；见 asset-inventory | 已落地 |
 | 五段检索 / 离线意图图 | 可选建议层 | P3+，非默认 |

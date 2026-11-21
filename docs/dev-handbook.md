@@ -38,6 +38,8 @@ MCP / Skill 是弹药，不是产品定义。
 | Harness 差分 | `pnpm diff-harness`：**bare**（`GY_HARNESS=bare`）/ history / relay | — |
 | TSecBench CLI | hint 默认禁；409 终态快失败；`probe` + ticket 记账 | 平台 ticket 须人工重置 |
 | 多 Worker 并行 Explore | **有（可配）** | 新建任务 `execution.maxConcurrentExplores`；有效并发 = min(配置, 靶标数) |
+| Hint API | **有** | `POST /tasks/:id/hints` + 控制台注入；Observe 吸收 |
+| 同族迁移 | **有** | `technique_transfer` → transferable Fact + 对端 Intent 扇出 |
 | 资产清单 + CIDR/通配准入 | seed / asset_record / 控制台资产 Tab | 扇出预算可再收紧 |
 
 ---
@@ -84,10 +86,13 @@ MCP / Skill 是弹药，不是产品定义。
 2. `pnpm diff-harness --mock --goals …`：History vs +Relay 相对表。
 3. 主尺仍建议 TSecBench 子集；辅尺 DVWA smoke。只报差分。
 
-### P4 — 可选并行 ✅（MVP：可配 Explore 并发）
+### P4 — 可选并行 ✅
 
-多 Explore Worker（新建任务可设 `maxConcurrentExplores`，默认 1）/ 同族迁移提示 / Hint API 仍后置。  
-**不要**默认做成 sapper tmux 军团；并行是图调度的倍率：共享 History + Intent CAS，每 slot 独立 Durable。
+1. **Explore 并发**：新建任务 `execution.maxConcurrentExplores`（默认 1，硬顶 16）；有效并发 = min(配置, 靶标数)；共享 History + Intent CAS；slot 0 = Bootstrap/Reason/Report leader。  
+2. **Hint API**：`POST /tasks/:id/hints` / 控制台「战术 Hint」/ `gy hint`；写入 History，下次 Observe 吸收。  
+3. **同族迁移**：验证打法后 `technique_transfer` → `transferable` Fact + 对端非 oos 资产 Intent 扇出 + family Hint。  
+
+**不要**默认做成 sapper tmux 军团；并行与迁移都是图调度倍率，不是产品形态。
 
 ---
 
@@ -187,17 +192,15 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ## 9. 下一件最小可做事项
 
-**P0–P3 + 手册打磨项已落地**（真模型相位协议、`GY_HARNESS=bare` 基线、TSec hint/409 硬化）。  
-P4 Explore 并发已可配（默认 1）；Hint API / 同族迁移仍后置。
+**P0–P4 已落地**（含 Explore 并发、Hint API、同族迁移）。下一刀按真实缺口选：TSecBench 子集差分、控制台 UX、或同族 key 启发式增强。
 
 验收：
 
 ```bash
 pnpm smoke
+pnpm --filter @gongyuai/history test
+pnpm --filter @gongyuai/worker test
 pnpm diff-harness --mock --goals examples/dvwa-smoke/goals.json \
   --target https://example.com \
   --auth "Written authorization: diff harness"
-pnpm --filter @gongyuai/worker test
 ```
-
-仅在有明确并行需求时开 P4。
