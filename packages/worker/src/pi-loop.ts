@@ -305,11 +305,57 @@ async function tryPiDurable(
 
     const context = BACKGROUND_CONTEXT;
 
-    const { defineTool, defineExtension, createRegistry, Harness, AssistantEntry, section } =
-      durable as typeof durable & {
-        section: (...args: unknown[]) => unknown;
-      };
+    const {
+      defineTool,
+      defineExtension,
+      createRegistry,
+      Harness,
+      AssistantEntry,
+      section,
+      hook,
+      ToolTask,
+      GenerationTask,
+    } = durable as typeof durable & {
+      section: (...args: unknown[]) => unknown;
+      hook: (...args: unknown[]) => unknown;
+      ToolTask: unknown;
+      GenerationTask: unknown;
+    };
     const { obj, str } = schema as { obj: (x: unknown) => unknown; str: () => unknown };
+
+    const graphCtx = () => ({
+      history: ctx.history,
+      taskId: manifest.taskId,
+      workspaceDir: manifest.workspaceDir,
+      state,
+      workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
+      save: () => {
+        state.toolCalls = ctx.usage.toolCalls;
+        state.installs = ctx.usage.installs;
+        ckpt.save(state);
+      },
+    });
+
+    /** Pull Pi usage into checkpoint + worker-status so console Live stays fresh. */
+    const syncLiveUsage = (piUsage?: {
+      models?: Record<string, { totalTokens?: number }>;
+      tools?: Record<string, { totalTokens?: number }>;
+    }) => {
+      if (piUsage) {
+        state.tokens = Math.max(state.tokens, sumPiTokens(piUsage));
+      }
+      state.toolCalls = Math.max(state.toolCalls, ctx.usage.toolCalls);
+      state.installs = Math.max(state.installs, ctx.usage.installs);
+      // Status sidecar first (CP polls this); ckpt is best-effort.
+      flushUsage(manifest, ctx, state);
+      try {
+        ckpt.save(state);
+      } catch {
+        /* ignore — Live counters already flushed */
+      }
+    };
+
+    const roundToolNames: string[] = [];
 
     const shell = defineTool({
       name: "shell",
@@ -319,7 +365,15 @@ async function tryPiDurable(
       execute: async (args: { command: string }) => {
         const r = runShell(ctx, args.command);
         state.toolCalls = ctx.usage.toolCalls;
-        ckpt.save(state);
+        state.installs = ctx.usage.installs;
+        // Flush sidecar before ckpt — status file is what CP/watchdog poll;
+        // ckpt.save can throw under contention and must not skip reporting.
+        flushUsage(manifest, ctx, state);
+        try {
+          ckpt.save(state);
+        } catch {
+          /* best-effort; usage already on disk */
+        }
         return {
           output: [
             {
@@ -592,6 +646,27 @@ async function tryPiDurable(
       },
     } as never);
 
+    const graphPiTools = GRAPH_PHASE_TOOLS.map((t) => {
+      const name = t.function.name;
+      const props = (t.function.parameters as { properties?: Record<string, unknown> })
+        .properties;
+      const params: Record<string, unknown> = {};
+      for (const key of Object.keys(props ?? {})) {
+        params[key] = str();
+      }
+      return defineTool({
+        name,
+        description: t.function.description,
+        parameters: obj(params),
+        replay: "safe",
+        execute: async (args: Record<string, string>) => {
+          const text =
+            handleGraphTool(name, args, graphCtx()) ?? `未知图工具 ${name}`;
+          return { output: [{ type: "text", text }] };
+        },
+      } as never);
+    });
+
     const registry = createRegistry();
     registry.install(
       defineExtension({
@@ -612,21 +687,95 @@ async function tryPiDurable(
           disable_mcp,
           load_skill,
           mcp_invoke,
+          ...graphPiTools,
           ...mcpPiTools,
+        ],
+        hooks: [
+          hook(ToolTask, {
+            beforeTool: (call: { name: string; parent?: unknown }) => {
+              if (call.parent) return undefined;
+              state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase);
+              const mcpNames = mcpHub.openaiTools.map((t) => t.function.name);
+              const allowed = allowedToolNames(state.phase, mcpNames);
+              if (allowed.has(call.name)) return undefined;
+              if (isMcpToolName(call.name)) {
+                const p = asGraphPhase(state.phase);
+                if (p === "explore" || p === "relay") return undefined;
+                return {
+                  block: `denied: MCP ${call.name} requires explore phase (have ${state.phase})`,
+                };
+              }
+              return {
+                block: `denied: tool ${call.name} not allowed in phase=${asGraphPhase(state.phase)}`,
+              };
+            },
+            afterTool: (call: { name: string; parent?: unknown }) => {
+              if (!call.parent) roundToolNames.push(call.name);
+              return undefined;
+            },
+          }),
+          hook(GenerationTask, {
+            afterResponse: async (
+              _msg: unknown,
+              api: { usage: (c: unknown) => Promise<unknown> },
+              hookCtx: unknown,
+            ) => {
+              try {
+                const usage = (await api.usage(hookCtx)) as {
+                  models?: Record<string, { totalTokens?: number }>;
+                  tools?: Record<string, { totalTokens?: number }>;
+                };
+                syncLiveUsage(usage);
+              } catch {
+                syncLiveUsage();
+              }
+            },
+            afterTools: async (
+              _assistant: unknown,
+              _results: unknown,
+              api: { usage: (c: unknown) => Promise<unknown> },
+              hookCtx: unknown,
+            ) => {
+              const names = roundToolNames.splice(0, roundToolNames.length);
+              try {
+                const usage = (await api.usage(hookCtx)) as {
+                  models?: Record<string, { totalTokens?: number }>;
+                  tools?: Record<string, { totalTokens?: number }>;
+                };
+                syncLiveUsage(usage);
+              } catch {
+                syncLiveUsage();
+              }
+              state.step += 1;
+              ckpt.save(state);
+              appendProgress(
+                manifest.workspaceDir,
+                `第 ${state.step} 步 · 工具 ${names.join("、") || "无"} · Token ${state.tokens} · phase=${state.phase}`,
+              );
+              return undefined;
+            },
+          }),
         ],
         sections: [
           section(
             "gongyuai-system",
-            () =>
-              systemPrompt(
+            () => {
+              state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase);
+              const open = ctx.history.openIntents(manifest.taskId);
+              const phaseBlock = phaseDirective(state.phase, {
+                openIntentCount: open.length,
+                activeIntentId: state.activeIntentId,
+              });
+              return systemPrompt(
                 manifest,
-                sessionBootstrapText(
+                `${phaseBlock}\n\n${sessionBootstrapText(
                   manifest,
                   ctx.history.observe(manifest.taskId),
-                ),
+                )}`,
                 mcpHub,
                 skillHub,
-              ),
+              );
+            },
             { tag: false },
           ),
         ],
@@ -648,12 +797,16 @@ async function tryPiDurable(
       manifest.workspaceDir,
       `Pi Durable 使用模型 ${ref.provider}/${ref.modelId}`,
     );
+    flushUsage(manifest, ctx, state);
 
     const prompt = [
       "你是 GongYuAI 授权安全评估执行节点。对操作者可见的说明尽量用中文。",
       "请用工具完成所有未通过目标；未经 assert_goal 成功不得宣称通过。",
       "严格留在 auth.targets 范围内，优先小步意图。",
+      "图调度：Bootstrap → Explore → Reason（phase_set / intent_*）；工具面按相位过滤。",
       "全部目标通过后回复 DONE。",
+      "",
+      kickoffUserMessage(state.phase),
       "",
       sessionBootstrapText(manifest, ctx.history.observe(manifest.taskId)),
     ].join("\n");
@@ -662,7 +815,26 @@ async function tryPiDurable(
       { type: "input", content: prompt, requestId: `gy-${manifest.taskId}-main` },
       context,
     );
-    const settled = await submission.wait(context);
+    // Heartbeat: Pi wait can run for hours; keep Live token/toolCounters moving.
+    const heartbeat = setInterval(() => {
+      void (async () => {
+        try {
+          const usage = (await harness.usage(context)) as {
+            models?: Record<string, { totalTokens?: number }>;
+            tools?: Record<string, { totalTokens?: number }>;
+          };
+          syncLiveUsage(usage);
+        } catch {
+          syncLiveUsage();
+        }
+      })();
+    }, 5_000);
+    let settled: Awaited<ReturnType<typeof submission.wait>>;
+    try {
+      settled = await submission.wait(context);
+    } finally {
+      clearInterval(heartbeat);
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const settledAny = settled as any;
     if (
@@ -722,20 +894,43 @@ function tokenDelta(usage?: {
   return (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0);
 }
 
+/** Sum totalTokens across Pi Durable conversation usage buckets. */
+function sumPiTokens(usage: {
+  models?: Record<string, { totalTokens?: number }>;
+  tools?: Record<string, { totalTokens?: number }>;
+}): number {
+  let n = 0;
+  for (const u of Object.values(usage.models ?? {})) {
+    n += u.totalTokens ?? 0;
+  }
+  for (const u of Object.values(usage.tools ?? {})) {
+    n += u.totalTokens ?? 0;
+  }
+  return n;
+}
+
 function flushUsage(
   manifest: WorkerManifest,
   ctx: ToolContext,
   state: CheckpointState,
 ): void {
   const slot = manifest.workerSlot ?? 0;
+  // Prefer the higher of durable checkpoint vs in-memory counters — Pi hooks
+  // and shell execute can briefly disagree; never report a regressing 0.
+  const toolCalls = Math.max(state.toolCalls, ctx.usage.toolCalls);
+  const installs = Math.max(state.installs, ctx.usage.installs);
+  state.toolCalls = toolCalls;
+  state.installs = installs;
+  ctx.usage.toolCalls = toolCalls;
+  ctx.usage.installs = installs;
   writeWorkerStatus(
     manifest.dataDir,
     {
       status: "running",
       usage: {
         tokens: state.tokens,
-        toolCalls: ctx.usage.toolCalls,
-        installs: ctx.usage.installs,
+        toolCalls,
+        installs,
       },
       workerSlot: slot,
       workerId: manifest.workerId,

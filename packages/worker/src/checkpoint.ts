@@ -42,6 +42,8 @@ export class CheckpointStore {
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new DatabaseSync(dbPath);
+    // WAL so control-plane can read usage while the worker holds the writer.
+    this.db.exec(`PRAGMA journal_mode = WAL;`);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS checkpoint (
         id INTEGER PRIMARY KEY CHECK (id = 1),

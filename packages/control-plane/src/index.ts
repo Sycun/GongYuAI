@@ -3,6 +3,7 @@ export { WorkerRunner, type RunnerConfig, type RuntimeMode } from "./runner.js";
 export { Watchdog, type WatchdogConfig } from "./watchdog.js";
 export { startControlServer, type ServerOptions } from "./server.js";
 export { taskDataDir, taskPaths } from "./paths.js";
+export { mergeUsageFromDisk, refreshTaskUsage } from "./usage.js";
 
 import { readFileSync } from "node:fs";
 import { hostname } from "node:os";

@@ -51,9 +51,13 @@ function parseTime(s: string): number {
 
 function formatClock(at: string): string {
   if (!at) return "";
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(at)) return at;
+  // Already Beijing local from worker PROGRESS.md
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(at)) {
+    return at.slice(0, 16);
+  }
   const ms = parseTime(at);
   if (!ms) return at;
+  // History Fact createdAt is UTC ISO → display as Beijing
   const t = new Date(ms + 8 * 3600_000);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
@@ -173,7 +177,13 @@ function buildTrace(progress: string[], facts: TraceFact[], active: boolean): Tr
       timelineType: "default" as const,
     }));
 
-  return [...nodes, ...orphanNodes].sort((a, b) => parseTime(a.at) - parseTime(b.at));
+  // Progress nodes win ties so "当前" stays on the live step, not a same-second Fact.
+  return [...nodes, ...orphanNodes].sort((a, b) => {
+    const dt = parseTime(a.at) - parseTime(b.at);
+    if (dt !== 0) return dt;
+    if (a.kind === b.kind) return 0;
+    return a.id.startsWith("p-") ? -1 : 1;
+  });
 }
 
 function ToolChain({ tools }: { tools: string[] }) {
@@ -214,15 +224,22 @@ export function ExecutionTrace({
     return seq.slice(-24);
   }, [nodes]);
 
+  /** 运行中「当前」优先落在 PROGRESS 节点；孤儿 Fact 只作挂靠，不抢跟跑焦点 */
+  const currentId = useMemo(() => {
+    if (!nodes.length) return null;
+    if (!active) return nodes[nodes.length - 1]?.id ?? null;
+    const fromProgress = [...nodes].reverse().find((n) => n.id.startsWith("p-"));
+    return (fromProgress ?? nodes[nodes.length - 1]).id;
+  }, [nodes, active]);
+
   const seedOpen = useMemo(() => {
     const keys = new Set<string>();
     if (!nodes.length) return keys;
-    const last = nodes[nodes.length - 1];
-    keys.add(last.id);
+    if (currentId) keys.add(currentId);
     const withDetail = [...nodes].reverse().find((n) => n.details.length > 0);
     if (withDetail) keys.add(withDetail.id);
     return keys;
-  }, [nodes]);
+  }, [nodes, currentId]);
 
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [seededFor, setSeededFor] = useState<string | undefined>(undefined);
@@ -235,17 +252,15 @@ export function ExecutionTrace({
       setSeededFor(stamp);
       return;
     }
-    // 同任务新出现的末节点：自动展开，便于跟跑
+    // 同任务新出现的当前节点：自动展开，便于跟跑
     setOpen((prev) => {
-      if (!nodes.length) return prev;
-      const last = nodes[nodes.length - 1];
-      if (prev.has(last.id)) return prev;
-      if (!active) return prev;
+      if (!currentId || !active) return prev;
+      if (prev.has(currentId)) return prev;
       const next = new Set(prev);
-      next.add(last.id);
+      next.add(currentId);
       return next;
     });
-  }, [resetKey, seededFor, seedOpen, nodes, active]);
+  }, [resetKey, seededFor, seedOpen, currentId, active]);
 
   const toggle = (id: string) => {
     setOpen((prev) => {
@@ -270,7 +285,7 @@ export function ExecutionTrace({
       </div>
 
       <Timeline mode="left" className="gy-exec-timeline">
-        {nodes.map((n, idx) => {
+        {nodes.map((n) => {
           const expanded = open.has(n.id);
           const canExpand = n.details.length > 0 || n.tokens != null || n.tools.length > 0;
 
@@ -313,7 +328,7 @@ export function ExecutionTrace({
                       Token {n.tokens.toLocaleString()}
                     </Tag>
                   ) : null}
-                  {idx === nodes.length - 1 && active ? (
+                  {active && n.id === currentId ? (
                     <Tag size="small" color="orange">
                       当前
                     </Tag>

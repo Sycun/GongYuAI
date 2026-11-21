@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { openHistory } from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
+import { refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
 
@@ -76,17 +77,13 @@ export class Watchdog {
     const task = this.store.get(taskId);
     if (!task) return;
 
-    // Sync usage / promote terminal from worker status sidecar
+    // Sync usage from worker-status + checkpoint (status sidecar can lag on Pi).
+    refreshTaskUsage(task);
+
+    // Promote terminal from worker status sidecar
     const status = this.readStatus(task.dataDir);
     if (status) {
       try {
-        if (status.usage) {
-          task.usage = {
-            tokens: Math.max(status.usage.tokens ?? 0, task.usage.tokens),
-            toolCalls: Math.max(status.usage.toolCalls ?? 0, task.usage.toolCalls),
-            installs: Math.max(status.usage.installs ?? 0, task.usage.installs),
-          };
-        }
         if (
           status.status === "completed" ||
           status.status === "failed" ||
@@ -115,6 +112,8 @@ export class Watchdog {
       } catch {
         /* ignore corrupt status */
       }
+    } else {
+      this.store.save(task);
     }
 
     // Budget wall clock

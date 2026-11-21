@@ -16,6 +16,7 @@ import {
 } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
+import { refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
 import type { SettingsStore } from "./settings.js";
@@ -180,20 +181,29 @@ export function startControlServer(opts: ServerOptions) {
         let toolCalls = 0;
         let installs = 0;
         const byTask = tasks.map((t) => {
-          tokens += t.usage.tokens;
-          toolCalls += t.usage.toolCalls;
-          installs += t.usage.installs;
+          const before = t.usage;
+          const usage = refreshTaskUsage(t);
+          if (
+            usage.tokens !== before.tokens ||
+            usage.toolCalls !== before.toolCalls ||
+            usage.installs !== before.installs
+          ) {
+            store.save(t);
+          }
+          tokens += usage.tokens;
+          toolCalls += usage.toolCalls;
+          installs += usage.installs;
           return {
             id: t.id,
             name: t.name,
             status: t.status,
-            tokens: t.usage.tokens,
-            toolCalls: t.usage.toolCalls,
-            installs: t.usage.installs,
+            tokens: usage.tokens,
+            toolCalls: usage.toolCalls,
+            installs: usage.installs,
             updatedAt: t.updatedAt,
           };
         });
-        byTask.sort((a, b) => b.tokens - a.tokens);
+        byTask.sort((a, b) => b.tokens - a.tokens || b.toolCalls - a.toolCalls);
         return send(res, 200, {
           totals: { tokens, toolCalls, installs, tasks: tasks.length },
           byTask: byTask.slice(0, 50),
@@ -270,7 +280,19 @@ export function startControlServer(opts: ServerOptions) {
       }
 
       if (method === "GET" && url.pathname === "/tasks") {
-        return send(res, 200, { tasks: store.list() });
+        const tasks = store.list().map((t) => {
+          const before = t.usage;
+          const usage = refreshTaskUsage(t);
+          if (
+            usage.tokens !== before.tokens ||
+            usage.toolCalls !== before.toolCalls ||
+            usage.installs !== before.installs
+          ) {
+            store.save(t);
+          }
+          return t;
+        });
+        return send(res, 200, { tasks });
       }
 
       if (method === "POST" && url.pathname === "/tasks") {
@@ -302,6 +324,15 @@ export function startControlServer(opts: ServerOptions) {
         if (!task) return send(res, 404, { error: "not found" });
 
         if (method === "GET" && rest === "") {
+          const before = task.usage;
+          refreshTaskUsage(task);
+          if (
+            task.usage.tokens !== before.tokens ||
+            task.usage.toolCalls !== before.toolCalls ||
+            task.usage.installs !== before.installs
+          ) {
+            store.save(task);
+          }
           return send(res, 200, { task });
         }
         if (method === "POST" && rest === "/stop") {
@@ -494,23 +525,40 @@ export function startControlServer(opts: ServerOptions) {
               history.close();
             }
           }
-          // Keep task.usage fresh when console polls runtime
+          // Prefer worker-status; fall back to Durable checkpoint when Pi path
+          // has not flushed status yet (stale 0 tokens / toolCalls).
+          const before = task.usage;
+          const mergedUsage = refreshTaskUsage(task);
+          if (
+            mergedUsage.tokens !== before.tokens ||
+            mergedUsage.toolCalls !== before.toolCalls ||
+            mergedUsage.installs !== before.installs
+          ) {
+            store.save(task);
+          }
+          let workerStatus: unknown = null;
           if (existsSync(statusPath)) {
             try {
-              const ws = JSON.parse(readFileSync(statusPath, "utf8")) as {
-                usage?: { tokens?: number; toolCalls?: number; installs?: number };
-              };
-              if (ws.usage) {
-                task.usage = {
-                  tokens: Math.max(ws.usage.tokens ?? 0, task.usage.tokens),
-                  toolCalls: Math.max(ws.usage.toolCalls ?? 0, task.usage.toolCalls),
-                  installs: Math.max(ws.usage.installs ?? 0, task.usage.installs),
-                };
-                store.save(task);
-              }
+              workerStatus = JSON.parse(readFileSync(statusPath, "utf8"));
             } catch {
               /* ignore */
             }
+          }
+          // Surface merged counters on workerStatus so Live pane matches Budget.
+          if (workerStatus && typeof workerStatus === "object") {
+            workerStatus = {
+              ...(workerStatus as Record<string, unknown>),
+              usage: mergedUsage,
+              updatedAt:
+                (workerStatus as { updatedAt?: string }).updatedAt ??
+                new Date().toISOString(),
+            };
+          } else {
+            workerStatus = {
+              status: task.status,
+              usage: mergedUsage,
+              updatedAt: new Date().toISOString(),
+            };
           }
           return send(res, 200, {
             leaseOwner: task.leaseOwner,
@@ -521,15 +569,13 @@ export function startControlServer(opts: ServerOptions) {
             containerId: task.containerId,
             containerIds: task.containerIds ?? [],
             execution: task.execution ?? { maxConcurrentExplores: 1 },
-            workerStatus: existsSync(statusPath)
-              ? JSON.parse(readFileSync(statusPath, "utf8"))
-              : null,
+            workerStatus,
             hasCheckpoint: existsSync(ckptPath),
             dataDir: task.dataDir,
             progress,
             recentFacts,
             recentIntents,
-            usage: task.usage,
+            usage: mergedUsage,
           });
         }
       }
