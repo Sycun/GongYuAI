@@ -37,6 +37,9 @@ async function main() {
 
   process.env.GY_ALLOW_STUB_INSTALL = "1";
   process.env.GY_SMOKE_PAUSE_MS = "2500";
+  // P1 acceptance: low threshold + min tool-call guard so mock writes ≥1 π
+  process.env.GY_RELAY_TOKEN_THRESHOLD = "1";
+  process.env.GY_RELAY_MIN_TOOL_CALLS = "1";
   const plane = await bootControlPlane({
     dataRoot,
     host: "127.0.0.1",
@@ -59,6 +62,7 @@ async function main() {
         authorizationNote: "Written authorization: local smoke target owned by operator",
         targets: ["https://example.com"],
         outOfScope: [],
+        capability: "full",
       },
       goals: JSON.parse(readFileSync(goalsPath, "utf8")),
       budget: {
@@ -66,6 +70,8 @@ async function main() {
         maxWallMs: 120000,
         maxToolCalls: 100,
         maxInstalls: 10,
+        relayTokenThreshold: 1,
+        relayMinToolCalls: 1,
       },
     }),
   });
@@ -102,12 +108,24 @@ async function main() {
       if (!report.includes("GongYuAI Report")) {
         throw new Error("missing report");
       }
+      const relay0 = join(dataRoot, "tasks", taskId, "workspace", "relay", "π0.json");
+      if (!existsSync(relay0)) {
+        throw new Error("missing Session Relay π0.json");
+      }
+      if (!report.includes("foothold") && !report.includes("Session Relay")) {
+        throw new Error("report missing relay injection");
+      }
+      const progressPath = join(dataRoot, "tasks", taskId, "workspace", "PROGRESS.md");
+      const progress = existsSync(progressPath) ? readFileSync(progressPath, "utf8") : "";
+      if (!progress.includes("phase=bootstrap") || !progress.includes("phase=explore")) {
+        throw new Error("missing graph phase sequence in PROGRESS.md");
+      }
       const final = st.task.status;
       if (final !== "completed") {
         throw new Error(`expected completed, got ${final}`);
       }
       console.log("[smoke] PASS");
-      console.log(report.slice(0, 500));
+      console.log(report.slice(0, 800));
       await plane.close();
       rmSync(dataRoot, { recursive: true, force: true });
       return;

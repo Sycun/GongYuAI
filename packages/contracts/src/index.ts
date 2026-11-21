@@ -109,6 +109,8 @@ export const CreateTaskRequestSchema = z.object({
     maxWallMs: 3_600_000,
     maxToolCalls: 500,
     maxInstalls: 50,
+    relayTokenThreshold: 30_000,
+    relayMinToolCalls: 2,
   }),
   /** When true, worker uses scripted mock agent (no LLM). */
   mock: z.boolean().default(false),

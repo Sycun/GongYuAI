@@ -9,7 +9,12 @@ export type TaskRecord = {
   workerPid: number | null;
   containerId: string | null;
   dataDir: string;
-  auth: { authorizationNote: string; targets: string[]; outOfScope?: string[] };
+  auth: {
+    authorizationNote: string;
+    targets: string[];
+    outOfScope?: string[];
+    capability?: "observe" | "scan" | "active-lab" | "full";
+  };
   goals: Array<{
     id: string;
     title: string;

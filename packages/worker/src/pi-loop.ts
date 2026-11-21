@@ -5,7 +5,9 @@ import { openHistory } from "@gongyuai/history";
 import { CheckpointStore, type CheckpointState } from "./checkpoint.js";
 import {
   appendProgress,
+  assertCapabilityAllows,
   installTool,
+  mcpActionForServer,
   runShell,
   writeEvidence,
   type ToolContext,
@@ -13,6 +15,12 @@ import {
 import { writeWorkerStatus } from "./status.js";
 import { isMcpToolName, openMcpHub, type McpHub } from "./mcp/client.js";
 import { openSkillHub, type SkillHub } from "./skills/runtime.js";
+import {
+  canRelay,
+  formatRelayInjection,
+  listRelayProtocols,
+  writeRelayProtocol,
+} from "./relay.js";
 
 /**
  * Pi Durable-backed worker. Falls back to OpenAI tool loop if durable harness
@@ -50,9 +58,20 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
         title: "执行节点已启动",
         summary: `目标范围：${manifest.auth.targets.join("、") || "—"}`,
       });
-      appendProgress(manifest.workspaceDir, "初始化完成");
-      state.phase = "loop";
+      appendProgress(manifest.workspaceDir, "phase=bootstrap");
+      state.phase = "bootstrap";
       ckpt.save(state);
+      state.phase = "explore";
+      ckpt.save(state);
+    }
+
+    // Crash recovery: expire stale claims; never auto-write π (P1.5).
+    history.expireStaleIntents(manifest.taskId, 30 * 60_000);
+    if (listRelayProtocols(manifest.workspaceDir).length) {
+      appendProgress(
+        manifest.workspaceDir,
+        `注入既有 Relay ×${listRelayProtocols(manifest.workspaceDir).length}`,
+      );
     }
 
     const mcpHub = await openMcpHub(manifest, ctx);
@@ -243,11 +262,19 @@ async function tryPiDurable(
     const history_overview = defineTool({
       name: "history_overview",
       description:
-        "Observe History: Goals + title-layer Facts + open Intents (no summary/evidence body)",
+        "Observe History: Goals + title-layer Facts + open Intents (+ Session Relay π)",
       parameters: obj({}),
       replay: "safe",
       execute: async () => ({
-        output: [{ type: "text", text: ctx.history.observe(manifest.taskId) }],
+        output: [
+          {
+            type: "text",
+            text: sessionBootstrapText(
+              manifest,
+              ctx.history.observe(manifest.taskId),
+            ),
+          },
+        ],
       }),
     } as never);
 
@@ -456,7 +483,10 @@ async function tryPiDurable(
             () =>
               systemPrompt(
                 manifest,
-                ctx.history.observe(manifest.taskId),
+                sessionBootstrapText(
+                  manifest,
+                  ctx.history.observe(manifest.taskId),
+                ),
                 mcpHub,
                 skillHub,
               ),
@@ -488,7 +518,7 @@ async function tryPiDurable(
       "严格留在 auth.targets 范围内，优先小步意图。",
       "全部目标通过后回复 DONE。",
       "",
-      ctx.history.observe(manifest.taskId),
+      sessionBootstrapText(manifest, ctx.history.observe(manifest.taskId)),
     ].join("\n");
 
     const submission = await root.submit(
@@ -609,7 +639,9 @@ function systemPrompt(
 - 只探测 auth.targets（主机/URL/CIDR；即便目标含 * 也禁止主机网络改动）。
 - Observe 默认只看 title 层 Fact + 进行中 Intent；summary/evidence 用 history_read_fact 或 history_list_layer 按需下钻。
 - 大输出写入 evidence；持续用 history_append_fact 更新 History。
-- 缺少二进制时用 install_tool。
+- 上下文饱和或自然检查点用 relay 工具写 π（Session Relay）；冲突以 History 为准。
+- 能力阶梯 auth.capability=${manifest.auth.capability ?? "observe"}（observe→scan→active-lab→full）；缺权工具会被拒绝。
+- 缺少二进制时用 install_tool（需 ≥scan）。
 - MCP：常开核以外用 enable_mcp 再调用；未 enable 的 MCP 不可调用。
 - Skill：系统只给路由表。需要方法论时 load_skill(id)；按阶段加载，不要一次灌入全部正文。
 ${visionLine}
@@ -617,6 +649,11 @@ ${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}
 当前 Observe（History）：
 ${observeText}
 `;
+}
+
+function sessionBootstrapText(manifest: WorkerManifest, historyObserve: string): string {
+  const relays = formatRelayInjection(listRelayProtocols(manifest.workspaceDir));
+  return `${historyObserve}\n\n${relays}`;
 }
 
 type ChatMessage = {
@@ -699,6 +736,27 @@ async function runOpenAiToolLoop(
           type: "object",
           properties: { layer: { type: "string" } },
           required: ["layer"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "relay",
+        description:
+          "Session Relay: write π handoff (foothold/unexplored/…) and clear chat buffer. Use at natural checkpoints or when context is noisy.",
+        parameters: {
+          type: "object",
+          properties: {
+            reason: { type: "string" },
+            current_position: { type: "string" },
+            network_map: { type: "string" },
+            tried: { type: "string" },
+            active_sessions: { type: "string" },
+            foothold: { type: "string" },
+            unexplored_surface: { type: "string" },
+          },
+          required: ["reason", "foothold", "unexplored_surface"],
         },
       },
     },
@@ -832,7 +890,71 @@ async function runOpenAiToolLoop(
   const liveTools = () => [...baseTools, ...mcpHub.openaiTools];
 
   const refreshSystem = () =>
-    systemPrompt(manifest, ctx.history.observe(manifest.taskId), mcpHub, skillHub);
+    systemPrompt(
+      manifest,
+      sessionBootstrapText(manifest, ctx.history.observe(manifest.taskId)),
+      mcpHub,
+      skillHub,
+    );
+
+  /** Clear chat buffer after Session Relay; re-inject Observe + all π. */
+  const resetMessagesAfterRelay = () => {
+    messages.splice(0, messages.length, {
+      role: "system",
+      content: refreshSystem(),
+    }, {
+      role: "user",
+      content:
+        "会话已 Relay。请根据注入的 π 与 History Observe 继续未完成 Goals / open Intents；禁止改动主机网络/VPN/代理。",
+    });
+  };
+
+  const performRelay = (opts: {
+    triggerForceAgent: boolean;
+    reason: string;
+    current_position?: string;
+    network_map?: string;
+    tried?: string;
+    active_sessions?: string;
+    foothold?: string;
+    unexplored_surface?: string;
+  }): string => {
+    const check = canRelay({
+      manifest,
+      tokensSinceRelay: state.tokensSinceRelay,
+      toolCallsSinceRelay: state.toolCallsSinceRelay,
+      forceAgent: opts.triggerForceAgent,
+    });
+    if (!check.ok) return `relay skipped: ${check.reason}`;
+    const prev = state.phase;
+    state.phase = "relay";
+    ckpt.save(state);
+    const protocol = writeRelayProtocol(manifest, ctx.history, {
+      trigger: check.trigger,
+      reason: opts.reason,
+      current_position: opts.current_position,
+      network_map: opts.network_map,
+      tried: opts.tried,
+      active_sessions: opts.active_sessions,
+      foothold: opts.foothold,
+      unexplored_surface: opts.unexplored_surface,
+      tokens: state.tokens,
+      toolCalls: ctx.usage.toolCalls,
+      generation: state.relayGeneration,
+    });
+    ctx.history.recordRelay(manifest.taskId, protocol.generation, check.trigger);
+    state.relayGeneration += 1;
+    state.tokensSinceRelay = 0;
+    state.toolCallsSinceRelay = 0;
+    state.phase = prev === "relay" || prev === "init" ? "explore" : prev;
+    ckpt.save(state);
+    appendProgress(
+      manifest.workspaceDir,
+      `relay π${protocol.generation} (${check.trigger}): ${opts.reason || "handoff"}`,
+    );
+    resetMessagesAfterRelay();
+    return JSON.stringify(protocol);
+  };
 
   const messages: ChatMessage[] = [
     {
@@ -864,6 +986,22 @@ async function runOpenAiToolLoop(
     if (Date.now() - loopStartedAt >= manifest.budget.maxWallMs) {
       appendProgress(manifest.workspaceDir, "达到 maxWallMs，结束循环");
       break;
+    }
+
+    // Auto Session Relay when token threshold crossed (never on Watchdog crash).
+    const autoCheck = canRelay({
+      manifest,
+      tokensSinceRelay: state.tokensSinceRelay,
+      toolCallsSinceRelay: state.toolCallsSinceRelay,
+      forceAgent: false,
+    });
+    if (autoCheck.ok) {
+      performRelay({
+        triggerForceAgent: false,
+        reason: "auto token threshold",
+        foothold: "see prior π + History observe",
+        unexplored_surface: "open intents / unfinished goals",
+      });
     }
 
     trimMessages(messages);
@@ -923,7 +1061,9 @@ async function runOpenAiToolLoop(
         };
       }>;
     };
-    state.tokens += tokenDelta(data.usage);
+    const deltaTok = tokenDelta(data.usage);
+    state.tokens += deltaTok;
+    state.tokensSinceRelay += deltaTok;
     const msg = data.choices[0]?.message;
     if (!msg) throw new Error("模型返回为空");
 
@@ -971,7 +1111,10 @@ async function runOpenAiToolLoop(
             break;
           }
           case "history_overview":
-            result = ctx.history.observe(manifest.taskId);
+            result = sessionBootstrapText(
+              manifest,
+              ctx.history.observe(manifest.taskId),
+            );
             break;
           case "history_read_fact": {
             const fact = ctx.history.getFact(manifest.taskId, args.factId ?? "");
@@ -989,6 +1132,18 @@ async function runOpenAiToolLoop(
             }
             break;
           }
+          case "relay":
+            result = performRelay({
+              triggerForceAgent: true,
+              reason: args.reason ?? "agent checkpoint",
+              current_position: args.current_position,
+              network_map: args.network_map,
+              tried: args.tried,
+              active_sessions: args.active_sessions,
+              foothold: args.foothold,
+              unexplored_surface: args.unexplored_surface,
+            });
+            break;
           case "write_evidence":
             result = writeEvidence(ctx, args.relativePath ?? "note.txt", args.content ?? "");
             ctx.history.appendFact({
@@ -1078,6 +1233,9 @@ async function runOpenAiToolLoop(
           }
           default:
             if (isMcpToolName(call.function.name)) {
+              const serverId =
+                call.function.name.replace(/^mcp__/, "").split("__")[0] ?? "";
+              assertCapabilityAllows(manifest, mcpActionForServer(serverId));
               result = await mcpHub.call(
                 call.function.name,
                 args as Record<string, unknown>,
@@ -1102,6 +1260,9 @@ async function runOpenAiToolLoop(
       });
     }
 
+    if (toolNames.length) {
+      state.toolCallsSinceRelay += toolNames.length;
+    }
     state.toolCalls = ctx.usage.toolCalls;
     state.installs = ctx.usage.installs;
     state.step = i + 1;
@@ -1110,7 +1271,7 @@ async function runOpenAiToolLoop(
     writeFileSync(join(manifest.workspaceDir, "openai-transcript.json"), JSON.stringify(messages, null, 2));
     appendProgress(
       manifest.workspaceDir,
-      `第 ${i + 1} 步 · 工具 ${toolNames.join("、") || "无"} · Token ${state.tokens}`,
+      `第 ${i + 1} 步 · 工具 ${toolNames.join("、") || "无"} · Token ${state.tokens} · phase=${state.phase}`,
     );
   }
 }

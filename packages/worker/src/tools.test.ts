@@ -19,9 +19,17 @@ function manifest(targets: string[]): WorkerManifest {
       authorizationNote: "lab auth note for tests",
       targets,
       outOfScope: [],
+      capability: "full",
     },
     goals: [],
-    budget: { maxTokens: 1000, maxWallMs: 60_000, maxToolCalls: 10, maxInstalls: 2 },
+    budget: {
+      maxTokens: 1000,
+      maxWallMs: 60_000,
+      maxToolCalls: 10,
+      maxInstalls: 2,
+      relayTokenThreshold: 30_000,
+      relayMinToolCalls: 2,
+    },
     mock: false,
     mcpServers: [],
     mcpPool: [],
@@ -31,6 +39,14 @@ function manifest(targets: string[]): WorkerManifest {
     skillCatalog: [],
   };
 }
+
+test("capability ladder blocks shell at observe", () => {
+  const m = manifest(["example.com"]);
+  m.auth.capability = "observe";
+  assert.throws(() => assertCommandAllowed(m, "curl -s http://example.com"), /observe/);
+  m.auth.capability = "scan";
+  assert.doesNotThrow(() => assertCommandAllowed(m, "curl -s http://example.com"));
+});
 
 test("hostInTargets supports CIDR and exact host", () => {
   assert.equal(hostInTargets(["10.0.0.0/8"], "10.0.188.64"), true);

@@ -310,34 +310,79 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
         )}
 
         {tab === "goals" && (
-          <Card style={{ background: "var(--semi-color-bg-1)" }} bodyStyle={{ paddingTop: 8 }}>
-            <List
-              dataSource={goals}
-              emptyContent="无目标"
-              renderItem={(g) => (
-                <List.Item
-                  main={
-                    <div>
-                      <Space>
-                        <Typography.Text strong>{g.title}</Typography.Text>
-                        <StatusTag status={goalStatus(g.passes)} />
-                      </Space>
-                      <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0" }}>
-                        {g.description}
-                      </Typography.Paragraph>
-                      <Typography.Text type="quaternary" size="small">
-                        证据：
-                        {(g.evidencePaths?.length
-                          ? g.evidencePaths
-                          : g.evidencePatterns
-                        ).join(", ") || "—"}
-                      </Typography.Text>
-                    </div>
-                  }
+          <Row gutter={16}>
+            <Col span={14}>
+              <Card
+                title="目标契约"
+                style={{ background: "var(--semi-color-bg-1)" }}
+                bodyStyle={{ paddingTop: 8 }}
+              >
+                <List
+                  dataSource={goals}
+                  emptyContent="无目标"
+                  renderItem={(g) => (
+                    <List.Item
+                      main={
+                        <div>
+                          <Space>
+                            <Typography.Text strong>{g.title}</Typography.Text>
+                            <StatusTag status={goalStatus(g.passes)} />
+                          </Space>
+                          <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0" }}>
+                            {g.description}
+                          </Typography.Paragraph>
+                          <Typography.Text type="quaternary" size="small">
+                            证据：
+                            {(g.evidencePaths?.length
+                              ? g.evidencePaths
+                              : g.evidencePatterns
+                            ).join(", ") || "—"}
+                          </Typography.Text>
+                        </div>
+                      }
+                    />
+                  )}
                 />
-              )}
-            />
-          </Card>
+              </Card>
+            </Col>
+            <Col span={10}>
+              <Card title="图前沿 · 开放意图" style={{ background: "var(--semi-color-bg-1)" }}>
+                <List
+                  dataSource={(history?.intents ?? []).filter((i) =>
+                    ["proposed", "claimed", "running"].includes(i.status),
+                  )}
+                  emptyContent="无开放 Intent"
+                  size="small"
+                  renderItem={(i) => (
+                    <List.Item
+                      main={
+                        <Space>
+                          <StatusTag status={i.status} />
+                          <span>{i.title}</span>
+                        </Space>
+                      }
+                    />
+                  )}
+                />
+              </Card>
+              <Card
+                title="图前沿 · 最近 Fact 标题"
+                style={{ background: "var(--semi-color-bg-1)", marginTop: 16 }}
+              >
+                <List
+                  dataSource={[...(history?.facts ?? [])]
+                    .filter((f) => f.layer === "title")
+                    .reverse()
+                    .slice(0, 12)}
+                  emptyContent="—"
+                  size="small"
+                  renderItem={(f) => (
+                    <List.Item main={<Typography.Text>{f.title}</Typography.Text>} />
+                  )}
+                />
+              </Card>
+            </Col>
+          </Row>
         )}
 
         {tab === "history" && (

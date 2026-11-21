@@ -17,6 +17,7 @@ function printHelp(): void {
 Usage:
   gy serve [--data-dir DIR] [--port N]
   gy run --goals FILE --target URL --auth NOTE [--name NAME] [--mock] [--wait]
+       [--capability observe|scan|active-lab|full]
   gy status [taskId]
   gy logs <taskId>
   gy report <taskId>
@@ -24,6 +25,7 @@ Usage:
 
 Environment:
   GY_DATA_DIR  GY_HOST  GY_PORT  GY_RUNTIME  OPENAI_API_KEY
+  GY_RELAY_TOKEN_THRESHOLD  GY_RELAY_MIN_TOOL_CALLS
 `);
 }
 
@@ -119,6 +121,11 @@ async function main(): Promise<void> {
     const name = flag(rest, "--name") ?? "mvp-run";
     const mock = has(rest, "--mock");
     const wait = has(rest, "--wait");
+    const capability = (flag(rest, "--capability") ?? "active-lab") as
+      | "observe"
+      | "scan"
+      | "active-lab"
+      | "full";
     if (!goalsPath || !target || !auth) {
       throw new Error("gy run requires --goals --target --auth");
     }
@@ -131,6 +138,7 @@ async function main(): Promise<void> {
         authorizationNote: auth,
         targets: [target],
         outOfScope: [],
+        capability,
       },
       goals,
       budget: {
@@ -138,6 +146,16 @@ async function main(): Promise<void> {
         maxWallMs: Number(flag(rest, "--max-wall-ms") ?? 600_000),
         maxToolCalls: Number(flag(rest, "--max-tool-calls") ?? 200),
         maxInstalls: Number(flag(rest, "--max-installs") ?? 20),
+        relayTokenThreshold: Number(
+          flag(rest, "--relay-token-threshold") ??
+            process.env.GY_RELAY_TOKEN_THRESHOLD ??
+            30_000,
+        ),
+        relayMinToolCalls: Number(
+          flag(rest, "--relay-min-tool-calls") ??
+            process.env.GY_RELAY_MIN_TOOL_CALLS ??
+            2,
+        ),
       },
     });
 

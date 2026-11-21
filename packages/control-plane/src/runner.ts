@@ -111,7 +111,8 @@ export class WorkerRunner {
         if (row) {
           const state = JSON.parse(row.json) as { phase?: string };
           if (state.phase === "done" || state.phase === "report") {
-            state.phase = "loop";
+            // Human restart — resume explore; never invent a Relay π here.
+            state.phase = "explore";
             db.prepare(
               `INSERT INTO checkpoint (id, json) VALUES (1, ?)
                ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
