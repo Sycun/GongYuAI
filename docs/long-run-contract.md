@@ -126,13 +126,20 @@ Loop exits on any of: all goals pass, `maxToolCalls`, `maxTokens`, `maxWallMs`, 
 - Tool results are truncated for the chat buffer；权威细节在 evidence + History。
 - Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`.
 
-## Auth capability ladder（规划）
+## Auth capability ladder
 
 在 prompt 白名单之上，工程化阶梯（对照 AutoRedTeam-Orchestrator）：
 
 `observe → scan → active-lab → full`
 
-每级抬权需显式配置；默认最低级。VPN/代理变更永远拒绝。
+| 级别 | 允许 |
+| --- | --- |
+| observe | History / evidence / assert / relay；无 shell / install / MCP |
+| scan | + shell、install、recon 类 MCP（nmap/httpx/…） |
+| active-lab | + 主动利用类 MCP |
+| full | 全部 Worker 工具面（仍禁主机 VPN/代理变更） |
+
+新任务 schema 默认 `observe`；`gy run` 默认传 `active-lab`。VPN/代理变更永远拒绝。
 
 ## Idempotency
 

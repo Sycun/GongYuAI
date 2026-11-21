@@ -111,15 +111,21 @@ export function writeRelayProtocol(
 }
 
 export function relayTokenThreshold(manifest: WorkerManifest): number {
-  const env = Number(process.env.GY_RELAY_TOKEN_THRESHOLD ?? "");
-  if (Number.isFinite(env) && env > 0) return env;
+  const raw = process.env.GY_RELAY_TOKEN_THRESHOLD;
+  if (raw != null && raw !== "") {
+    const env = Number(raw);
+    if (Number.isFinite(env) && env > 0) return env;
+  }
   return manifest.budget.relayTokenThreshold ?? 30_000;
 }
 
 export function relayMinToolCalls(manifest: WorkerManifest): number {
-  const env = Number(process.env.GY_RELAY_MIN_TOOL_CALLS ?? "");
-  if (Number.isFinite(env) && env >= 0) return env;
-  return manifest.budget.relayMinToolCalls ?? 3;
+  const raw = process.env.GY_RELAY_MIN_TOOL_CALLS;
+  if (raw != null && raw !== "") {
+    const env = Number(raw);
+    if (Number.isFinite(env) && env >= 0) return env;
+  }
+  return manifest.budget.relayMinToolCalls ?? 2;
 }
 
 /**

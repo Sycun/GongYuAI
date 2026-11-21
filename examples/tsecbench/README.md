@@ -35,9 +35,18 @@ pnpm gy run \
   --goals examples/tsecbench/goals-autonomous.json \
   --target '10.0.0.0/8' \
   --auth "TSecBench authorized task_202611fkretwo5ka — GongYuAI agent evaluation" \
+  --capability full \
   --name tsecbench-auto \
   --max-wall-ms 14400000 \
   --max-tool-calls 5000
 ```
+
+相对差分（同预算只比 History vs +Relay）：
+
+```bash
+pnpm diff-harness --mock --goals examples/dvwa-smoke/goals.json \
+  --target https://example.com --auth "Written authorization: diff harness"
+```
+
 
 Watch: **http://127.0.0.1:8877/** (Mission Control). Host network/VPN mutation is denied by the worker.

@@ -46,6 +46,10 @@ function manifest(workspaceDir: string): WorkerManifest {
 }
 
 test("canRelay enforces min tool calls then auto threshold", () => {
+  const prevMin = process.env.GY_RELAY_MIN_TOOL_CALLS;
+  const prevThr = process.env.GY_RELAY_TOKEN_THRESHOLD;
+  delete process.env.GY_RELAY_MIN_TOOL_CALLS;
+  delete process.env.GY_RELAY_TOKEN_THRESHOLD;
   const m = manifest("/tmp");
   assert.equal(
     canRelay({
@@ -81,6 +85,10 @@ test("canRelay enforces min tool calls then auto threshold", () => {
   });
   assert.equal(agent.ok, true);
   if (agent.ok) assert.equal(agent.trigger, "agent");
+  if (prevMin !== undefined) process.env.GY_RELAY_MIN_TOOL_CALLS = prevMin;
+  else delete process.env.GY_RELAY_MIN_TOOL_CALLS;
+  if (prevThr !== undefined) process.env.GY_RELAY_TOKEN_THRESHOLD = prevThr;
+  else delete process.env.GY_RELAY_TOKEN_THRESHOLD;
 });
 
 test("writeRelayProtocol appends πn.json and injection lists foothold", () => {

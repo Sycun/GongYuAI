@@ -27,21 +27,22 @@ MCP / Skill 是弹药，不是产品定义。
 
 | 能力 | 现状 | 缺口 |
 | --- | --- | --- |
-| Lease / Watchdog / checkpoint | 有 | 保持零策略 |
-| Fact 分层 + append | title Observe + 按需下钻 | Intent 回边使用率继续抬 |
-| Intent propose/claim/conclude | `sourceFactIds` + 成功回写 Fact | heartbeat → expire |
-| Goal + evidence gate | 有 | 语义断言扩展（除 ALL_COMPLETE） |
-| Router ≠ shell | 有 | 控制台展示图前沿即可 |
-| Bootstrap / Reason / Explore | 弱（单 loop） | 图驱动调度显式化 |
-| Session Relay | 无 | πₙ 文件 + 双触发 + 启动注入 |
-| Auth ladder | 白名单 + 禁 VPN | 阶梯枚举 |
-| 多 Worker 并行 Explore | 无 | MVP 后置 |
+| Lease / Watchdog / checkpoint | 有；重启不写 π | 保持零策略 |
+| Fact 分层 + append | title Observe + 按需下钻 | — |
+| Intent propose/claim/conclude | `sourceFactIds` + 成功回写 + expire | — |
+| Goal + evidence gate | 有（含 ALL_COMPLETE） | 更多语义断言可按需加 |
+| Router ≠ shell | 有 | — |
+| Bootstrap / Reason / Explore | Durable phase + mock 相位序列 | 真模型 loop 仍偏工具自由（可继续收紧） |
+| Session Relay | πₙ + 双触发 + 启动注入 | — |
+| Auth ladder | `observe\|scan\|active-lab\|full` | — |
+| Harness 差分 | `pnpm diff-harness`（History vs +Relay） | 真·裸 OpenAI loop 仍可补 |
+| 多 Worker 并行 Explore | 无 | **P4 后置** |
 
 ---
 
 ## 3. 分期路线（建议严格按序）
 
-### P0 — 图语义硬化（先做，不并行开花）
+### P0 — 图语义硬化 ✅
 
 **目标**：让 History 成为真正的攻击路径，而不只是日志表。
 
@@ -52,34 +53,34 @@ MCP / Skill 是弹药，不是产品定义。
 
 **验收**：`pnpm smoke`；手工跑 DVWA mock 后 `history.sqlite` 可见 Fact←Intent 链。
 
-### P1 — Session Relay
+### P1 — Session Relay ✅
 
 **目标**：上下文阈值或自然检查点可换班，不丢路径。
 
 1. contracts：`RelayProtocol` schema（字段见 long-run-contract）。
 2. 工具：`relay`；写 `workspace/relay/π{n}.json`；bump `relayGeneration`。
 3. 触发：token 阈值（可配）+ agent 调用；最小 tool-call 间隔。
-4. Worker 启动：注入全部 π + History overview；**清空**旧 chat buffer。
+4. Worker 启动：注入全部 π + History observe；**清空**旧 chat buffer。
 5. Watchdog 重启 **不**自动生成 π（避免把崩溃当接力）；仅恢复 Durable + History。
 
-**验收**：人为压低 token 阈值，同一 task 出现 ≥1 次 relay；继任实例能复述 foothold / unexplored；Goals 不丢。
+**验收**：`GY_RELAY_TOKEN_THRESHOLD=1` 下 smoke 写出 ≥1 个 π；报告含 foothold / Session Relay。
 
-### P2 — 图驱动调度（仍可单 Worker）
+### P2 — 图驱动调度 ✅（MVP）
 
 **目标**：循环显式走 Bootstrap → Explore* → Reason，而不是「自由聊天碰巧写 History」。
 
-1. phase 写入 Durable：`bootstrap | explore | reason | relay | report`。
-2. Explore 一次只 claim **一个** Intent。
-3. Reason 互斥：有 open Explore 时不跑 Reason；新 Fact/Hint 唤醒 Reason。
-4. 控制台 Goals / History：显示 open Intents 与最近 Fact title。
+1. phase 写入 Durable：`bootstrap | explore | reason | relay | report | done`。
+2. Explore 一次只 claim **一个** Intent（mock 路径强制）。
+3. Reason 互斥：有 open Explore 时不跑 Reason。
+4. 控制台 Goals：显示 open Intents 与最近 Fact title。
 
-**验收**：mock 路径日志可见相位序列；失败 Intent 可被重新 propose，不污染已成功 Fact。
+**验收**：smoke `PROGRESS.md` 含 `phase=bootstrap` / `phase=explore`。
 
-### P3 — 能力阶梯 + TSecBench 差分
+### P3 — 能力阶梯 + TSecBench 差分 ✅（MVP）
 
 1. `auth.capability: observe|scan|active-lab|full`；工具按级过滤。
-2. 固定预算下对比：`裸 OpenAI loop` vs `GongYuAI(+History)` vs `+Relay`。
-3. 主尺：TSecBench 清板或子集；辅尺：DVWA smoke。只报差分，不报绝对神话分。
+2. `pnpm diff-harness --mock --goals …`：History vs +Relay 相对表。
+3. 主尺仍建议 TSecBench 子集；辅尺 DVWA smoke。只报差分。
 
 ### P4 — 可选并行（明确后置）
 
@@ -112,11 +113,12 @@ MCP / Skill 是弹药，不是产品定义。
 ```bash
 pnpm install
 pnpm -r run build
-pnpm smoke                          # mock 闭环必绿
+pnpm smoke                          # mock 闭环必绿（含 Relay + 相位）
+pnpm diff-harness --mock --goals examples/dvwa-smoke/goals.json --target https://example.com --auth "Written authorization: diff harness"
 pnpm gy run --mock --wait ...       # 契约冒烟
 # 真模型：
 pnpm gy serve --port 8877
-pnpm gy run --goals ... --auth ...  # 见 examples/
+pnpm gy run --goals ... --auth ... --capability active-lab
 ```
 
 TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主机网络。
@@ -146,7 +148,7 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 ### sapper-v2
 
 - 价值在 harness：调度 / 记忆 / 自愈；模型可换。  
-- 分层 History；指挥官不下工具；watchdog 零策略。  
+- 分层 History；指挥官不下工具；Watchdog 零策略。  
 - 上下文饱和 → 写交接再读（≈ Relay）。  
 - 同族迁移 = Fact 广播成熟打法（P4 灵感）。  
 - **竞赛军规与 tmux 编制不是 GongYuAI 产品面。**
@@ -175,6 +177,7 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 ## 8. 安全与授权
 
 - 仅授权目标；`authorizationNote` + `targets` 必填。  
+- `auth.capability` 默认最低；`gy run` 显式抬权。  
 - 默认拒绝对主机 VPN/代理/路由的变更。  
 - Skill/MCP 下载物使用前审查；不自动执行未审脚本。
 
@@ -182,11 +185,10 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ## 9. 下一件最小可做事项
 
-**P0 已完成**（图语义硬化：`sourceFactIds`、成功回写、Observe title 优先、单测）。  
+**P0–P3 MVP 已落地。** P4（多 Explore Worker / Hint API / 同族迁移）明确后置，默认不做。
 
-下一里程碑只做 **P1 — Session Relay**（勿并行开 P2+）：
+若继续打磨（非并行开花，择一）：
 
-1. contracts：`RelayProtocol` schema（字段见 long-run-contract）。  
-2. 工具：`relay`；写 `workspace/relay/π{n}.json`；bump `relayGeneration`。  
-
-验收见上文 P1；做完再开 P2 图驱动调度。
+1. 真模型 OpenAI loop 收紧为显式 Bootstrap/Explore/Reason 工具协议。  
+2. `diff-harness` 补真正的裸 OpenAI baseline 进程。  
+3. 仅在有明确并行需求时开 P4。
