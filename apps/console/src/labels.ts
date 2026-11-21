@@ -27,6 +27,10 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   report: { title: "报告", subtitle: "任务报告" },
   logs: { title: "日志", subtitle: "执行节点日志" },
   settings: { title: "设置", subtitle: "模型 · Token · 静默更新" },
+  "settings-model": { title: "模型配置", subtitle: "OpenAI 兼容 API · 视觉能力" },
+  "settings-usage": { title: "Token 统计", subtitle: "累计用量 · 按任务明细" },
+  "settings-update": { title: "一键更新", subtitle: "GitHub 静默拉取 · 保留本机数据" },
+  "settings-runtime": { title: "运行时", subtitle: "监听地址 · 控制台能力" },
 };
 
 export const DETAIL_TABS = [
@@ -39,6 +43,25 @@ export const DETAIL_TABS = [
 ] as const;
 
 export type DetailTab = (typeof DETAIL_TABS)[number]["key"];
+
+export const SETTINGS_SECTIONS = [
+  { key: "settings-model", label: "模型配置", section: "model" },
+  { key: "settings-usage", label: "Token 统计", section: "usage" },
+  { key: "settings-update", label: "一键更新", section: "update" },
+  { key: "settings-runtime", label: "运行时", section: "runtime" },
+] as const;
+
+export type SettingsRoute = (typeof SETTINGS_SECTIONS)[number]["key"];
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["section"];
+
+export function isSettingsRoute(route: string): route is SettingsRoute | "settings" {
+  return route === "settings" || SETTINGS_SECTIONS.some((s) => s.key === route);
+}
+
+export function settingsSectionOf(route: string): SettingsSection {
+  const hit = SETTINGS_SECTIONS.find((s) => s.key === route);
+  return hit?.section ?? "model";
+}
 
 export function statusColor(status: string): "green" | "orange" | "red" | "grey" | "blue" {
   if (["completed", "ok", "succeeded"].includes(status)) return "green";

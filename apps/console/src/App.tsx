@@ -10,9 +10,20 @@ import {
   IconFile,
   IconTerminal,
   IconSetting,
+  IconBolt,
+  IconHistogram,
+  IconDownload,
+  IconServer,
 } from "@douyinfe/semi-icons";
 import { api, type Overview, type TaskRecord } from "./api";
-import { DETAIL_TABS, ROUTE_META, type DetailTab } from "./labels";
+import {
+  DETAIL_TABS,
+  ROUTE_META,
+  isSettingsRoute,
+  settingsSectionOf,
+  type DetailTab,
+  type SettingsRoute,
+} from "./labels";
 import { OverviewPage } from "./pages/OverviewPage";
 import { TasksPage } from "./pages/TasksPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
@@ -24,17 +35,24 @@ type Route =
   | "overview"
   | "tasks"
   | "settings"
+  | SettingsRoute
   | DetailTab;
+
+const DEFAULT_OPEN_KEYS = ["dive", "settings"];
+
+function normalizeRoute(route: string): Route {
+  if (route === "settings") return "settings-model";
+  return (route || "overview") as Route;
+}
 
 function parseHash(): { route: Route; taskId: string | null } {
   const raw = (location.hash || "#/overview").replace(/^#\/?/, "");
   const [routePart, id] = raw.split("/");
-  const route = (routePart || "overview") as Route;
-  return { route, taskId: id || null };
+  return { route: normalizeRoute(routePart || "overview"), taskId: id || null };
 }
 
 function buildHash(route: Route, taskId: string | null): string {
-  if (taskId && route !== "overview" && route !== "tasks" && route !== "settings") {
+  if (taskId && route !== "overview" && route !== "tasks" && !isSettingsRoute(route)) {
     return `#/${route}/${taskId}`;
   }
   if (route === "tasks" && taskId) return `#/tasks/${taskId}`;
@@ -48,6 +66,7 @@ export function App() {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
+  const [openKeys, setOpenKeys] = useState<(string | number)[]>(DEFAULT_OPEN_KEYS);
 
   const meta = ROUTE_META[route] ?? ROUTE_META.overview;
   const selectedTask = useMemo(
@@ -56,11 +75,12 @@ export function App() {
   );
 
   const navigate = useCallback((next: Route, nextTaskId?: string | null) => {
-    setRoute(next);
+    const resolvedRoute = normalizeRoute(next);
+    setRoute(resolvedRoute);
     const id = nextTaskId === undefined ? taskId : nextTaskId;
     let resolved = id;
     if (
-      DETAIL_TABS.some((t) => t.key === next) &&
+      DETAIL_TABS.some((t) => t.key === resolvedRoute) &&
       !resolved &&
       tasks.length
     ) {
@@ -69,7 +89,7 @@ export function App() {
     } else if (nextTaskId !== undefined) {
       setTaskId(nextTaskId);
     }
-    location.hash = buildHash(next, resolved ?? null);
+    location.hash = buildHash(resolvedRoute, resolved ?? null);
   }, [taskId, tasks]);
 
   const refresh = useCallback(async () => {
@@ -113,7 +133,13 @@ export function App() {
         <Nav
           style={{ maxWidth: 220, height: "100%" }}
           selectedKeys={selectedKeys}
-          onSelect={({ itemKey }) => navigate(String(itemKey) as Route)}
+          openKeys={openKeys}
+          onOpenChange={({ openKeys: next }) => setOpenKeys(next ?? [])}
+          onSelect={({ itemKey }) => {
+            const key = String(itemKey);
+            if (key === "dive" || key === "settings") return;
+            navigate(key as Route);
+          }}
           header={{
             text: "GongYuAI",
             logo: (
@@ -147,7 +173,12 @@ export function App() {
             <Nav.Item itemKey="report" text="报告" icon={<IconFile />} />
             <Nav.Item itemKey="logs" text="日志" icon={<IconTerminal />} />
           </Nav.Sub>
-          <Nav.Item itemKey="settings" text="设置" icon={<IconSetting />} />
+          <Nav.Sub itemKey="settings" text="设置" icon={<IconSetting />}>
+            <Nav.Item itemKey="settings-model" text="模型配置" icon={<IconBolt />} />
+            <Nav.Item itemKey="settings-usage" text="Token 统计" icon={<IconHistogram />} />
+            <Nav.Item itemKey="settings-update" text="一键更新" icon={<IconDownload />} />
+            <Nav.Item itemKey="settings-runtime" text="运行时" icon={<IconServer />} />
+          </Nav.Sub>
         </Nav>
       </Sider>
       <Layout>
@@ -186,7 +217,9 @@ export function App() {
             <OverviewPage overview={overview} onSelect={openTask} />
           )}
           {route === "tasks" && <TasksPage tasks={tasks} onSelect={openTask} />}
-          {route === "settings" && <SettingsPage />}
+          {isSettingsRoute(route) && (
+            <SettingsPage section={settingsSectionOf(route)} />
+          )}
           {DETAIL_TABS.some((t) => t.key === route) && (
             <TaskDetailPage
               task={selectedTask}
