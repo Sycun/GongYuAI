@@ -16,6 +16,7 @@
     "gy": "tsx apps/cli/src/index.ts",
     "test": "pnpm -r run test",
     "smoke": "tsx scripts/smoke.ts",
+    "diff-harness": "tsx scripts/diff-harness.ts",
     "tsecbench": "tsx scripts/tsecbench.ts",
     "typecheck": "pnpm -r run typecheck",
     "smoke:tools": "tsx scripts/smoke-tools.ts",

@@ -28,7 +28,8 @@ export function assertCapabilityAllows(
   manifest: WorkerManifest,
   action: "shell" | "install" | "mcp-scan" | "mcp-active",
 ): void {
-  const cap = manifest.auth.capability ?? "observe";
+  // New tasks default to observe via schema; legacy manifests without the field keep full.
+  const cap = manifest.auth.capability ?? "full";
   if (action === "shell" && !capabilityAtLeast(cap, "scan")) {
     throw new Error(
       `denied: shell requires auth.capability≥scan (have ${cap}); observe is read-only`,

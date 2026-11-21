@@ -197,6 +197,29 @@ test("observe is title + open Intents only; summary/evidence on demand", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test("expireStaleIntents moves claimed to expired", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-exp-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "66666666-6666-4666-8666-666666666666";
+  const intent = store.proposeIntent({
+    taskId,
+    title: "stale",
+    sourceFactIds: [ORIGIN_FACT_ID],
+  });
+  store.claimIntent(taskId, intent.id, "w1");
+  // maxAgeMs=0 ⇒ any claimed/running is stale
+  const expired = store.expireStaleIntents(taskId, 0);
+  assert.equal(expired.length, 1);
+  assert.equal(expired[0]!.status, "expired");
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("claimIntent is CAS on proposed; succeed conclude requires Fact writeback", () => {
   const root = mkdtempSync(join(tmpdir(), "gy-hist-cas-"));
   const evidenceDir = join(root, "evidence");
