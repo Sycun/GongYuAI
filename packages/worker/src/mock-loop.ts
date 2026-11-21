@@ -102,8 +102,14 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
 
   const sourceFromHistory = (): string[] => {
     const facts = history.listFacts(manifest.taskId);
-    const last = facts[facts.length - 1];
-    return last ? [last.id] : [ORIGIN_FACT_ID];
+    // Prefer in-scope asset / non-asset facts; never hang Intent solely on oos.
+    for (let i = facts.length - 1; i >= 0; i--) {
+      const f = facts[i]!;
+      const kindTag = f.tags.find((t) => t.startsWith("asset.kind:"));
+      if (kindTag === "asset.kind:oos") continue;
+      return [f.id];
+    }
+    return [ORIGIN_FACT_ID];
   };
 
   const save = () => {
@@ -190,11 +196,12 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
         // Simulate discovery under first target pattern so 资产表 grows past seeds.
         const seed0 = manifest.auth.targets[0];
         if (seed0) {
+          const isCidr = /^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/.test(seed0.trim());
+          const host =
+            seed0.replace(/^https?:\/\//, "").split("/")[0]?.split(":")[0] ?? "example.com";
           history.recordAsset({
             taskId: manifest.taskId,
-            address: seed0.includes("/")
-              ? "10.0.188.64"
-              : `discovered.${seed0.replace(/^https?:\/\//, "").split("/")[0] ?? "example.com"}`,
+            address: isCidr ? "10.0.188.64" : `discovered.${host}`,
             auth: manifest.auth,
             summary: "mock 发现资产（自动准入）",
             source: "discover",
@@ -271,6 +278,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           );
           if (!claimed) throw new Error("failed to claim install intent");
           state.activeIntentId = intent.id;
+          state.activeIntentClaimedAt = new Date().toISOString();
           save();
 
           const installed = installTool(ctx, { name: "curl" });
@@ -289,6 +297,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             history.concludeIntent(manifest.taskId, intent.id, "failed", installed.detail);
           }
           state.activeIntentId = null;
+          state.activeIntentClaimedAt = null;
           state.step = 1;
           save();
           continue;
@@ -308,6 +317,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           );
           if (!claimed) throw new Error("failed to claim recon intent");
           state.activeIntentId = intent.id;
+          state.activeIntentClaimedAt = new Date().toISOString();
 
           let banner = "";
           try {
@@ -328,7 +338,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           );
 
           const goals = history.listGoals(manifest.taskId);
-          const recon = goals.find((g) => g.id === "recon") ?? goals[0];
+          const recon = goals.find((g) => g.id === "recon");
           if (recon) {
             const asserted = history.assertGoal(manifest.taskId, recon.id, [evidencePath]);
             if (!asserted.ok) throw new Error(asserted.reason);
@@ -349,6 +359,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
             ],
           });
           state.activeIntentId = null;
+          state.activeIntentClaimedAt = null;
           appendProgress(manifest.workspaceDir, "recon goal passed");
           state.step = 2;
           save();

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "tsec-subset-foothold",
+    "title": "子集差分 · 立足点证据",
+    "description": "TSecBench 子集 harness 差分用：写出 foothold 证据文件（mock 可完成）。真平台跑时换成真实挑战证据模式。",
+    "evidencePatterns": ["tsec-subset/foothold.txt"]
+  },
+  {
+    "id": "tsec-subset-path",
+    "title": "子集差分 · 攻击路径可复核",
+    "description": "写出至少一条 Fact←Intent 路径说明，证明 History harness 相对裸循环可记账。",
+    "evidencePatterns": ["tsec-subset/path.md"]
+  }
+]

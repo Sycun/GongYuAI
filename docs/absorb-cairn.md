@@ -33,9 +33,9 @@
 | Stigmergy：Worker 不私聊 | 协作只写图 | **已对齐** |
 | Server 零策略，只保图一致 | Control plane 不下 shell；Watchdog 零策略 | **已对齐**（职责切分略不同） |
 | Dispatcher 独占写协议；Agent 只收 prompt 出结构 | Worker **直接**写 History | **有意差异**：你们 Worker 持工具+写图；勿改成「纯 prompt 沙箱」除非产品转向 |
-| `Project.reason` lease：单项目同时最多一个 Reason | 相位互斥（有 open Intent 强制回 Explore） | **可补**：多 Explore slot 时显式 Reason lease/CAS |
-| Explore/Bootstrap **双阶段**：timeout → 同 session `conclude` 捞 partial Fact | 理论有「残日志捞 partial Fact」；实现未硬化双阶段 | **可后置对照** |
-| `tasks.reason.max_intents`（例：2） | Reason 可多次 propose | **可按需硬顶** |
+| `Project.reason` lease：单项目同时最多一个 Reason | `reasonLeaseMs` CAS + 相位互斥 | **已对齐** |
+| Explore/Bootstrap **双阶段**：timeout → 同 session `conclude` 捞 partial Fact | `exploreTimeoutMs` → `forceConcludeExploreTimeout` + partial Fact | **已对齐** |
+| `tasks.reason.max_intents`（例：2） | `maxIntentsPerReason` + `maxIntentsPerAssetRoot` | **已对齐** |
 | Fact 文本 = 洞见 + 原始数据路径引用 | 分层 title/summary/evidence | **纪律可写进 prompt**；不必改 schema |
 | 状态变化靠追加否定 Fact（如 shell 断） | append-only 已支持 | **prompt 强调**即可 |
 | `reopen` 撤销 completed | Goal `passes` sticky | **保持 sticky**；勿照搬 reopen 松 Goal 闸 |
@@ -60,11 +60,9 @@
 
 ## 若再动手（非默认下一刀）
 
-按真实缺口选，勿为对照而对照：
+调度三件套已落地。剩余按真实缺口：
 
-1. Explore 超时 → 同会话强制 conclude 写 ≥1 partial Fact（对齐 dispatcher 双阶段）。  
-2. 多 Worker 下 `reason` CAS lease（对齐 `Project.reason`）。  
-3. `maxIntentsPerReason` 配置硬顶。  
-4. Observe/系统提示：Fact 写「洞见 + evidence 路径」；失败也用新 Fact 记录否定态。
+1. Observe/系统提示：Fact 写「洞见 + evidence 路径」；失败也用新 Fact 记录否定态（prompt 纪律）。  
+2. 真 TSecBench 子集相对裸循环 / ARTEX 差分（`pnpm diff-harness:tsec` 仅为 mock 基线）。
 
 验收仍用 TSecBench / smoke **相对裸循环差分**，不迷信赛会 AK。

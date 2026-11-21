@@ -83,11 +83,20 @@ Worker shell 闸门与资产准入共用同一套规则。
 
 **不要**把 FOFA JSON 只塞进 chat / Relay 当真相。控制台「设置 → 资产收集」配置密钥后，Worker 才可见对应收集器。
 
-## 扇出纪律
+## 扇出纪律（硬闸）
 
-- Reason 对清单有界扇出（top-N / 同根一批），避免 500 子域 → 500 Intent。  
+配置在 `execution`（创建任务契约；默认见 contracts）：
+
+| 字段 | 默认 | 作用 |
+| --- | --- | --- |
+| `maxIntentsPerReason` | 4 | Reason 波次 open Intent 硬顶 |
+| `maxIntentsPerAssetRoot` | 2 | 同根（eTLD+1 或 IPv4 /24）open Intent 硬顶 |
+| `exploreTimeoutMs` | 900000 | Explore claim 墙钟超时 → 强制 conclude + partial Fact；0=关 |
+| `reasonLeaseMs` | 120000 | 多 Explore 下 Reason 项目级 CAS lease；0=关 |
+
+- Reason / `technique_transfer` 走同一套硬顶；同根合并优先于盲目全量扇出。  
 - 有 open Explore 时不做 Reason（既有图互斥）。  
-- `oos` 可保留情报标题，不扇出利用。
+- `oos` 可保留情报标题；**禁止**作为利用 Intent 的唯一前驱（`proposeIntent` 硬拒）。
 
 ## 反模式
 

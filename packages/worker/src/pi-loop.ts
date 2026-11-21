@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  DEFAULT_EXPLORE_TIMEOUT_MS,
   isBudgetHit,
   isExploreLeader,
   isWallHit,
@@ -40,6 +41,7 @@ import {
   phaseDirective,
   syncGraphPhase,
 } from "./graph-phase.js";
+import { maybeForceExploreTimeout } from "./explore-timeout.js";
 
 /**
  * Pi Durable-backed worker. Falls back to OpenAI tool loop if durable harness
@@ -387,6 +389,7 @@ async function tryPiDurable(
       workspaceDir: manifest.workspaceDir,
       state,
       workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
+      execution: manifest.execution,
       save: () => {
         state.toolCalls = ctx.usage.toolCalls;
         state.installs = ctx.usage.installs;
@@ -890,16 +893,21 @@ async function tryPiDurable(
       let round = 0;
       for (;;) {
         round += 1;
+        const timeoutNote = runExploreTimeoutGate(
+          manifest,
+          ctx.history,
+          state,
+          ckpt,
+        );
         const softPace = maybeSoftPaceMessage(state, ctx, workerStartedAt);
-        if (softPace) ckpt.save(state);
+        if (softPace || timeoutNote) ckpt.save(state);
         const content =
           round === 1
-            ? softPace
-              ? `${kickoff}\n\n${softPace}`
-              : kickoff
+            ? [kickoff, timeoutNote, softPace].filter(Boolean).join("\n\n")
             : [
                 `长程续跑 #${round}：目标仍未全部通过。禁止收口/最终汇报。`,
                 "请继续用工具推进；完成语义以 assert_goal / evidence gate 为准。",
+                timeoutNote ?? "",
                 softPace ?? "",
                 "",
                 sessionBootstrapText(
@@ -1098,9 +1106,31 @@ function flushUsage(
       },
       workerSlot: slot,
       workerId: manifest.workerId,
+      phase: state.phase,
+      activeIntentId: state.activeIntentId,
     },
     slot,
   );
+}
+
+function runExploreTimeoutGate(
+  manifest: WorkerManifest,
+  history: ReturnType<typeof openHistory>,
+  state: CheckpointState,
+  ckpt: CheckpointStore,
+): string | null {
+  const timeoutMs =
+    manifest.execution?.exploreTimeoutMs ?? DEFAULT_EXPLORE_TIMEOUT_MS;
+  const result = maybeForceExploreTimeout({
+    history,
+    taskId: manifest.taskId,
+    workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
+    workspaceDir: manifest.workspaceDir,
+    state,
+    exploreTimeoutMs: timeoutMs,
+    save: () => ckpt.save(state),
+  });
+  return result.message;
 }
 
 function systemPrompt(
@@ -1476,6 +1506,7 @@ async function runOpenAiToolLoop(
     workspaceDir: manifest.workspaceDir,
     state,
     workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
+    execution: manifest.execution,
     save: () => {
       state.toolCalls = ctx.usage.toolCalls;
       state.installs = ctx.usage.installs;
@@ -1564,6 +1595,16 @@ async function runOpenAiToolLoop(
       ? Math.max(manifest.budget.maxToolCalls, 40)
       : Number.MAX_SAFE_INTEGER;
   for (let i = 0; i < maxRounds; i++) {
+    const timeoutNote = runExploreTimeoutGate(
+      manifest,
+      ctx.history,
+      state,
+      ckpt,
+    );
+    if (timeoutNote) {
+      messages.push({ role: "user", content: timeoutNote });
+      flushUsage(manifest, ctx, state);
+    }
     if (ctx.history.allGoalsPass(manifest.taskId)) break;
     if (isBudgetHit(ctx.usage.toolCalls, manifest.budget.maxToolCalls)) {
       state.lastError = "maxToolCalls exceeded";

@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  ExecutionConfigSchema,
   goalsFromSpecs,
   type CreateTaskRequest,
   type TaskRecord,
@@ -58,7 +59,7 @@ export class ControlStore {
       auth: req.auth,
       goals: goalsFromSpecs(req.goals),
       budget: req.budget,
-      execution: req.execution ?? { maxConcurrentExplores: 1 },
+      execution: req.execution,
       mock: req.mock,
       createdAt: now,
       updatedAt: now,
@@ -90,9 +91,7 @@ export class ControlStore {
   }
 
   private normalize(record: TaskRecord): TaskRecord {
-    if (!record.execution) {
-      record.execution = { maxConcurrentExplores: 1 };
-    }
+    record.execution = ExecutionConfigSchema.parse(record.execution ?? {});
     if (!Array.isArray(record.workerPids)) record.workerPids = [];
     if (!Array.isArray(record.containerIds)) record.containerIds = [];
     return record;

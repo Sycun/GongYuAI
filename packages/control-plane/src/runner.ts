@@ -69,7 +69,7 @@ function writeManifestForSlot(
     auth: task.auth,
     goals: task.goals,
     budget: task.budget,
-    execution: task.execution ?? { maxConcurrentExplores: 1 },
+    execution: task.execution,
     workerId: `w${slot}-${task.id.slice(0, 8)}`,
     workerSlot: slot,
     workerCount,

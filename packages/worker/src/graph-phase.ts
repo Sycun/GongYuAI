@@ -2,10 +2,26 @@
  * Graph-driven Bootstrap → Explore → Reason protocol (P2 / handbook polish).
  * History remains authoritative; phase only gates Worker tool surface.
  */
-import type { WorkerPhase } from "@gongyuai/contracts";
-import type { HistoryStore, ConcludeFactInput } from "@gongyuai/history";
+import type { ExecutionConfig, WorkerPhase } from "@gongyuai/contracts";
+import {
+  DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
+  DEFAULT_MAX_INTENTS_PER_REASON,
+  DEFAULT_REASON_LEASE_MS,
+} from "@gongyuai/contracts";
+import type { ConcludeFactInput, FanoutPolicy, HistoryStore } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import { appendProgress } from "./tools.js";
+
+export function fanoutPolicyFromExecution(
+  execution?: Partial<ExecutionConfig> | null,
+): FanoutPolicy {
+  return {
+    maxIntentsPerReason:
+      execution?.maxIntentsPerReason ?? DEFAULT_MAX_INTENTS_PER_REASON,
+    maxIntentsPerAssetRoot:
+      execution?.maxIntentsPerAssetRoot ?? DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
+  };
+}
 
 /** Tools always available (observe / handoff / skill catalog). */
 const ALWAYS = new Set([
@@ -106,7 +122,7 @@ export function phaseDirective(
     );
   } else if (p === "reason") {
     lines.push(
-      "Reason：读资产清单 + Hint + 可迁移打法 + 新 Fact → Complete / 有界扇出新 Intent / technique_transfer 同族广播 / no-op。对 admitted/live 资产挂 sourceFactIds 继续测；oos 不扇出利用。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
+      "Reason：读资产清单 + Hint + 可迁移打法 + 新 Fact → Complete / 有界扇出新 Intent / technique_transfer 同族广播 / no-op。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
     );
   }
   return lines.join("\n");
@@ -207,7 +223,7 @@ export const GRAPH_PHASE_TOOLS = [
     function: {
       name: "technique_transfer",
       description:
-        "P4 同族迁移：把已验证打法写成 transferable Fact，并为对端非 oos 资产扇出 Intent（可选 targetAddresses 逗号列表；空=全部）。",
+        "同族迁移：写 transferable Fact 并为对端非 oos 资产扇出 Intent。familyKey 可省略（系统按指纹/组件/同源启发式补全）。受 maxIntentsPerReason / 同根硬顶约束。",
       parameters: {
         type: "object",
         properties: {
@@ -255,6 +271,8 @@ export type GraphToolCtx = {
   state: CheckpointState;
   workerId?: string;
   save: () => void;
+  /** From task execution config; drives Reason/transfer hard caps + leases. */
+  execution?: Partial<ExecutionConfig> | null;
 };
 
 export function handleGraphTool(
@@ -263,6 +281,9 @@ export function handleGraphTool(
   ctx: GraphToolCtx,
 ): string | null {
   const workerId = ctx.workerId ?? "gy-worker";
+
+  const fanout = fanoutPolicyFromExecution(ctx.execution);
+  const reasonLeaseMs = ctx.execution?.reasonLeaseMs ?? DEFAULT_REASON_LEASE_MS;
 
   if (name === "phase_set") {
     const next = String(args.phase ?? "").trim() as WorkerPhase;
@@ -279,8 +300,18 @@ export function handleGraphTool(
     if (next === "reason" && open.length > 0) {
       return `denied: Reason 互斥 — ${open.length} open Intent(s); finish Explore first`;
     }
-    if (next === "explore" && asGraphPhase(ctx.state.phase) === "bootstrap") {
-      // ok
+    if (next === "reason" && reasonLeaseMs > 0) {
+      const lease = ctx.history.tryAcquireReasonLease(
+        ctx.taskId,
+        workerId,
+        reasonLeaseMs,
+      );
+      if (!lease.ok) {
+        return `denied: Reason lease held by ${lease.owner} until ${lease.until}`;
+      }
+    }
+    if (next !== "reason" && asGraphPhase(ctx.state.phase) === "reason") {
+      ctx.history.releaseReasonLease(ctx.taskId, workerId);
     }
     ctx.state.phase = next;
     ctx.save();
@@ -290,12 +321,25 @@ export function handleGraphTool(
 
   if (name === "intent_propose") {
     const sourceFactIds = parseFactIds(args.sourceFactIds ?? "");
+    const inReason = asGraphPhase(ctx.state.phase) === "reason";
+    if (inReason && reasonLeaseMs > 0) {
+      const lease = ctx.history.tryAcquireReasonLease(
+        ctx.taskId,
+        workerId,
+        reasonLeaseMs,
+      );
+      if (!lease.ok) {
+        return `错误: Reason lease held by ${lease.owner} until ${lease.until}`;
+      }
+    }
     try {
       const intent = ctx.history.proposeIntent({
         taskId: ctx.taskId,
         title: args.title ?? "untitled",
         summary: args.summary ?? "",
         sourceFactIds,
+        rejectOosOnly: true,
+        fanout: inReason ? fanout : undefined,
       });
       return JSON.stringify(intent);
     } catch (err) {
@@ -314,6 +358,7 @@ export function handleGraphTool(
     );
     if (!claimed) return `claim failed (not proposed?): ${args.intentId ?? ""}`;
     ctx.state.activeIntentId = claimed.id;
+    ctx.state.activeIntentClaimedAt = new Date().toISOString();
     ctx.state.phase = "explore";
     ctx.save();
     appendProgress(ctx.workspaceDir, `phase=explore claim=${claimed.id}`);
@@ -339,10 +384,15 @@ export function handleGraphTool(
         { facts },
       );
       if (!done) return `conclude failed: ${args.intentId ?? ""}`;
-      if (ctx.state.activeIntentId === done.id) ctx.state.activeIntentId = null;
-      // After conclude: if no open intents → reason; else stay explore
+      if (ctx.state.activeIntentId === done.id) {
+        ctx.state.activeIntentId = null;
+        ctx.state.activeIntentClaimedAt = null;
+      }
       const open = ctx.history.openIntents(ctx.taskId);
       ctx.state.phase = open.length > 0 ? "explore" : "reason";
+      if (ctx.state.phase === "reason" && reasonLeaseMs > 0) {
+        ctx.history.tryAcquireReasonLease(ctx.taskId, workerId, reasonLeaseMs);
+      }
       ctx.save();
       appendProgress(
         ctx.workspaceDir,
@@ -368,17 +418,20 @@ export function handleGraphTool(
         summary: args.summary ?? "",
         familyKey: args.familyKey?.trim() || undefined,
         targetAddresses: targets.length ? targets : undefined,
+        fanout,
       });
-      // New Intents → stay/return Explore
       ctx.state.phase = "explore";
+      ctx.history.releaseReasonLease(ctx.taskId, workerId);
       ctx.save();
       appendProgress(
         ctx.workspaceDir,
-        `technique_transfer ${out.techniqueFact.id} → intents=${out.intents.length} skipped=${out.skipped.length}`,
+        `technique_transfer ${out.techniqueFact.id} family=${out.familyKey ?? "—"} → intents=${out.intents.length} skipped=${out.skipped.length}`,
       );
       return JSON.stringify({
         ok: true,
         techniqueFactId: out.techniqueFact.id,
+        familyKey: out.familyKey,
+        familyKeyVia: out.familyKeyVia,
         intentIds: out.intents.map((i) => i.id),
         skipped: out.skipped,
       });

@@ -41,12 +41,30 @@ pnpm gy run \
 ```
 
 
-相对差分（同预算只比 History vs +Relay）：
+## Harness 子集差分（相对裸循环）
+
+只报 **bare / history / relay** 相对表，不报神话绝对分。
+
+Mock 基线（CI / 本机无 VPN 也可）：
 
 ```bash
-pnpm diff-harness --mock --goals examples/dvwa-smoke/goals.json \
-  --target https://example.com --auth "Written authorization: diff harness"
+pnpm diff-harness:tsec
+# 等价于：
+pnpm diff-harness --mock --goals examples/tsecbench/goals-subset-diff.json \
+  --target https://example.com \
+  --auth "Written authorization: TSecBench subset harness diff"
 ```
 
+真平台子集（VPN + ticket + 真模型；禁止 hint；只跑小子集）：
+
+```bash
+# 1) 接通 Viscosity；2) 填好 .gongyuai/tsecbench/env；3) 去掉 --mock，收紧 budget
+pnpm diff-harness --goals examples/tsecbench/goals-subset-diff.json \
+  --target '10.0.0.0/8' \
+  --auth "TSecBench authorized <task_id> — harness subset vs bare" \
+  --modes bare,history,relay
+```
+
+与 ARTEX 对比时：同一 task ticket、同一子集、同预算；只比完成题数 / toolCalls / tokens 相对差，不批量 hint。
 
 Watch: **http://127.0.0.1:8877/** (Mission Control). Host network/VPN mutation is denied by the worker.

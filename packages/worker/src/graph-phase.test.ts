@@ -24,6 +24,7 @@ function tmpState(phase: CheckpointState["phase"] = "bootstrap"): CheckpointStat
     tokensSinceRelay: 0,
     toolCallsSinceRelay: 0,
     activeIntentId: null,
+    activeIntentClaimedAt: null,
     lastSoftToolMilestone: 0,
     lastSoftWallMilestone: 0,
     lastError: null,

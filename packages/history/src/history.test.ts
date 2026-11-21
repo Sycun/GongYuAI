@@ -449,7 +449,157 @@ test("broadcastTechnique fans out intents to peer assets", () => {
     familyKey: "example-waf",
   });
   assert.ok(again.skipped.length >= 1);
+  assert.ok(out.familyKey === "example-waf" || out.familyKeyVia === "explicit");
 
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("proposeIntent rejects oos-only exploit predecessors", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-oos-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "88888888-8888-4888-8888-888888888888";
+  const auth = { targets: ["in.example.com"], outOfScope: [] as string[] };
+  store.seedAssetsFromAuth(taskId, { targets: ["in.example.com"] });
+  const oos = store.recordAsset({
+    taskId,
+    address: "evil.other.com",
+    auth,
+  });
+  assert.equal(oos.asset.kind, "oos");
+  assert.throws(
+    () =>
+      store.proposeIntent({
+        taskId,
+        title: "exploit oos",
+        sourceFactIds: [oos.fact.id],
+      }),
+    /oos-only/,
+  );
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("Reason fanout caps open intents and same-root", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-fan-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "99999999-9999-4999-8999-999999999999";
+  const auth = {
+    targets: ["*.example.com", "*.other.org"],
+    outOfScope: [] as string[],
+  };
+  const a = store.recordAsset({ taskId, address: "a.example.com", auth });
+  const b = store.recordAsset({ taskId, address: "b.other.org", auth });
+  const fanout = { maxIntentsPerReason: 2, maxIntentsPerAssetRoot: 1 };
+  store.proposeIntent({
+    taskId,
+    title: "probe a",
+    sourceFactIds: [a.fact.id],
+    fanout,
+  });
+  assert.throws(
+    () =>
+      store.proposeIntent({
+        taskId,
+        title: "probe a2",
+        sourceFactIds: [a.fact.id],
+        fanout,
+      }),
+    /maxIntentsPerAssetRoot|fanout cap/,
+  );
+  // Different registrable root → allowed until maxIntentsPerReason
+  store.proposeIntent({
+    taskId,
+    title: "probe b",
+    sourceFactIds: [b.fact.id],
+    fanout,
+  });
+  assert.throws(
+    () =>
+      store.proposeIntent({
+        taskId,
+        title: "probe more",
+        sourceFactIds: [b.fact.id],
+        fanout,
+      }),
+    /maxIntentsPerReason|fanout cap/,
+  );
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("reason lease CAS and explore timeout partial conclude", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-lease-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const got = store.tryAcquireReasonLease(taskId, "w0", 60_000);
+  assert.equal(got.ok, true);
+  const denied = store.tryAcquireReasonLease(taskId, "w1", 60_000);
+  assert.equal(denied.ok, false);
+  assert.equal(store.releaseReasonLease(taskId, "w0"), true);
+  assert.equal(store.tryAcquireReasonLease(taskId, "w1", 60_000).ok, true);
+
+  const intent = store.proposeIntent({
+    taskId,
+    title: "slow explore",
+    sourceFactIds: ["origin"],
+  });
+  store.claimIntent(taskId, intent.id, "w0");
+  const done = store.forceConcludeExploreTimeout({
+    taskId,
+    intentId: intent.id,
+    workerId: "w0",
+  });
+  assert.ok(done);
+  assert.equal(done?.status, "failed");
+  const facts = store.listFacts(taskId);
+  assert.ok(facts.some((f) => f.tags.includes("partial")));
+  store.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("broadcastTechnique suggests familyKey when omitted", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-fam-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const auth = { targets: ["*.example.com"], outOfScope: [] as string[] };
+  store.recordAsset({ taskId, address: "a.example.com", auth, live: true });
+  store.recordAsset({ taskId, address: "b.example.com", auth, live: true });
+  const source = store.appendFact({
+    taskId,
+    layer: "title",
+    title: "WordPress plugin RCE confirmed",
+    summary: "wp-admin ajax endpoint",
+  });
+  const out = store.broadcastTechnique({
+    taskId,
+    sourceFactIds: [source.id],
+    title: "WordPress plugin RCE",
+    summary: "authenticated ajax RCE on wordpress",
+    fanout: { maxIntentsPerReason: 4, maxIntentsPerAssetRoot: 2 },
+  });
+  assert.ok(out.familyKey);
+  assert.ok(out.familyKeyVia === "stack" || out.familyKey === "wordpress");
   store.close();
   rmSync(root, { recursive: true, force: true });
 });

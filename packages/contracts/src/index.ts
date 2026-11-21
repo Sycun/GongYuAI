@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  DEFAULT_EXPLORE_TIMEOUT_MS,
+  DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
+  DEFAULT_MAX_INTENTS_PER_REASON,
+  DEFAULT_REASON_LEASE_MS,
+} from "./fanout.js";
 
 /** Reserved for multi-user; MVP always "default". */
 export const TenantIdSchema = z.string().min(1).default("default");
@@ -96,6 +102,8 @@ export const AuthScopeSchema = z.object({
 export type AuthScope = z.infer<typeof AuthScopeSchema>;
 
 export * from "./scope.js";
+export * from "./fanout.js";
+export * from "./family-key.js";
 
 /** Graph-driven worker phases (P2). Crash recovery still uses Durable; Relay ≠ crash. */
 export const WorkerPhaseSchema = z.enum([
@@ -162,6 +170,41 @@ export const ExecutionConfigSchema = z.object({
     .min(1)
     .max(MAX_CONCURRENT_EXPLORES)
     .default(1),
+  /**
+   * Hard cap on Intents proposed during a single Reason wave
+   * (open proposed+claimed+running count while phase=reason).
+   */
+  maxIntentsPerReason: z
+    .number()
+    .int()
+    .min(1)
+    .max(64)
+    .default(DEFAULT_MAX_INTENTS_PER_REASON),
+  /**
+   * Max open Intents whose primary asset shares the same root
+   * (registrable domain or IPv4 /24).
+   */
+  maxIntentsPerAssetRoot: z
+    .number()
+    .int()
+    .min(1)
+    .max(32)
+    .default(DEFAULT_MAX_INTENTS_PER_ASSET_ROOT),
+  /**
+   * Claimed Explore Intent wall timeout. On expiry Worker force-concludes
+   * with a partial Fact (Cairn dual-stage). 0 = disabled.
+   */
+  exploreTimeoutMs: z
+    .number()
+    .int()
+    .nonnegative()
+    .default(DEFAULT_EXPLORE_TIMEOUT_MS),
+  /** Reason project-level lease TTL for multi-Explore CAS. 0 = disabled. */
+  reasonLeaseMs: z
+    .number()
+    .int()
+    .nonnegative()
+    .default(DEFAULT_REASON_LEASE_MS),
 });
 export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
 
@@ -191,9 +234,13 @@ export const CreateTaskRequestSchema = z.object({
     relayTokenThreshold: 30_000,
     relayMinToolCalls: 2,
   }),
-  /** Parallel Explore pool size (default 1 = serial). */
-  execution: ExecutionConfigSchema.optional().default({
+  /** Parallel Explore pool size + Reason fanout / Explore timeout (defaults filled). */
+  execution: ExecutionConfigSchema.default({
     maxConcurrentExplores: 1,
+    maxIntentsPerReason: DEFAULT_MAX_INTENTS_PER_REASON,
+    maxIntentsPerAssetRoot: DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
+    exploreTimeoutMs: DEFAULT_EXPLORE_TIMEOUT_MS,
+    reasonLeaseMs: DEFAULT_REASON_LEASE_MS,
   }),
   /** When true, worker uses scripted mock agent (no LLM). */
   mock: z.boolean().default(false),
@@ -219,7 +266,13 @@ export const TaskRecordSchema = z.object({
   auth: AuthScopeSchema,
   goals: z.array(GoalStateSchema),
   budget: BudgetSchema,
-  execution: ExecutionConfigSchema.default({ maxConcurrentExplores: 1 }),
+  execution: ExecutionConfigSchema.default({
+    maxConcurrentExplores: 1,
+    maxIntentsPerReason: DEFAULT_MAX_INTENTS_PER_REASON,
+    maxIntentsPerAssetRoot: DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
+    exploreTimeoutMs: DEFAULT_EXPLORE_TIMEOUT_MS,
+    reasonLeaseMs: DEFAULT_REASON_LEASE_MS,
+  }),
   mock: z.boolean(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -308,6 +361,8 @@ export const HistoryEventKindSchema = z.enum([
   "relay_written",
   "hint_appended",
   "technique_broadcast",
+  "reason_lease",
+  "explore_timeout_conclude",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 
@@ -335,15 +390,6 @@ export type CreateHintRequest = z.infer<typeof CreateHintRequestSchema>;
 /** Mark a confirmed technique Fact as reusable across peer assets (同族迁移). */
 export const TRANSFERABLE_TAG = "transferable";
 export const familyTag = (key: string) => `family:${key.trim().toLowerCase()}`;
-export function parseFamilyKeyFromTags(tags: string[]): string | null {
-  for (const t of tags) {
-    if (t.startsWith("family:")) {
-      const k = t.slice("family:".length).trim();
-      if (k) return k;
-    }
-  }
-  return null;
-}
 
 export const HistoryEventSchema = z.object({
   id: z.string().uuid(),
@@ -562,7 +608,13 @@ export const WorkerManifestSchema = z.object({
   auth: AuthScopeSchema,
   goals: z.array(GoalStateSchema),
   budget: BudgetSchema,
-  execution: ExecutionConfigSchema.default({ maxConcurrentExplores: 1 }),
+  execution: ExecutionConfigSchema.default({
+    maxConcurrentExplores: 1,
+    maxIntentsPerReason: DEFAULT_MAX_INTENTS_PER_REASON,
+    maxIntentsPerAssetRoot: DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
+    exploreTimeoutMs: DEFAULT_EXPLORE_TIMEOUT_MS,
+    reasonLeaseMs: DEFAULT_REASON_LEASE_MS,
+  }),
   /** Stable id for Intent claim CAS (unique per Explore slot). */
   workerId: z.string().min(1).default("w0"),
   /** 0-based Explore slot; slot 0 is bootstrap/reason/report leader. */

@@ -7,6 +7,9 @@ export type WorkerStatusFile = {
   usage: { tokens: number; toolCalls: number; installs: number };
   workerSlot?: number;
   workerId?: string;
+  /** Graph phase for Mission Control Live. */
+  phase?: string;
+  activeIntentId?: string | null;
   updatedAt?: string;
 };
 

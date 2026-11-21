@@ -23,16 +23,24 @@ import {
   ORIGIN_FACT_ID,
   TRANSFERABLE_TAG,
   admitAddress,
+  assetRootKey,
   assetTags,
   familyTag,
+  normalizeFamilyKey,
   normalizeTargetPattern,
   parseAssetAddrFromTags,
   parseAssetKindFromTags,
   parseAssetSourceFromTags,
+  suggestFamilyKey,
 } from "@gongyuai/contracts";
 import { minimatch } from "./minimatch.js";
 
 export { minimatch } from "./minimatch.js";
+
+export type FanoutPolicy = {
+  maxIntentsPerReason: number;
+  maxIntentsPerAssetRoot: number;
+};
 
 export type ConcludeFactInput = {
   layer: FactLayer;
@@ -129,6 +137,14 @@ export class HistoryStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_hints_task ON hints(task_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS leases (
+        task_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        owner TEXT NOT NULL,
+        until_iso TEXT NOT NULL,
+        PRIMARY KEY (task_id, kind)
+      );
     `);
     this.ensureIntentSourceFactIdsColumn();
   }
@@ -537,8 +553,21 @@ export class HistoryStore {
     title: string;
     summary?: string;
     sourceFactIds: string[];
+    /**
+     * When true (default), reject Intents whose only asset predecessors are oos.
+     * Intel-only / origin-only Intents still pass.
+     */
+    rejectOosOnly?: boolean;
+    /** Apply Reason fanout hard caps (open count + same-root). */
+    fanout?: FanoutPolicy;
   }): Intent {
     const sourceFactIds = this.validateSourceFactIds(input.taskId, input.sourceFactIds);
+    if (input.rejectOosOnly !== false) {
+      this.assertNotOosOnlyExploit(input.taskId, sourceFactIds);
+    }
+    if (input.fanout) {
+      this.assertFanoutAllows(input.taskId, sourceFactIds, input.fanout);
+    }
     const now = this.now();
     const intent: Intent = {
       id: randomUUID(),
@@ -578,6 +607,158 @@ export class HistoryStore {
       sourceFactIds: intent.sourceFactIds,
     });
     return intent;
+  }
+
+  /** Primary asset address among source facts (first asset.* tag wins). */
+  primaryAssetAddress(taskId: string, sourceFactIds: string[]): string | null {
+    for (const id of sourceFactIds) {
+      if (id === ORIGIN_FACT_ID) continue;
+      const fact = this.getFact(taskId, id);
+      if (!fact) continue;
+      const addr = parseAssetAddrFromTags(fact.tags);
+      if (addr) return addr;
+    }
+    return null;
+  }
+
+  private assertNotOosOnlyExploit(taskId: string, sourceFactIds: string[]): void {
+    const kinds: AssetKind[] = [];
+    for (const id of sourceFactIds) {
+      if (id === ORIGIN_FACT_ID) continue;
+      const fact = this.getFact(taskId, id);
+      if (!fact?.tags.includes(ASSET_TAG)) continue;
+      const kind = parseAssetKindFromTags(fact.tags);
+      if (kind) kinds.push(kind);
+    }
+    if (!kinds.length) return;
+    if (kinds.every((k) => k === "oos")) {
+      throw new Error(
+        "oos-only: 不可将范围外资产作为利用 Intent 的唯一前驱（可记账，不可扇出利用）",
+      );
+    }
+  }
+
+  private assertFanoutAllows(
+    taskId: string,
+    sourceFactIds: string[],
+    policy: FanoutPolicy,
+  ): void {
+    const open = this.openIntents(taskId);
+    if (open.length >= policy.maxIntentsPerReason) {
+      throw new Error(
+        `fanout cap: open Intents=${open.length} ≥ maxIntentsPerReason=${policy.maxIntentsPerReason}`,
+      );
+    }
+    const addr = this.primaryAssetAddress(taskId, sourceFactIds);
+    if (!addr) return;
+    const root = assetRootKey(addr);
+    if (!root) return;
+    let sameRoot = 0;
+    for (const intent of open) {
+      const peer = this.primaryAssetAddress(taskId, intent.sourceFactIds);
+      if (peer && assetRootKey(peer) === root) sameRoot += 1;
+    }
+    if (sameRoot >= policy.maxIntentsPerAssetRoot) {
+      throw new Error(
+        `fanout cap: root=${root} open=${sameRoot} ≥ maxIntentsPerAssetRoot=${policy.maxIntentsPerAssetRoot}`,
+      );
+    }
+  }
+
+  /**
+   * Project-level Reason lease (Cairn Project.reason). CAS via SQLite.
+   * Returns true when acquired or refreshed by the same owner.
+   */
+  tryAcquireReasonLease(
+    taskId: string,
+    owner: string,
+    ttlMs: number,
+  ): { ok: true; until: string } | { ok: false; owner: string; until: string } {
+    if (ttlMs <= 0) {
+      const until = this.now();
+      return { ok: true, until };
+    }
+    const nowMs = Date.now();
+    const until = new Date(nowMs + ttlMs).toISOString();
+    const row = this.db
+      .prepare(`SELECT owner, until_iso FROM leases WHERE task_id = ? AND kind = 'reason'`)
+      .get(taskId) as { owner: string; until_iso: string } | undefined;
+    if (row) {
+      const exp = Date.parse(row.until_iso);
+      if (Number.isFinite(exp) && exp > nowMs && row.owner !== owner) {
+        return { ok: false, owner: row.owner, until: row.until_iso };
+      }
+    }
+    this.db
+      .prepare(
+        `INSERT INTO leases (task_id, kind, owner, until_iso) VALUES (?, 'reason', ?, ?)
+         ON CONFLICT(task_id, kind) DO UPDATE SET owner = excluded.owner, until_iso = excluded.until_iso`,
+      )
+      .run(taskId, owner, until);
+    this.emit(taskId, "reason_lease", { owner, until, action: "acquire" });
+    return { ok: true, until };
+  }
+
+  releaseReasonLease(taskId: string, owner: string): boolean {
+    const result = this.db
+      .prepare(`DELETE FROM leases WHERE task_id = ? AND kind = 'reason' AND owner = ?`)
+      .run(taskId, owner);
+    if ((result.changes ?? 0) > 0) {
+      this.emit(taskId, "reason_lease", { owner, action: "release" });
+      return true;
+    }
+    return false;
+  }
+
+  getReasonLease(
+    taskId: string,
+  ): { owner: string; until: string } | null {
+    const row = this.db
+      .prepare(`SELECT owner, until_iso FROM leases WHERE task_id = ? AND kind = 'reason'`)
+      .get(taskId) as { owner: string; until_iso: string } | undefined;
+    if (!row) return null;
+    return { owner: row.owner, until: row.until_iso };
+  }
+
+  /**
+   * Cairn dual-stage: Explore timeout → force conclude with ≥1 partial Fact.
+   * Always writes a Fact so the graph keeps the partial result.
+   */
+  forceConcludeExploreTimeout(input: {
+    taskId: string;
+    intentId: string;
+    workerId: string;
+    reason?: string;
+  }): Intent | null {
+    const intent = this.getIntent(input.taskId, input.intentId);
+    if (!intent) return null;
+    if (!["claimed", "running", "proposed"].includes(intent.status)) return null;
+    const conclusion =
+      input.reason?.trim() ||
+      `Explore timeout — partial Fact recovered (worker=${input.workerId})`;
+    const done = this.concludeIntent(
+      input.taskId,
+      input.intentId,
+      "failed",
+      conclusion,
+      {
+        facts: [
+          {
+            layer: "title",
+            title: `partial · Explore 超时 · ${intent.title}`.slice(0, 200),
+            summary: conclusion,
+            tags: ["partial", "explore_timeout"],
+          },
+        ],
+      },
+    );
+    if (done) {
+      this.emit(input.taskId, "explore_timeout_conclude", {
+        intentId: input.intentId,
+        workerId: input.workerId,
+      });
+    }
+    return done;
   }
 
   claimIntent(taskId: string, intentId: string, workerId: string): Intent | null {
@@ -900,6 +1081,7 @@ export class HistoryStore {
   /**
    * P4 同族迁移：把已验证打法写成 transferable Fact，并为对端资产扇出 Intent。
    * 协作只写图（stigmergy），不点对点私聊。
+   * familyKey 可省略 → 从 title/summary/tags/资产根启发式补全。
    */
   broadcastTechnique(input: {
     taskId: string;
@@ -909,7 +1091,14 @@ export class HistoryStore {
     familyKey?: string;
     /** Empty → all non-oos assets (admitted/live/seed). */
     targetAddresses?: string[];
-  }): { techniqueFact: Fact; intents: Intent[]; skipped: string[] } {
+    fanout?: FanoutPolicy;
+  }): {
+    techniqueFact: Fact;
+    intents: Intent[];
+    skipped: string[];
+    familyKey: string | null;
+    familyKeyVia: string | null;
+  } {
     const sources = input.sourceFactIds.map((s) => s.trim()).filter(Boolean);
     if (!sources.length) throw new Error("broadcastTechnique requires sourceFactIds");
     for (const id of sources) {
@@ -919,8 +1108,29 @@ export class HistoryStore {
       }
     }
 
+    const assetsAll = this.listAssets(input.taskId);
+    const assets = assetsAll.filter((a) => a.kind !== "oos");
+    const wanted = input.targetAddresses?.map((a) => a.trim()).filter(Boolean);
+    let peers = wanted?.length
+      ? assets.filter((a) => wanted.includes(a.address))
+      : assets;
+
+    const sourceTags = sources.flatMap((id) => this.getFact(input.taskId, id)?.tags ?? []);
+    const hint = suggestFamilyKey({
+      title: input.title,
+      summary: input.summary,
+      tags: sourceTags,
+      addresses: peers.map((p) => p.address),
+    });
+    const familyKey =
+      normalizeFamilyKey(input.familyKey) ?? hint?.key ?? null;
+    const familyKeyVia = input.familyKey?.trim()
+      ? "explicit"
+      : hint
+        ? hint.via
+        : null;
+
     const tags = [TRANSFERABLE_TAG];
-    const familyKey = input.familyKey?.trim();
     if (familyKey) tags.push(familyTag(familyKey));
 
     const techniqueFact = this.appendFact({
@@ -931,12 +1141,14 @@ export class HistoryStore {
       tags,
     });
 
-    const assets = this.listAssets(input.taskId).filter((a) => a.kind !== "oos");
-    const wanted = input.targetAddresses?.map((a) => a.trim()).filter(Boolean);
-    const peers = wanted?.length
-      ? assets.filter((a) => wanted.includes(a.address))
-      : assets;
+    // Prefer peers sharing the family root when key is root:* or stack fingerprint.
+    if (familyKey?.startsWith("root:")) {
+      const root = familyKey.slice("root:".length);
+      const narrowed = peers.filter((p) => assetRootKey(p.address) === root);
+      if (narrowed.length) peers = narrowed;
+    }
 
+    const fanout = input.fanout;
     const intents: Intent[] = [];
     const skipped: string[] = [];
     const openTitles = new Set(
@@ -944,46 +1156,70 @@ export class HistoryStore {
         .filter((i) => ["proposed", "claimed", "running"].includes(i.status))
         .map((i) => i.title),
     );
+    const rootBudget = new Map<string, number>();
 
     for (const peer of peers) {
+      if (fanout && intents.length + this.openIntents(input.taskId).length >= fanout.maxIntentsPerReason) {
+        skipped.push(peer.address);
+        continue;
+      }
+      const root = assetRootKey(peer.address);
+      if (fanout && root) {
+        const used =
+          (rootBudget.get(root) ?? 0) +
+          this.openIntents(input.taskId).filter((i) => {
+            const a = this.primaryAssetAddress(input.taskId, i.sourceFactIds);
+            return a != null && assetRootKey(a) === root;
+          }).length;
+        if (used >= fanout.maxIntentsPerAssetRoot) {
+          skipped.push(peer.address);
+          continue;
+        }
+      }
       const title = `同族迁移：在 ${peer.address} 复用「${techniqueFact.title}」`;
       if (openTitles.has(title)) {
         skipped.push(peer.address);
         continue;
       }
-      const intent = this.proposeIntent({
-        taskId: input.taskId,
-        title,
-        summary:
-          `将已验证打法迁移到对端资产 ${peer.address}。` +
-          (familyKey ? ` family=${familyKey}。` : "") +
-          ` 手法摘要：${input.summary.trim().slice(0, 400)}`,
-        sourceFactIds: [techniqueFact.id, peer.factId, ...sources].slice(0, 8),
-      });
-      intents.push(intent);
-      openTitles.add(title);
+      try {
+        const intent = this.proposeIntent({
+          taskId: input.taskId,
+          title,
+          summary:
+            `将已验证打法迁移到对端资产 ${peer.address}。` +
+            (familyKey ? ` family=${familyKey}。` : "") +
+            ` 手法摘要：${input.summary.trim().slice(0, 400)}`,
+          sourceFactIds: [techniqueFact.id, peer.factId, ...sources].slice(0, 8),
+          fanout,
+        });
+        intents.push(intent);
+        openTitles.add(title);
+        if (root) rootBudget.set(root, (rootBudget.get(root) ?? 0) + 1);
+      } catch {
+        skipped.push(peer.address);
+      }
     }
 
     this.emit(input.taskId, "technique_broadcast", {
       techniqueFactId: techniqueFact.id,
-      familyKey: familyKey ?? null,
+      familyKey,
+      familyKeyVia,
       intentCount: intents.length,
       skipped,
     });
 
-    // Soft Hint so Observe surfaces the transfer even before intents are claimed.
     this.appendHint({
       taskId: input.taskId,
       text:
         `[同族迁移] ${techniqueFact.title}` +
-        (familyKey ? ` (family=${familyKey})` : "") +
+        (familyKey ? ` (family=${familyKey}${familyKeyVia ? ` via ${familyKeyVia}` : ""})` : "") +
         ` → 已为 ${intents.length} 个资产提出 Intent` +
-        (skipped.length ? `；跳过已有 ${skipped.length}` : ""),
+        (skipped.length ? `；跳过 ${skipped.length}` : ""),
       source: "family",
       tags: [TRANSFERABLE_TAG, ...(familyKey ? [familyTag(familyKey)] : [])],
     });
 
-    return { techniqueFact, intents, skipped };
+    return { techniqueFact, intents, skipped, familyKey, familyKeyVia };
   }
 
   listEvents(taskId: string, limit = 200): HistoryEvent[] {
@@ -1054,7 +1290,7 @@ export class HistoryStore {
         );
       }
       lines.push(
-        "（seed/admitted/live 可作 Intent 前驱继续测；oos 禁止作为利用 Intent 唯一前驱；发现用 asset_record。）",
+        "（seed/admitted/live 可作 Intent 前驱继续测；oos 禁止作为利用 Intent 唯一前驱；Reason 扇出受 maxIntentsPerReason / 同根硬顶；发现用 asset_record。）",
       );
     }
     lines.push("", "## Hint（战术注入）");

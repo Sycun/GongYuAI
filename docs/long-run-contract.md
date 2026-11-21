@@ -70,6 +70,8 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 - 发现物经 `asset_record` 写入；`admitAddress` **自动**判定 admitted / oos（IPv4 CIDR、`*.domain`、裸域后缀、`*`）。  
 - `outOfScope` 覆盖 targets。  
 - Observe 注入「资产清单」；`GET /tasks/:id/assets` 供控制台轮询。  
+- Reason / `technique_transfer` 扇出硬顶：`execution.maxIntentsPerReason`（默认 4）、`maxIntentsPerAssetRoot`（默认 2）；oos-only 前驱拒利用。  
+- Explore 墙钟：`exploreTimeoutMs`（默认 15min）超时强制 conclude + partial Fact；Reason 多 slot：`reasonLeaseMs` CAS。  
 - 细则：[asset-inventory.md](./asset-inventory.md)；匹配实现：`packages/contracts/src/scope.ts`。
 
 ## Evidence gate

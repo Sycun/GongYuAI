@@ -287,8 +287,32 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                 <Descriptions
                   align="left"
                   data={[
+                    {
+                      key: "图相位",
+                      value: (
+                        <Tag color="blue" size="small">
+                          {runtime?.phase ||
+                            (runtime?.workerStatus as { phase?: string } | null)?.phase ||
+                            "—"}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      key: "活跃 Intent",
+                      value: shortId(
+                        runtime?.activeIntentId ||
+                          (runtime?.workerStatus as { activeIntentId?: string } | null)
+                            ?.activeIntentId ||
+                          "",
+                      ) || "—",
+                    },
                     { key: "租约持有者", value: runtime?.leaseOwner || "—" },
-                    { key: "租约到期", value: runtime?.leaseUntil || "—" },
+                    {
+                      key: "租约到期",
+                      value: runtime?.leaseUntil
+                        ? formatDateTime(runtime.leaseUntil, true)
+                        : "—",
+                    },
                     { key: "栅栏号", value: String(runtime?.fence ?? task.fence) },
                     { key: "检查点", value: runtime?.hasCheckpoint ? "有" : "无" },
                     {
@@ -298,6 +322,10 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                           task.execution?.maxConcurrentExplores ??
                           1,
                       ),
+                    },
+                    {
+                      key: "Reason 扇出硬顶",
+                      value: `${runtime?.execution?.maxIntentsPerReason ?? task.execution?.maxIntentsPerReason ?? 4} / 同根 ${runtime?.execution?.maxIntentsPerAssetRoot ?? task.execution?.maxIntentsPerAssetRoot ?? 2}`,
                     },
                     {
                       key: "工作进程",
@@ -431,9 +459,20 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
             title={`资产清单 · ${assets.length} 条`}
             style={{ background: "var(--semi-color-bg-1)" }}
             headerExtraContent={
-              <Typography.Text type="tertiary" size="small">
-                与 AI Observe 同表 · 发现经 asset_record 自动准入
-              </Typography.Text>
+              <Space>
+                {active ? (
+                  <Tag color="green" size="small">
+                    实时同步
+                  </Tag>
+                ) : (
+                  <Tag color="grey" size="small">
+                    静止
+                  </Tag>
+                )}
+                <Typography.Text type="tertiary" size="small">
+                  与 Observe 同表 · asset_record 自动准入 · oos 不扇出利用
+                </Typography.Text>
+              </Space>
             }
           >
             {assets.length === 0 ? (
@@ -442,57 +481,83 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                 description="创建任务后会从 auth.targets 写入种子行；运行中发现会追加。"
               />
             ) : (
-              <Table
-                size="small"
-                pagination={assets.length > 20 ? { pageSize: 20 } : false}
-                dataSource={assets.map((a) => ({ ...a, key: a.address }))}
-                columns={[
-                  {
-                    title: "地址 / 模式",
-                    dataIndex: "address",
-                    render: (v: string) => (
-                      <Typography.Text
-                        style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace" }}
+              <>
+                <Space style={{ marginBottom: 12 }} wrap>
+                  {(["live", "admitted", "seed", "oos", "candidate"] as const).map((k) => {
+                    const n = assets.filter((a) => a.kind === k).length;
+                    if (!n) return null;
+                    return (
+                      <Tag
+                        key={k}
+                        color={statusColor(
+                          k === "oos" ? "failed" : k === "live" ? "ok" : "running",
+                        )}
+                        size="small"
                       >
-                        {v}
-                      </Typography.Text>
-                    ),
-                  },
-                  {
-                    title: "状态",
-                    dataIndex: "kind",
-                    width: 100,
-                    render: (k: string) => (
-                      <Tag color={statusColor(k === "oos" ? "failed" : k === "live" ? "ok" : "running")} size="small">
-                        {ASSET_KIND_LABEL[k] ?? k}
+                        {ASSET_KIND_LABEL[k] ?? k} {n}
                       </Tag>
-                    ),
-                  },
-                  {
-                    title: "来源",
-                    dataIndex: "source",
-                    width: 90,
-                    render: (s: string) => (s === "auth" ? "授权" : "发现"),
-                  },
-                  {
-                    title: "说明",
-                    dataIndex: "summary",
-                    ellipsis: true,
-                  },
-                  {
-                    title: "Fact",
-                    dataIndex: "factId",
-                    width: 100,
-                    render: (id: string) => shortId(id),
-                  },
-                  {
-                    title: "更新",
-                    dataIndex: "createdAt",
-                    width: 180,
-                    render: (t: string) => formatDateTime(t, true),
-                  },
-                ]}
-              />
+                    );
+                  })}
+                </Space>
+                <Table
+                  size="small"
+                  pagination={assets.length > 20 ? { pageSize: 20 } : false}
+                  dataSource={assets.map((a) => ({ ...a, key: a.address }))}
+                  columns={[
+                    {
+                      title: "地址 / 模式",
+                      dataIndex: "address",
+                      render: (v: string) => (
+                        <Typography.Text
+                          style={{
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                          }}
+                        >
+                          {v}
+                        </Typography.Text>
+                      ),
+                    },
+                    {
+                      title: "状态",
+                      dataIndex: "kind",
+                      width: 100,
+                      render: (k: string) => (
+                        <Tag
+                          color={statusColor(
+                            k === "oos" ? "failed" : k === "live" ? "ok" : "running",
+                          )}
+                          size="small"
+                        >
+                          {ASSET_KIND_LABEL[k] ?? k}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      title: "来源",
+                      dataIndex: "source",
+                      width: 90,
+                      render: (s: string) => (s === "auth" ? "授权" : "发现"),
+                    },
+                    {
+                      title: "说明",
+                      dataIndex: "summary",
+                      ellipsis: true,
+                    },
+                    {
+                      title: "Fact",
+                      dataIndex: "factId",
+                      width: 100,
+                      render: (id: string) => shortId(id),
+                    },
+                    {
+                      title: "更新",
+                      dataIndex: "createdAt",
+                      width: 180,
+                      render: (t: string) => formatDateTime(t, true),
+                    },
+                  ]}
+                />
+              </>
             )}
           </Card>
         )}
@@ -547,20 +612,49 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
               </Card>
             </Col>
             <Col span={10} style={{ marginTop: 16 }}>
-              <Card title="图前沿 · 开放意图" style={{ background: "var(--semi-color-bg-1)" }}>
+              <Card
+                title={`图前沿 · 开放意图 (${
+                  (history?.intents ?? []).filter((i) =>
+                    ["proposed", "claimed", "running"].includes(i.status),
+                  ).length
+                })`}
+                style={{ background: "var(--semi-color-bg-1)" }}
+                headerExtraContent={
+                  <Typography.Text type="tertiary" size="small">
+                    相位 {runtime?.phase || "—"}
+                  </Typography.Text>
+                }
+              >
                 <List
                   dataSource={(history?.intents ?? []).filter((i) =>
                     ["proposed", "claimed", "running"].includes(i.status),
                   )}
-                  emptyContent="无开放 Intent"
+                  emptyContent="无开放 Intent — Reason 可扇出"
                   size="small"
                   renderItem={(i) => (
                     <List.Item
                       main={
-                        <Space>
-                          <StatusTag status={i.status} />
-                          <span>{i.title}</span>
-                        </Space>
+                        <div>
+                          <Space>
+                            <StatusTag status={i.status} />
+                            <Typography.Text
+                              strong={
+                                Boolean(
+                                  runtime?.activeIntentId &&
+                                    i.id === runtime.activeIntentId,
+                                )
+                              }
+                            >
+                              {i.title}
+                            </Typography.Text>
+                          </Space>
+                          {i.sourceFactIds?.length ? (
+                            <Typography.Text type="quaternary" size="small">
+                              ← {i.sourceFactIds.map(shortId).join(", ")}
+                              {i.claimedBy ? ` · ${i.claimedBy}` : ""}
+                            </Typography.Text>
+                          ) : null}
+                        </div>
                       }
                     />
                   )}
@@ -578,7 +672,17 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                   emptyContent="—"
                   size="small"
                   renderItem={(f) => (
-                    <List.Item main={<Typography.Text>{f.title}</Typography.Text>} />
+                    <List.Item
+                      main={
+                        <div>
+                          <Typography.Text>{f.title}</Typography.Text>
+                          <Typography.Text type="quaternary" size="small">
+                            {shortId(f.id)}
+                            {f.intentId ? ` ← ${shortId(f.intentId)}` : ""}
+                          </Typography.Text>
+                        </div>
+                      }
+                    />
                   )}
                 />
               </Card>

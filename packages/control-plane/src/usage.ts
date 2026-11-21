@@ -51,7 +51,7 @@ function readWorkerStatusUsage(dataDir: string): UsageSlice | null {
   return out;
 }
 
-function readCheckpointUsage(dataDir: string): UsageSlice | null {
+function readCheckpointJson(dataDir: string): Record<string, unknown> | null {
   const paths = taskPaths(dataDir);
   const ckptPath = `${paths.durableDb}.ckpt.sqlite`;
   if (!existsSync(ckptPath)) return null;
@@ -62,7 +62,7 @@ function readCheckpointUsage(dataDir: string): UsageSlice | null {
         .prepare(`SELECT json FROM checkpoint WHERE id = 1`)
         .get() as { json: string } | undefined;
       if (!row) return null;
-      return JSON.parse(row.json) as UsageSlice;
+      return JSON.parse(row.json) as Record<string, unknown>;
     } finally {
       db.close();
     }
@@ -70,6 +70,24 @@ function readCheckpointUsage(dataDir: string): UsageSlice | null {
     // Writer may hold a brief exclusive lock (non-WAL). Best-effort.
     return null;
   }
+}
+
+function readCheckpointUsage(dataDir: string): UsageSlice | null {
+  return readCheckpointJson(dataDir) as UsageSlice | null;
+}
+
+/** Graph phase + active Intent from Durable checkpoint (Mission Control Live). */
+export function readCheckpointGraph(dataDir: string): {
+  phase: string | null;
+  activeIntentId: string | null;
+} {
+  const raw = readCheckpointJson(dataDir);
+  if (!raw) return { phase: null, activeIntentId: null };
+  return {
+    phase: typeof raw.phase === "string" ? raw.phase : null,
+    activeIntentId:
+      typeof raw.activeIntentId === "string" ? raw.activeIntentId : null,
+  };
 }
 
 /** Merge task.usage with on-disk worker-status + durable checkpoint. */

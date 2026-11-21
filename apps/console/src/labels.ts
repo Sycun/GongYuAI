@@ -51,8 +51,20 @@ export function formatWorkerStatus(ws: unknown): Array<{ key: string; value: str
   const o = ws as Record<string, unknown>;
   const usage = (o.usage ?? {}) as Record<string, unknown>;
   const status = typeof o.status === "string" ? o.status : "";
+  const phase = typeof o.phase === "string" ? o.phase : "";
+  const activeIntent =
+    typeof o.activeIntentId === "string"
+      ? o.activeIntentId
+      : o.activeIntentId === null
+        ? "—"
+        : "";
   return [
     { key: "节点状态", value: (STATUS_LABEL[status] ?? status) || "—" },
+    { key: "图相位", value: phase || "—" },
+    {
+      key: "活跃 Intent",
+      value: activeIntent ? (activeIntent === "—" ? "—" : shortId(activeIntent)) : "—",
+    },
     {
       key: "Token",
       value: String(usage.tokens ?? 0),
@@ -78,9 +90,9 @@ export function formatWorkerStatus(ws: unknown): Array<{ key: string; value: str
 export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   overview: { title: "总览", subtitle: "系统态势 · 活跃任务与恢复" },
   tasks: { title: "任务", subtitle: "任务列表 · 点选进入深潜" },
-  live: { title: "运行态", subtitle: "租约 / 检查点 / 预算" },
-  assets: { title: "资产", subtitle: "授权靶标 · 运行中发现 · 与 AI 同表" },
-  goals: { title: "目标", subtitle: "证据闸门 · Fact–Intent DAG" },
+  live: { title: "运行态", subtitle: "相位 · 租约 · 预算 · Hint" },
+  assets: { title: "资产", subtitle: "授权靶标 · 发现 · 与 Observe 同表" },
+  goals: { title: "目标", subtitle: "证据闸门 · 开放 Intent · DAG" },
   history: { title: "历史", subtitle: "Fact–Intent DAG · 分层事实" },
   evidence: { title: "证据", subtitle: "证据文件" },
   report: { title: "报告", subtitle: "任务报告" },

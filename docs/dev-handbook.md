@@ -40,12 +40,18 @@ MCP / Skill 是弹药，不是产品定义。
 | 多 Worker 并行 Explore | **有（可配）** | 新建任务 `execution.maxConcurrentExplores`；有效并发 = min(配置, 靶标数) |
 | Hint API | **有** | `POST /tasks/:id/hints` + 控制台注入；Observe 吸收 |
 | 同族迁移 | **有** | `technique_transfer` → transferable Fact + 对端 Intent 扇出 |
-| 资产清单 + CIDR/通配准入 | seed / asset_record / 控制台资产 Tab | 扇出预算可再收紧 |
+| 资产清单 + CIDR/通配准入 | seed / asset_record / 控制台资产 Tab | — |
+| Reason 扇出硬闸 | **有** | `maxIntentsPerReason` / `maxIntentsPerAssetRoot`；oos-only 拒利用 |
+| 同族 familyKey 启发式 | **有** | tag → stack 指纹 → 同源 root；`technique_transfer` 可省略 |
+| Explore 超时 dual-stage | **有** | `exploreTimeoutMs` → force conclude + partial Fact |
+| Reason 项目 lease | **有** | `reasonLeaseMs` CAS（多 Explore） |
 | 证据邻域 / 元数据保真 | **有（P5）** | `formatFactDrill` + `recordedAt` |
 | 预算尽报告 / 工具单闸 | **有（P5）** | `writeTerminalReport` + `tool_gate` |
 | 默认不限预算 + 假耗尽修复 | **有** | `0=unlimited`；`incomplete`≠`budget_exhausted`；重启重置 `startedAt` |
 | 软节奏提示（非停工） | **有** | `soft-pace.ts`：工具/墙钟里程碑只注入提示，不结束任务 |
 | 清板卡题/Intent 纪律 | **软注入** | `board-policy.ts` + `goals-autonomous.json`；硬闸仍靠图 |
+| 控制台 Live / Assets / Goals | **有** | 相位·租约·扇出硬顶；资产 kind 汇总；开放 Intent 前驱 |
+| TSecBench 子集差分 | **有** | `pnpm diff-harness:tsec`（mock）；真平台见 tsecbench README |
 
 ---
 
@@ -211,14 +217,17 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ## 9. 下一件最小可做事项
 
-**P0–P5 已落地**。下一刀按真实缺口选：TSecBench 子集差分、控制台 UX、或同族 key 启发式增强。History/Relay 语义检索层仍默认不做。
+**P0–P5 + 扇出硬闸 / familyKey / Cairn 调度 / 控制台 UX / TSec 子集差分**已落地。  
+下一刀按**真实差分痛点**选：真 TSecBench（相对裸循环 / ARTEX）子集实测、或 Intentest 五段检索（仍默认不做）。History/Relay 语义 RAG 默认不做。
 
 验收：
 
 ```bash
 pnpm smoke
+pnpm --filter @gongyuai/contracts test
 pnpm --filter @gongyuai/history test
 pnpm --filter @gongyuai/worker test
+pnpm diff-harness:tsec
 pnpm diff-harness --mock --goals examples/dvwa-smoke/goals.json \
   --target https://example.com \
   --auth "Written authorization: diff harness"

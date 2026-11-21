@@ -16,7 +16,7 @@ import {
 } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
-import { refreshTaskUsage } from "./usage.js";
+import { readCheckpointGraph, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
 import type { SettingsStore } from "./settings.js";
@@ -493,6 +493,7 @@ export function startControlServer(opts: ServerOptions) {
               .map((l) => l.slice(2))
               .slice(-40);
           }
+          const checkpointGraph = readCheckpointGraph(task.dataDir);
           let recentFacts: Array<{
             title: string;
             summary: string;
@@ -549,6 +550,12 @@ export function startControlServer(opts: ServerOptions) {
             workerStatus = {
               ...(workerStatus as Record<string, unknown>),
               usage: mergedUsage,
+              phase:
+                (workerStatus as { phase?: string }).phase ??
+                checkpointGraph.phase,
+              activeIntentId:
+                (workerStatus as { activeIntentId?: string | null })
+                  .activeIntentId ?? checkpointGraph.activeIntentId,
               updatedAt:
                 (workerStatus as { updatedAt?: string }).updatedAt ??
                 new Date().toISOString(),
@@ -557,6 +564,8 @@ export function startControlServer(opts: ServerOptions) {
             workerStatus = {
               status: task.status,
               usage: mergedUsage,
+              phase: checkpointGraph.phase,
+              activeIntentId: checkpointGraph.activeIntentId,
               updatedAt: new Date().toISOString(),
             };
           }
@@ -568,7 +577,9 @@ export function startControlServer(opts: ServerOptions) {
             workerPids: task.workerPids ?? [],
             containerId: task.containerId,
             containerIds: task.containerIds ?? [],
-            execution: task.execution ?? { maxConcurrentExplores: 1 },
+            execution: task.execution,
+            phase: checkpointGraph.phase,
+            activeIntentId: checkpointGraph.activeIntentId,
             workerStatus,
             hasCheckpoint: existsSync(ckptPath),
             dataDir: task.dataDir,

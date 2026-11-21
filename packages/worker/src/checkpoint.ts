@@ -17,6 +17,8 @@ export type CheckpointState = {
   toolCallsSinceRelay: number;
   /** Currently claimed Explore intent (at most one). */
   activeIntentId: string | null;
+  /** ISO time when activeIntentId was claimed (Explore wall timeout). */
+  activeIntentClaimedAt: string | null;
   /** Soft pace: last tool-call milestone advised (never stops the run). */
   lastSoftToolMilestone: number;
   /** Soft pace: last wall-index advised (never stops the run). */
@@ -35,6 +37,7 @@ const DEFAULT: CheckpointState = {
   tokensSinceRelay: 0,
   toolCallsSinceRelay: 0,
   activeIntentId: null,
+  activeIntentClaimedAt: null,
   lastSoftToolMilestone: 0,
   lastSoftWallMilestone: 0,
   lastError: null,
@@ -75,6 +78,7 @@ export class CheckpointStore {
       tokensSinceRelay: parsed.tokensSinceRelay ?? parsed.tokens ?? 0,
       toolCallsSinceRelay: parsed.toolCallsSinceRelay ?? 0,
       activeIntentId: parsed.activeIntentId ?? null,
+      activeIntentClaimedAt: parsed.activeIntentClaimedAt ?? null,
       lastSoftToolMilestone: parsed.lastSoftToolMilestone ?? 0,
       lastSoftWallMilestone: parsed.lastSoftWallMilestone ?? 0,
     };

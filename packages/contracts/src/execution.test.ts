@@ -48,6 +48,10 @@ test("CreateTaskRequest defaults execution.maxConcurrentExplores to 1", () => {
     ],
   });
   assert.equal(parsed.execution.maxConcurrentExplores, 1);
+  assert.equal(parsed.execution.maxIntentsPerReason, 4);
+  assert.equal(parsed.execution.maxIntentsPerAssetRoot, 2);
+  assert.equal(parsed.execution.exploreTimeoutMs, 900_000);
+  assert.equal(parsed.execution.reasonLeaseMs, 120_000);
 });
 
 test("CreateTaskRequest accepts user concurrency", () => {
@@ -67,6 +71,7 @@ test("CreateTaskRequest accepts user concurrency", () => {
     execution: { maxConcurrentExplores: 3 },
   });
   assert.equal(parsed.execution.maxConcurrentExplores, 3);
+  assert.equal(parsed.execution.maxIntentsPerReason, 4);
   assert.equal(
     resolveExploreWorkerCount({
       maxConcurrentExplores: parsed.execution.maxConcurrentExplores,

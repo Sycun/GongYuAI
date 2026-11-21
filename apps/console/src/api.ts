@@ -33,6 +33,10 @@ export type TaskRecord = {
   };
   execution?: {
     maxConcurrentExplores: number;
+    maxIntentsPerReason?: number;
+    maxIntentsPerAssetRoot?: number;
+    exploreTimeoutMs?: number;
+    reasonLeaseMs?: number;
   };
   usage: { tokens: number; toolCalls: number; installs: number };
   error: string | null;
@@ -111,7 +115,9 @@ export type RuntimePayload = {
   workerPids?: number[];
   containerId: string | null;
   containerIds?: string[];
-  execution?: { maxConcurrentExplores: number };
+  execution?: TaskRecord["execution"];
+  phase?: string | null;
+  activeIntentId?: string | null;
   workerStatus: unknown;
   hasCheckpoint: boolean;
   dataDir: string;

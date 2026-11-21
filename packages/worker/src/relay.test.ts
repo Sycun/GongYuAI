@@ -35,7 +35,7 @@ function manifest(workspaceDir: string): WorkerManifest {
       relayTokenThreshold: 100,
       relayMinToolCalls: 2,
     },
-    execution: { maxConcurrentExplores: 1 },
+    execution: { maxConcurrentExplores: 1, maxIntentsPerReason: 4, maxIntentsPerAssetRoot: 2, exploreTimeoutMs: 900_000, reasonLeaseMs: 120_000 },
     workerId: "w0",
     workerSlot: 0,
     workerCount: 1,
