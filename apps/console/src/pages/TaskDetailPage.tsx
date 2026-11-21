@@ -12,15 +12,24 @@ import {
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
-import { IconRefresh, IconStop } from "@douyinfe/semi-icons";
+import { IconPlay, IconRefresh, IconStop } from "@douyinfe/semi-icons";
 import {
   api,
   type HistoryPayload,
   type RuntimePayload,
   type TaskRecord,
 } from "../api";
-import { DETAIL_TABS, type DetailTab, STATUS_LABEL, shortId } from "../labels";
+import {
+  DETAIL_TABS,
+  type DetailTab,
+  STATUS_LABEL,
+  formatWorkerStatus,
+  isActiveStatus,
+  isStartableStatus,
+  shortId,
+} from "../labels";
 import { StatusTag } from "../components/StatusTag";
+import { ExecutionTrace } from "../components/ExecutionTrace";
 
 type Props = {
   task: TaskRecord | null;
@@ -39,6 +48,8 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   const [evidenceBody, setEvidenceBody] = useState("请选择左侧文件");
   const [paneText, setPaneText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [liveUsage, setLiveUsage] = useState<TaskRecord["usage"] | null>(null);
 
   useEffect(() => {
     if (!task) return;
@@ -52,6 +63,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           if (cancelled) return;
           setHistory(h.json);
           setRuntime(r.json);
+          if (r.json.usage) setLiveUsage(r.json.usage);
         }
         if (tab === "evidence") {
           const ev = await api.evidence(task!.id);
@@ -78,6 +90,41 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     };
   }, [task?.id, tab]);
 
+  // 运行中自动刷新运行态 / 步骤，保持与任务状态一致
+  useEffect(() => {
+    if (!task || !isActiveStatus(task.status)) return;
+    if (tab !== "live" && tab !== "goals" && tab !== "history" && tab !== "logs") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        if (tab === "live" || tab === "goals" || tab === "history") {
+          const [h, r] = await Promise.all([api.history(task.id), api.runtime(task.id)]);
+          if (cancelled) return;
+          setHistory(h.json);
+          setRuntime(r.json);
+          if (r.json.usage) setLiveUsage(r.json.usage);
+        }
+        if (tab === "logs") {
+          const r = await api.logs(task.id);
+          if (cancelled) return;
+          setPaneText(r.text || "（空）");
+        }
+        await onRefresh();
+      } catch {
+        /* 轮询失败时静默，下一次再试 */
+      }
+    };
+    const timer = window.setInterval(() => void tick(), 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [task?.id, task?.status, tab, onRefresh]);
+
+  useEffect(() => {
+    setLiveUsage(null);
+  }, [task?.id]);
+
   if (!task) {
     return (
       <Empty
@@ -88,13 +135,35 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     );
   }
 
+  const usage = liveUsage ?? task.usage;
+  const active = isActiveStatus(task.status);
+  const startable = isStartableStatus(task.status);
+
   const stopTask = async () => {
+    if (!active || actionBusy) return;
+    setActionBusy(true);
     try {
       await api.stop(task.id);
       Toast.success("已发送停止");
       await onRefresh();
     } catch (e) {
       Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const startTask = async () => {
+    if (!startable || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await api.start(task.id);
+      Toast.success("已开始运行");
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -109,6 +178,12 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   };
 
   const goals = history?.goals?.length ? history.goals : task.goals;
+
+  const goalStatus = (passes: boolean) => {
+    if (passes) return "ok";
+    if (active) return "running";
+    return "pending";
+  };
 
   return (
     <div>
@@ -131,14 +206,37 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           <Typography.Text type="tertiary" style={{ display: "block", marginTop: 6 }}>
             编号 {shortId(task.id)} · 目标 {(task.auth.targets || []).join(", ") || "—"}
           </Typography.Text>
+          {task.error ? (
+            <Typography.Text type="danger" style={{ display: "block", marginTop: 4 }}>
+              {task.error}
+            </Typography.Text>
+          ) : null}
         </div>
         <Space>
           <Button icon={<IconRefresh />} onClick={() => void onRefresh()} loading={loading}>
             刷新
           </Button>
-          <Button type="danger" theme="solid" icon={<IconStop />} onClick={() => void stopTask()}>
-            停止
-          </Button>
+          {active ? (
+            <Button
+              type="danger"
+              theme="solid"
+              icon={<IconStop />}
+              loading={actionBusy}
+              onClick={() => void stopTask()}
+            >
+              停止
+            </Button>
+          ) : startable ? (
+            <Button
+              type="primary"
+              theme="solid"
+              icon={<IconPlay />}
+              loading={actionBusy}
+              onClick={() => void startTask()}
+            >
+              开始
+            </Button>
+          ) : null}
         </Space>
       </div>
 
@@ -173,15 +271,15 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                   data={[
                     {
                       key: "工具调用",
-                      value: `${task.usage.toolCalls} / ${task.budget.maxToolCalls}`,
+                      value: `${usage.toolCalls} / ${task.budget.maxToolCalls}`,
                     },
                     {
                       key: "安装次数",
-                      value: `${task.usage.installs} / ${task.budget.maxInstalls}`,
+                      value: `${usage.installs} / ${task.budget.maxInstalls}`,
                     },
                     {
                       key: "Token",
-                      value: `${task.usage.tokens} / ${task.budget.maxTokens}`,
+                      value: `${usage.tokens} / ${task.budget.maxTokens}`,
                     },
                     { key: "授权说明", value: task.auth.authorizationNote || "—" },
                   ]}
@@ -189,8 +287,23 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
               </Card>
             </Col>
             <Col span={24} style={{ marginTop: 16 }}>
+              <Card
+                title="执行链路"
+                style={{ background: "var(--semi-color-bg-1)" }}
+                bodyStyle={{ maxHeight: 640, overflow: "auto" }}
+              >
+                <ExecutionTrace
+                  resetKey={task.id}
+                  progress={runtime?.progress}
+                  facts={runtime?.recentFacts}
+                  active={active}
+                  emptyHint={active ? "等待执行节点上报步骤…" : "暂无执行步骤"}
+                />
+              </Card>
+            </Col>
+            <Col span={24} style={{ marginTop: 16 }}>
               <Card title="执行节点状态" style={{ background: "var(--semi-color-bg-1)" }}>
-                <pre className="gy-mono">{JSON.stringify(runtime?.workerStatus ?? {}, null, 2)}</pre>
+                <Descriptions align="left" data={formatWorkerStatus(runtime?.workerStatus)} />
               </Card>
             </Col>
           </Row>
@@ -207,7 +320,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                     <div>
                       <Space>
                         <Typography.Text strong>{g.title}</Typography.Text>
-                        <StatusTag status={g.passes ? "ok" : "running"} />
+                        <StatusTag status={goalStatus(g.passes)} />
                       </Space>
                       <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0" }}>
                         {g.description}
@@ -237,7 +350,11 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
             <Col span={12}>
               <Card title="意图" style={{ background: "var(--semi-color-bg-1)" }}>
                 <List
-                  dataSource={[...(history?.intents ?? [])].reverse().slice(0, 20)}
+                  dataSource={
+                    runtime?.recentIntents?.length
+                      ? runtime.recentIntents
+                      : [...(history?.intents ?? [])].reverse().slice(0, 20)
+                  }
                   emptyContent="—"
                   size="small"
                   renderItem={(i) => (

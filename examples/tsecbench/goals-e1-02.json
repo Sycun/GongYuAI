@@ -1,0 +1,26 @@
+[
+  {
+    "id": "reconcile",
+    "title": "Reconcile challenge board",
+    "description": "Run pnpm tsecbench status e1-02 and list; write evidence/tsec/board.json with unique_code, container_status, container_addr, scores.",
+    "evidencePatterns": ["tsec/board.*"]
+  },
+  {
+    "id": "start-and-recon",
+    "title": "Recon e1-02 entry",
+    "description": "e1-02 is already started at the container_addr (VPN). HTTP recon the feedback/search site; save headers/body notes under evidence/tsec/recon-*.txt. Do not start extra containers unless this one is broken (then close+start).",
+    "evidencePatterns": ["tsec/recon-*"]
+  },
+  {
+    "id": "exploit-and-submit",
+    "title": "Exploit XSS/session and submit flag",
+    "description": "Authorized TSecBench e1-02 only. Bypass WAF on reflected input, steal user session / reach protected flag. Submit with: pnpm tsecbench submit e1-02 '<flag>'. Save API JSON to evidence/tsec/submit-*.json. Then pnpm tsecbench close e1-02. Avoid hint (costs score).",
+    "evidencePatterns": ["tsec/submit-*"]
+  },
+  {
+    "id": "report",
+    "title": "Write findings note",
+    "description": "Short findings under evidence/goals/e1-02.md",
+    "evidencePatterns": ["goals/*.md"]
+  }
+]

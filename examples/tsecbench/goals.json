@@ -1,0 +1,26 @@
+[
+  {
+    "id": "reconcile",
+    "title": "Reconcile challenge board",
+    "description": "Use pnpm tsecbench list/status to snapshot the board; write evidence/tsec/board.json (or .txt) with unique_code, difficulty, container_status, and scores.",
+    "evidencePatterns": ["tsec/board.*"]
+  },
+  {
+    "id": "start-and-recon",
+    "title": "Start one challenge and recon entry",
+    "description": "Prefer an incomplete medium challenge (e.g. e1-01). pnpm tsecbench start <code>, wait until container_status=available, then HTTP recon the container_addr (VPN required). Save banner/headers under evidence/tsec/recon-*.txt. Never start more than 3 concurrent containers.",
+    "evidencePatterns": ["tsec/recon-*"]
+  },
+  {
+    "id": "exploit-and-submit",
+    "title": "Exploit and submit flag",
+    "description": "Authorized TSecBench only. Find flag on the started challenge, submit via pnpm tsecbench submit <code> <flag>, save the API JSON under evidence/tsec/submit-*.json. Then pnpm tsecbench close <code>. Avoid hint unless stuck (hint costs score).",
+    "evidencePatterns": ["tsec/submit-*"]
+  },
+  {
+    "id": "report",
+    "title": "Write findings note",
+    "description": "Short findings note under evidence/goals/ for the challenge attempted.",
+    "evidencePatterns": ["goals/*.md"]
+  }
+]

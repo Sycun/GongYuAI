@@ -1,12 +1,22 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { createWriteStream, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import {
+  createWriteStream,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  unlinkSync,
+} from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import type { TaskRecord, WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
 import type { ControlStore } from "./store.js";
 import type { SettingsStore } from "./settings.js";
+
+const TERMINAL = new Set(["stopped", "failed", "completed", "budget_exhausted"]);
+const ACTIVE = new Set(["queued", "initializing", "running", "recovering"]);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");
@@ -62,6 +72,14 @@ export class WorkerRunner {
     const task = this.store.get(taskId);
     if (!task) throw new Error(`task not found: ${taskId}`);
 
+    if (ACTIVE.has(task.status) && this.isAlive(task)) {
+      throw new Error("任务已在运行中");
+    }
+
+    if (TERMINAL.has(task.status) || !ACTIVE.has(task.status)) {
+      this.prepareRestart(task);
+    }
+
     const lease = this.store.acquireLease(taskId, this.cfg.ownerId, this.cfg.leaseMs);
     if (!lease.ok) throw new Error(`lease: ${lease.reason}`);
 
@@ -71,6 +89,49 @@ export class WorkerRunner {
       return this.startDocker(lease.task);
     }
     return this.startLocal(lease.task);
+  }
+
+  /** 从终态重新开始：清掉完成标记，必要时重置已完成的检查点 */
+  private prepareRestart(task: TaskRecord): void {
+    const paths = taskPaths(task.dataDir);
+    const ckptPath = `${paths.durableDb}.ckpt.sqlite`;
+    if (existsSync(ckptPath)) {
+      try {
+        const db = new DatabaseSync(ckptPath);
+        const row = db.prepare(`SELECT json FROM checkpoint WHERE id = 1`).get() as
+          | { json: string }
+          | undefined;
+        if (row) {
+          const state = JSON.parse(row.json) as { phase?: string };
+          if (state.phase === "done" || state.phase === "report") {
+            state.phase = "loop";
+            db.prepare(
+              `INSERT INTO checkpoint (id, json) VALUES (1, ?)
+               ON CONFLICT(id) DO UPDATE SET json = excluded.json`,
+            ).run(JSON.stringify({ ...state, updatedAt: new Date().toISOString() }));
+          }
+        }
+        db.close();
+      } catch {
+        /* keep existing checkpoint */
+      }
+    }
+    const statusPath = join(task.dataDir, "worker-status.json");
+    if (existsSync(statusPath)) {
+      try {
+        unlinkSync(statusPath);
+      } catch {
+        /* ignore */
+      }
+    }
+    task.status = "queued";
+    task.finishedAt = null;
+    task.error = null;
+    task.workerPid = null;
+    task.containerId = null;
+    task.leaseOwner = null;
+    task.leaseUntil = null;
+    this.store.save(task);
   }
 
   private workerEntry(): string {
@@ -173,6 +234,10 @@ export class WorkerRunner {
     const task = this.store.get(taskId);
     if (!task) return null;
 
+    if (TERMINAL.has(task.status)) {
+      return task;
+    }
+
     const local = this.children.get(taskId);
     if (local?.pid) {
       try {
@@ -189,6 +254,14 @@ export class WorkerRunner {
 
     if (task.containerId) {
       spawnSync("docker", ["rm", "-f", task.containerId], { encoding: "utf8" });
+    }
+
+    if (task.workerPid) {
+      try {
+        process.kill(task.workerPid, "SIGTERM");
+      } catch {
+        /* already gone */
+      }
     }
 
     return this.store.setStatus(taskId, "stopped");

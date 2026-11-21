@@ -126,7 +126,6 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
       });
       const r = await api.runUpdate();
       setUpdateStatus(r.json);
-      // 无感知：不弹过程，只在按钮上转
     } catch (e) {
       setUpdating(false);
       Toast.error(e instanceof Error ? e.message : String(e));
@@ -135,10 +134,11 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 
   const totals = usage?.totals ?? { tokens: 0, toolCalls: 0, installs: 0, tasks: 0 };
   const phase = updateStatus?.phase;
+  const cardStyle = { background: "var(--semi-color-bg-1)", maxWidth: 720 } as const;
 
   if (section === "model") {
     return (
-      <Card title="模型配置" style={{ background: "var(--semi-color-bg-1)", maxWidth: 720 }}>
+      <Card title="模型配置" style={cardStyle}>
         <Banner
           type="info"
           closeIcon={null}
@@ -209,7 +209,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 
   if (section === "usage") {
     return (
-      <Card title="Token 统计" style={{ background: "var(--semi-color-bg-1)", maxWidth: 720 }}>
+      <Card title="Token 统计" style={cardStyle}>
         <Row gutter={12} style={{ marginBottom: 12 }}>
           <Col span={12}>
             <Typography.Text type="tertiary" size="small">
@@ -256,7 +256,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 
   if (section === "update") {
     return (
-      <Card title="一键更新" style={{ background: "var(--semi-color-bg-1)", maxWidth: 720 }}>
+      <Card title="一键更新" style={cardStyle}>
         <Typography.Paragraph type="tertiary" style={{ marginTop: 0 }}>
           从 GitHub 静默拉取并覆盖安装目录，保留本机数据与模型配置，构建后自动重启。对用户无感。
         </Typography.Paragraph>
@@ -288,11 +288,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
             <Button htmlType="submit" type="tertiary">
               保存更新源
             </Button>
-            <Button
-              theme="solid"
-              loading={updating}
-              onClick={() => void runSilentUpdate()}
-            >
+            <Button theme="solid" loading={updating} onClick={() => void runSilentUpdate()}>
               {updating ? "更新中…" : "一键更新"}
             </Button>
           </Space>
@@ -336,7 +332,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
   }
 
   return (
-    <Card title="运行时" style={{ background: "var(--semi-color-bg-1)", maxWidth: 720 }}>
+    <Card title="运行时" style={cardStyle}>
       <Space vertical align="start">
         <Typography.Text>监听 {window.location.host || "0.0.0.0:8877"}</Typography.Text>
         <Typography.Text type="tertiary">

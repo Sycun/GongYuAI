@@ -55,7 +55,7 @@ export class Watchdog {
     const task = this.store.get(taskId);
     if (!task) return;
 
-    // Terminal promotion from worker status sidecar
+    // Sync usage / promote terminal from worker status sidecar
     const statusPath = join(task.dataDir, "worker-status.json");
     if (existsSync(statusPath)) {
       try {
@@ -64,18 +64,18 @@ export class Watchdog {
           error?: string;
           usage?: { tokens?: number; toolCalls?: number; installs?: number };
         };
+        if (status.usage) {
+          task.usage = {
+            tokens: Math.max(status.usage.tokens ?? 0, task.usage.tokens),
+            toolCalls: Math.max(status.usage.toolCalls ?? 0, task.usage.toolCalls),
+            installs: Math.max(status.usage.installs ?? 0, task.usage.installs),
+          };
+        }
         if (
           status.status === "completed" ||
           status.status === "failed" ||
           status.status === "budget_exhausted"
         ) {
-          if (status.usage) {
-            task.usage = {
-              tokens: status.usage.tokens ?? task.usage.tokens,
-              toolCalls: status.usage.toolCalls ?? task.usage.toolCalls,
-              installs: status.usage.installs ?? task.usage.installs,
-            };
-          }
           // Sync goals from history before terminal promotion
           const paths = taskPaths(task.dataDir);
           if (existsSync(paths.historyDb)) {
@@ -94,6 +94,8 @@ export class Watchdog {
           this.store.save(task);
           return;
         }
+        // Running: persist usage so console / Token 统计可见
+        this.store.save(task);
       } catch {
         /* ignore corrupt status */
       }

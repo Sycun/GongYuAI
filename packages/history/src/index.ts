@@ -424,19 +424,19 @@ export class HistoryStore {
     );
 
     const lines: string[] = [];
-    lines.push("## Goals");
+    lines.push("## 目标");
     for (const g of goals) {
-      lines.push(`- [${g.passes ? "PASS" : "FAIL"}] ${g.id}: ${g.title}`);
+      lines.push(`- [${g.passes ? "通过" : "未通过"}] ${g.id}: ${g.title}`);
     }
-    lines.push("", "## Fact titles");
+    lines.push("", "## 事实标题");
     for (const f of titles.slice(-50)) {
       lines.push(`- ${f.title}`);
     }
-    lines.push("", "## Recent summaries");
+    lines.push("", "## 近期摘要");
     for (const f of summaries) {
       lines.push(`- ${f.title}: ${f.summary.slice(0, 240)}`);
     }
-    lines.push("", "## Open intents");
+    lines.push("", "## 进行中意图");
     for (const i of open) {
       lines.push(`- (${i.status}) ${i.title}`);
     }

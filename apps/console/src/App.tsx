@@ -38,6 +38,7 @@ type Route =
   | SettingsRoute
   | DetailTab;
 
+/** 任务深潜 / 设置 默认全展开，用户可自行折叠 */
 const DEFAULT_OPEN_KEYS = ["dive", "settings"];
 
 function normalizeRoute(route: string): Route {
@@ -216,7 +217,15 @@ export function App() {
           {route === "overview" && (
             <OverviewPage overview={overview} onSelect={openTask} />
           )}
-          {route === "tasks" && <TasksPage tasks={tasks} onSelect={openTask} />}
+          {route === "tasks" && (
+            <TasksPage
+              tasks={tasks}
+              onSelect={openTask}
+              onCreated={(id) => {
+                void refresh().then(() => openTask(id));
+              }}
+            />
+          )}
           {isSettingsRoute(route) && (
             <SettingsPage section={settingsSectionOf(route)} />
           )}

@@ -140,7 +140,7 @@ export function installTool(
 export function appendProgress(workspaceDir: string, line: string): void {
   const path = join(workspaceDir, "PROGRESS.md");
   if (!existsSync(path)) {
-    writeFileSync(path, `# Progress\n\n`);
+    writeFileSync(path, `# 执行进度\n\n`);
   }
   appendFileSync(path, `- ${new Date().toISOString()} ${line}\n`);
 }

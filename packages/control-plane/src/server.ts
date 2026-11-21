@@ -210,6 +210,10 @@ export function startControlServer(opts: ServerOptions) {
           const stopped = await runner.stop(taskId);
           return send(res, 200, { task: stopped });
         }
+        if (method === "POST" && rest === "/start") {
+          const started = await runner.start(taskId);
+          return send(res, 200, { task: started });
+        }
         if (method === "GET" && rest === "/logs") {
           const logPath = join(task.dataDir, "worker.log");
           const text = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
@@ -283,6 +287,66 @@ export function startControlServer(opts: ServerOptions) {
           const paths = taskPaths(task.dataDir);
           const statusPath = join(task.dataDir, "worker-status.json");
           const ckptPath = `${paths.durableDb}.ckpt.sqlite`;
+          const progressPath = join(paths.workspaceDir, "PROGRESS.md");
+          let progress: string[] = [];
+          if (existsSync(progressPath)) {
+            progress = readFileSync(progressPath, "utf8")
+              .split("\n")
+              .map((l) => l.trim())
+              .filter((l) => l.startsWith("- "))
+              .map((l) => l.slice(2))
+              .slice(-40);
+          }
+          let recentFacts: Array<{
+            title: string;
+            summary: string;
+            layer: string;
+            createdAt: string;
+          }> = [];
+          let recentIntents: Array<{ title: string; status: string }> = [];
+          if (existsSync(paths.historyDb)) {
+            const history = openHistory({
+              dbPath: paths.historyDb,
+              evidenceDir: paths.evidenceDir,
+            });
+            try {
+              recentFacts = history
+                .listFacts(task.id)
+                .slice(-30)
+                .reverse()
+                .map((f) => ({
+                  title: f.title,
+                  summary: f.summary,
+                  layer: f.layer,
+                  createdAt: f.createdAt,
+                }));
+              recentIntents = history
+                .listIntents(task.id)
+                .slice(-20)
+                .reverse()
+                .map((i) => ({ title: i.title, status: i.status }));
+            } finally {
+              history.close();
+            }
+          }
+          // Keep task.usage fresh when console polls runtime
+          if (existsSync(statusPath)) {
+            try {
+              const ws = JSON.parse(readFileSync(statusPath, "utf8")) as {
+                usage?: { tokens?: number; toolCalls?: number; installs?: number };
+              };
+              if (ws.usage) {
+                task.usage = {
+                  tokens: Math.max(ws.usage.tokens ?? 0, task.usage.tokens),
+                  toolCalls: Math.max(ws.usage.toolCalls ?? 0, task.usage.toolCalls),
+                  installs: Math.max(ws.usage.installs ?? 0, task.usage.installs),
+                };
+                store.save(task);
+              }
+            } catch {
+              /* ignore */
+            }
+          }
           return send(res, 200, {
             leaseOwner: task.leaseOwner,
             leaseUntil: task.leaseUntil,
@@ -294,6 +358,10 @@ export function startControlServer(opts: ServerOptions) {
               : null,
             hasCheckpoint: existsSync(ckptPath),
             dataDir: task.dataDir,
+            progress,
+            recentFacts,
+            recentIntents,
+            usage: task.usage,
           });
         }
       }

@@ -1,0 +1,14 @@
+[
+  {
+    "id": "board-loop",
+    "title": "Autonomous TSecBench loop",
+    "description": "You own the full loop without human help. Use pnpm tsecbench list/status/start/submit/close. Rules: (1) max 3 concurrent started containers; (2) prefer incomplete medium then hard; (3) skip already is_completed=true; (4) after each flag submit, close that challenge; (5) if container broken, close then start again; (6) VPN is already connected—never hunt VPN or change host routes; (7) write every cycle under evidence/tsec/<code>/ with board.json, recon-*.txt, submit-*.json; (8) keep going across multiple challenges until budget ends. Hint costs score—avoid unless truly stuck.",
+    "evidencePatterns": ["tsec/**/submit-*"]
+  },
+  {
+    "id": "progress-log",
+    "title": "Maintain progress log",
+    "description": "Keep evidence/goals/autonomous-progress.md updated with which unique_codes completed, scores awarded, and next planned code.",
+    "evidencePatterns": ["goals/autonomous-progress.md"]
+  }
+]

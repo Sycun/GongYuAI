@@ -40,21 +40,21 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
       mkdirSync(manifest.workspaceDir, { recursive: true });
       writeFileSync(
         join(manifest.workspaceDir, "PROGRESS.md"),
-        `# Progress\n\nInitializer for task ${manifest.taskId}\n\n`,
+        `# 执行进度\n\n任务 ${manifest.taskId} 初始化\n\n`,
       );
       history.appendFact({
         taskId: manifest.taskId,
         layer: "title",
-        title: "Task initialized",
-        summary: `Authorized targets: ${manifest.auth.targets.join(", ")}`,
+        title: "任务已初始化",
+        summary: `授权目标：${manifest.auth.targets.join("、")}`,
       });
       history.appendFact({
         taskId: manifest.taskId,
         layer: "summary",
-        title: "Auth scope loaded",
+        title: "已加载授权范围",
         summary: manifest.auth.authorizationNote.slice(0, 500),
       });
-      appendProgress(manifest.workspaceDir, "initializer complete");
+      appendProgress(manifest.workspaceDir, "初始化完成");
       state.phase = "loop";
       state.step = 0;
       ckpt.save(state);

@@ -11,6 +11,7 @@ export default defineConfig({
       "/health": "http://127.0.0.1:8877",
       "/overview": "http://127.0.0.1:8877",
       "/tasks": "http://127.0.0.1:8877",
+      "/settings": "http://127.0.0.1:8877",
     },
   },
   build: {

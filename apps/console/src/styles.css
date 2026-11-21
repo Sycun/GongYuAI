@@ -29,6 +29,91 @@ body {
   border-radius: 8px;
 }
 
+.gy-exec-trace-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.gy-tool-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--semi-color-fill-0);
+}
+
+.gy-tool-chain-item {
+  display: inline-flex;
+  align-items: center;
+}
+
+.gy-tool-chain-arrow {
+  margin: 0 6px;
+  color: var(--semi-color-text-3);
+  font-size: 12px;
+}
+
+.gy-exec-timeline {
+  padding-left: 4px;
+}
+
+.gy-exec-step-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 2px 4px 2px 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.gy-exec-step-btn:hover:not(:disabled) {
+  background: var(--semi-color-fill-0);
+}
+
+.gy-exec-step-btn:disabled {
+  cursor: default;
+}
+
+.gy-exec-chevron {
+  display: inline-flex;
+  width: 16px;
+  margin-top: 3px;
+  color: var(--semi-color-text-2);
+  flex-shrink: 0;
+}
+
+.gy-exec-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 8px 0 4px 22px;
+}
+
+.gy-exec-detail {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-0);
+}
+
+.gy-exec-summary {
+  margin-top: 6px !important;
+  max-height: 220px;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--semi-color-fill-0);
+}
+
 .semi-navigation-header-text {
   font-weight: 650 !important;
   letter-spacing: 0.02em;

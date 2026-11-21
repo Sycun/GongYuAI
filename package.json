@@ -16,6 +16,7 @@
     "gy": "tsx apps/cli/src/index.ts",
     "test": "pnpm -r run test",
     "smoke": "tsx scripts/smoke.ts",
+    "tsecbench": "tsx scripts/tsecbench.ts",
     "typecheck": "pnpm -r run typecheck"
   },
   "dependencies": {

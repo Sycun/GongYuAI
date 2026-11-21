@@ -60,6 +60,15 @@ export type RuntimePayload = {
   workerStatus: unknown;
   hasCheckpoint: boolean;
   dataDir: string;
+  progress?: string[];
+  recentFacts?: Array<{
+    title: string;
+    summary: string;
+    layer: string;
+    createdAt: string;
+  }>;
+  recentIntents?: Array<{ title: string; status: string }>;
+  usage?: { tokens: number; toolCalls: number; installs: number };
 };
 
 export type EvidenceList = {
@@ -127,11 +136,40 @@ export type UpdateJobStatus = {
   silent: boolean;
 };
 
+export type CreateTaskBody = {
+  name: string;
+  mock?: boolean;
+  auth: {
+    authorizationNote: string;
+    targets: string[];
+    outOfScope?: string[];
+  };
+  goals: Array<{
+    id: string;
+    title: string;
+    description: string;
+    evidencePatterns: string[];
+  }>;
+  budget?: {
+    maxTokens?: number;
+    maxWallMs?: number;
+    maxToolCalls?: number;
+    maxInstalls?: number;
+  };
+};
+
 export const api = {
   health: () => request<{ ok: boolean }>("/health"),
   overview: () => request<Overview>("/overview"),
   tasks: () => request<{ tasks: TaskRecord[] }>("/tasks"),
+  createTask: (body: CreateTaskBody) =>
+    request<{ task: TaskRecord }>("/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   stop: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/stop`, { method: "POST" }),
+  start: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/start`, { method: "POST" }),
   history: (id: string) => request<HistoryPayload>(`/tasks/${id}/history`),
   runtime: (id: string) => request<RuntimePayload>(`/tasks/${id}/runtime`),
   evidence: (id: string) => request<EvidenceList>(`/tasks/${id}/evidence`),

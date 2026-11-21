@@ -39,16 +39,16 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
     if (state.phase === "init") {
       writeFileSync(
         join(manifest.workspaceDir, "PROGRESS.md"),
-        `# Progress\n\nPi worker initializer for ${manifest.taskId}\n`,
+        `# 执行进度\n\n任务 ${manifest.taskId} 初始化\n`,
       );
       history.seedGoals(manifest.taskId, manifest.goals);
       history.appendFact({
         taskId: manifest.taskId,
         layer: "title",
-        title: "Pi worker started",
-        summary: `targets=${manifest.auth.targets.join(",")}`,
+        title: "执行节点已启动",
+        summary: `目标范围：${manifest.auth.targets.join("、") || "—"}`,
       });
-      appendProgress(manifest.workspaceDir, "initializer complete");
+      appendProgress(manifest.workspaceDir, "初始化完成");
       state.phase = "loop";
       ckpt.save(state);
     }
@@ -64,9 +64,10 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
     state.phase = "done";
     ckpt.save(state);
 
-    const exhausted = ctx.usage.toolCalls >= manifest.budget.maxToolCalls;
+    const allPass = history.allGoalsPass(manifest.taskId);
     writeWorkerStatus(manifest.dataDir, {
-      status: exhausted && !history.allGoalsPass(manifest.taskId) ? "budget_exhausted" : "completed",
+      // Never report "completed" while goals still FAIL (e.g. hard round-cap exit).
+      status: allPass ? "completed" : "budget_exhausted",
       usage: {
         tokens: state.tokens,
         toolCalls: ctx.usage.toolCalls,
@@ -93,6 +94,89 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
   }
 }
 
+/** Resolve provider/model/baseUrl for Pi Durable from GongYu settings. */
+export function resolvePiModelRef(manifest: WorkerManifest): {
+  provider: string;
+  modelId: string;
+  baseUrl: string;
+  apiKeyEnv: string;
+  visionEnabled: boolean;
+  visionModelId: string;
+} {
+  const modelId = manifest.model?.modelId ?? process.env.GY_MODEL ?? "gpt-4.1-mini";
+  const baseUrl = (
+    manifest.model?.baseUrl ??
+    process.env.OPENAI_BASE_URL ??
+    "https://api.openai.com/v1"
+  ).replace(/\/$/, "");
+  const apiKeyEnv = manifest.model?.apiKeyEnv ?? "OPENAI_API_KEY";
+  const visionEnabled = manifest.model?.visionEnabled !== false;
+  const visionModelId = manifest.model?.visionModelId || modelId;
+
+  let provider = (manifest.model?.provider || "openai").trim().toLowerCase() || "openai";
+  // Settings UI is OpenAI-compatible: users often leave provider=openai while pointing
+  // baseUrl at DeepSeek / proxies. Map those so Pi's catalog lookup + compat detect work.
+  if (provider === "openai" || provider === "openai-compatible" || provider === "compat") {
+    const host = baseUrl.toLowerCase();
+    if (host.includes("deepseek.com")) provider = "deepseek";
+    else if (host.includes("openrouter.ai")) provider = "openrouter";
+    else if (!host.includes("api.openai.com")) provider = "openai-compatible";
+  }
+
+  return { provider, modelId, baseUrl, apiKeyEnv, visionEnabled, visionModelId };
+}
+
+async function buildConfiguredModels(manifest: WorkerManifest) {
+  const { createModels, createProvider } = await import("@earendil-works/pi-ai/models");
+  const { openAICompletionsApi } = await import(
+    "@earendil-works/pi-ai/api/openai-completions.lazy"
+  );
+  const ref = resolvePiModelRef(manifest);
+  const chatModel = {
+    id: ref.modelId,
+    name: ref.modelId,
+    api: "openai-completions" as const,
+    provider: ref.provider,
+    baseUrl: ref.baseUrl,
+    reasoning: false,
+    input: (ref.visionEnabled ? ["text", "image"] : ["text"]) as ("text" | "image")[],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 16_384,
+  };
+  const modelsList = [chatModel];
+  if (ref.visionModelId !== ref.modelId) {
+    modelsList.push({
+      ...chatModel,
+      id: ref.visionModelId,
+      name: ref.visionModelId,
+      input: ["text", "image"],
+    });
+  }
+
+  const models = createModels();
+  models.setProvider(
+    createProvider({
+      id: ref.provider,
+      name: ref.provider,
+      baseUrl: ref.baseUrl,
+      auth: {
+        apiKey: {
+          name: "API key",
+          resolve: async () => {
+            const key = process.env[ref.apiKeyEnv];
+            if (!key) return undefined;
+            return { auth: { apiKey: key }, source: ref.apiKeyEnv };
+          },
+        },
+      },
+      models: modelsList,
+      api: openAICompletionsApi(),
+    }),
+  );
+  return { models, ref };
+}
+
 async function tryPiDurable(
   manifest: WorkerManifest,
   ctx: ToolContext,
@@ -101,27 +185,24 @@ async function tryPiDurable(
 ): Promise<boolean> {
   try {
     const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
-    const { createModels } = await import("@earendil-works/pi-ai/models");
-    const { openaiProvider } = await import("@earendil-works/pi-ai/providers/openai");
     const durable = await import("@earendil-works/pi-durable");
     const { openNodeSqliteStorage } = await import(
       "@earendil-works/pi-durable/storage/sqlite/node"
     );
     const schema = await import("@earendil-works/pi-schema");
 
-    const apiKey = process.env[manifest.model?.apiKeyEnv ?? "OPENAI_API_KEY"];
+    const { models, ref } = await buildConfiguredModels(manifest);
+    const apiKey = process.env[ref.apiKeyEnv];
     if (!apiKey) return false;
+    if (!models.getModel(ref.provider, ref.modelId)) {
+      appendProgress(
+        manifest.workspaceDir,
+        `Pi Durable 模型未注册（${ref.provider}/${ref.modelId}），改用 OpenAI 工具循环`,
+      );
+      return false;
+    }
 
     const context = BACKGROUND_CONTEXT;
-    const models = createModels();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (models as any).setProvider(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (openaiProvider as any)({
-        apiKey,
-        baseURL: manifest.model?.baseUrl ?? process.env.OPENAI_BASE_URL,
-      }),
-    );
 
     const { defineTool, defineExtension, createRegistry, Harness, AssistantEntry, section } =
       durable as typeof durable & {
@@ -255,18 +336,22 @@ async function tryPiDurable(
     const root = await harness.root(context, {
       agent: {
         model: {
-          provider: "openai",
-          modelId: manifest.model?.modelId ?? process.env.GY_MODEL ?? "gpt-4.1-mini",
+          provider: ref.provider,
+          modelId: ref.modelId,
         },
       },
     });
     harness.resume();
+    appendProgress(
+      manifest.workspaceDir,
+      `Pi Durable 使用模型 ${ref.provider}/${ref.modelId}`,
+    );
 
     const prompt = [
-      "You are GongYuAI, an AI-native authorized pentest worker.",
-      "Complete all FAIL goals using tools. Never claim pass without assert_goal succeeding.",
-      "Stay inside auth.targets. Prefer small incremental intents.",
-      "When all goals pass, reply DONE.",
+      "你是 GongYuAI 授权安全评估执行节点。对操作者可见的说明尽量用中文。",
+      "请用工具完成所有未通过目标；未经 assert_goal 成功不得宣称通过。",
+      "严格留在 auth.targets 范围内，优先小步意图。",
+      "全部目标通过后回复 DONE。",
       "",
       ctx.history.overview(manifest.taskId),
     ].join("\n");
@@ -276,6 +361,22 @@ async function tryPiDurable(
       context,
     );
     const settled = await submission.wait(context);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const settledAny = settled as any;
+    if (
+      settledAny?.status === "unanswered" ||
+      settledAny?.reason === "no_model" ||
+      (typeof settledAny?.status === "string" &&
+        settledAny.status !== "done" &&
+        settledAny.status !== "answered")
+    ) {
+      await harness.close(context);
+      appendProgress(
+        manifest.workspaceDir,
+        `Pi Durable 无可用模型（${settledAny?.reason ?? settledAny?.status}），改用 OpenAI 工具循环`,
+      );
+      return false;
+    }
     if (settled.status === "done" && settled.type === "input") {
       await root.commit(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -288,34 +389,70 @@ async function tryPiDurable(
     state.toolCalls = ctx.usage.toolCalls;
     state.installs = ctx.usage.installs;
     ckpt.save(state);
+    flushUsage(manifest, ctx, state);
+    // If Pi never called tools and goals remain, prefer OpenAI-compatible loop (e.g. DeepSeek).
+    if (ctx.usage.toolCalls === 0 && !ctx.history.allGoalsPass(manifest.taskId)) {
+      appendProgress(
+        manifest.workspaceDir,
+        "Pi Durable 未调用工具，改用 OpenAI 工具循环",
+      );
+      return false;
+    }
     return true;
   } catch (err) {
     appendProgress(
       manifest.workspaceDir,
-      `pi-durable unavailable, falling back: ${err instanceof Error ? err.message : String(err)}`,
+      `Pi Durable 不可用，回退：${err instanceof Error ? err.message : String(err)}`,
     );
     return false;
   }
 }
 
+function tokenDelta(usage?: {
+  total_tokens?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+}): number {
+  if (!usage) return 0;
+  if (typeof usage.total_tokens === "number" && usage.total_tokens > 0) {
+    return usage.total_tokens;
+  }
+  return (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0);
+}
+
+function flushUsage(
+  manifest: WorkerManifest,
+  ctx: ToolContext,
+  state: CheckpointState,
+): void {
+  writeWorkerStatus(manifest.dataDir, {
+    status: "running",
+    usage: {
+      tokens: state.tokens,
+      toolCalls: ctx.usage.toolCalls,
+      installs: ctx.usage.installs,
+    },
+  });
+}
+
 function systemPrompt(manifest: WorkerManifest, overview: string): string {
   const visionOn = manifest.model?.visionEnabled !== false;
   const visionLine = visionOn
-    ? `- Vision enabled (Pi image input). Prefer visionModelId=${manifest.model?.visionModelId || manifest.model?.modelId || "default"} for screenshots/UI evidence when available.`
-    : `- Vision disabled; do not rely on image understanding.`;
-  return `GongYuAI authorized pentest worker.
-Authorization: ${manifest.auth.authorizationNote}
-Targets: ${manifest.auth.targets.join(", ")}
-Out of scope: ${manifest.auth.outOfScope.join(", ") || "(none)"}
+    ? `- 视觉能力已开启。截图/界面证据优先使用 visionModelId=${manifest.model?.visionModelId || manifest.model?.modelId || "default"}。`
+    : `- 视觉能力已关闭；不要依赖图像理解。`;
+  return `你是 GongYuAI 授权安全评估执行节点。对操作者可见的说明、事实标题与摘要尽量使用中文。
+授权说明：${manifest.auth.authorizationNote}
+目标范围：${manifest.auth.targets.join("、")}
+范围外：${manifest.auth.outOfScope.join("、") || "（无）"}
 
-Rules:
-- Use tools; do not invent evidence.
-- assert_goal requires real evidence files.
-- install_tool when a binary is missing.
-- Keep History updated with title/summary/evidence facts.
+规则：
+- 必须使用工具，不得虚构证据。
+- assert_goal 需要真实证据文件。
+- 缺少二进制时用 install_tool。
+- 持续用 title/summary/evidence 事实更新 History。
 ${visionLine}
 
-Current History:
+当前 History：
 ${overview}
 `;
 }
@@ -434,33 +571,63 @@ async function runOpenAiToolLoop(
     {
       role: "user",
       content:
-        "Complete all FAIL goals. Use tools. When finished and all goals pass, reply with DONE.",
+        "请完成所有未通过目标。使用工具推进；全部通过后回复 DONE。对外说明尽量用中文。",
     },
   ];
 
-  for (let i = 0; i < 40; i++) {
+  appendProgress(manifest.workspaceDir, "进入模型工具循环");
+  flushUsage(manifest, ctx, state);
+
+  // LLM rounds follow task budget (old hard cap of 40 caused false "completed").
+  const maxRounds = Math.max(manifest.budget.maxToolCalls, 40);
+  for (let i = 0; i < maxRounds; i++) {
     if (ctx.history.allGoalsPass(manifest.taskId)) break;
     if (ctx.usage.toolCalls >= manifest.budget.maxToolCalls) break;
 
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-        "user-agent": "GongYuAI/0.1",
-      },
-      body: JSON.stringify({
-        model,
-        messages,
-        tools,
-        tool_choice: "auto",
-      }),
-    });
+    let res: Response | undefined;
+    let lastFetchErr: unknown;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        res = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${apiKey}`,
+            "content-type": "application/json",
+            "user-agent": "GongYuAI/0.1",
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            tools,
+            tool_choice: "auto",
+          }),
+        });
+        lastFetchErr = undefined;
+        break;
+      } catch (err) {
+        lastFetchErr = err;
+        const waitMs = 1000 * (attempt + 1);
+        appendProgress(
+          manifest.workspaceDir,
+          `模型请求重试 ${attempt + 1}/4：${err instanceof Error ? err.message : String(err)}（等待 ${waitMs}ms）`,
+        );
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+    }
+    if (!res) {
+      throw new Error(
+        `模型请求失败（已重试）：${lastFetchErr instanceof Error ? lastFetchErr.message : String(lastFetchErr)}`,
+      );
+    }
     if (!res.ok) {
-      throw new Error(`openai error ${res.status}: ${await res.text()}`);
+      throw new Error(`模型接口错误 ${res.status}: ${await res.text()}`);
     }
     const data = (await res.json()) as {
-      usage?: { total_tokens?: number };
+      usage?: {
+        total_tokens?: number;
+        prompt_tokens?: number;
+        completion_tokens?: number;
+      };
       choices: Array<{
         message: {
           role: string;
@@ -472,9 +639,9 @@ async function runOpenAiToolLoop(
         };
       }>;
     };
-    state.tokens += data.usage?.total_tokens ?? 0;
+    state.tokens += tokenDelta(data.usage);
     const msg = data.choices[0]?.message;
-    if (!msg) throw new Error("empty completion");
+    if (!msg) throw new Error("模型返回为空");
 
     messages.push({
       role: "assistant",
@@ -486,31 +653,49 @@ async function runOpenAiToolLoop(
       if ((msg.content ?? "").includes("DONE")) break;
       messages.push({
         role: "user",
-        content: "Continue with tools until goals pass, then DONE.",
+        content: "请继续用工具推进未通过目标，全部通过后回复 DONE。",
       });
+      flushUsage(manifest, ctx, state);
       continue;
     }
 
+    const toolNames: string[] = [];
     for (const call of msg.tool_calls) {
       const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
       let result = "";
+      toolNames.push(call.function.name);
       try {
         switch (call.function.name) {
-          case "shell":
-            result = JSON.stringify(runShell(ctx, args.command ?? ""));
+          case "shell": {
+            const r = runShell(ctx, args.command ?? "");
+            result = JSON.stringify(r);
+            ctx.history.appendFact({
+              taskId: manifest.taskId,
+              layer: "summary",
+              title: "执行命令",
+              summary: `$ ${String(args.command ?? "").slice(0, 200)} → exit ${r.exitCode}`,
+            });
             break;
+          }
           case "history_overview":
             result = ctx.history.overview(manifest.taskId);
             break;
           case "write_evidence":
             result = writeEvidence(ctx, args.relativePath ?? "note.txt", args.content ?? "");
+            ctx.history.appendFact({
+              taskId: manifest.taskId,
+              layer: "evidence",
+              title: "写入证据",
+              summary: result,
+              evidencePath: result,
+            });
             break;
           case "history_append_fact":
             result = JSON.stringify(
               ctx.history.appendFact({
                 taskId: manifest.taskId,
                 layer: (args.layer as "title" | "summary" | "evidence") ?? "summary",
-                title: args.title ?? "untitled",
+                title: args.title ?? "未命名",
                 summary: args.summary ?? "",
                 evidencePath: args.evidencePath || null,
               }),
@@ -520,6 +705,12 @@ async function runOpenAiToolLoop(
             result = JSON.stringify(
               installTool(ctx, { name: args.name ?? "", package: args.package }),
             );
+            ctx.history.appendFact({
+              taskId: manifest.taskId,
+              layer: "summary",
+              title: "安装工具",
+              summary: args.name ?? "",
+            });
             break;
           case "assert_goal":
             result = JSON.stringify(
@@ -532,12 +723,18 @@ async function runOpenAiToolLoop(
                   .filter(Boolean),
               ),
             );
+            ctx.history.appendFact({
+              taskId: manifest.taskId,
+              layer: "summary",
+              title: "断言目标",
+              summary: args.goalId ?? "",
+            });
             break;
           default:
-            result = `unknown tool ${call.function.name}`;
+            result = `未知工具 ${call.function.name}`;
         }
       } catch (err) {
-        result = `error: ${err instanceof Error ? err.message : String(err)}`;
+        result = `错误: ${err instanceof Error ? err.message : String(err)}`;
       }
       messages.push({
         role: "tool",
@@ -548,8 +745,13 @@ async function runOpenAiToolLoop(
 
     state.toolCalls = ctx.usage.toolCalls;
     state.installs = ctx.usage.installs;
+    state.step = i + 1;
     ckpt.save(state);
+    flushUsage(manifest, ctx, state);
     writeFileSync(join(manifest.workspaceDir, "openai-transcript.json"), JSON.stringify(messages, null, 2));
-    appendProgress(manifest.workspaceDir, `openai step ${i + 1}`);
+    appendProgress(
+      manifest.workspaceDir,
+      `第 ${i + 1} 步 · 工具 ${toolNames.join("、") || "无"} · Token ${state.tokens}`,
+    );
   }
 }
