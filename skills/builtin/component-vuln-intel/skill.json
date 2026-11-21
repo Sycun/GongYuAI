@@ -2,9 +2,15 @@
   "id": "component-vuln-intel",
   "name": "component-vuln-intel",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "cve",
+    "组件",
+    "依赖",
+    "供应链"
   ]
 }

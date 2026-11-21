@@ -2,9 +2,15 @@
   "id": "wireless-hardware-attack",
   "name": "wireless-hardware-attack",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "wifi",
+    "无线",
+    "rf",
+    "蓝牙"
   ]
 }

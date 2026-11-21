@@ -2,9 +2,17 @@
   "id": "web-attack-methods",
   "name": "web-attack-methods",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "web",
+    "注入",
+    "xss",
+    "ssrf",
+    "idor",
+    "上传"
   ]
 }

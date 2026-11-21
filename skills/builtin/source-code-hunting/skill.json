@@ -2,9 +2,15 @@
   "id": "source-code-hunting",
   "name": "source-code-hunting",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "源码",
+    "code",
+    "审计",
+    "sast"
   ]
 }

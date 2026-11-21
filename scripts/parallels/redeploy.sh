@@ -1,29 +1,23 @@
 #!/usr/bin/env bash
-# Run inside Parallels Ubuntu/Kali. Syncs host GongYuAI, rebuilds, restarts serve on :8877.
+# Run inside Kali. Pull from GitHub private origin, rebuild, restart serve on :8877.
+# Host develops in /Users/sycpro/GongYuAI and pushes; this VM only pulls — no Parallels share / Downloads sync.
 set -euo pipefail
-export PATH="/home/parallels/.n/bin:/home/parallels/.npm-global/bin:${PATH:-}"
-GY=/home/parallels/GongYuAI
+export PATH="/home/parallels/.n/bin:/home/parallels/.npm-global/bin:/home/parallels/.local/bin:${PATH:-}"
 
-# Prefer full Home share; fall back to Downloads sync drop (psf often only mirrors Downloads).
-if [[ -d /media/psf/Home/GongYuAI ]]; then
-  SRC=/media/psf/Home/GongYuAI
-elif [[ -d /media/psf/Home/Downloads/GongYuAI-sync ]]; then
-  SRC=/media/psf/Home/Downloads/GongYuAI-sync
-else
-  echo "missing shared source (expected /media/psf/Home/GongYuAI or .../Downloads/GongYuAI-sync)" >&2
+GY=/home/parallels/GongYuAI
+BRANCH="${GONGYUAI_BRANCH:-main}"
+REMOTE="${GONGYUAI_REMOTE:-origin}"
+
+if [[ ! -d "$GY/.git" ]]; then
+  echo "missing git checkout at $GY (expected clone of Sycun/GongYuAI)" >&2
   exit 1
 fi
 
-echo "sync $SRC -> $GY"
-rsync -a --delete \
-  --exclude node_modules \
-  --exclude .gongyuai \
-  --exclude .git \
-  --exclude out \
-  --exclude '.env' \
-  "$SRC/" "$GY/"
-
 cd "$GY"
+echo "pull $REMOTE/$BRANCH -> $GY"
+git fetch "$REMOTE"
+git pull --ff-only "$REMOTE" "$BRANCH"
+
 pnpm install
 pnpm --filter @gongyuai/contracts build
 pnpm --filter @gongyuai/history build

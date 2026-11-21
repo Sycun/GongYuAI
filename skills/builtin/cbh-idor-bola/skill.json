@@ -2,9 +2,15 @@
   "id": "cbh-idor-bola",
   "name": "cbh-idor-bola",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "idor",
+    "bola",
+    "越权",
+    "object"
   ]
 }

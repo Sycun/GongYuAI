@@ -2,9 +2,16 @@
   "id": "active-directory-attack",
   "name": "active-directory-attack",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "ad",
+    "domain",
+    "kerberos",
+    "ldap",
+    "smb"
   ]
 }

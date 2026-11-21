@@ -2,9 +2,15 @@
   "id": "cbh-business-logic",
   "name": "cbh-business-logic",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "业务逻辑",
+    "logic",
+    "支付",
+    "工单"
   ]
 }

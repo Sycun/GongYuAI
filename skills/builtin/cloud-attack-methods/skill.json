@@ -2,9 +2,16 @@
   "id": "cloud-attack-methods",
   "name": "cloud-attack-methods",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "aws",
+    "azure",
+    "gcp",
+    "cloud",
+    "s3"
   ]
 }

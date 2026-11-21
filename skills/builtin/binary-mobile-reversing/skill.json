@@ -2,9 +2,15 @@
   "id": "binary-mobile-reversing",
   "name": "binary-mobile-reversing",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "apk",
+    "ios",
+    "逆向",
+    "mobile"
   ]
 }

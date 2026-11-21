@@ -2,9 +2,15 @@
   "id": "blockchain-contract-attack",
   "name": "blockchain-contract-attack",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "solidity",
+    "合约",
+    "web3",
+    "defi"
   ]
 }

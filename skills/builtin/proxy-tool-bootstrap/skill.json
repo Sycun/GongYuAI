@@ -2,9 +2,15 @@
   "id": "proxy-tool-bootstrap",
   "name": "proxy-tool-bootstrap",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "burp",
+    "proxy",
+    "抓包",
+    "mitm"
   ]
 }

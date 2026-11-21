@@ -2,9 +2,16 @@
   "id": "ai-llm-app-attack",
   "name": "ai-llm-app-attack",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "llm",
+    "prompt",
+    "ai",
+    "rag",
+    "agent"
   ]
 }

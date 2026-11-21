@@ -2,9 +2,14 @@
   "id": "redteam-opsec",
   "name": "redteam-opsec",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "opsec",
+    "隐蔽",
+    "痕迹"
   ]
 }

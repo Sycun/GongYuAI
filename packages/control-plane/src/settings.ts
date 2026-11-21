@@ -407,10 +407,18 @@ export class SettingsStore {
     }));
   }
 
+  /**
+   * Legacy field: we no longer pre-inject skill bodies into the system prompt.
+   * Keep empty — model uses routing table + load_skill.
+   */
   enabledSkillsForManifest(): WorkerSkillPack[] {
-    const core = new Set<string>(CORE_SKILL_IDS);
+    return [];
+  }
+
+  /** Packs that participate in the skill router (settings.enabled). */
+  routedSkillsForManifest(): WorkerSkillPack[] {
     return this.data.skillPacks
-      .filter((s) => s.enabled || core.has(s.id))
+      .filter((s) => s.enabled)
       .map((s) => ({
         id: s.id,
         name: s.name,
@@ -424,11 +432,13 @@ export class SettingsStore {
     description: string;
     category: string;
   }> {
-    return this.data.skillPacks.map((s) => ({
-      id: s.id,
-      name: s.name,
-      description: s.description ?? "",
-      category: "skill",
-    }));
+    return this.data.skillPacks
+      .filter((s) => s.enabled)
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description ?? "",
+        category: "skill",
+      }));
   }
 }

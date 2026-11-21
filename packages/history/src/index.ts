@@ -237,6 +237,14 @@ export class HistoryStore {
     return rows.map((r) => this.rowToFact(r));
   }
 
+  getFact(taskId: string, factId: string): Fact | null {
+    const r = this.db
+      .prepare(`SELECT * FROM facts WHERE task_id = ? AND id = ?`)
+      .get(taskId, factId) as Record<string, unknown> | undefined;
+    if (!r) return null;
+    return this.rowToFact(r);
+  }
+
   private rowToFact(r: Record<string, unknown>): Fact {
     return {
       id: String(r.id),
@@ -535,10 +543,37 @@ export class HistoryStore {
     }));
   }
 
+  /**
+   * Worker Observe surface: Goals + title-layer Facts + open Intents only.
+   * Summary / evidence stay out of the default prompt — drill via getFact / listFacts.
+   */
+  observe(taskId: string): string {
+    const lines = this.observeCore(taskId);
+    lines.push(
+      "",
+      "（Observe 不含 summary/evidence；需要时用 history_read_fact / history_list_layer。）",
+    );
+    return lines.join("\n");
+  }
+
+  /** Human / report view: Observe + recent summaries (not injected into Worker system prompt). */
   overview(taskId: string): string {
-    const goals = this.listGoals(taskId);
-    const titles = this.listFacts(taskId, "title");
+    const lines = this.observeCore(taskId);
     const summaries = this.listFacts(taskId, "summary").slice(-20);
+    lines.push("", "## 近期摘要");
+    if (summaries.length === 0) {
+      lines.push("- （无）");
+    } else {
+      for (const f of summaries) {
+        lines.push(`- [${f.id.slice(0, 8)}] ${f.title}: ${f.summary.slice(0, 240)}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  private observeCore(taskId: string): string[] {
+    const goals = this.listGoals(taskId);
+    const titles = this.listFacts(taskId, "title").slice(-50);
     const open = this.listIntents(taskId).filter((i) =>
       ["proposed", "claimed", "running"].includes(i.status),
     );
@@ -548,19 +583,21 @@ export class HistoryStore {
     for (const g of goals) {
       lines.push(`- [${g.passes ? "通过" : "未通过"}] ${g.id}: ${g.title}`);
     }
-    lines.push("", "## 事实标题");
-    for (const f of titles.slice(-50)) {
-      lines.push(`- ${f.title}`);
-    }
-    lines.push("", "## 近期摘要");
-    for (const f of summaries) {
-      lines.push(`- ${f.title}: ${f.summary.slice(0, 240)}`);
+    lines.push("", "## 事实标题（title 层）");
+    for (const f of titles) {
+      const intent = f.intentId ? ` ←intent ${f.intentId.slice(0, 8)}` : "";
+      lines.push(`- [${f.id.slice(0, 8)}] ${f.title}${intent}`);
     }
     lines.push("", "## 进行中意图");
-    for (const i of open) {
-      lines.push(`- (${i.status}) ${i.title}`);
+    if (open.length === 0) {
+      lines.push("- （无）");
+    } else {
+      for (const i of open) {
+        const src = i.sourceFactIds.join(",");
+        lines.push(`- [${i.id.slice(0, 8)}] (${i.status}) ${i.title} ←facts ${src}`);
+      }
     }
-    return lines.join("\n");
+    return lines;
   }
 
   relativeEvidencePath(absPath: string): string {

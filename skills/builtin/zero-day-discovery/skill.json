@@ -2,9 +2,14 @@
   "id": "zero-day-discovery",
   "name": "zero-day-discovery",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "0day",
+    "fuzz",
+    "未知漏洞"
   ]
 }

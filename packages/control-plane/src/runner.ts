@@ -48,8 +48,9 @@ function writeManifest(task: TaskRecord, settings: SettingsStore): WorkerManifes
     mcpServers: settings.enabledMcpForManifest(),
     mcpPool: settings.allMcpForManifest(),
     mcpCatalog: settings.mcpCatalogForManifest(),
+    // skillPacks intentionally empty — no full-body injection; router + load_skill.
     skillPacks: settings.enabledSkillsForManifest(),
-    skillPool: settings.allSkillsForManifest(),
+    skillPool: settings.routedSkillsForManifest(),
     skillCatalog: settings.skillCatalogForManifest(),
   };
   mkdirSync(task.dataDir, { recursive: true });

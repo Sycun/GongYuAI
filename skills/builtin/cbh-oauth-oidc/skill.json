@@ -2,9 +2,15 @@
   "id": "cbh-oauth-oidc",
   "name": "cbh-oauth-oidc",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "oauth",
+    "oidc",
+    "sso",
+    "token"
   ]
 }

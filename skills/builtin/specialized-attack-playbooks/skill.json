@@ -2,7 +2,7 @@
   "id": "specialized-attack-playbooks",
   "name": "specialized-attack-playbooks",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"

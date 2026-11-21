@@ -2,9 +2,15 @@
   "id": "attack-surface-recon",
   "name": "attack-surface-recon",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "攻击面",
+    "asset",
+    "枚举",
+    "mapping"
   ]
 }

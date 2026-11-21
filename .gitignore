@@ -13,3 +13,5 @@ apps/console/dist/
 *.sqlite-*
 .turbo/
 coverage/
+examples/tsecbench/private/
+archive/

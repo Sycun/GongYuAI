@@ -2,7 +2,7 @@
   "id": "unlimited-attack-scope",
   "name": "unlimited-attack-scope",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"

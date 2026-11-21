@@ -1,9 +1,15 @@
 {
   "id": "osint",
   "name": "被动 OSINT",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "refs": [
     "https://github.com/kekurttel/pentest-skills",
     "https://github.com/briiirussell/cybersecurity-skills"
+  ],
+  "triggers": [
+    "osint",
+    "whois",
+    "邮箱",
+    "passive"
   ]
 }

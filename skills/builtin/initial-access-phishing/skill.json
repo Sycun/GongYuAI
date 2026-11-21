@@ -2,9 +2,14 @@
   "id": "initial-access-phishing",
   "name": "initial-access-phishing",
   "description": ">-",
-  "defaultEnabled": false,
+  "defaultEnabled": true,
   "source": "csai",
   "refs": [
     "CyberStrikeAI/skills on Kali"
+  ],
+  "triggers": [
+    "钓鱼",
+    "phishing",
+    "初始访问"
   ]
 }

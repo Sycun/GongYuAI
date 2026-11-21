@@ -21,6 +21,16 @@ pnpm -r run build
 pnpm smoke
 ```
 
+## Mac 开发 → Kali 运行（GitHub）
+
+| 角色 | 路径 | 动作 |
+| --- | --- | --- |
+| Mac | `/Users/sycpro/GongYuAI` | 开发；`git push origin main` |
+| Kali | `/home/parallels/GongYuAI` | `bash scripts/parallels/redeploy.sh`（pull + build + `:8877`） |
+
+首次在 Kali 从旧共享盘树切到 Git：`bash scripts/parallels/bootstrap-from-github.sh`。  
+不再使用 `~/Downloads/GongYuAI-sync` / Parallels 共享盘 rsync 做传输。
+
 Mock closed loop:
 
 ```bash

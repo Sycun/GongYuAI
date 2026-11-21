@@ -242,12 +242,48 @@ async function tryPiDurable(
 
     const history_overview = defineTool({
       name: "history_overview",
-      description: "Read layered History overview",
+      description:
+        "Observe History: Goals + title-layer Facts + open Intents (no summary/evidence body)",
       parameters: obj({}),
       replay: "safe",
       execute: async () => ({
-        output: [{ type: "text", text: ctx.history.overview(manifest.taskId) }],
+        output: [{ type: "text", text: ctx.history.observe(manifest.taskId) }],
       }),
+    } as never);
+
+    const history_read_fact = defineTool({
+      name: "history_read_fact",
+      description: "Drill into one Fact by id (summary / evidencePath on demand)",
+      parameters: obj({ factId: str() }),
+      replay: "safe",
+      execute: async (args: { factId: string }) => {
+        const fact = ctx.history.getFact(manifest.taskId, args.factId);
+        return {
+          output: [
+            {
+              type: "text",
+              text: fact ? JSON.stringify(fact) : `unknown fact: ${args.factId}`,
+            },
+          ],
+        };
+      },
+    } as never);
+
+    const history_list_layer = defineTool({
+      name: "history_list_layer",
+      description: "List Facts for one layer (summary|evidence|title) on demand",
+      parameters: obj({ layer: str() }),
+      replay: "safe",
+      execute: async (args: { layer: string }) => {
+        const layer = args.layer as "title" | "summary" | "evidence";
+        if (!["title", "summary", "evidence"].includes(layer)) {
+          return {
+            output: [{ type: "text", text: `invalid layer: ${args.layer}` }],
+          };
+        }
+        const facts = ctx.history.listFacts(manifest.taskId, layer).slice(-30);
+        return { output: [{ type: "text", text: JSON.stringify(facts) }] };
+      },
     } as never);
 
     const history_append_fact = defineTool({
@@ -411,6 +447,8 @@ async function tryPiDurable(
         tools: [
           shell,
           history_overview,
+          history_read_fact,
+          history_list_layer,
           history_append_fact,
           write_evidence,
           install_tool,
@@ -428,7 +466,7 @@ async function tryPiDurable(
             () =>
               systemPrompt(
                 manifest,
-                ctx.history.overview(manifest.taskId),
+                ctx.history.observe(manifest.taskId),
                 mcpHub,
                 skillHub,
               ),
@@ -460,7 +498,7 @@ async function tryPiDurable(
       "严格留在 auth.targets 范围内，优先小步意图。",
       "全部目标通过后回复 DONE。",
       "",
-      ctx.history.overview(manifest.taskId),
+      ctx.history.observe(manifest.taskId),
     ].join("\n");
 
     const submission = await root.submit(
@@ -544,7 +582,7 @@ function flushUsage(
 
 function systemPrompt(
   manifest: WorkerManifest,
-  overview: string,
+  observeText: string,
   mcpHub?: McpHub,
   skillHub?: SkillHub,
 ): string {
@@ -576,14 +614,15 @@ function systemPrompt(
 - 完成只能靠 assert_goal（evidence gate）；口头 DONE 在目标未通过时无效。
 - 禁止修改主机网络/VPN/代理/路由；靶场 VPN 须任务前已连接。
 - 只探测 auth.targets（主机/URL/CIDR；即便目标含 * 也禁止主机网络改动）。
-- 大输出写入 evidence，对话里只留摘要；持续更新 History。
+- Observe 默认只看 title 层 Fact + 进行中 Intent；summary/evidence 用 history_read_fact 或 history_list_layer 按需下钻。
+- 大输出写入 evidence；持续用 history_append_fact 更新 History。
 - 缺少二进制时用 install_tool。
 - 工具面采用按需解锁：常开核以外用 enable_mcp / enable_skill（写清 reason）；不需要时 disable_*。
 - 未 enable 的 MCP 不可调用。
 ${visionLine}
 ${mcpBlock}${mcpCatalogBlock}${skillBlock}${skillCatalogBlock}
-当前 History：
-${overview}
+当前 Observe（History）：
+${observeText}
 `;
 }
 
