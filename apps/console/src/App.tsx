@@ -11,6 +11,13 @@ import {
   IconPuzzle,
   IconCode,
   IconSearch,
+  IconPulse,
+  IconCheckboxTick,
+  IconHistory,
+  IconFolder,
+  IconFile,
+  IconTerminal,
+  IconGlobe,
 } from "@douyinfe/semi-icons";
 import { api, type Overview, type TaskRecord } from "./api";
 import {
@@ -35,8 +42,8 @@ type Route =
   | SettingsRoute
   | DetailTab;
 
-/** 设置默认展开 */
-const DEFAULT_OPEN_KEYS = ["settings"];
+/** 任务深潜 / 设置 固定展开，不可收起 */
+const LOCKED_OPEN_KEYS = ["dive", "settings"];
 
 function isDetailRoute(route: Route): boolean {
   return DETAIL_TABS.some((t) => t.key === route);
@@ -44,6 +51,7 @@ function isDetailRoute(route: Route): boolean {
 
 function normalizeRoute(route: string): Route {
   if (route === "settings" || route === "settings-tools") return "settings-model";
+  if (route === "dive") return "live";
   return (route || "overview") as Route;
 }
 
@@ -68,7 +76,6 @@ export function App() {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
-  const [openKeys, setOpenKeys] = useState<(string | number)[]>(DEFAULT_OPEN_KEYS);
 
   const meta = ROUTE_META[route] ?? ROUTE_META.overview;
   const selectedTask = useMemo(
@@ -123,8 +130,9 @@ export function App() {
 
   const openTask = (id: string) => navigate("live", id);
 
-  // 深潜分区只在任务页内用 Tab；侧栏高亮「任务」
-  const selectedKeys = [isDetailRoute(route) || (route === "tasks" && taskId) ? "tasks" : route];
+  const selectedKeys = [
+    route === "tasks" && taskId ? "tasks" : route,
+  ];
 
   return (
     <Layout style={{ height: "100vh", background: "var(--semi-color-bg-0)" }}>
@@ -132,11 +140,13 @@ export function App() {
         <Nav
           style={{ maxWidth: 220, height: "100%" }}
           selectedKeys={selectedKeys}
-          openKeys={openKeys}
-          onOpenChange={({ openKeys: next }) => setOpenKeys(next ?? [])}
+          openKeys={LOCKED_OPEN_KEYS}
+          onOpenChange={() => {
+            /* 分组固定展开 */
+          }}
           onSelect={({ itemKey }) => {
             const key = String(itemKey);
-            if (key === "settings") return;
+            if (key === "settings" || key === "dive") return;
             navigate(key as Route);
           }}
           header={{
@@ -160,10 +170,18 @@ export function App() {
               </span>
             ),
           }}
-          footer={{ collapseButton: true }}
         >
           <Nav.Item itemKey="overview" text="总览" icon={<IconHome />} />
           <Nav.Item itemKey="tasks" text="任务" icon={<IconList />} />
+          <Nav.Sub itemKey="dive" text="任务深潜">
+            <Nav.Item itemKey="live" text="运行态" icon={<IconPulse />} />
+            <Nav.Item itemKey="assets" text="资产" icon={<IconGlobe />} />
+            <Nav.Item itemKey="goals" text="目标" icon={<IconCheckboxTick />} />
+            <Nav.Item itemKey="history" text="历史" icon={<IconHistory />} />
+            <Nav.Item itemKey="evidence" text="证据" icon={<IconFolder />} />
+            <Nav.Item itemKey="report" text="报告" icon={<IconFile />} />
+            <Nav.Item itemKey="logs" text="日志" icon={<IconTerminal />} />
+          </Nav.Sub>
           <Nav.Sub itemKey="settings" text="设置" icon={<IconSetting />}>
             <Nav.Item itemKey="settings-model" text="模型配置" icon={<IconBolt />} />
             <Nav.Item itemKey="settings-assets" text="资产收集" icon={<IconSearch />} />
