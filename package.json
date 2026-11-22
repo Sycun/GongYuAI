@@ -16,6 +16,7 @@
     "gy": "tsx apps/cli/src/index.ts",
     "test": "pnpm -r run test",
     "smoke": "tsx scripts/smoke.ts",
+    "review:offline": "node --import tsx --test packages/history/src/review-acceptance.test.ts",
     "diff-harness": "tsx scripts/diff-harness.ts",
     "diff-harness:tsec": "tsx scripts/diff-harness.ts --mock --goals examples/tsecbench/goals-subset-diff.json --target example.invalid --auth \"Local synthetic P3 fixture only\"",
     "tsecbench": "tsx scripts/tsecbench.ts",

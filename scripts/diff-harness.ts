@@ -24,7 +24,10 @@ type RunResult = {
   status: string;
   tokens: number;
   toolCalls: number;
-  mock?: { goalsPassed: number; goalsTotal: number; relayEvents: number; relayFiles: number };
+  goalsPassed: number;
+  goalsTotal: number;
+  relayFiles: number;
+  mock?: { relayEvents: number };
 };
 
 function flag(argv: string[], name: string): string | undefined {
@@ -61,6 +64,8 @@ async function runMode(
     port: number;
   },
 ): Promise<RunResult> {
+  const previousNoRelay = process.env.GY_DIFF_NO_RELAY;
+  process.env.GY_DIFF_NO_RELAY = mode === "history" ? "1" : "0";
   const previousMockRelay = process.env.GY_MOCK_RELAY;
   process.env.GY_ALLOW_STUB_INSTALL = "1";
   if (mode === "bare") {
@@ -114,31 +119,35 @@ async function runMode(
     if (!response.ok) throw new Error(`cannot start ${mode}: ${await response.text()}`);
     const { task: created } = (await response.json()) as { task: TaskRecord };
     const { status, task } = await waitTask(plane.url, created.id, 120_000);
+    if (status === "timeout") await plane.runner.stop(task.id);
+    const relayDir = join(task.dataDir, "workspace", "relay");
+    const relayFiles = existsSync(relayDir)
+      ? readdirSync(relayDir).filter((file) => /^(π|pi)\d+\.json$/iu.test(file)).length
+      : 0;
+    if (mode !== "relay" && relayFiles) throw new Error(`${mode}: control produced a Relay file`);
     const result: RunResult = {
+      goalsPassed: task.goals.filter((goal) => goal.passes).length,
+      goalsTotal: task.goals.length,
+      relayFiles,
       mode,
       status,
       tokens: task.usage.tokens,
       toolCalls: task.usage.toolCalls,
     };
     if (opts.mock) {
-      if (status === "timeout") await plane.runner.stop(task.id);
       const history = (await (await fetch(`${plane.url}/tasks/${task.id}/history`)).json()) as {
         events: Array<{ kind: string }>;
       };
-      const relayDir = join(task.dataDir, "workspace", "relay");
       result.mock = {
-        goalsPassed: task.goals.filter((goal) => goal.passes).length,
-        goalsTotal: task.goals.length,
         relayEvents: history.events.filter((event) => event.kind === "relay_written").length,
-        relayFiles: existsSync(relayDir)
-          ? readdirSync(relayDir).filter((file) => /^(π|pi)\d+\.json$/iu.test(file)).length
-          : 0,
       };
     }
     return result;
   } finally {
     await plane.close();
     delete process.env.GY_HARNESS;
+    if (previousNoRelay === undefined) delete process.env.GY_DIFF_NO_RELAY;
+    else process.env.GY_DIFF_NO_RELAY = previousNoRelay;
     if (previousMockRelay === undefined) delete process.env.GY_MOCK_RELAY;
     else process.env.GY_MOCK_RELAY = previousMockRelay;
   }
@@ -148,10 +157,10 @@ function checkMockResults(rows: RunResult[]): void {
   for (const row of rows) {
     const stats = row.mock!;
     const relayExpected = row.mode === "relay" ? 1 : 0;
-    if (stats.relayEvents !== relayExpected || stats.relayFiles !== relayExpected) {
+    if (stats.relayEvents !== relayExpected || row.relayFiles !== relayExpected) {
       throw new Error(`${row.mode}: unexpected number of mock Relay events or files`);
     }
-    if (row.status !== "completed" || stats.goalsPassed !== stats.goalsTotal) {
+    if (row.status !== "completed" || row.goalsPassed !== row.goalsTotal) {
       throw new Error(`${row.mode}: mock fixture goals did not pass`);
     }
     if (row.toolCalls !== 2 || row.tokens !== 0) {
@@ -201,12 +210,11 @@ async function main() {
   }
 
   console.log(mock ? "\n# GongYuAI mock differential\n" : "\n# GongYuAI harness differential (relative only)\n");
-  console.log(`| mode | status | tokens | toolCalls |${mock ? " goals | relay events | relay files |" : ""}`);
-  console.log(`| --- | --- | ---: | ---: |${mock ? " ---: | ---: | ---: |" : ""}`);
+  console.log(`| mode | status | tokens | toolCalls | goals | relay files |${mock ? " relay events |" : ""}`);
+  console.log(`| --- | --- | ---: | ---: | ---: | ---: |${mock ? " ---: |" : ""}`);
   for (const r of rows) {
-    const stats = r.mock;
-    const metrics = stats ? ` ${stats.goalsPassed}/${stats.goalsTotal} | ${stats.relayEvents} | ${stats.relayFiles} |` : "";
-    console.log(`| ${r.mode} | ${r.status} | ${r.tokens} | ${r.toolCalls} |${metrics}`);
+    const events = r.mock ? ` ${r.mock.relayEvents} |` : "";
+    console.log(`| ${r.mode} | ${r.status} | ${r.tokens} | ${r.toolCalls} | ${r.goalsPassed}/${r.goalsTotal} | ${r.relayFiles} |${events}`);
   }
   if (mock) {
     checkMockResults(rows);

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { TaskRecord } from "@gongyuai/contracts";
+import { isBudgetHit, type TaskRecord } from "@gongyuai/contracts";
 import { taskPaths } from "./paths.js";
 
 export type UsageCounters = {
@@ -102,7 +102,19 @@ export function mergeUsageFromDisk(
 
 /** Refresh and persist usage on a task record when counters advanced. */
 export function refreshTaskUsage(task: TaskRecord): UsageCounters {
-  const merged = mergeUsageFromDisk(task.dataDir, task.usage);
+  const disk = mergeUsageFromDisk(task.dataDir, emptyUsage);
+  const offset = task.usageOffset ?? emptyUsage;
+  const merged = maxUsage(task.usage, {
+    tokens: offset.tokens + disk.tokens,
+    toolCalls: offset.toolCalls + disk.toolCalls,
+    installs: offset.installs + disk.installs,
+  });
   task.usage = merged;
   return merged;
+}
+
+export function exhaustedCounter(task: TaskRecord): "maxTokens" | "maxToolCalls" | "maxInstalls" | undefined {
+  if (isBudgetHit(task.usage.tokens, task.budget.maxTokens)) return "maxTokens";
+  if (isBudgetHit(task.usage.toolCalls, task.budget.maxToolCalls)) return "maxToolCalls";
+  if (isBudgetHit(task.usage.installs, task.budget.maxInstalls)) return "maxInstalls";
 }

@@ -82,7 +82,7 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 2. Every provided path is relative to `evidence/` and resolves to a regular file there. Parent traversal, symbolic links and hard-linked files are rejected. The same boundary applies to Worker evidence writes and console reads.
 3. If a path is `**/ALL_COMPLETE.json`, the JSON must be a non-empty challenge array and **every** `is_completed` must be `true`（TSecBench 清板）。
 
-No file ⇒ no pass. Model self-report / verbal DONE is insufficient.
+普通目标至少需要非空材料。可配置 `evidenceChecks` 精确匹配 JSON 顶层字段；断言依据的原始字节与 SHA-256 在同一事务保存。旧记录缺少原版时报告标明未知。见[事实复核与离线验收](./evidence-review.md)。
 
 ## Session Relay（CHAP 对齐，GongYuAI 化）
 
@@ -168,7 +168,7 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 - `budget_exhausted` **only** when a finite hard gate actually fired.
 - `incomplete` when the loop ended without all goals **and** without hitting a gate; Pi path **re-kicks** while goals remain.
 - `failed` / `stopped` for errors / operator stop.
-- 重启任务必须重置 `startedAt`，并把预算恢复为 unlimited（避免旧墙钟秒杀）。
+- 从终态重新开始时重新计墙钟，保留操作者设定的四项预算。Token、调用和安装沿用任务累计口径。详情 API 同时返回本轮增量 `runUsage` 和累计 `usage`。
 - **预算尽仍出报告（P5）**：硬闸或 incomplete 收卷仍落盘 `report.md`。控制面墙钟截止时停止 Worker，用当前 History 写报告，再发布 `budget_exhausted`。如果收卷写盘失败，任务记为 `failed` 并保留错误原因。
 - Tool results are truncated for the chat buffer；权威细节在 evidence + History。
 - Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`.

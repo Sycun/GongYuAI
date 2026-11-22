@@ -34,6 +34,10 @@
 - `examples/dvwa-smoke/`
 - `examples/tsecbench/`
 
+## 事实复核与验收
+
+[女娲、DAG 与证据复核](./evidence-review.md)说明复核入口、证据版本、报告判读和离线验收用例。
+
 ## 北极星
 
 > Harness 让任务活着；History 让路径可信；Evidence 让完成可复核；Relay 让上下文可换班。

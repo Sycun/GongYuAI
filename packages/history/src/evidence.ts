@@ -53,7 +53,7 @@ export function resolveEvidenceFile(evidenceDir: string, path: string) {
   return { relativePath, absolutePath, stat };
 }
 
-export function readEvidenceFile(evidenceDir: string, path: string): string {
+export function readEvidenceBytes(evidenceDir: string, path: string): Buffer {
   const { absolutePath } = resolveEvidenceFile(evidenceDir, path);
   const fd = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -62,10 +62,14 @@ export function readEvidenceFile(evidenceDir: string, path: string): string {
     if (opened.dev !== stat.dev || opened.ino !== stat.ino) {
       throw new Error("evidence file changed while opening it");
     }
-    return readFileSync(fd, "utf8");
+    return readFileSync(fd);
   } finally {
     closeSync(fd);
   }
+}
+
+export function readEvidenceFile(evidenceDir: string, path: string): string {
+  return readEvidenceBytes(evidenceDir, path).toString("utf8");
 }
 
 export function listEvidenceFiles(evidenceDir: string): string[] {

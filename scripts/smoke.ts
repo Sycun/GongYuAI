@@ -54,7 +54,7 @@ async function checkWallTimeout(url: string, goals: unknown) {
       const report = await (await fetch(`${taskUrl}/report`)).text();
       if (!report.includes("Status: budget_exhausted") ||
           !report.includes("Reason: maxWallMs exceeded") ||
-          !report.includes("## History overview")) {
+          !report.includes("## 逐项目标复核")) {
         throw new Error("wall timeout did not publish the terminal report");
       }
       const history = await (await fetch(`${taskUrl}/history`)).json() as {

@@ -6,6 +6,7 @@ import {
   AddAssetCollectorSchema,
   AddUserMcpSchema,
   AssetCollectorPatchSchema,
+  CreateFactReviewSchema,
   CreateHintRequestSchema,
   CreateTaskRequestSchema,
   isActiveTaskStatus,
@@ -23,6 +24,7 @@ import {
   readEvidenceFile,
   readExecutionStepCalls,
   resolveEvidenceFile,
+  writeTaskReport,
 } from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
 import { readCheckpointGraph, refreshTaskUsage } from "./usage.js";
@@ -342,7 +344,13 @@ export function startControlServer(opts: ServerOptions) {
           ) {
             store.save(task);
           }
-          return send(res, 200, { task });
+          const base = task.runStartUsage;
+          const runUsage = {
+            tokens: task.usage.tokens - (base?.tokens ?? 0),
+            toolCalls: task.usage.toolCalls - (base?.toolCalls ?? 0),
+            installs: task.usage.installs - (base?.installs ?? 0),
+          };
+          return send(res, 200, { task: { ...task, runUsage } });
         }
         if (method === "POST" && rest === "/stop") {
           const stopped = await runner.stop(taskId);
@@ -377,6 +385,38 @@ export function startControlServer(opts: ServerOptions) {
           res.end(text);
           return;
         }
+        const version = /^\/report-evidence\/([a-f0-9]{64})$/.exec(rest);
+        if (method === "GET" && version) {
+          const paths = taskPaths(task.dataDir);
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            const bytes = history.readProofVersion(task.id, version[1]!);
+            if (!bytes) return send(res, 404, { error: "unknown evidence version" });
+            res.writeHead(200, { "content-type": "application/octet-stream", "content-disposition": "attachment", "x-content-type-options": "nosniff" });
+            res.end(bytes);
+            return;
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "POST" && rest === "/reviews") {
+          const input = CreateFactReviewSchema.safeParse(await readJson(req));
+          if (!input.success) return send(res, 400, { error: input.error.message });
+          const paths = taskPaths(task.dataDir);
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            let review;
+            try { review = history.appendReview(task.id, input.data); }
+            catch (err) { return send(res, 400, { error: String(err) }); }
+            if (isTerminalTaskStatus(task.status)) {
+              writeTaskReport({ taskId: task.id, dataDir: task.dataDir, auth: task.auth }, history,
+                { status: task.status, reason: task.error ?? undefined });
+            }
+            return send(res, 201, { review });
+          } finally {
+            history.close();
+          }
+        }
         if (method === "GET" && rest === "/history") {
           const paths = taskPaths(task.dataDir);
           if (!existsSync(paths.historyDb)) {
@@ -384,6 +424,8 @@ export function startControlServer(opts: ServerOptions) {
               overview: "",
               goals: [],
               facts: [],
+              reviews: [],
+              goalProofs: [],
               intents: [],
               events: [],
               assets: [],
@@ -399,6 +441,8 @@ export function startControlServer(opts: ServerOptions) {
               overview: history.overview(task.id),
               goals: history.listGoals(task.id),
               facts: history.listFacts(task.id),
+              reviews: history.listReviews(task.id),
+              goalProofs: history.listGoalProofs(task.id),
               intents: history.listIntents(task.id),
               events: history.listEvents(task.id, 100),
               assets: history.listAssets(task.id),
@@ -637,8 +681,10 @@ export function startControlServer(opts: ServerOptions) {
   return new Promise<{ close: () => Promise<void>; url: string }>((resolve, reject) => {
     server.once("error", reject);
     server.listen(opts.port, opts.host, () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : opts.port;
       resolve({
-        url: `http://${opts.host}:${opts.port}`,
+        url: `http://${opts.host}:${port}`,
         close: () =>
           new Promise((r, j) => {
             server.close((e) => (e ? j(e) : r()));

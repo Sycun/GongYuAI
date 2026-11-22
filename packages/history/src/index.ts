@@ -33,8 +33,12 @@ import {
   parseAssetSourceFromTags,
   suggestFamilyKey,
 } from "@gongyuai/contracts";
-import { minimatch } from "./minimatch.js";
-import { readEvidenceFile, resolveEvidenceFile } from "./evidence.js";
+import { captureEvidence, collectGoalEvidence, type EvidenceSnapshot } from "./goal-evidence.js";
+import { CreateFactReviewSchema, type CreateFactReview } from "@gongyuai/contracts";
+
+export { collectGoalEvidence, validateAllCompleteEvidence } from "./goal-evidence.js";
+export type FactReview = CreateFactReview & { id: string; sha256: string; createdAt: string };
+export type GoalProof = { goalId: string; path: string; sha256: string };
 
 export { minimatch } from "./minimatch.js";
 export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
@@ -123,6 +127,27 @@ export class HistoryStore {
         PRIMARY KEY (task_id, id)
       );
 
+      CREATE TABLE IF NOT EXISTS goal_checks (
+        task_id TEXT NOT NULL, goal_id TEXT NOT NULL, checks_json TEXT NOT NULL,
+        PRIMARY KEY(task_id, goal_id)
+      );
+      CREATE TABLE IF NOT EXISTS evidence_versions (
+        sha256 TEXT PRIMARY KEY, content BLOB NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS goal_proofs (
+        task_id TEXT NOT NULL, goal_id TEXT NOT NULL, path TEXT NOT NULL,
+        sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256),
+        PRIMARY KEY(task_id, goal_id, path)
+      );
+      CREATE TABLE IF NOT EXISTS fact_reviews (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, fact_id TEXT NOT NULL REFERENCES facts(id),
+        goal_id TEXT NOT NULL, decision TEXT NOT NULL, replacement_fact_id TEXT REFERENCES facts(id),
+        reviewer TEXT NOT NULL, reason TEXT NOT NULL, path TEXT NOT NULL,
+        sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256), created_at TEXT NOT NULL,
+        FOREIGN KEY(task_id, goal_id) REFERENCES goals(task_id, id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_reviews_task ON fact_reviews(task_id, goal_id);
+
       CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
@@ -200,7 +225,7 @@ export class HistoryStore {
     this.db.exec("BEGIN");
     try {
       for (const g of goals) {
-        stmt.run(
+        const inserted = stmt.run(
           g.id,
           taskId,
           g.title,
@@ -210,6 +235,10 @@ export class HistoryStore {
           JSON.stringify(g.evidencePaths),
           g.assertedAt,
         );
+        if (inserted.changes && g.evidenceChecks?.length) {
+          this.db.prepare("INSERT INTO goal_checks VALUES (?, ?, ?)")
+            .run(taskId, g.id, JSON.stringify(g.evidenceChecks));
+        }
       }
       this.db.exec("COMMIT");
     } catch (err) {
@@ -360,13 +389,14 @@ export class HistoryStore {
 
   listGoals(taskId: string): GoalState[] {
     const rows = this.db
-      .prepare(`SELECT * FROM goals WHERE task_id = ? ORDER BY id`)
+      .prepare(`SELECT g.*, c.checks_json FROM goals g LEFT JOIN goal_checks c ON c.goal_id = g.id AND c.task_id = g.task_id WHERE g.task_id = ? ORDER BY g.id`)
       .all(taskId) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: String(r.id),
       title: String(r.title),
       description: String(r.description),
       evidencePatterns: JSON.parse(String(r.evidence_patterns_json)) as string[],
+      evidenceChecks: r.checks_json ? JSON.parse(String(r.checks_json)) : undefined,
       passes: Boolean(r.passes),
       evidencePaths: JSON.parse(String(r.evidence_paths_json)) as string[],
       assertedAt: (r.asserted_at as string | null) ?? null,
@@ -950,31 +980,14 @@ export class HistoryStore {
     if (!goal) return { ok: false, reason: `unknown goal: ${goalId}` };
     if (goal.passes) return { ok: true, goal };
 
-    const normalized: string[] = [];
-    for (const path of evidencePaths) {
-      try {
-        normalized.push(resolveEvidenceFile(this.evidenceDir, path).relativePath);
-      } catch {
-        return { ok: false, reason: `missing or invalid evidence file: ${path}` };
-      }
+    let files: EvidenceSnapshot[];
+    try {
+      files = collectGoalEvidence(this.evidenceDir, goal, evidencePaths);
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
-    for (const pattern of goal.evidencePatterns) {
-      if (!normalized.some((p) => minimatch(p, pattern))) {
-        return {
-          ok: false,
-          reason: `missing evidence for pattern "${pattern}" (provided: ${normalized.join(", ") || "none"})`,
-        };
-      }
-    }
-
-    // Semantic gate: ALL_COMPLETE.json must prove every challenge is_completed.
-    for (const p of normalized) {
-      if (!/(^|\/)ALL_COMPLETE\.json$/i.test(p)) continue;
-      const verdict = validateAllCompleteEvidence(this.evidenceDir, p);
-      if (verdict) return { ok: false, reason: verdict };
-    }
-
-    this.db.exec("BEGIN");
+    const normalized = files.map((f) => f.path);
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const result = this.db
         .prepare(
@@ -984,11 +997,90 @@ export class HistoryStore {
         )
         .run(JSON.stringify(normalized), this.now(), taskId, goalId);
       if (result.changes) {
+        for (const f of files) {
+          this.saveVersion(f);
+          this.db.prepare("INSERT INTO goal_proofs VALUES (?, ?, ?, ?)").run(taskId, goalId, f.path, f.sha256);
+        }
         this.emit(taskId, "goal_asserted", { goalId, evidencePaths: normalized });
       }
       const updated = this.listGoals(taskId).find((g) => g.id === goalId);
       this.db.exec("COMMIT");
       return updated ? { ok: true, goal: updated } : { ok: false, reason: `unknown goal: ${goalId}` };
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  withReportTransaction<T>(render: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = render();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  private saveVersion(file: EvidenceSnapshot): void {
+    this.db.prepare("INSERT INTO evidence_versions(sha256, content) VALUES (?, ?) ON CONFLICT DO NOTHING")
+      .run(file.sha256, file.content);
+  }
+
+  relayCount(taskId: string): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS n FROM events WHERE task_id = ? AND kind = 'relay_written'").get(taskId);
+    return Number(row?.n ?? 0);
+  }
+
+  listGoalProofs(taskId: string): GoalProof[] {
+    return this.db.prepare("SELECT goal_id AS goalId, path, sha256 FROM goal_proofs WHERE task_id = ? ORDER BY goal_id, path")
+      .all(taskId) as GoalProof[];
+  }
+
+  readProofVersion(taskId: string, sha256: string): Buffer | undefined {
+    const row = this.db.prepare(`SELECT content FROM evidence_versions WHERE sha256 = ? AND (
+      EXISTS (SELECT 1 FROM goal_proofs WHERE task_id = ? AND sha256 = ?) OR
+      EXISTS (SELECT 1 FROM fact_reviews WHERE task_id = ? AND sha256 = ?))`)
+      .get(sha256, taskId, sha256, taskId, sha256) as { content: Uint8Array } | undefined;
+    return row && Buffer.from(row.content);
+  }
+
+  listReviews(taskId: string): FactReview[] {
+    const rows = this.db.prepare(`SELECT id, fact_id AS factId, goal_id AS goalId, decision,
+      replacement_fact_id AS replacementFactId, reviewer, reason, path AS evidencePath, sha256,
+      created_at AS createdAt FROM fact_reviews WHERE task_id = ? ORDER BY rowid`)
+      .all(taskId);
+    return rows.map(({ replacementFactId, ...r }) => ({
+      ...r, ...(replacementFactId ? { replacementFactId } : {}),
+    }) as FactReview);
+  }
+
+  appendReview(taskId: string, input: CreateFactReview): FactReview {
+    const r = CreateFactReviewSchema.parse(input);
+    if (!this.getFact(taskId, r.factId) || (r.replacementFactId && !this.getFact(taskId, r.replacementFactId))) {
+      throw new Error("review references a fact outside this task or an unknown fact");
+    }
+    if (!this.listGoals(taskId).some((g) => g.id === r.goalId)) throw new Error("unknown review goal");
+    const file = captureEvidence(this.evidenceDir, r.evidencePath);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const prior = this.listReviews(taskId).filter((p) => p.goalId === r.goalId && p.factId === r.factId).at(-1);
+      if (prior && prior.decision === r.decision && prior.reviewer === r.reviewer && prior.reason === r.reason &&
+          prior.replacementFactId === r.replacementFactId && prior.sha256 === file.sha256 && prior.evidencePath === file.path) {
+        this.db.exec("COMMIT");
+        return prior;
+      }
+      const review = { ...r, id: randomUUID(), createdAt: this.now(), evidencePath: file.path, sha256: file.sha256 };
+      this.saveVersion(file);
+      this.db.prepare(`INSERT INTO fact_reviews
+        (id, task_id, fact_id, goal_id, decision, replacement_fact_id, reviewer, reason, path, sha256, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(review.id, taskId, r.factId, r.goalId, r.decision, r.replacementFactId ?? null, r.reviewer,
+          r.reason, file.path, file.sha256, review.createdAt);
+      this.db.exec("COMMIT");
+      return review;
     } catch (err) {
       this.db.exec("ROLLBACK");
       throw err;
@@ -1340,38 +1432,6 @@ export class HistoryStore {
   relativeEvidencePath(absPath: string): string {
     return relative(this.evidenceDir, absPath).replace(/\\/g, "/");
   }
-}
-
-/** Validate board-clearance evidence used by autonomous TSecBench goals. */
-export function validateAllCompleteEvidence(evidenceDir: string, path: string): string | null {
-  let raw: string;
-  try {
-    raw = readEvidenceFile(evidenceDir, path);
-  } catch {
-    return `cannot read ALL_COMPLETE evidence: ${path}`;
-  }
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return "ALL_COMPLETE.json must be valid JSON";
-  }
-  if (!Array.isArray(data) || data.length === 0) {
-    return "ALL_COMPLETE.json must be a non-empty challenge array";
-  }
-  const incomplete: string[] = [];
-  for (const row of data) {
-    if (!row || typeof row !== "object") {
-      return "ALL_COMPLETE.json entries must be objects";
-    }
-    const rec = row as { unique_code?: unknown; is_completed?: unknown };
-    const code = typeof rec.unique_code === "string" ? rec.unique_code : "?";
-    if (rec.is_completed !== true) incomplete.push(code);
-  }
-  if (incomplete.length > 0) {
-    return `ALL_COMPLETE.json still has incomplete challenges: ${incomplete.slice(0, 12).join(", ")}${incomplete.length > 12 ? "…" : ""}`;
-  }
-  return null;
 }
 
 export function openHistory(opts: OpenHistoryOptions): HistoryStore {

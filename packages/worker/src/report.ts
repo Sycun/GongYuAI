@@ -1,6 +1,5 @@
 import type { WorkerManifest } from "@gongyuai/contracts";
 import { writeTaskReport, type HistoryStore, type TerminalReportStatus } from "@gongyuai/history";
-import { formatRelayInjection, listRelayProtocols } from "./relay.js";
 
 /**
  * P5: always land report.md on terminal paths (including budget_exhausted).
@@ -15,10 +14,5 @@ export function writeTerminalReport(
     includeRelay?: boolean;
   },
 ): string {
-  return writeTaskReport(manifest, history, {
-    ...opts,
-    relaySummary: opts.includeRelay === false
-      ? undefined
-      : formatRelayInjection(listRelayProtocols(manifest.workspaceDir)),
-  });
+  return writeTaskReport(manifest, history, opts);
 }

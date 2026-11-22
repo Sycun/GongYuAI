@@ -11,7 +11,6 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import {
-  BUDGET_UNLIMITED,
   isActiveTaskStatus,
   isTerminalTaskStatus,
   resolveExploreWorkerCount,
@@ -21,6 +20,7 @@ import {
 } from "@gongyuai/contracts";
 import { openHistory, writeTaskReport } from "@gongyuai/history";
 import { durableDbForSlot, manifestPathForSlot, taskPaths } from "./paths.js";
+import { exhaustedCounter, mergeUsageFromDisk, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
 import type { SettingsStore } from "./settings.js";
 
@@ -53,6 +53,19 @@ function writeManifestForSlot(
   const model = settings.modelForManifest();
   const durableDb = durableDbForSlot(task.dataDir, slot);
   const manifestPath = manifestPathForSlot(task.dataDir, slot);
+  // A checkpoint already includes its own counters. Debit any earlier usage
+  // that survived only in the control ledger from finite worker limits.
+  const budget = { ...task.budget };
+  if (task.usageOffset) {
+    for (const [limit, meter] of [
+      ["maxTokens", "tokens"], ["maxToolCalls", "toolCalls"], ["maxInstalls", "installs"],
+    ] as const) {
+      if (budget[limit] > 0) {
+        budget[limit] -= task.usageOffset[meter];
+        if (budget[limit] <= 0) throw new Error(`existing task budget exhausted: ${limit}`);
+      }
+    }
+  }
   const manifest: WorkerManifest = {
     taskId: task.id,
     dataDir: task.dataDir,
@@ -62,7 +75,7 @@ function writeManifestForSlot(
     workspaceDir: paths.workspaceDir,
     auth: task.auth,
     goals: task.goals,
-    budget: task.budget,
+    budget,
     execution: task.execution,
     workerId: `w${slot}-${task.id.slice(0, 8)}`,
     workerSlot: slot,
@@ -132,6 +145,10 @@ export class WorkerRunner {
 
   /** 从终态重新开始：清掉完成标记，必要时重置已完成的检查点 */
   private prepareRestart(task: TaskRecord): void {
+    const usage = refreshTaskUsage(task);
+    const exhausted = exhaustedCounter(task);
+    if (exhausted) throw new Error(`existing task budget exhausted: ${exhausted}`);
+    task.runStartUsage = { ...usage };
     const resetCkpt = (ckptPath: string) => {
       if (!existsSync(ckptPath)) return;
       try {
@@ -192,6 +209,13 @@ export class WorkerRunner {
       /* ignore */
     }
 
+    // Only checkpoint counters survive removal of the old status files.
+    const carried = mergeUsageFromDisk(task.dataDir, { tokens: 0, toolCalls: 0, installs: 0 });
+    task.usageOffset = {
+      tokens: Math.max(0, usage.tokens - carried.tokens),
+      toolCalls: Math.max(0, usage.toolCalls - carried.toolCalls),
+      installs: Math.max(0, usage.installs - carried.installs),
+    };
     task.status = "queued";
     // Wall clock must restart — keeping the original startedAt makes watchdog
     // instantly re-fire maxWallMs on "开始" after a long idle.
@@ -205,14 +229,6 @@ export class WorkerRunner {
     task.containerIds = [];
     task.leaseOwner = null;
     task.leaseUntil = null;
-    // Resume as unlimited unless the operator later sets explicit --max-* caps.
-    task.budget = {
-      ...task.budget,
-      maxWallMs: BUDGET_UNLIMITED,
-      maxToolCalls: BUDGET_UNLIMITED,
-      maxTokens: BUDGET_UNLIMITED,
-      maxInstalls: BUDGET_UNLIMITED,
-    };
     this.store.save(task);
   }
 
@@ -404,7 +420,7 @@ export class WorkerRunner {
     return this.store.finishTask(task, status, error);
   }
 
-  async stop(taskId: string, cause: "operator" | "wall-timeout" = "operator"): Promise<TaskRecord | null> {
+  async stop(taskId: string, cause: "operator" | "wall-timeout" | NonNullable<ReturnType<typeof exhaustedCounter>> = "operator"): Promise<TaskRecord | null> {
     const task = this.store.get(taskId);
     if (!task) return null;
     if (isTerminalTaskStatus(task.status)) {
@@ -417,27 +433,26 @@ export class WorkerRunner {
 
     let status: "stopped" | "budget_exhausted" | "failed" = "stopped";
     let error: string | null = null;
-    if (cause === "wall-timeout") {
-      const reason = "maxWallMs exceeded";
+    if (cause !== "operator") {
       status = "budget_exhausted";
-      error = reason;
-      const paths = taskPaths(task.dataDir);
+      error = cause === "wall-timeout" ? "maxWallMs exceeded" : `${cause} exceeded`;
+    }
+    const paths = taskPaths(task.dataDir);
+    try {
+      const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
       try {
-        const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
-        try {
-          history.seedGoals(taskId, task.goals);
-          task.goals = history.listGoals(taskId);
-          writeTaskReport({ taskId, dataDir: task.dataDir, auth: task.auth }, history, {
-            status,
-            reason,
-          });
-        } finally {
-          history.close();
-        }
-      } catch (err) {
-        status = "failed";
-        error = `${reason}; report finalization failed: ${err instanceof Error ? err.message : String(err)}`;
+        history.seedGoals(taskId, task.goals);
+        task.goals = history.listGoals(taskId);
+        writeTaskReport({ taskId, dataDir: task.dataDir, auth: task.auth }, history, {
+          status, reason: error ?? undefined,
+        });
+      } finally {
+        history.close();
       }
+    } catch (err) {
+      status = "failed";
+      error = [error, `report finalization failed: ${err instanceof Error ? err.message : String(err)}`]
+        .filter(Boolean).join("; ");
     }
     return this.store.finishTask(task, status, error);
   }

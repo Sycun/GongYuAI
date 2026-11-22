@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { isActiveTaskStatus, isTerminalTaskStatus, isWallHit } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
-import { refreshTaskUsage } from "./usage.js";
+import { exhaustedCounter, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
 
@@ -117,6 +117,12 @@ export class Watchdog {
       return;
     }
     this.store.save(task);
+
+    const exhausted = exhaustedCounter(task);
+    if (exhausted) {
+      await this.runner.stop(taskId, exhausted);
+      return;
+    }
 
     // Optional wall clock (0 = unlimited)
     if (task.startedAt) {

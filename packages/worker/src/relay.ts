@@ -137,6 +137,7 @@ export function canRelay(opts: {
   toolCallsSinceRelay: number;
   forceAgent: boolean;
 }): { ok: true; trigger: "auto" | "agent" } | { ok: false; reason: string } {
+  if (process.env.GY_DIFF_NO_RELAY === "1") return { ok: false, reason: "Relay disabled for differential control" };
   const minTools = relayMinToolCalls(opts.manifest);
   if (opts.toolCallsSinceRelay < minTools) {
     return {

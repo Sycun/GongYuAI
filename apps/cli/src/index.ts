@@ -32,6 +32,7 @@ Usage:
   gy hint <taskId> "<text>"     # inject tactical Hint into History
   gy logs <taskId>
   gy report <taskId>
+  gy review <taskId> --file REVIEW.json
   gy stop <taskId>
   gy archive <taskId>
   gy unarchive <taskId>
@@ -268,6 +269,22 @@ async function main(): Promise<void> {
     try {
       const logs = await api(opts, "GET", `/tasks/${id}/logs`);
       process.stdout.write(logs.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "review") {
+    const id = rest[0];
+    const path = flag(rest, "--file");
+    if (!id || !path) throw new Error("gy review <taskId> --file REVIEW.json");
+    const input: unknown = JSON.parse(readFileSync(resolve(path), "utf8"));
+    const owned = await ensureServer(opts);
+    try {
+      const response = await api(opts, "POST", `/tasks/${encodeURIComponent(id)}/reviews`, input);
+      if (response.status >= 400) throw new Error(response.text);
+      console.log(response.text);
     } finally {
       if (owned.close) await owned.close();
     }

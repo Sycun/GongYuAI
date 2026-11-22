@@ -155,12 +155,32 @@ export const RelayProtocolSchema = z.object({
 });
 export type RelayProtocol = z.infer<typeof RelayProtocolSchema>;
 
+const EvidenceChecksSchema = z.array(z.object({
+  pattern: z.string().min(1),
+  field: z.string().min(1),
+  equals: z.union([z.string(), z.number(), z.boolean()]),
+})).optional();
+
+export const CreateFactReviewSchema = z.object({
+  factId: z.string().uuid(),
+  goalId: z.string().min(1),
+  decision: z.enum(["confirmed", "retracted"]),
+  replacementFactId: z.string().uuid().optional(),
+  reviewer: z.string().trim().min(1),
+  reason: z.string().trim().min(1),
+  evidencePath: z.string().trim().min(1),
+}).refine((r) => !r.replacementFactId || (r.decision === "retracted" && r.factId !== r.replacementFactId), {
+  message: "Only a retracted fact can point to a distinct replacement",
+});
+export type CreateFactReview = z.infer<typeof CreateFactReviewSchema>;
+
 export const GoalSpecSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   description: z.string().min(1),
   /** Glob patterns under evidence/ that must exist before pass. */
   evidencePatterns: z.array(z.string().min(1)).min(1),
+  evidenceChecks: EvidenceChecksSchema,
 });
 export type GoalSpec = z.infer<typeof GoalSpecSchema>;
 
@@ -264,11 +284,18 @@ export const GoalStateSchema = z.object({
   title: z.string(),
   description: z.string(),
   evidencePatterns: z.array(z.string()),
+  evidenceChecks: EvidenceChecksSchema,
   passes: z.boolean(),
   evidencePaths: z.array(z.string()).default([]),
   assertedAt: z.string().datetime().nullable().default(null),
 });
 export type GoalState = z.infer<typeof GoalStateSchema>;
+
+const UsageCountersSchema = z.object({
+  tokens: z.number().int().nonnegative(),
+  toolCalls: z.number().int().nonnegative(),
+  installs: z.number().int().nonnegative(),
+});
 
 export const TaskRecordSchema = z.object({
   id: z.string().uuid(),
@@ -304,11 +331,11 @@ export const TaskRecordSchema = z.object({
   containerIds: z.array(z.string()).default([]),
   dataDir: z.string(),
   error: z.string().nullable(),
-  usage: z.object({
-    tokens: z.number().int().nonnegative(),
-    toolCalls: z.number().int().nonnegative(),
-    installs: z.number().int().nonnegative(),
-  }),
+  /** Cumulative counters at the start of this operator-initiated run. */
+  runStartUsage: UsageCountersSchema.optional(),
+  /** Counters previously visible only in a sidecar or the control record. */
+  usageOffset: UsageCountersSchema.optional(),
+  usage: UsageCountersSchema,
 });
 export type TaskRecord = z.infer<typeof TaskRecordSchema>;
 
@@ -818,6 +845,7 @@ export function goalsFromSpecs(specs: GoalSpec[]): GoalState[] {
     title: g.title,
     description: g.description,
     evidencePatterns: g.evidencePatterns,
+    evidenceChecks: g.evidenceChecks,
     passes: false,
     evidencePaths: [],
     assertedAt: null,

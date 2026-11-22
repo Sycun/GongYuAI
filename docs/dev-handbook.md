@@ -30,7 +30,7 @@ MCP / Skill 是弹药，不是产品定义。
 | Lease / Watchdog / checkpoint | 有；重启不写 π | 保持零策略 |
 | Fact 分层 + append | title Observe + 按需下钻 | — |
 | Intent propose/claim/conclude | `sourceFactIds` + 成功回写 + expire；真模型工具 `intent_*` | — |
-| Goal + evidence gate | 有（含 ALL_COMPLETE） | 更多语义断言可按需加 |
+| Goal + evidence gate | 有（含 ALL_COMPLETE） | 支持 JSON 字段判据与 SHA-256 快照，见[离线复核验收](./evidence-review.md) |
 | Router ≠ shell | 有 | — |
 | Bootstrap / Reason / Explore | Durable phase + mock + **真模型工具面按相位过滤** | Pi Durable 路径仍以 OpenAI fallback 为主纪律 |
 | Session Relay | πₙ + 双触发 + 启动注入 | — |
@@ -47,7 +47,7 @@ MCP / Skill 是弹药，不是产品定义。
 | Reason 项目 lease | **有** | `reasonLeaseMs` CAS（多 Explore） |
 | 证据邻域 / 元数据保真 | **有（P5）** | `formatFactDrill` + `recordedAt` |
 | 预算尽报告 / 工具单闸 | **有（P5）** | `writeTerminalReport` + `tool_gate` |
-| 默认不限预算 + 假耗尽修复 | **有** | `0=unlimited`；`incomplete`≠`budget_exhausted`；重启重置 `startedAt` |
+| 默认不限预算 + 假耗尽修复 | **有** | `0=unlimited`；`incomplete`≠`budget_exhausted`；终态重启只重计墙钟，保留预算与累计用量 |
 | 软节奏提示（非停工） | **有** | `soft-pace.ts`：工具/墙钟里程碑只注入提示，不结束任务 |
 | 清板卡题/Intent 纪律 | **软注入** | `board-policy.ts` + `goals-autonomous.json`；硬闸仍靠图 |
 | 控制台 Live / Assets / Goals | **有** | 相位·租约·扇出硬顶；资产 kind 汇总；开放 Intent 前驱 |

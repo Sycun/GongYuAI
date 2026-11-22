@@ -14,31 +14,25 @@ import {
   type ShellTraceCall,
   type WorkerManifest,
 } from "@gongyuai/contracts";
-import { listEvidenceFiles, minimatch, openHistory, resolveEvidenceFile, validateAllCompleteEvidence } from "@gongyuai/history";
+import { listEvidenceFiles, minimatch, openHistory, collectGoalEvidence, writeTaskReport } from "@gongyuai/history";
 import { CheckpointStore } from "./checkpoint.js";
 import { assertMockGoals, collectMockBanner, dispatchMockTool } from "./mock-fixture.js";
 import { appendProgress, runShell, writeEvidence, type ToolContext } from "./tools.js";
 import { writeWorkerStatus } from "./status.js";
 import { formatShellResult, recordExecutionStep } from "./execution-trace.js";
 
+function matchingPaths(evidenceDir: string, goal: GoalSpec): string[] {
+  const patterns = [...goal.evidencePatterns, ...(goal.evidenceChecks ?? []).map((rule) => rule.pattern)];
+  return listEvidenceFiles(evidenceDir).filter((p) => patterns.some((pattern) => minimatch(p, pattern)));
+}
+
 function goalSatisfied(evidenceDir: string, goal: GoalSpec): boolean {
-  const files = listEvidenceFiles(evidenceDir);
-  for (const pattern of goal.evidencePatterns) {
-    const hit = files.find((p) => {
-      if (!minimatch(p, pattern)) return false;
-      try {
-        resolveEvidenceFile(evidenceDir, p);
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (!hit) return false;
-    if (/(^|\/)ALL_COMPLETE\.json$/i.test(hit)) {
-      if (validateAllCompleteEvidence(evidenceDir, hit)) return false;
-    }
+  try {
+    collectGoalEvidence(evidenceDir, goal, matchingPaths(evidenceDir, goal));
+    return true;
+  } catch {
+    return false;
   }
-  return true;
 }
 
 function allGoalsSatisfied(manifest: WorkerManifest): boolean {
@@ -76,8 +70,7 @@ async function runBareMock(manifest: WorkerManifest): Promise<void> {
     collectMockBanner(ctx);
     const allPassed = assertMockGoals(ctx);
 
-    const report = `# GongYuAI Bare Report\n\nTask: ${manifest.taskId}\nMode: bare mock\nGoals satisfied: ${allPassed}\n`;
-    writeFileSync(join(manifest.dataDir, "report.md"), report);
+    writeTaskReport(manifest, history, { status: allPassed ? "completed" : "incomplete" });
     appendProgress(manifest.workspaceDir, "bare=mock done");
     state.phase = "done";
     state.toolCalls = ctx.usage.toolCalls;
@@ -334,14 +327,22 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
       );
     }
 
-    writeFileSync(
-      join(manifest.dataDir, "report.md"),
-      `# GongYuAI Bare Report\n\nTask: ${manifest.taskId}\nMode: bare OpenAI\nPass: ${allGoalsSatisfied(manifest)}\n`,
-    );
+    const ledger = openHistory({ dbPath: manifest.historyDb, evidenceDir: manifest.evidenceDir });
+    let passed: boolean;
+    try {
+      ledger.seedGoals(manifest.taskId, manifest.goals);
+      for (const goal of manifest.goals) {
+        ledger.assertGoal(manifest.taskId, goal.id, matchingPaths(manifest.evidenceDir, goal));
+      }
+      passed = ledger.allGoalsPass(manifest.taskId);
+      writeTaskReport(manifest, ledger, { status: passed ? "completed" : "incomplete" });
+    } finally {
+      ledger.close();
+    }
     state.phase = "done";
     ckpt.save(state);
     writeWorkerStatus(manifest.dataDir, {
-      status: allGoalsSatisfied(manifest) ? "completed" : "incomplete",
+      status: passed ? "completed" : "incomplete",
       usage: {
         tokens: state.tokens,
         toolCalls: ctx.usage.toolCalls,

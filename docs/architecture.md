@@ -24,7 +24,7 @@ Long-running authorized pentest agents fail for four reasons: context windows fi
 
 | 原语 | 含义 | GongYuAI 落地 |
 | --- | --- | --- |
-| **Fact** | 已验证、不可变的客观发现 | `facts` 表；`layer ∈ {title, summary, evidence}`；append-only |
+| **Fact** | 只追加的观察记录，可追溯复核状态 | `facts` 表；`layer ∈ {title, summary, evidence}`；append-only |
 | **Intent** | 基于既有 Fact 的探索承诺（尚未完成） | `intents` 表；CAS claim；`proposed → claimed → running → succeeded\|failed` |
 | **Goal** | 宏观终态契约 | `goals` + `evidencePatterns`；证据文件闸门，不可口头完成 |
 | **Hint**（可选） | 人类战术注入 | 控制台 / API 写入，下次 Observe 吸收（对应 Cairn Hint / Intentest prompt 表） |
@@ -41,7 +41,7 @@ Fact  ──front──▶  Intent  ──back──▶  Fact'
 约束：
 
 - 新 Intent **必须**挂在已有 Fact（或 origin）上，禁止无因探索。
-- Fact 一经写入不可改；纠错只能追加否定/修正 Fact。
+- Fact 保留原始记录。复核按目标追加确认或撤回意见，撤回可指向同一任务的更正 Fact。证据路径和当时的内容版本随复核一起保存。见[复核设计](./evidence-review.md)。
 - 协作只通过图（stigmergy），禁止 Worker 间私聊成为真相源。
 - 运行中发现的子域/主机经 `asset_record` 写入资产投影；**自动**按 `auth.targets`（含 IPv4 CIDR / `*.domain`）准入，不另开资产库、不静默改授权列表。
 
