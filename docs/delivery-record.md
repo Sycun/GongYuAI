@@ -101,7 +101,7 @@ git diff --stat 77f8b8c HEAD -- README.md docs          # 期望：只有上列�
 | `bf6b3bac-b095-4399-9975-71c0dc914aaa` | B1（UI，77f8b8c） | completed · 1/1 · 采用 `r1795360401215-0001` |
 | `c8c451d3-9bec-4484-b9a4-0ee65269f5a6` | B2（UI，77f8b8c，含冲突阶段截图） | completed · 1/1 · 采用 `r1795360478812-0001` |
 | `6413d3f3-96be-4d36-a3b7-59cf1d15ad13` | B2 早期一次脚本化尝试（同性质，界面脚本未回报结果，数据已核对） | completed · 1/1 · 同路径冲突阶段 0/1 已核对 |
-| `5e3490ce-30a9-4bf0-9831-a5c6bf5ee7b2` | A（UI，最终构建 f271955） | completed · 1/1 · 采用 `r1795361422364-0001`，报告引用输入版本 |
+| `5e3490ce-30a9-4bf0-9831-a5c6bf5ee7b2` | A（UI，最终构建 f271955） | 首次通过由操作员判定写入（当时任务已以 incomplete 结束），随后从控制台「开始」重跑一次 → completed · 1/1 · 采用 `r1795361422364-0001`，报告引用输入版本。时间线：首次通过 15:30:22Z，任务重跑终态 15:38:28Z |
 | `706ead3e…` / `7a15202a…` / `dfcbffcc…` / `af139adb…` | 最终构建 f271955 上用同一批产品接口复检 A / B1 / B2 / 老形状绑定规则 | 全部按预期：A 409→200、B1 两时点 409→200、B2 歧义 409（`app-a-1`，当前第 2/3 行）→200、老形状借用被拒 409 而未绑定核算 200 |
 
 读数文件：`docs/evidence/round8/kali-console-acceptance.json`（前三笔 UI 复跑）、`docs/evidence/round8/kali-http-recheck.json`（最终构建复检）、`docs/evidence/round8/console-browser-acceptance.json`（本机三笔 UI）。
@@ -111,6 +111,16 @@ git diff --stat 77f8b8c HEAD -- README.md docs          # 期望：只有上列�
 - **真实生产效果待验证**：缺 (1) 一份获准用于本次验收的脱敏真实委托（含材料先后顺序、范围修订、撤回与实际覆盖、中途交接），(2) 客户对该材料用途的书面许可，(3) 平台结果产生前独立封存的人工底稿（预期差异、未验证项、已撤回结论、遗留事项）。
 - 本轮全部材料为虚构样本（`diff.example.com` / `app-a-*` 主机名），不构成真实业务结论。
 - 采用规则是**内容哈希绑定**而不是“时间上最新”：材料被换回与某次核算完全相同的字节时，该次核算重新具备采用资格（不需要重新生成），因为判定依据的是“判定时有效的那份输入”。材料内容一旦变化，旧结果即失去资格——两个反例都已固定成回归。
+
+### 0.10 复核登记的已知边界（未在代码里改）
+
+| 项 | 位置 | 现状 |
+| --- | --- | --- |
+| §5.2 拒绝措辞未覆盖全部旧格式路径 | `packages/history/src/goal-evidence.ts` `selectAdoptedReconcile` 的 `!samePattern.length` 分支 | 行为正确（手写 v1 结果文件、无归档行时一律 409），但“已有 N 份旧格式结果需重新核算”的措辞只在存在未绑定归档且都不匹配该目标图案时出现；复核人原报的“手写 v1 匹配 pattern、无归档行”仍回“没有匹配 … 的核算结果”。留作措辞改进，不影响判定 |
+| §5.3 版本号生成 / 写文件 / 入库非跨进程原子 | `packages/history/src/index.ts` `archiveReconcile` | 主键 `(task_id, id)` 兜底；24 路双进程并发实测未复现；当前单进程 systemd 部署不触发 |
+| §5.4 归档结果摘要未与版本戳交叉比对 | `parseArchivedResult` | 结果文件哈希已覆盖篡改；版本戳与归档行逐字段比对 |
+| §5.5 已通过目标的 `latestRevisionId` 由 proof 路径推断 | `packages/history/src/index.ts` `goalReconcileState` | 仅用于展示；`passes` 与 proof 才是判定依据 |
+| 采用规则是内容哈希而非时间 | `selectAdoptedReconcile` | 材料换回与某次核算完全相同的字节时该次核算重新具备资格（复核人独立复验 200 且哈希相等）；内容一变即失效 |
 
 ## 0A. 上一轮（第七轮）关键读数
 
