@@ -66,10 +66,15 @@
 
 ### 0.6 提交差异（受验提交之后）
 
-本轮只有一次文档 / 证据提交（本文件、台账、复核清单与 `docs/evidence/round8/`）。它相对受验提交 `77f8b8c` 的差异全部落在 `docs/` 与 `docs/evidence/`，运行时源码零差异；复核命令：
+受验提交 `77f8b8c` 之后只有一次文档 / 证据提交 `fcd65f3`，改动清单：
+`README.md`、`docs/delivery-record.md`、`docs/implementation-ledger.md`、`docs/review-checklist.md`、
+`docs/evidence/round8/{kali-console-acceptance.json,console-browser-acceptance.json,kali-console-a-goal-card.png,kali-console-conflict-keys.png}`
+（其中 `console-browser-acceptance.json` 已在受验提交内，其余随本次文档提交）。
+**运行时源码（`packages/**`、`apps/**`、`scripts/**`）零差异**，复核命令：
 
 ```bash
-git diff --stat 77f8b8c HEAD -- ':!docs'
+git diff --stat 77f8b8c HEAD -- packages apps scripts    # 期望：空
+git diff --stat 77f8b8c HEAD -- README.md docs          # 期望：只有上列文件
 ```
 
 ### 0.7 仍然未验证的（工程验收 ≠ 生产盲评）

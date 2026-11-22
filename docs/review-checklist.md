@@ -8,8 +8,8 @@
 ## 0. 本轮（第八轮）最短路径
 
 ```bash
-git ls-remote origin refs/heads/main            # 期望 77f8b8c2c526eb8106e63e40f0b01fb131c90e89
-git diff --stat 77f8b8c HEAD -- ':!docs'        # 期望为空（本轮之后只有文档/证据提交）
+git ls-remote origin refs/heads/main                 # 期望 fcd65f3…（受验提交 77f8b8c 之后的文档提交）
+git diff --stat 77f8b8c HEAD -- packages apps scripts # 期望为空（只有 README.md 与 docs/** 变化）
 bash scripts/clean-regression.sh 77f8b8c2c526eb8106e63e40f0b01fb131c90e89 /tmp/gy-clean
 # 期望：162 单测通过、校验器 8 项、smoke PASS、跨日 80/80、业务 77/77、首次通过 69/69、失败步骤 0
 ```
