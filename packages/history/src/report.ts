@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { TaskStatus, WorkerManifest, Fact } from "@gongyuai/contracts";
+import { coverageLabels, type TaskStatus, type TaskRecord, type WorkerManifest, type Fact } from "@gongyuai/contracts";
 import type { HistoryStore, FactReview } from "./index.js";
+import { describeGoalEvidence, formatAccounting } from "./delivery.js";
 
 export type TerminalReportStatus = Extract<TaskStatus, "completed" | "budget_exhausted" | "incomplete" | "failed" | "stopped">;
 
@@ -23,7 +24,7 @@ function label(raw: string) {
 export function writeTaskReport(
   task: Pick<WorkerManifest, "taskId" | "dataDir" | "auth">,
   history: HistoryStore,
-  opts: { status: TerminalReportStatus; reason?: string; includeRelay?: boolean },
+  opts: { status: TerminalReportStatus; reason?: string; includeRelay?: boolean; accounting?: Pick<TaskRecord, "budget" | "usage" | "startedAt" | "finishedAt"> },
 ): string {
   return history.withReportTransaction(() => {
     const id = task.taskId;
@@ -40,6 +41,7 @@ export function writeTaskReport(
     }
     const proofs = history.listGoalProofs(id);
     const reviews = history.listReviews(id);
+    const coverage = history.listCoverage(id);
     const goals = history.listGoals(id);
     const cited = new Set<string>();
     const exported = new Set<string>();
@@ -62,20 +64,24 @@ export function writeTaskReport(
     const lines = ["# GongYuAI Report", "", `Task: ${id}`, `Status: ${opts.status}`];
     if (opts.reason) lines.push(`Reason: ${label(opts.reason)}`);
     lines.push(`Targets: ${task.auth.targets.map(label).join(", ")}`, `Authorization: ${label(task.auth.authorizationNote)}`,
-      "", "## 逐项目标复核", "");
+      `排除范围　${task.auth.outOfScope?.map(label).join("、") || "未列出"}`);
+    if (opts.accounting) lines.push("", ...formatAccounting(opts.accounting));
+    lines.push("", "## 逐项目标复核", "");
     const factLabel = (f: Fact) => `${label(f.title)}（${f.id}）`;
     for (const goal of goals) {
       const versions = proofs.filter((p) => p.goalId === goal.id);
       const audit = reviews.filter((r) => r.goalId === goal.id);
       const current = new Map<string, FactReview>();
       for (const r of audit) current.set(r.factId, r);
-      let status = "未验证";
-      if (goal.passes) {
-        const checksContent = goal.evidenceChecks?.length || versions.some((v) => /(^|\/)ALL_COMPLETE\.json$/i.test(v.path));
-        status = !versions.length ? "历史通过，原版证据未留存"
-          : checksContent ? "已通过内容判据" : "已留存材料（仅文件判据）";
-      }
+      const status = describeGoalEvidence(goal, versions, audit);
       lines.push(`### ${label(goal.title)}（${label(goal.id)}）· ${status}`, "", label(goal.description), "");
+      const entries = coverage.filter((entry) => entry.goalId === goal.id);
+      if (!entries.length) lines.push("- 人工覆盖记录　未知");
+      for (const entry of entries) {
+        const when = entry === entries.at(-1) ? "当前覆盖" : "历次覆盖";
+        const evidence = entry.evidencePath && entry.sha256 ? " · " + link(entry.evidencePath, entry.sha256) : "";
+        lines.push(`- ${when}　${coverageLabels[entry.status]}（${label(entry.reviewer)}，${entry.createdAt}）　${label(entry.reason)}${evidence}`);
+      }
       if (!goal.passes) lines.push(`- 尚缺可通过验收的材料。所需路径：${goal.evidencePatterns.map(label).join("、")}`);
       for (const rule of goal.evidenceChecks ?? []) {
         lines.push(`- 内容判据：${label(rule.pattern)} 中 ${label(rule.field)} = ${label(JSON.stringify(rule.equals))}`);

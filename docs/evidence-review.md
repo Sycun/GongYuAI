@@ -71,3 +71,45 @@ TSecBench 快捷差分的 mock 组使用相同的合成材料和计数口径，�
 同一类台账的真模型实验已完成。六份材料各重复两次，bare、DAG、DAG + Relay 三组分别答对 59、60、57 个字段（满分 60）。[实测用量、错答分析与逐次记录](./experiments/2026-11-22-offline-review/README.md)
 
 交接现在分开记录撤回意见与撤回对象、历史状态与原版可复验性。[两批回归与六批对照](./experiments/2026-11-22-ledger-relay/README.md)列出了五次换班后的逐题结果，以及可交付字段得分与内容判断之间的差异。
+
+## 生产交付验收
+
+控制台新任务由操作员填写授权依据和排除范围。每条自然语言目标分别留存一份材料。文件验收、内容判据、人工覆盖和事实撤回各有独立记录。
+
+在目标页选择“记录覆盖”，填写署名和理由。已测与部分覆盖需要指定证据相对路径。提交时封存原件，重复提交相同意见复用原记录。未测与受阻允许没有文件。未填报时覆盖为未知。当前为单用户署名。HTTP 入口为 `POST /tasks/<id>/coverage`，字段为 `goalId`、`status`、`reviewer`、`reason` 和可选的 `evidencePath`。
+
+报告页同时显示当前交付核对和留存的报告。交付核对可通过 `GET /tasks/<id>/delivery` 读取。旧任务没有报告时，`GET /tasks/<id>/report` 返回标明缺失的交接摘要。读取摘要保留旧库和旧文件。现场文件清单以及未验证目标可帮助人工交接。用量来自平台计数，计费以供应商账单为准。
+
+离线回归使用 `pnpm --filter @gongyuai/control-plane test`。正式准入另选一份可脱敏、已人工结项的委托，保留范围变更和作业时间顺序，封存人工结论。中断时由另一名负责人根据交付物判断覆盖、受阻项和证据。终态对照人工结论分别记录漏报、误报和成本偏差。合成回归与这项盲评分别记录。
+
+### 在交接时封存并独立复核覆盖
+
+`gy coverage-snapshot` 在一个只读事务里读取每个目标的最新人工覆盖，按 SHA-256 核验库里留存的原件。快照只写目标 ID、覆盖状态、证据核验结果、摘要和捕获时间。没有人工记录的目标记为 `unknown`。交接时和终态可以各保存一份，命令拒绝覆盖同名文件。
+
+另一位复核人用脱敏材料独立填写 JSON 底稿。在查看平台的覆盖判断前，将底稿及其 SHA-256 分开保存在任务工作区之外。以下示例核对一项已测目标和一项受阻目标。真实使用时替换任务 ID 和目标 ID。
+
+```json
+{
+  "version": 1,
+  "taskId": "90ae45d3-6406-4860-a494-395dcdac3007",
+  "split": "development",
+  "goals": [
+    { "goalId": "inventory", "status": "tested" },
+    { "goalId": "approval", "status": "blocked" }
+  ]
+}
+```
+
+`split` 取 `development`（调试）或 `holdout`（独立留出）。正式盲评需由复核人控制底稿访问；该字段记录分组约定。每项可指定 `evidenceSha256`，用于核对平台引用的原件与人工指定的版本。省略它时，只核验证据完整性；材料能否支持业务结论仍由复核人判断。
+
+用实际任务 ID 和数据根目录设置 `TASK_ID`、`GY_DATA_DIR`，用两次封存时分别留存的摘要设置 `SNAPSHOT_SHA256`、`REFERENCE_SHA256`。
+
+```sh
+pnpm --silent gy coverage-snapshot "$TASK_ID" --data-dir "$GY_DATA_DIR" --out handoff.json
+pnpm --silent gy coverage-compare handoff.json reference.json \
+  --snapshot-sha256 "$SNAPSHOT_SHA256" --reference-sha256 "$REFERENCE_SHA256"
+```
+
+对照结果包含两个输入文件的摘要、样本分组、底稿目标数、状态相符数、逐项验收数和整项是否相符。明细区分覆盖夸大、低报、受阻与未测混淆、未知、缺项及底稿外目标。即使所有状态一致，所需原件缺失、内容摘要不符或引用版本错误，整项也无法通过。退出码 0 表示整项相符，2 表示成功比对并发现差异，1 表示输入或运行错误。该结果衡量覆盖登记与底稿的一致性；漏洞发现、严重性与预算应分别评测。
+
+开发集与正式测试集分组借鉴 NYU CTF Bench，逐项目标和整项任务两种读数借鉴 Cybench。GongYuAI 使用自己的覆盖记录和封存证据评分。[TSecBench 资源目录](https://tsecbench.zc.tencent.com/resources) · [NYU CTF Bench 数据集划分](https://github.com/NYU-LLM-CTF/NYU_CTF_Bench#benchmark-structure) · [Cybench 论文](https://arxiv.org/abs/2408.08926)

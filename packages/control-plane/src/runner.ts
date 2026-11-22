@@ -11,6 +11,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import {
+  goalsFromSpecs,
   isActiveTaskStatus,
   isTerminalTaskStatus,
   resolveExploreWorkerCount,
@@ -417,34 +418,28 @@ export class WorkerRunner {
 
   finishWorkerRun(task: TaskRecord, status: TerminalTaskStatus, error: string | null): TaskRecord {
     this.stopWorkers(task);
-    return this.store.finishTask(task, status, error);
-  }
-
-  async stop(taskId: string, cause: "operator" | "wall-timeout" | NonNullable<ReturnType<typeof exhaustedCounter>> = "operator"): Promise<TaskRecord | null> {
-    const task = this.store.get(taskId);
-    if (!task) return null;
-    if (isTerminalTaskStatus(task.status)) {
-      if (task.workerPid || task.workerPids.length || task.containerId || task.containerIds.length) {
-        return this.finishWorkerRun(task, task.status, task.error);
-      }
-      return task;
-    }
-    this.stopWorkers(task);
-
-    let status: "stopped" | "budget_exhausted" | "failed" = "stopped";
-    let error: string | null = null;
-    if (cause !== "operator") {
-      status = "budget_exhausted";
-      error = cause === "wall-timeout" ? "maxWallMs exceeded" : `${cause} exceeded`;
-    }
+    refreshTaskUsage(task);
+    task.finishedAt ??= new Date().toISOString();
     const paths = taskPaths(task.dataDir);
     try {
       const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
       try {
-        history.seedGoals(taskId, task.goals);
-        task.goals = history.listGoals(taskId);
-        writeTaskReport({ taskId, dataDir: task.dataDir, auth: task.auth }, history, {
-          status, reason: error ?? undefined,
+        // A stale control snapshot must never manufacture an assertion in History.
+        history.seedGoals(task.id, goalsFromSpecs(task.goals));
+        history.withReportTransaction(() => {
+          task.goals = history.listGoals(task.id);
+          if (status === "completed" && (!task.goals.length || task.goals.some((goal) => !goal.passes))) {
+            status = "incomplete";
+            error = [error, "History 中仍有未验收目标或缺少目标记录"].filter(Boolean).join(" · ");
+          }
+          const over = exhaustedCounter(task, "exceeded");
+          if (over && status === "completed") {
+            status = "budget_exhausted";
+            error = [error, `${over} exceeded`].filter(Boolean).join(" · ");
+          }
+          writeTaskReport({ taskId: task.id, dataDir: task.dataDir, auth: task.auth }, history, {
+            status, reason: error ?? undefined, accounting: task,
+          });
         });
       } finally {
         history.close();
@@ -455,6 +450,26 @@ export class WorkerRunner {
         .filter(Boolean).join("; ");
     }
     return this.store.finishTask(task, status, error);
+  }
+
+  async stop(taskId: string, cause: "operator" | "wall-timeout" | NonNullable<ReturnType<typeof exhaustedCounter>> = "operator"): Promise<TaskRecord | null> {
+    const task = this.store.get(taskId);
+    if (!task) return null;
+    if (isTerminalTaskStatus(task.status)) {
+      if (task.workerPid || task.workerPids.length || task.containerId || task.containerIds.length) {
+        this.stopWorkers(task);
+        return this.store.finishTask(task, task.status, task.error);
+      }
+      return task;
+    }
+
+    let status: "stopped" | "budget_exhausted" = "stopped";
+    let error: string | null = null;
+    if (cause !== "operator") {
+      status = "budget_exhausted";
+      error = cause === "wall-timeout" ? "maxWallMs exceeded" : `${cause} exceeded`;
+    }
+    return this.finishWorkerRun(task, status, error);
   }
 
   isAlive(task: TaskRecord): boolean {

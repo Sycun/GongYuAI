@@ -113,8 +113,12 @@ export function refreshTaskUsage(task: TaskRecord): UsageCounters {
   return merged;
 }
 
-export function exhaustedCounter(task: TaskRecord): "maxTokens" | "maxToolCalls" | "maxInstalls" | undefined {
-  if (isBudgetHit(task.usage.tokens, task.budget.maxTokens)) return "maxTokens";
-  if (isBudgetHit(task.usage.toolCalls, task.budget.maxToolCalls)) return "maxToolCalls";
-  if (isBudgetHit(task.usage.installs, task.budget.maxInstalls)) return "maxInstalls";
+export function exhaustedCounter(task: TaskRecord, threshold: "reached" | "exceeded" = "reached"): "maxTokens" | "maxToolCalls" | "maxInstalls" | undefined {
+  for (const [limit, meter] of [
+    ["maxTokens", "tokens"], ["maxToolCalls", "toolCalls"], ["maxInstalls", "installs"],
+  ] as const) {
+    const used = task.usage[meter];
+    const max = task.budget[limit];
+    if (isBudgetHit(used, max) && (threshold === "reached" || used > max)) return limit;
+  }
 }

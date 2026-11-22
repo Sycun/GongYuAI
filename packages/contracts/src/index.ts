@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { CoverageStatusSchema } from "./coverage-audit.js";
+export { CoverageReferenceSchema, CoverageSnapshotSchema, type CoverageSnapshot } from "./coverage-audit.js";
 export type { ExecutionStep, ExecutionTracePage, ShellTraceCall } from "./execution-trace.js";
 import {
   DEFAULT_EXPLORE_TIMEOUT_MS,
@@ -174,6 +176,19 @@ export const CreateFactReviewSchema = z.object({
 });
 export type CreateFactReview = z.infer<typeof CreateFactReviewSchema>;
 
+export const CoverageReviewSchema = z.object({
+  goalId: z.string().min(1),
+  status: CoverageStatusSchema,
+  reviewer: z.string().trim().min(1),
+  reason: z.string().trim().min(1),
+  evidencePath: z.string().trim().min(1).optional(),
+}).refine((r) => !["partial", "tested"].includes(r.status) || !!r.evidencePath, {
+  message: "已测或部分覆盖需要证据文件",
+});
+export type CoverageReviewInput = z.infer<typeof CoverageReviewSchema>;
+export { coverageLabels } from "./coverage.js";
+export type CoverageReview = CoverageReviewInput & { id: string; createdAt: string; sha256?: string };
+
 export const GoalSpecSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -257,7 +272,10 @@ export const CreateTaskRequestSchema = z.object({
   tenantId: z.string().min(1).default("default"),
   name: z.string().min(1).default("untitled"),
   auth: AuthScopeSchema,
-  goals: z.array(GoalSpecSchema).min(1),
+  goals: z.array(GoalSpecSchema).min(1).refine(
+    (goals) => new Set(goals.map((goal) => goal.id)).size === goals.length,
+    { message: "目标 ID 必须唯一" },
+  ),
   budget: BudgetSchema.optional().default({
     maxTokens: BUDGET_UNLIMITED,
     maxWallMs: BUDGET_UNLIMITED,

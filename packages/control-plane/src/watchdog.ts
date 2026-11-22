@@ -1,8 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isActiveTaskStatus, isTerminalTaskStatus, isWallHit } from "@gongyuai/contracts";
-import { openHistory } from "@gongyuai/history";
-import { taskPaths } from "./paths.js";
 import { exhaustedCounter, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
@@ -95,25 +93,7 @@ export class Watchdog {
     // Promote terminal from worker status sidecar
     const worker = this.readStatus(task.dataDir);
     if (worker && isTerminalTaskStatus(worker.status)) {
-      // Stop the entire pool even if the leader already exited.
-      const paths = taskPaths(task.dataDir);
-      let status = worker.status;
-      let error = worker.error ?? null;
-      try {
-        if (existsSync(paths.historyDb)) {
-          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
-          try {
-            task.goals = history.listGoals(task.id);
-          } finally {
-            history.close();
-          }
-        }
-      } catch (err) {
-        if (status === "completed") status = "failed";
-        const detail = err instanceof Error ? err.message : String(err);
-        error = [error, `could not read final goal state: ${detail}`].filter(Boolean).join("; ");
-      }
-      this.runner.finishWorkerRun(task, status, error);
+      this.runner.finishWorkerRun(task, worker.status, worker.error ?? null);
       return;
     }
     this.store.save(task);

@@ -23,6 +23,8 @@ type Props = {
 type FormValues = {
   targets: string;
   objective: string;
+  authorizationNote: string;
+  outOfScope?: string;
   maxConcurrentExplores: number;
 };
 
@@ -49,12 +51,15 @@ function goalsFromObjective(objective: string) {
     .map((s) => s.trim())
     .filter(Boolean);
   const items = lines.length ? lines : [objective.trim() || "完成授权范围内的安全评估"];
-  return items.map((line, i) => ({
-    id: items.length === 1 ? "main" : `g${i + 1}`,
-    title: items.length === 1 ? "主目标" : `目标 ${i + 1}`,
-    description: line,
-    evidencePatterns: ["**/*"],
-  }));
+  return items.map((line, i) => {
+    const id = items.length === 1 ? "main" : `g${i + 1}`;
+    return {
+      id,
+      title: items.length === 1 ? "主目标" : `目标 ${i + 1}`,
+      description: line,
+      evidencePatterns: [`goals/${id}.md`],
+    };
+  });
 }
 
 export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
@@ -95,9 +100,9 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
         name: hint,
         mock: false,
         auth: {
-          authorizationNote: `已授权评估：${targetList.join("、")}（操作者自有/书面授权）`,
+          authorizationNote: values.authorizationNote.trim(),
           targets: targetList,
-          outOfScope: [],
+          outOfScope: parseTargets(values.outOfScope ?? ""),
         },
         goals: goalsFromObjective(objective),
         budget: {
@@ -207,7 +212,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
         }
       >
         <Typography.Paragraph type="tertiary" style={{ marginTop: 0, marginBottom: 20 }}>
-          可填多个靶标并设置 Explore 并发；授权说明、预算等用默认配置自动启动。
+          本次任务上限为 10 分钟、200 万 Token、200 次工具调用和 20 次安装。
         </Typography.Paragraph>
         <Form
           id="create-task-form"
@@ -228,8 +233,16 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
             extraText="多行或多个逗号分隔；作业范围仅允许在这些目标内执行"
           />
           <Form.TextArea
+            field="authorizationNote"
+            label="授权依据"
+            placeholder="填写授权单号或委托范围说明"
+            rules={[{ required: true, validator: (_rule, value) => typeof value === "string" && value.trim().length >= 8, message: "请填写至少 8 个字符的授权依据" }]}
+          />
+          <Form.TextArea field="outOfScope" label="排除范围（可选）" placeholder="每行一个排除项" />
+          <Form.TextArea
             field="objective"
             label="目标"
+            extraText="每项目标单独留存一份材料。材料提交后，结论仍可由操作员复核。"
             placeholder={"例如：完成站点基础信息收集，并输出简要发现说明\n多行则按行拆成多个目标"}
             autosize={{ minRows: 5, maxRows: 10 }}
             rules={[{ required: true, message: "必填" }]}

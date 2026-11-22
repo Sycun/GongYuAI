@@ -48,7 +48,14 @@ export function TaskTable({
           title: "状态",
           dataIndex: "status",
           width: 120,
-          render: (status: string) => <StatusTag status={status} />,
+          render: (status: string, record: TaskRecord) => (
+            <Space wrap>
+              <StatusTag status={status} />
+              {status === "completed" && (!record.goals.length || record.goals.some((g) => !g.passes)) && (
+                <Typography.Text type="warning" size="small">目标待核对</Typography.Text>
+              )}
+            </Space>
+          ),
         },
         {
           title: "模式",

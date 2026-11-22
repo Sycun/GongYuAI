@@ -34,12 +34,13 @@ import {
   suggestFamilyKey,
 } from "@gongyuai/contracts";
 import { captureEvidence, collectGoalEvidence, type EvidenceSnapshot } from "./goal-evidence.js";
-import { CreateFactReviewSchema, type CreateFactReview } from "@gongyuai/contracts";
+import { CoverageReviewSchema, type CoverageReview, type CoverageReviewInput, CreateFactReviewSchema, type CreateFactReview } from "@gongyuai/contracts";
 
 export { collectGoalEvidence, validateAllCompleteEvidence } from "./goal-evidence.js";
 export type FactReview = CreateFactReview & { id: string; sha256: string; createdAt: string };
 export type GoalProof = { goalId: string; path: string; sha256: string };
 
+export { describeGoalEvidence, formatAccounting } from "./delivery.js";
 export { minimatch } from "./minimatch.js";
 export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
 export { listEvidenceFiles, readEvidenceFile, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
@@ -59,6 +60,7 @@ export type ConcludeFactInput = {
 };
 
 export type OpenHistoryOptions = {
+  readOnly?: boolean;
   dbPath: string;
   evidenceDir: string;
 };
@@ -68,9 +70,22 @@ export class HistoryStore {
   readonly evidenceDir: string;
   private readonly db: DatabaseSync;
 
+  private readonly archiveTables?: Set<string>;
+
   constructor(opts: OpenHistoryOptions) {
     this.dbPath = opts.dbPath;
     this.evidenceDir = opts.evidenceDir;
+    if (opts.readOnly) {
+      this.db = new DatabaseSync(opts.dbPath, { readOnly: true });
+      try {
+        this.archiveTables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+          .all().map((row) => String(row.name)));
+      } catch (err) {
+        this.db.close();
+        throw err;
+      }
+      return;
+    }
     mkdirSync(dirname(opts.dbPath), { recursive: true });
     mkdirSync(opts.evidenceDir, { recursive: true });
     this.db = new DatabaseSync(opts.dbPath);
@@ -139,6 +154,13 @@ export class HistoryStore {
         sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256),
         PRIMARY KEY(task_id, goal_id, path)
       );
+      CREATE TABLE IF NOT EXISTS coverage_reviews (
+        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, goal_id TEXT NOT NULL,
+        status TEXT NOT NULL, reviewer TEXT NOT NULL, reason TEXT NOT NULL,
+        path TEXT, sha256 TEXT REFERENCES evidence_versions(sha256), created_at TEXT NOT NULL,
+        FOREIGN KEY(task_id, goal_id) REFERENCES goals(task_id, id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_coverage_task ON coverage_reviews(task_id, goal_id);
       CREATE TABLE IF NOT EXISTS fact_reviews (
         id TEXT PRIMARY KEY, task_id TEXT NOT NULL, fact_id TEXT NOT NULL REFERENCES facts(id),
         goal_id TEXT NOT NULL, decision TEXT NOT NULL, replacement_fact_id TEXT REFERENCES facts(id),
@@ -388,8 +410,11 @@ export class HistoryStore {
   }
 
   listGoals(taskId: string): GoalState[] {
+    const query = this.archiveTables && !this.archiveTables.has("goal_checks")
+      ? "SELECT *, NULL AS checks_json FROM goals WHERE task_id = ? ORDER BY id"
+      : "SELECT g.*, c.checks_json FROM goals g LEFT JOIN goal_checks c ON c.goal_id = g.id AND c.task_id = g.task_id WHERE g.task_id = ? ORDER BY g.id";
     const rows = this.db
-      .prepare(`SELECT g.*, c.checks_json FROM goals g LEFT JOIN goal_checks c ON c.goal_id = g.id AND c.task_id = g.task_id WHERE g.task_id = ? ORDER BY g.id`)
+      .prepare(query)
       .all(taskId) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: String(r.id),
@@ -1013,7 +1038,8 @@ export class HistoryStore {
   }
 
   withReportTransaction<T>(render: () => T): T {
-    this.db.exec("BEGIN IMMEDIATE");
+    if (this.db.isTransaction) return render();
+    this.db.exec(this.archiveTables ? "BEGIN" : "BEGIN IMMEDIATE");
     try {
       const result = render();
       this.db.exec("COMMIT");
@@ -1035,6 +1061,7 @@ export class HistoryStore {
   }
 
   listGoalProofs(taskId: string): GoalProof[] {
+    if (this.archiveTables && !this.archiveTables.has("goal_proofs")) return [];
     return this.db.prepare("SELECT goal_id AS goalId, path, sha256 FROM goal_proofs WHERE task_id = ? ORDER BY goal_id, path")
       .all(taskId) as GoalProof[];
   }
@@ -1042,12 +1069,14 @@ export class HistoryStore {
   readProofVersion(taskId: string, sha256: string): Buffer | undefined {
     const row = this.db.prepare(`SELECT content FROM evidence_versions WHERE sha256 = ? AND (
       EXISTS (SELECT 1 FROM goal_proofs WHERE task_id = ? AND sha256 = ?) OR
-      EXISTS (SELECT 1 FROM fact_reviews WHERE task_id = ? AND sha256 = ?))`)
-      .get(sha256, taskId, sha256, taskId, sha256) as { content: Uint8Array } | undefined;
+      EXISTS (SELECT 1 FROM fact_reviews WHERE task_id = ? AND sha256 = ?) OR
+      EXISTS (SELECT 1 FROM coverage_reviews WHERE task_id = ? AND sha256 = ?))`)
+      .get(sha256, taskId, sha256, taskId, sha256, taskId, sha256) as { content: Uint8Array } | undefined;
     return row && Buffer.from(row.content);
   }
 
   listReviews(taskId: string): FactReview[] {
+    if (this.archiveTables && !this.archiveTables.has("fact_reviews")) return [];
     const rows = this.db.prepare(`SELECT id, fact_id AS factId, goal_id AS goalId, decision,
       replacement_fact_id AS replacementFactId, reviewer, reason, path AS evidencePath, sha256,
       created_at AS createdAt FROM fact_reviews WHERE task_id = ? ORDER BY rowid`)
@@ -1055,6 +1084,41 @@ export class HistoryStore {
     return rows.map(({ replacementFactId, ...r }) => ({
       ...r, ...(replacementFactId ? { replacementFactId } : {}),
     }) as FactReview);
+  }
+
+  listCoverage(taskId: string): CoverageReview[] {
+    if (this.archiveTables && !this.archiveTables.has("coverage_reviews")) return [];
+    return this.db.prepare(`SELECT id, goal_id AS goalId, status, reviewer, reason,
+      path AS evidencePath, sha256, created_at AS createdAt FROM coverage_reviews WHERE task_id = ? ORDER BY rowid`)
+      .all(taskId).map(({ evidencePath, sha256, ...record }) => ({
+        ...record, ...(evidencePath ? { evidencePath, sha256 } : {}),
+      }) as CoverageReview);
+  }
+
+  recordCoverage(taskId: string, input: CoverageReviewInput): CoverageReview {
+    const entry = CoverageReviewSchema.parse(input);
+    const file = entry.evidencePath ? captureEvidence(this.evidenceDir, entry.evidencePath) : undefined;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (!this.listGoals(taskId).some((g) => g.id === entry.goalId)) throw new Error("unknown coverage goal");
+      const prior = this.listCoverage(taskId).filter((r) => r.goalId === entry.goalId).at(-1);
+      if (prior && prior.status === entry.status && prior.reason === entry.reason && prior.reviewer === entry.reviewer &&
+          prior.evidencePath === file?.path && prior.sha256 === file?.sha256) {
+        this.db.exec("COMMIT");
+        return prior;
+      }
+      const review: CoverageReview = { ...entry, id: randomUUID(), createdAt: this.now(),
+        ...(file ? { evidencePath: file.path, sha256: file.sha256 } : {}) };
+      if (file) this.saveVersion(file);
+      this.db.prepare("INSERT INTO coverage_reviews (id, task_id, goal_id, status, reviewer, reason, path, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(review.id, taskId, review.goalId, review.status, review.reviewer, review.reason,
+          file?.path ?? null, file?.sha256 ?? null, review.createdAt);
+      this.db.exec("COMMIT");
+      return review;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   appendReview(taskId: string, input: CreateFactReview): FactReview {

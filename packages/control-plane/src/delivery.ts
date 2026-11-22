@@ -1,0 +1,67 @@
+import { existsSync } from "node:fs";
+import { coverageLabels, type TaskRecord } from "@gongyuai/contracts";
+import { describeGoalEvidence, formatAccounting, listEvidenceFiles, openHistory } from "@gongyuai/history";
+import { taskPaths } from "./paths.js";
+import { refreshTaskUsage } from "./usage.js";
+
+function singleLine(value: string): string {
+  return value.replace(/[\r\n\t]+/g, " ");
+}
+
+/** A current reading of the surviving records. Never repairs or publishes a historical report. */
+export function deliverySummary(task: TaskRecord, hasReport: boolean): string {
+  const paths = taskPaths(task.dataDir);
+  refreshTaskUsage(task);
+  const lines = [
+    "# 交付核对", "",
+    `任务　${task.id}`, `控制面记录　${task.status}`,
+    `授权范围　${task.auth.targets.map(singleLine).join("、")}`,
+    `排除范围　${task.auth.outOfScope?.map(singleLine).join("、") || "未列出"}`,
+    `归档报告　${hasReport ? "已留存" : "未留存"}`,
+  ];
+  if (task.error) lines.push(`结束原因　${singleLine(task.error)}`);
+  lines.push("", "## 目标与凭据", "");
+  const expected = new Map(task.goals.map((goal) => [goal.id, goal]));
+  try {
+    if (!existsSync(paths.historyDb)) throw new Error("缺少 History 数据库");
+    const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+    try {
+      history.withReportTransaction(() => {
+        const goals = history.listGoals(task.id);
+        const coverage = new Map(history.listCoverage(task.id).map((entry) => [entry.goalId, entry]));
+        const proofs = history.listGoalProofs(task.id);
+        const reviews = history.listReviews(task.id);
+        for (const goal of goals) {
+          const cached = expected.get(goal.id);
+          const conflict = !cached ? " · 控制面未列出此目标"
+            : cached.passes !== goal.passes ? " · 与控制面记录不一致" : "";
+          lines.push(`- ${singleLine(goal.title)}（${singleLine(goal.id)}）　${describeGoalEvidence(goal, proofs, reviews)}${conflict}`);
+          const review = coverage.get(goal.id);
+          lines.push(review
+            ? `  覆盖　${coverageLabels[review.status]}（${singleLine(review.reviewer)}，${review.createdAt}）　${singleLine(review.reason)}`
+            : "  覆盖　未知");
+          if (review?.sha256) lines.push(`  证据　${singleLine(review.evidencePath ?? "")} · SHA-256 ${review.sha256}`);
+          expected.delete(goal.id);
+        }
+        for (const id of expected.keys()) lines.push(`- ${singleLine(id)}　缺少 History 目标记录`);
+        if (task.status === "completed" && (expected.size || !goals.length || goals.some((g) => !g.passes))) {
+          lines.push("- 终态冲突：控制面记为完成，History 无法支持全部目标已验收。");
+        }
+      });
+    } finally {
+      history.close();
+    }
+  } catch {
+    lines.push("- History 缺失或不可读，无法核对目标。");
+  }
+  lines.push("", ...formatAccounting(task), "", "## 现场留存文件", "");
+  try {
+    const files = listEvidenceFiles(paths.evidenceDir).sort();
+    lines.push(`evidence/ 中有 ${files.length} 个文件。此清单仅用于交接，文件数量不代表测试覆盖率。`);
+    for (const file of files.slice(0, 20)) lines.push(`- ${singleLine(file)}`);
+    if (files.length > 20) lines.push(`其余 ${files.length - 20} 个文件可在证据页查看。`);
+  } catch {
+    lines.push("证据目录不可读，文件数量未知。");
+  }
+  return lines.join("\n") + "\n";
+}

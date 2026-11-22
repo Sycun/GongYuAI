@@ -1,7 +1,7 @@
 # GongYuAI 开发手册
 
 面向后续沿 **外置 Fact–Intent 图 + Durable + Evidence + Session Relay** 方向开发。  
-设计哲学：优雅简洁够用；能删就删；砍面不砍能力；改动用 TSecBench / smoke **相对裸循环**验收。
+设计哲学：优雅简洁够用；能删就删；砍面不砍能力；生产交付用覆盖、证据、中断交接和预算对账验收。TSecBench / smoke 用于功能与性能回归。
 
 权威文档（完整索引：[README.md](./README.md)）：
 
@@ -95,7 +95,7 @@ MCP / Skill 是弹药，不是产品定义。
 
 1. `auth.capability: observe|scan|active-lab|full`；工具按级过滤。
 2. `pnpm diff-harness --mock --goals …`：History vs +Relay 相对表。
-3. 主尺仍建议 TSecBench 子集；辅尺 DVWA smoke。只报差分。
+3. TSecBench 子集记录基准性能，DVWA smoke 检查功能。生产交付另行验收，见[证据复核](./evidence-review.md#生产交付验收)。
 
 **纯离线对照**用 `pnpm diff-harness:offline`。三组用同一个确定性模型桩读取合成目录记录和复核回执，工具只返回固定数据。三组共享工具白名单、模型轮次上限、工具调用上限，以及对答案 JSON 的内容判据。
 

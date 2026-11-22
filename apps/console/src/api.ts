@@ -1,4 +1,4 @@
-import type { ExecutionTracePage, ShellTraceCall } from "@gongyuai/contracts";
+import type { CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall } from "@gongyuai/contracts";
 
 export type TaskRecord = {
   id: string;
@@ -26,6 +26,7 @@ export type TaskRecord = {
     evidencePatterns: string[];
     passes: boolean;
     evidencePaths?: string[];
+    assessment?: string;
   }>;
   budget: {
     maxTokens: number;
@@ -68,6 +69,7 @@ export type AssetRecord = {
 };
 
 export type HistoryPayload = {
+  coverage?: CoverageReview[];
   overview: string;
   goals: TaskRecord["goals"];
   facts: Array<{
@@ -313,6 +315,11 @@ export const api = {
   evidence: (id: string) => request<EvidenceList>(`/tasks/${id}/evidence`),
   evidenceFile: (id: string, path: string) =>
     request<string>(`/tasks/${id}/evidence/file?path=${encodeURIComponent(path)}`),
+  recordCoverage: (id: string, body: CoverageReviewInput) =>
+    request<{ coverage: CoverageReview }>(`/tasks/${id}/coverage`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    }),
+  delivery: (id: string) => request<{ summary: string; hasReport: boolean }>(`/tasks/${id}/delivery`),
   report: (id: string) => request<string>(`/tasks/${id}/report`),
   logs: (id: string) => request<string>(`/tasks/${id}/logs`),
   settings: () => request<PublicSettings>("/settings"),

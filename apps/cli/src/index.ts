@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { compareCommand, snapshotCommand } from "./coverage-audit.js";
 import {
   BUDGET_UNLIMITED,
   CreateTaskRequestSchema,
@@ -32,6 +33,8 @@ Usage:
   gy hint <taskId> "<text>"     # inject tactical Hint into History
   gy logs <taskId>
   gy report <taskId>
+  gy coverage-snapshot <taskId> --out FILE [--data-dir DIR]
+  gy coverage-compare SNAPSHOT REFERENCE --snapshot-sha256 HASH --reference-sha256 HASH
   gy review <taskId> --file REVIEW.json
   gy stop <taskId>
   gy archive <taskId>
@@ -130,6 +133,13 @@ async function main(): Promise<void> {
   const { cmd, rest, opts } = parseGlobal(process.argv.slice(2));
   if (cmd === "help" || cmd === "--help" || cmd === "-h") {
     printHelp();
+    return;
+  }
+
+  if (cmd === "coverage-compare" || cmd === "coverage-snapshot") {
+    if (opts.baseUrl) throw new Error("覆盖复核命令使用本地文件；请省略 --base-url");
+    if (cmd === "coverage-compare") compareCommand(rest);
+    else snapshotCommand(rest, resolveCanonicalDataRoot({ installRoot: resolveInstallRoot(), explicit: opts.dataDir }));
     return;
   }
 

@@ -7,6 +7,7 @@ import {
   AddUserMcpSchema,
   AssetCollectorPatchSchema,
   CreateFactReviewSchema,
+  CoverageReviewSchema,
   CreateHintRequestSchema,
   CreateTaskRequestSchema,
   isActiveTaskStatus,
@@ -18,6 +19,7 @@ import {
   UpdateSettingsPatchSchema,
 } from "@gongyuai/contracts";
 import {
+  describeGoalEvidence,
   listEvidenceFiles,
   listExecutionSteps,
   openHistory,
@@ -26,6 +28,7 @@ import {
   resolveEvidenceFile,
   writeTaskReport,
 } from "@gongyuai/history";
+import { deliverySummary } from "./delivery.js";
 import { taskPaths } from "./paths.js";
 import { readCheckpointGraph, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
@@ -378,9 +381,15 @@ export function startControlServer(opts: ServerOptions) {
           res.end(text.slice(-200_000));
           return;
         }
+        if (method === "GET" && rest === "/delivery") {
+          const path = taskPaths(task.dataDir).reportPath;
+          const hasReport = existsSync(path);
+          return send(res, 200, { summary: deliverySummary(task, hasReport), hasReport });
+        }
         if (method === "GET" && rest === "/report") {
           const reportPath = join(task.dataDir, "report.md");
-          const text = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
+          const text = existsSync(reportPath) ? readFileSync(reportPath, "utf8")
+            : isTerminalTaskStatus(task.status) ? deliverySummary(task, false) : "";
           res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });
           res.end(text);
           return;
@@ -399,6 +408,21 @@ export function startControlServer(opts: ServerOptions) {
             history.close();
           }
         }
+        if (method === "POST" && rest === "/coverage") {
+          const input = CoverageReviewSchema.safeParse(await readJson(req));
+          if (!input.success) return send(res, 400, { error: input.error.message });
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            const coverage = history.recordCoverage(task.id, input.data);
+            return send(res, 201, { coverage });
+          } catch (err) {
+            return send(res, 400, { error: String(err) });
+          } finally {
+            history.close();
+          }
+        }
         if (method === "POST" && rest === "/reviews") {
           const input = CreateFactReviewSchema.safeParse(await readJson(req));
           if (!input.success) return send(res, 400, { error: input.error.message });
@@ -410,7 +434,7 @@ export function startControlServer(opts: ServerOptions) {
             catch (err) { return send(res, 400, { error: String(err) }); }
             if (isTerminalTaskStatus(task.status)) {
               writeTaskReport({ taskId: task.id, dataDir: task.dataDir, auth: task.auth }, history,
-                { status: task.status, reason: task.error ?? undefined });
+                { status: task.status, reason: task.error ?? undefined, accounting: task });
             }
             return send(res, 201, { review });
           } finally {
@@ -426,6 +450,7 @@ export function startControlServer(opts: ServerOptions) {
               facts: [],
               reviews: [],
               goalProofs: [],
+              coverage: [],
               intents: [],
               events: [],
               assets: [],
@@ -437,12 +462,17 @@ export function startControlServer(opts: ServerOptions) {
             evidenceDir: paths.evidenceDir,
           });
           try {
+            const reviews = history.listReviews(task.id);
+            const goalProofs = history.listGoalProofs(task.id);
             return send(res, 200, {
               overview: history.overview(task.id),
-              goals: history.listGoals(task.id),
+              goals: history.listGoals(task.id).map((goal) => ({
+                ...goal, assessment: describeGoalEvidence(goal, goalProofs, reviews),
+              })),
               facts: history.listFacts(task.id),
-              reviews: history.listReviews(task.id),
-              goalProofs: history.listGoalProofs(task.id),
+              reviews,
+              goalProofs,
+              coverage: history.listCoverage(task.id),
               intents: history.listIntents(task.id),
               events: history.listEvents(task.id, 100),
               assets: history.listAssets(task.id),

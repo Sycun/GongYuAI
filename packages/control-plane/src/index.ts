@@ -1,3 +1,4 @@
+export { captureCoverage, compareCoverage, coverageDigest } from "./coverage-audit.js";
 export { ControlStore } from "./store.js";
 export { WorkerRunner, type RunnerConfig, type RuntimeMode } from "./runner.js";
 export { Watchdog, type WatchdogConfig } from "./watchdog.js";

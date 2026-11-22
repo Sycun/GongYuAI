@@ -38,6 +38,7 @@ import {
   statusColor,
 } from "../labels";
 import { StatusTag } from "../components/StatusTag";
+import { GoalCoverage } from "../components/GoalCoverage";
 import { ExecutionTrace } from "../components/ExecutionTrace";
 import { FactIntentDag } from "../components/dag/FactIntentDag";
 import { formatDateTime } from "../time";
@@ -72,6 +73,8 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
 
     async function load() {
       setLoading(true);
+      setPaneText("");
+      setHistory(null);
       try {
         if (tab === "live" || tab === "goals" || tab === "history") {
           const [h, r] = await Promise.all([api.history(task!.id), api.runtime(task!.id)]);
@@ -91,8 +94,14 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           if (cancelled) return;
           setEvidenceFiles(ev.json.files ?? []);
         }
-        if (tab === "report" || tab === "logs") {
-          const r = tab === "report" ? await api.report(task!.id) : await api.logs(task!.id);
+        if (tab === "report") {
+          const { json } = await api.delivery(task!.id);
+          const original = json.hasReport ? (await api.report(task!.id)).text : "";
+          if (cancelled) return;
+          setPaneText(original ? json.summary + "\n## 留存报告\n\n" + original : json.summary);
+        }
+        if (tab === "logs") {
+          const r = await api.logs(task!.id);
           if (cancelled) return;
           setPaneText(r.text || "（空）");
         }
@@ -109,7 +118,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [task?.id, tab]);
+  }, [task?.id, task?.status, tab]);
 
   // 运行中自动刷新运行态 / 步骤，保持与任务状态一致
   useEffect(() => {
@@ -242,12 +251,6 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   };
 
   const goals = history?.goals?.length ? history.goals : task.goals;
-
-  const goalStatus = (passes: boolean) => {
-    if (passes) return "ok";
-    if (active) return "running";
-    return "pending";
-  };
 
   return (
     <div>
@@ -644,7 +647,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                         <div>
                           <Space>
                             <Typography.Text strong>{g.title}</Typography.Text>
-                            <StatusTag status={goalStatus(g.passes)} />
+                            <Tag>{g.assessment ?? (g.passes ? "控制面记录已通过，待核对" : "未验证")}</Tag>
                           </Space>
                           <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0" }}>
                             {g.description}
@@ -656,6 +659,15 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                               : g.evidencePatterns
                             ).join(", ") || "—"}
                           </Typography.Text>
+                          {history && <GoalCoverage
+                            key={task.id + "/" + g.id}
+                            taskId={task.id}
+                            goalId={g.id}
+                            record={history.coverage?.filter((row) => row.goalId === g.id).at(-1)}
+                            onSaved={(row) => setHistory((prev) => prev && ({
+                              ...prev, coverage: [...(prev.coverage ?? []).filter((r) => r.id !== row.id), row],
+                            }))}
+                          />}
                         </div>
                       }
                     />

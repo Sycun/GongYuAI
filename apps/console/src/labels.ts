@@ -5,7 +5,7 @@ export const STATUS_LABEL: Record<string, string> = {
   initializing: "初始化",
   running: "运行中",
   recovering: "恢复中",
-  completed: "已完成",
+  completed: "运行完成",
   failed: "失败",
   budget_exhausted: "预算耗尽",
   incomplete: "未完成退出",
