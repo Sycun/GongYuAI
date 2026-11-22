@@ -2,7 +2,8 @@
 
 本目录是项目**权威设计与开发入口**。后续沿 Fact–Intent 图 + Durable + Evidence + Relay 方向开发时，从这里读起。
 
-> **实施台账**：[implementation-ledger.md](./implementation-ledger.md)（P0–P12→代码/入口/证据/差距，阶段 1–7 实际状态，发布与 Kali 记录）。
+> **实施台账**：[implementation-ledger.md](./implementation-ledger.md)（P0–P12→代码/入口/证据/差距，阶段 1–7 实际状态）。  
+> **交付记录**：[delivery-record.md](./delivery-record.md)（发布提交/SHA、测试与验收、Kali 部署与一致性证据、复核清单）。
 > **总体设计原始稿**：[MASTER-DESIGN.md](./MASTER-DESIGN.md)（愿景/用户定调/P0–P12 全景/契约/路线图/待决策）。  
 > **交互全图（可独立交付）**：[design-atlas.html](./design-atlas.html)——中文、可点击/缩放/搜索/思路导览，全部思路串联一图，双击浏览器打开即可。  
 > **分册交互演示**：[demos/](./demos/)——六个独立 HTML（零依赖、自带明暗主题），与下列提案文档一一对应。
