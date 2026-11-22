@@ -112,7 +112,16 @@
 | 控制台资源 | 服务端返回 `assets/index-DgoApZO2.js`，对应文件存在于 `packages/control-plane/web/assets/` |
 
 正式入口视觉证据：`docs/evidence/ui/20261122-kali-official-entry.png`。
-三端读数与时间戳：`docs/evidence/release/receipt.json`（受验代码 SHA、GitHub main SHA、Kali HEAD 与运行读数）。
+
+**带时间戳的发布回执**：`docs/evidence/release/receipt.json`（采集时间 `2026-11-22T13:40:54Z` / 21:40:54+08:00）。三端读数：
+
+| 端 | 读数 |
+| --- | --- |
+| 受验代码 | `d7c46d4956246ba448b565136683daf155af1c62`（构建/测试/两套验收/恢复演练都在此提交） |
+| GitHub `main` | `abc2485ce703f3695b8634c568e845aaa170c606`（记录提交；相对受验代码非 docs 差异为 0） |
+| Kali 实际运行 | 目录 `/home/parallels/GongYuAI`、HEAD `abc2485ce703f3695b8634c568e845aaa170c606`、运行版本 `d7c46d4…`、监听进程 cwd 同目录、health `{"ok":true}`、任务 14 个 |
+
+回执提交（本文件所在提交之后的第三个提交）只追加 `receipt.json` 与本节读数；两个文档提交相对受验代码都只有 `docs/` 差异（`git diff --stat d7c46d4 HEAD -- ':!docs'` 为空）。
 
 ## 9. 阶段签收摘要
 
