@@ -114,7 +114,7 @@ async function apiText(base: string, path: string): Promise<string> {
 /** 在独立数据根上做一次隔离恢复，并用 API 逐项读回。 */
 async function drillCopy(
   copyRoot: string,
-  options: { firstBoot?: boolean },
+  options: { expectRehome?: "all" | number },
 ) {
   const plane = await bootControlPlane({
     dataRoot: copyRoot,
@@ -132,17 +132,15 @@ async function drillCopy(
       JSON.stringify(apiIds) === JSON.stringify(copyIds),
       `${apiIds.length} 项，与副本目录一致（${copyIds.length} 项）`,
     );
-    // 首次启动必须改写全部越界记录；再次启动时副本数据库已被改写，改写 0 条才是对的。
-    const rehomeOk = options.firstBoot
-      ? plane.rehomed.length === tasks.tasks.length
-      : plane.rehomed.length === 0;
+    // 改写条数是可观察量：首次启动要收回全部越界记录；副本已被收回时再启动应为 0；
+    // 故意把某条记录改指别处后，再启动必须刚好收回那几条。
+    const expected = options.expectRehome ?? "all";
+    const want = expected === "all" ? tasks.tasks.length : expected;
     check(
       "restore.rehomed",
-      rehomeOk,
-      options.firstBoot
-        ? `首次启动改写目录归属 ${plane.rehomed.length}/${tasks.tasks.length} 条` +
-            (plane.rehomed[0] ? `（如 ${plane.rehomed[0].taskId}: ${plane.rehomed[0].from} → ${plane.rehomed[0].to}）` : "")
-        : `再次启动改写 ${plane.rehomed.length} 条（副本记录已在上次启动时收回到副本内）`,
+      plane.rehomed.length === want,
+      `改写目录归属 ${plane.rehomed.length} 条（期望 ${want}）` +
+        (plane.rehomed[0] ? `（如 ${plane.rehomed[0].taskId}: ${plane.rehomed[0].from} → ${plane.rehomed[0].to}）` : ""),
     );
     const outsideRoot = tasks.tasks.filter((task) => !resolve(task.dataDir).startsWith(resolve(copyRoot)));
     check(
@@ -256,7 +254,7 @@ async function selftest(outDir: string) {
       `副本 control.sqlite 记录 dataDir=${before}（旧备份的真实形状）`);
 
     // 第一次：源目录可访问。
-    const first = await drillCopy(copyRoot, { firstBoot: true });
+    const first = await drillCopy(copyRoot, { expectRehome: "all" });
     try {
       const report = await apiText(first.base, `/tasks/${twin.taskId}/report`);
       check("api.report-copy-marker", report.includes("COPY-ONLY-MARKER") && !report.includes("SOURCE-ONLY-MARKER"),
@@ -284,7 +282,7 @@ async function selftest(outDir: string) {
     }
     check("negative.source-inaccessible", sourceInaccessible, "源目录已 chmod 000，读取被拒");
     try {
-      const second = await drillCopy(copyRoot, {});
+      const second = await drillCopy(copyRoot, { expectRehome: 0 });
       try {
         const report = await apiText(second.base, `/tasks/${twin.taskId}/report`);
         check("negative.report-copy-marker", report.includes("COPY-ONLY-MARKER") && !report.includes("SOURCE-ONLY-MARKER"),
@@ -369,7 +367,7 @@ async function backupDrill(archive: string, outDir: string) {
     }
     record.evidenceHashes = Object.fromEntries(evidenceHashes);
 
-    const run = await drillCopy(copyRoot, { firstBoot: true });
+    const run = await drillCopy(copyRoot, { expectRehome: "all" });
     try {
       const history = await apiGet<{ facts: unknown[]; events: unknown[] }>(run.base, `/tasks/${demoId}/history`);
       check("api.demo-counts-match-archive",
@@ -458,14 +456,14 @@ async function backupDrill(archive: string, outDir: string) {
     } finally {
       decoyDb.close();
     }
-    const decoyRun = await drillCopy(copyRoot, { firstBoot: false });
+    const decoyRun = await drillCopy(copyRoot, { expectRehome: 1 });
     try {
       const report = await apiText(decoyRun.base, `/tasks/${demoId}/report`);
       check("decoy.copy-wins",
         !report.includes("DECOY-FORMAL-REPORT") && sha256(report) === sha256(demoReport),
         `把记录改指诱饵目录后，API 仍返回副本报告（${sha256(report).slice(0, 12)}…）`);
       chmodSync(decoy, 0o000);
-      const lockedRun = await drillCopy(copyRoot, {});
+      const lockedRun = await drillCopy(copyRoot, { expectRehome: 0 });
       try {
         const report2 = await apiText(lockedRun.base, `/tasks/${demoId}/report`);
         check("decoy.copy-wins-without-source",
@@ -497,7 +495,7 @@ async function sealedDrill(archive: string) {
   };
   try {
     const copyRoot = extractArchive(archive, join(work, "extract"));
-    const run = await drillCopy(copyRoot, { firstBoot: true });
+    const run = await drillCopy(copyRoot, { expectRehome: "all" });
     try {
       const tasks = run.tasks;
       const proofs: Array<{ taskId: string; goalId: string; path: string; sha256: string }> = [];
