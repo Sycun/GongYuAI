@@ -30,3 +30,5 @@ node --import tsx scripts/review-model.mjs score .gongyuai/review-model/trials.j
 ```
 
 这是对文档复核时的历史表示和一次会话交接的比较。没有调用生产执行循环、外部目标、Shell 工具或 MCP。部分题材继承回归用例，样本适合核对测量和发现具体错误。
+
+后续两批回归与六批实验沿用相同账本、标准答案和预算。[修订版交接和多批协议](./multibatch.md)

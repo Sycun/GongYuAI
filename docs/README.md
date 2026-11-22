@@ -40,6 +40,8 @@
 
 [三组真模型对照](./experiments/2026-11-22-offline-review/README.md)记录同一批台账的字段准确率、实际 Token、逐题错答和复算方法。
 
+[Relay 两批回归与六批对照](./experiments/2026-11-22-ledger-relay/README.md)比较五次交接后的准确率、交付格式与实际 Token。
+
 ## 北极星
 
 > Harness 让任务活着；History 让路径可信；Evidence 让完成可复核；Relay 让上下文可换班。
