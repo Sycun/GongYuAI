@@ -12,10 +12,13 @@ export function writeTerminalReport(
   opts: {
     status: TerminalReportStatus;
     reason?: string;
+    includeRelay?: boolean;
   },
 ): string {
   return writeTaskReport(manifest, history, {
     ...opts,
-    relaySummary: formatRelayInjection(listRelayProtocols(manifest.workspaceDir)),
+    relaySummary: opts.includeRelay === false
+      ? undefined
+      : formatRelayInjection(listRelayProtocols(manifest.workspaceDir)),
   });
 }

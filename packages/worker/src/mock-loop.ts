@@ -5,11 +5,9 @@ import { openHistory } from "@gongyuai/history";
 import { CheckpointStore } from "./checkpoint.js";
 import {
   appendProgress,
-  installTool,
-  runShell,
-  writeEvidence,
   type ToolContext,
 } from "./tools.js";
+import { assertMockGoals, collectMockBanner, dispatchMockTool } from "./mock-fixture.js";
 import { writeWorkerStatus } from "./status.js";
 import { writeTerminalReport } from "./report.js";
 import {
@@ -78,6 +76,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
   const ckpt = new CheckpointStore(manifest.durableDb);
   let state = ckpt.load();
   const slot = manifest.workerSlot ?? 0;
+  const relayEnabled = process.env.GY_MOCK_RELAY !== "off";
 
   const ctx: ToolContext = {
     manifest,
@@ -119,6 +118,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
   };
 
   const doRelay = (trigger: "auto" | "agent", reason: string) => {
+    if (!relayEnabled) return false;
     const check = canRelay({
       manifest,
       tokensSinceRelay: state.tokensSinceRelay,
@@ -137,7 +137,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
       reason,
       current_position: `mock · step=${state.step}`,
       network_map: manifest.auth.targets.join(", "),
-      tried: "mock install_tool + recon curl",
+      tried: "mock fixture preparation and collection",
       foothold: "mock worker; re-read History observe + π",
       unexplored_surface: "remaining goals without evidence",
       tokens: state.tokens,
@@ -159,8 +159,9 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
   };
 
   try {
+    history.seedGoals(manifest.taskId, manifest.goals);
     // Crash recovery must NOT invent π — only Durable + History (P1.5).
-    const existingPi = listRelayProtocols(manifest.workspaceDir);
+    const existingPi = relayEnabled ? listRelayProtocols(manifest.workspaceDir) : [];
     if (existingPi.length) {
       appendProgress(
         manifest.workspaceDir,
@@ -244,11 +245,10 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
         appendProgress(manifest.workspaceDir, `phase=explore step=${state.step}`);
 
         // Auto relay when token threshold artificially low (GY_RELAY_TOKEN_THRESHOLD)
-        if (state.tokensSinceRelay > 0 || ctx.usage.toolCalls > 0) {
+        if (relayEnabled && (state.tokensSinceRelay > 0 || ctx.usage.toolCalls > 0)) {
           // bump mock tokens so auto-relay can fire under low threshold
           const thr = Number(process.env.GY_RELAY_TOKEN_THRESHOLD ?? 0);
           if (thr > 0 && state.tokensSinceRelay < thr) {
-            state.tokens += thr;
             state.tokensSinceRelay += thr;
           }
           if (
@@ -267,8 +267,8 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           // Explore: propose → claim exactly one
           const intent = history.proposeIntent({
             taskId: manifest.taskId,
-            title: "Ensure curl available",
-            summary: "install_tool if missing",
+            title: "Prepare mock fixture",
+            summary: "Record synthetic tool preparation",
             sourceFactIds: sourceFromHistory(),
           });
           const claimed = history.claimIntent(
@@ -281,21 +281,11 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           state.activeIntentClaimedAt = new Date().toISOString();
           save();
 
-          const installed = installTool(ctx, { name: "curl" });
+          dispatchMockTool(ctx, "mock_prepare");
           state.toolCallsSinceRelay += 1;
-          if (installed.ok) {
-            history.concludeIntent(manifest.taskId, intent.id, "succeeded", installed.detail, {
-              facts: [
-                {
-                  layer: "title",
-                  title: "curl available",
-                  summary: installed.detail,
-                },
-              ],
-            });
-          } else {
-            history.concludeIntent(manifest.taskId, intent.id, "failed", installed.detail);
-          }
+          history.concludeIntent(manifest.taskId, intent.id, "succeeded", "fixture ready", {
+            facts: [{ layer: "title", title: "Mock fixture ready" }],
+          });
           state.activeIntentId = null;
           state.activeIntentClaimedAt = null;
           state.step = 1;
@@ -319,27 +309,8 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           state.activeIntentId = intent.id;
           state.activeIntentClaimedAt = new Date().toISOString();
 
-          let banner = "";
-          try {
-            const probe = runShell(ctx, "printf 'HTTP/1.1 200 OK\nServer: gongyuai-mock\n'");
-            banner = probe.stdout || probe.stderr || "no response";
-          } catch (err) {
-            banner = `probe error: ${err instanceof Error ? err.message : String(err)}`;
-          }
+          const { path: evidencePath, banner } = collectMockBanner(ctx);
           state.toolCallsSinceRelay += 1;
-
-          const evidencePath = writeEvidence(
-            ctx,
-            "recon/banner.txt",
-            `target=${target}\n${banner}\n`,
-          );
-
-          const goals = history.listGoals(manifest.taskId);
-          const recon = goals.find((g) => g.id === "recon");
-          if (recon) {
-            const asserted = history.assertGoal(manifest.taskId, recon.id, [evidencePath]);
-            if (!asserted.ok) throw new Error(asserted.reason);
-          }
 
           history.concludeIntent(manifest.taskId, intent.id, "succeeded", "banner saved", {
             facts: [
@@ -357,7 +328,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           });
           state.activeIntentId = null;
           state.activeIntentClaimedAt = null;
-          appendProgress(manifest.workspaceDir, "recon goal passed");
+          appendProgress(manifest.workspaceDir, "mock banner saved");
           state.step = 2;
           save();
 
@@ -380,37 +351,15 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           save();
           continue;
         }
-        const goals = history.listGoals(manifest.taskId);
-        const remaining = goals.filter((g) => !g.passes);
-        if (remaining.length === 0) {
-          state.phase = "report";
-          save();
-          break;
-        }
-        for (const g of remaining) {
-          const path = writeEvidence(
-            ctx,
-            `goals/${g.id}.md`,
-            `# ${g.title}\n\n${g.description}\n\nMock evidence for ${g.id}.\n`,
-          );
-          const asserted = history.assertGoal(manifest.taskId, g.id, [path]);
-          if (!asserted.ok) {
-            const fallback = writeEvidence(
-              ctx,
-              g.evidencePatterns[0]!.replace(/\*/g, "mock"),
-              `mock evidence for ${g.id}\n`,
-            );
-            const again = history.assertGoal(manifest.taskId, g.id, [fallback]);
-            if (!again.ok) throw new Error(again.reason);
-          }
-        }
+        assertMockGoals(ctx);
         state.phase = "report";
         save();
       }
     }
 
+    const status = history.allGoalsPass(manifest.taskId) ? "completed" : "incomplete";
     if (state.phase === "report") {
-      writeTerminalReport(manifest, history, { status: "completed" });
+      writeTerminalReport(manifest, history, { status, includeRelay: relayEnabled });
       appendProgress(manifest.workspaceDir, "phase=report written");
       state.phase = "done";
       save();
@@ -419,7 +368,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
     writeWorkerStatus(
       manifest.dataDir,
       {
-        status: "completed",
+        status,
         usage: {
           tokens: state.tokens,
           toolCalls: ctx.usage.toolCalls,
@@ -442,6 +391,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
       writeTerminalReport(manifest, history, {
         status: budgetHit ? "budget_exhausted" : "failed",
         reason: message,
+        includeRelay: relayEnabled,
       });
     } catch {
       /* report best-effort */

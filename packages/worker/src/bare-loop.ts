@@ -13,8 +13,9 @@ import {
   type GoalSpec,
   type WorkerManifest,
 } from "@gongyuai/contracts";
-import { listEvidenceFiles, minimatch, resolveEvidenceFile, validateAllCompleteEvidence } from "@gongyuai/history";
+import { listEvidenceFiles, minimatch, openHistory, resolveEvidenceFile, validateAllCompleteEvidence } from "@gongyuai/history";
 import { CheckpointStore } from "./checkpoint.js";
+import { assertMockGoals, collectMockBanner, dispatchMockTool } from "./mock-fixture.js";
 import { appendProgress, runShell, writeEvidence, type ToolContext } from "./tools.js";
 import { writeWorkerStatus } from "./status.js";
 
@@ -45,28 +46,20 @@ function allGoalsSatisfied(manifest: WorkerManifest): boolean {
   );
 }
 
-/** Scripted bare mock: write matching evidence, no History/Intent/Relay. */
+/** Scripted fixture with common evaluation and no graph decisions or Relay. */
 async function runBareMock(manifest: WorkerManifest): Promise<void> {
   const ckpt = new CheckpointStore(`${manifest.durableDb}.ckpt.sqlite`);
   let state = ckpt.load();
-  mkdirSync(manifest.workspaceDir, { recursive: true });
-  mkdirSync(manifest.evidenceDir, { recursive: true });
+  const history = openHistory({ dbPath: manifest.historyDb, evidenceDir: manifest.evidenceDir });
   writeFileSync(
     join(manifest.workspaceDir, "PROGRESS.md"),
     `# Bare baseline\n\ntask ${manifest.taskId}\nmode=bare-mock\n`,
   );
   appendProgress(manifest.workspaceDir, "bare=mock start");
 
-  // Minimal ToolContext without History — shell/writeEvidence need history for some paths.
-  // Use a stub that never writes graph facts.
-  const stubHistory = {
-    appendFact: () => ({}),
-    recordInstall: () => {},
-  } as unknown as ToolContext["history"];
-
   const ctx: ToolContext = {
     manifest,
-    history: stubHistory,
+    history,
     usage: { toolCalls: state.toolCalls, installs: state.installs },
   };
 
@@ -76,32 +69,12 @@ async function runBareMock(manifest: WorkerManifest): Promise<void> {
   });
 
   try {
-    const target = manifest.auth.targets[0] ?? "https://example.com";
-    for (const goal of manifest.goals) {
-      for (const pattern of goal.evidencePatterns) {
-        const rel = pattern.includes("*")
-          ? pattern.replace(/\*/g, "bare").replace(/\/+/g, "/")
-          : pattern;
-        const content =
-          pattern.endsWith(".json") && /ALL_COMPLETE/i.test(pattern)
-            ? "[]"
-            : `# bare evidence\ngoal=${goal.id}\ntarget=${target}\n`;
-        // ALL_COMPLETE empty array fails semantic gate — for mock board goals skip
-        // unless pattern is simple files.
-        if (/ALL_COMPLETE/i.test(pattern)) {
-          appendProgress(
-            manifest.workspaceDir,
-            `bare skip ALL_COMPLETE pattern for ${goal.id}`,
-          );
-          continue;
-        }
-        writeEvidence(ctx, rel, content);
-        ctx.usage.toolCalls += 1;
-        appendProgress(manifest.workspaceDir, `bare wrote ${rel}`);
-      }
-    }
+    history.seedGoals(manifest.taskId, manifest.goals);
+    dispatchMockTool(ctx, "mock_prepare");
+    collectMockBanner(ctx);
+    const allPassed = assertMockGoals(ctx);
 
-    const report = `# GongYuAI Bare Report\n\nTask: ${manifest.taskId}\nMode: bare (no History / no Relay)\nGoals satisfied: ${allGoalsSatisfied(manifest)}\n`;
+    const report = `# GongYuAI Bare Report\n\nTask: ${manifest.taskId}\nMode: bare mock\nGoals satisfied: ${allPassed}\n`;
     writeFileSync(join(manifest.dataDir, "report.md"), report);
     appendProgress(manifest.workspaceDir, "bare=mock done");
     state.phase = "done";
@@ -109,7 +82,7 @@ async function runBareMock(manifest: WorkerManifest): Promise<void> {
     ckpt.save(state);
 
     writeWorkerStatus(manifest.dataDir, {
-      status: allGoalsSatisfied(manifest) ? "completed" : "incomplete",
+      status: allPassed ? "completed" : "incomplete",
       usage: {
         tokens: state.tokens,
         toolCalls: ctx.usage.toolCalls,
@@ -119,7 +92,7 @@ async function runBareMock(manifest: WorkerManifest): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     writeWorkerStatus(manifest.dataDir, {
-      status: "failed",
+      status: message === "maxToolCalls exceeded" ? "budget_exhausted" : "failed",
       error: message,
       usage: {
         tokens: state.tokens,
@@ -130,6 +103,7 @@ async function runBareMock(manifest: WorkerManifest): Promise<void> {
     throw err;
   } finally {
     ckpt.close();
+    history.close();
   }
 }
 

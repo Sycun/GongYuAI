@@ -17,7 +17,7 @@
     "test": "pnpm -r run test",
     "smoke": "tsx scripts/smoke.ts",
     "diff-harness": "tsx scripts/diff-harness.ts",
-    "diff-harness:tsec": "tsx scripts/diff-harness.ts --mock --goals examples/tsecbench/goals-subset-diff.json --target https://example.com --auth \"Written authorization: TSecBench subset harness diff\"",
+    "diff-harness:tsec": "tsx scripts/diff-harness.ts --mock --goals examples/tsecbench/goals-subset-diff.json --target example.invalid --auth \"Local synthetic P3 fixture only\"",
     "tsecbench": "tsx scripts/tsecbench.ts",
     "typecheck": "pnpm -r run typecheck",
     "smoke:tools": "tsx scripts/smoke-tools.ts",

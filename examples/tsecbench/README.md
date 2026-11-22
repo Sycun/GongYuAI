@@ -51,9 +51,13 @@ Mock 基线（CI / 本机无 VPN 也可）：
 pnpm diff-harness:tsec
 # 等价于：
 pnpm diff-harness --mock --goals examples/tsecbench/goals-subset-diff.json \
-  --target https://example.com \
-  --auth "Written authorization: TSecBench subset harness diff"
+  --target example.invalid \
+  --auth "Local synthetic P3 fixture only"
 ```
+
+三组执行相同的合成准备和采集，各计两次工具调用。证据写入和 Goal 断言属于验收步骤，不计入工具调用。三组都用同一套证据文件规则判定 Goal。Mock 不调用模型，Tokens 不作收益指标。
+
+`bare` 只用 History 持久化验收与审计，执行过程不读任务图。`history` 组关闭自动和主动 Relay，`relay` 组必须生成一次交接。表格同时列出通过的 Goal 数、Relay 事件数和文件数，任一口径异常时命令返回失败。
 
 真平台子集（VPN + ticket + 真模型；禁止 hint；只跑小子集）：
 
