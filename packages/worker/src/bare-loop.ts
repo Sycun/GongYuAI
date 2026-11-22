@@ -28,7 +28,10 @@ function matchingPaths(evidenceDir: string, goal: GoalSpec): string[] {
 
 function goalSatisfied(evidenceDir: string, goal: GoalSpec): boolean {
   try {
-    collectGoalEvidence(evidenceDir, goal, matchingPaths(evidenceDir, goal));
+    // 业务核算目标的“缺件”由核算条件判定（并点名缺哪一份材料），这里不抢答。
+    collectGoalEvidence(evidenceDir, goal, matchingPaths(evidenceDir, goal), {
+      deferPatternsToReconcileGate: Boolean(goal.reconcileGate),
+    });
     return true;
   } catch {
     return false;

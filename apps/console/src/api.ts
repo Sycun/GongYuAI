@@ -31,6 +31,12 @@ export type TaskRecord = {
     passes: boolean;
     evidencePaths?: string[];
     assessment?: string;
+    /** 目标类型：file = 普通材料留存；business-reconcile = 业务核算。 */
+    kind?: "file" | "business-reconcile";
+    /** 业务核算配置（建档时由界面填、服务端落库，恢复后仍读这一份）。 */
+    business?: BusinessReconcileConfig;
+    /** 核算态：缺材料 / 待重算 / 结论不合格 / 可判定 / 已通过。 */
+    reconcileState?: ReconcileStateReport | null;
     /** 目标级核算条件：声明后只挂差异文件不算完成比对。 */
     reconcileGate?: {
       pattern: string;
@@ -104,6 +110,8 @@ export type HistoryPayload = {
   coverage?: CoverageReview[];
   overview: string;
   goals: TaskRecord["goals"];
+  /** 任务的核算版本归档（版本号倒序），复核输入与结果一一对应。 */
+  reconcileRevisions?: ArchivedReconcile[];
   facts: Array<{
     id: string;
     layer: string;
@@ -225,11 +233,19 @@ export type ReconcileResultPayload = {
       currentLine: number | null;
       changes: Array<{ field: string; before: string | null; after: string | null }>;
       reason?: string;
+      duplicates?: Array<{
+        material: "baseline" | "current";
+        line: number;
+        endLine: number;
+        fields: Record<string, string>;
+      }>;
     }>;
   };
   evidencePath: string;
   evidenceSha256: string;
   factId: string | null;
+  /** 本次核算的版本身份（首次判定用它核对输入）。 */
+  revision?: ReconcileRevision;
   materials: {
     baseline: { path: string; present: boolean; sha256: string | null };
     current: { path: string; present: boolean; sha256: string | null };
@@ -393,6 +409,57 @@ export type UpdateJobStatus = {
   silent: boolean;
 };
 
+/** 业务核算配置：界面填的就是这一份，服务端据此派生核算条件。 */
+export type BusinessReconcileConfig = {
+  name: string;
+  keyField: string;
+  compareFields?: string[];
+  requiredKeys?: string[];
+  maxUnknown: number;
+  maxAmbiguous: number;
+  baseline: { path: string; format?: "csv" | "json"; keyField?: string };
+  current: { path: string; format?: "csv" | "json"; keyField?: string };
+};
+
+/** 一次核算的版本身份：对应目标、两侧材料哈希、采用的核算口径。 */
+export type ReconcileRevision = {
+  id: string;
+  taskId: string;
+  goalIds: string[];
+  config: BusinessReconcileConfig;
+  configDigest: string;
+  inputDigest: string;
+  baseline: { path: string; format: "csv" | "json" | null; present: boolean; sha256: string | null; rows: number };
+  current: { path: string; format: "csv" | "json" | null; present: boolean; sha256: string | null; rows: number };
+  createdAt: string;
+};
+
+export type ArchivedReconcile = {
+  revision: ReconcileRevision;
+  evidencePath: string;
+  evidenceSha256: string;
+  counts: ReconcileResultPayload["result"]["counts"];
+};
+
+export type ReconcileStateReport = {
+  state: "passed" | "no-result" | "missing-material" | "stale" | "unsatisfied" | "ready";
+  reason: string | null;
+  latestRevisionId: string | null;
+  /** 最近一版核算里的冲突重复键：键、原因、全部来源行（材料 + 物理行号）。 */
+  ambiguous?: Array<{
+    key: string;
+    reason: string;
+    lines: Array<{ material: "baseline" | "current"; line: number; endLine: number }>;
+  }>;
+  readyRevisionId: string | null;
+  materials: { baseline: { path: string; present: boolean }; current: { path: string; present: boolean } } | null;
+  drift: {
+    ok: boolean;
+    state: string;
+    reason: string | null;
+  } | null;
+};
+
 export type CreateTaskBody = {
   name: string;
   mock?: boolean;
@@ -405,7 +472,10 @@ export type CreateTaskBody = {
     id: string;
     title: string;
     description: string;
-    evidencePatterns: string[];
+    /** 普通材料留存目标必须给 evidencePatterns；业务核算目标可省略（系统派生）。 */
+    evidencePatterns?: string[];
+    kind?: "file" | "business-reconcile";
+    business?: BusinessReconcileConfig;
   }>;
   budget?: {
     maxTokens?: number;
@@ -453,6 +523,38 @@ export const api = {
   executionStepCalls: (id: string, stepId: string, signal: AbortSignal) =>
     request<{ calls: ShellTraceCall[] }>(`/tasks/${id}/trace/${encodeURIComponent(stepId)}`, { signal }),
   evidence: (id: string) => request<EvidenceList>(`/tasks/${id}/evidence`),
+  /** 导入或替换一份原始材料（同一路径即替换）。 */
+  writeEvidence: (id: string, body: { path: string; content: string }) =>
+    request<{ path: string; sha256: string; replaced: boolean }>(`/tasks/${id}/evidence`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  /** 撤回一份材料：文件移出 evidence/，撤回前的哈希记进事件台账。 */
+  removeEvidence: (id: string, path: string) =>
+    request<{ removed: string; sha256: string }>(
+      `/tasks/${id}/evidence?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" },
+    ),
+  /** 按当前证据触发一次目标判定（与 worker 同一条实现）。 */
+  assertGoal: (id: string, goalId: string) =>
+    request<{
+      ok: boolean;
+      goal: TaskRecord["goals"][number];
+      reason?: string;
+      reconcileState?: ReconcileStateReport | null;
+    }>(`/tasks/${id}/goals/assert`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goalId }),
+    }),
+  /** 按目标建档时持久化的配置核算（不用手抄路径）。 */
+  reconcileGoal: (id: string, goalId: string) =>
+    request<ReconcileResultPayload>(`/tasks/${id}/reconcile`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goalId }),
+    }),
   evidenceFile: (id: string, path: string) =>
     request<string>(`/tasks/${id}/evidence/file?path=${encodeURIComponent(path)}`),
   recordCoverage: (id: string, body: CoverageReviewInput) =>
@@ -468,6 +570,7 @@ export const api = {
     keyField?: string;
     compareFields?: string[];
     requiredKeys?: string[];
+    goalIds?: string[];
   }) =>
     request<ReconcileResultPayload>(`/tasks/${id}/reconcile`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),

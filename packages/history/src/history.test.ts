@@ -664,135 +664,132 @@ test("broadcastTechnique suggests familyKey when omitted", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-// ── 第七轮：目标级核算条件（缺件不得判通过） ──────────────────────────────
+// ── 第七/八轮：目标级核算条件（缺件不得判通过；首次通过绑定输入版本） ──────
 
-function reconcileFixture(overrides: {
-  name?: string;
-  missingMaterials?: string[];
-  unknown?: number;
-  ambiguous?: number;
-  totalKeys?: number;
-  baselinePath?: string;
-  currentPath?: string;
-  baselineSha?: string | null;
-  currentSha?: string | null;
-} = {}) {
-  const baselinePath = overrides.baselinePath ?? "assets/baseline.csv";
-  const currentPath = overrides.currentPath ?? "assets/current.csv";
-  return {
-    version: 1,
-    name: overrides.name ?? "asset-diff",
-    keyField: "host",
-    compareFields: ["version"],
-    baseline: {
-      path: baselinePath,
-      format: "csv",
-      rows: 2,
-      sha256: overrides.baselineSha === undefined ? "a".repeat(64) : overrides.baselineSha,
-    },
-    current: {
-      path: currentPath,
-      format: "csv",
-      rows: 2,
-      sha256: overrides.currentSha === undefined ? "b".repeat(64) : overrides.currentSha,
-    },
-    missingMaterials: overrides.missingMaterials ?? [],
-    counts: {
-      added: 0,
-      removed: 0,
-      changed: 1,
-      unchanged: 1,
-      missing: 0,
-      unknown: overrides.unknown ?? 0,
-      ambiguous: overrides.ambiguous ?? 0,
-      totalKeys: overrides.totalKeys ?? 2,
-    },
-    items: [
-      { key: "app-a-1", status: "changed", baselineLine: 2, currentLine: 2, changes: [{ field: "version", before: "1", after: "2" }] },
-      { key: "app-a-2", status: "unchanged", baselineLine: 3, currentLine: 3, changes: [] },
-    ],
-  };
+const BASELINE_CSV = [
+  "host,role,version",
+  "app-a-1,web,1.4",
+  "app-a-2,db,2.1",
+].join("\n");
+const CURRENT_CSV = [
+  "host,role,version",
+  "app-a-1,web,1.5",
+  "app-a-2,db,2.1",
+].join("\n");
+
+function writeMaterial(evidenceDir: string, path: string, content: string) {
+  writeEvidenceFile(evidenceDir, path, content);
 }
 
-function seedDiffGoal(store: ReturnType<typeof openHistory>, taskId: string) {
-  store.seedGoals(taskId, [{
+function seedDiffGoal(
+  store: ReturnType<typeof openHistory>,
+  taskId: string,
+  options: { business?: boolean; requiredKeys?: string[] } = {},
+) {
+  const goal: Record<string, unknown> = {
     id: "asset-baseline-diff",
     title: "原始资产清单差异",
     description: "按业务主键核对两份原始资产清单",
-    evidencePatterns: ["reconcile/*.json"],
-    reconcileGate: { pattern: "reconcile/*.json", maxUnknown: 0, maxAmbiguous: 0 },
-    passes: false,
-    evidencePaths: [],
-    assertedAt: null,
-  } as Parameters<typeof store.seedGoals>[1][number]]);
+  };
+  if (options.business) {
+    Object.assign(goal, {
+      kind: "business-reconcile",
+      business: {
+        name: "asset-diff",
+        keyField: "host",
+        maxUnknown: 0,
+        maxAmbiguous: 0,
+        baseline: { path: "assets/baseline.csv" },
+        current: { path: "assets/current.csv" },
+        ...(options.requiredKeys?.length ? { requiredKeys: options.requiredKeys } : {}),
+      },
+      evidencePatterns: ["reconcile/asset-diff-*.json"],
+      reconcileGate: { pattern: "reconcile/asset-diff-*.json", maxUnknown: 0, maxAmbiguous: 0 },
+    });
+  } else {
+    Object.assign(goal, {
+      evidencePatterns: ["reconcile/*.json"],
+      reconcileGate: { pattern: "reconcile/*.json", maxUnknown: 0, maxAmbiguous: 0 },
+    });
+  }
+  Object.assign(goal, { passes: false, evidencePaths: [], assertedAt: null });
+  store.seedGoals(taskId, [goal as Parameters<typeof store.seedGoals>[1][number]]);
 }
 
-test("核算条件：只挂一份缺基线的差异 JSON 不能判通过，并点名缺哪份材料", () => {
+/** 走真实核算实现归档一次，返回本次的版本与结果文件。 */
+function reconcile(store: ReturnType<typeof openHistory>, taskId: string, overrides: Record<string, unknown> = {}) {
+  return store.archiveReconcile({
+    taskId,
+    request: {
+      name: "asset-diff",
+      baseline: { path: "assets/baseline.csv" },
+      current: { path: "assets/current.csv" },
+      keyField: "host",
+      goalIds: ["asset-baseline-diff"],
+      ...overrides,
+    } as Parameters<typeof store.archiveReconcile>[0]["request"],
+    goalIds: (overrides.goalIds as string[] | undefined) ?? ["asset-baseline-diff"],
+  });
+}
+
+test("核算条件：缺基线时点名缺件，不判通过；补交后重新核算才首次通过", () => {
   const root = mkdtempSync(join(tmpdir(), "gy-hist-gate-"));
   const evidenceDir = join(root, "evidence");
   mkdirSync(join(evidenceDir, "reconcile"), { recursive: true });
   const store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
   const taskId = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
   try {
-    seedDiffGoal(store, taskId);
+    seedDiffGoal(store, taskId, { business: true });
 
-    // 1) 只交当前清单：差异 JSON 存在，但整份基线材料缺失。
-    writeFileSync(
-      join(evidenceDir, "reconcile", "asset-diff-1.json"),
-      JSON.stringify(reconcileFixture({
-        missingMaterials: ["assets/baseline.csv"],
-        unknown: 2,
-        baselineSha: null,
-      }), null, 2),
-    );
-    const rejected = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-1.json"]);
+    // 1) 只交当前清单：核算结果本身就是缺件结论。
+    writeMaterial(evidenceDir, "assets/current.csv", CURRENT_CSV);
+    const first = reconcile(store, taskId);
+    assert.match(first.revision.id, /^r\d{13}-\d{4}$/);
+    assert.equal(first.revision.baseline.present, false);
+    assert.equal(first.revision.current.present, true);
+    assert.equal(first.result.counts.unknown, 2);
+
+    const rejected = store.assertGoal(taskId, "asset-baseline-diff", []);
     assert.equal(rejected.ok, false, "缺基线不得判通过");
-    if (!rejected.ok) {
-      assert.match(rejected.reason, /缺少基线材料 assets\/baseline\.csv/);
-    }
-    const goals = store.listGoals(taskId);
-    assert.equal(goals[0]!.passes, false);
+    if (!rejected.ok) assert.match(rejected.reason, /缺少基线材料 assets\/baseline\.csv/);
+    assert.equal(store.listGoals(taskId)[0]!.passes, false);
     assert.deepEqual(store.listGoalProofs(taskId), [], "未通过就不该有首次通过依据");
-    // 拒绝原因留在事件台账里，报告和控制台都读它。
     const rejections = store.listEvents(taskId).filter((event) => event.kind === "goal_assert_rejected");
     assert.equal(rejections.length, 1);
     assert.match(String((rejections[0]!.payload as { reason?: string }).reason), /缺少基线材料/);
 
     // 2) 两侧都缺：点名两份材料。
-    writeFileSync(
-      join(evidenceDir, "reconcile", "asset-diff-2.json"),
-      JSON.stringify(reconcileFixture({
-        name: "asset-diff-empty",
-        missingMaterials: ["assets/baseline.csv", "assets/current.csv"],
-        unknown: 2,
-        baselineSha: null,
-        currentSha: null,
-      }), null, 2),
-    );
-    const both = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-2.json"]);
-    assert.equal(both.ok, false);
-    if (!both.ok) assert.match(both.reason, /缺少两侧材料/);
+    rmSync(join(evidenceDir, "assets/current.csv"));
+    const both = reconcile(store, taskId);
+    assert.deepEqual(both.result.missingMaterials, ["assets/baseline.csv", "assets/current.csv"]);
+    const rejectedBoth = store.assertGoal(taskId, "asset-baseline-diff", []);
+    assert.equal(rejectedBoth.ok, false);
+    if (!rejectedBoth.ok) assert.match(rejectedBoth.reason, /缺少两侧材料/);
     assert.equal(store.listGoals(taskId)[0]!.passes, false);
 
-    // 3) 补交基线后重新核算：合格结果首次通过，且只采用这一份核算文件。
-    writeFileSync(
-      join(evidenceDir, "reconcile", "asset-diff-3.json"),
-      JSON.stringify(reconcileFixture(), null, 2),
-    );
-    const passed = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-3.json"]);
+    // 3) 补交两侧材料后重新核算：合格结果首次通过，只采用这一份核算文件。
+    writeMaterial(evidenceDir, "assets/baseline.csv", BASELINE_CSV);
+    writeMaterial(evidenceDir, "assets/current.csv", CURRENT_CSV);
+    const good = reconcile(store, taskId);
+    assert.equal(good.result.counts.unknown, 0);
+    const passed = store.assertGoal(taskId, "asset-baseline-diff", []);
     assert.equal(passed.ok, true);
     const proofs = store.listGoalProofs(taskId);
     assert.equal(proofs.length, 1, "首次通过只记这一份核算文件");
-    assert.equal(proofs[0]!.path, "reconcile/asset-diff-3.json");
-    assert.match(proofs[0]!.sha256, /^[0-9a-f]{64}$/);
+    assert.equal(proofs[0]!.path, good.evidencePath);
+    assert.equal(proofs[0]!.sha256, good.evidenceSha256);
     const asserted = store.listEvents(taskId).filter((event) => event.kind === "goal_asserted");
     assert.equal(asserted.length, 1);
-    const adopted = (asserted[0]!.payload as { adoptedReconcile?: { path: string; sha256: string } }).adoptedReconcile;
-    assert.equal(adopted?.path, "reconcile/asset-diff-3.json");
+    const adopted = (asserted[0]!.payload as {
+      adoptedReconcile?: { path: string; sha256: string; revisionId: string; inputDigest: string };
+    }).adoptedReconcile;
+    assert.equal(adopted?.path, good.evidencePath);
     assert.equal(adopted?.sha256, proofs[0]!.sha256, "事件里的哈希等于首次通过依据的封存哈希");
+    assert.equal(adopted?.revisionId, good.revision.id);
+    assert.equal(adopted?.inputDigest, good.revision.inputDigest);
 
     // 4) 重复提交不重复记账。
-    const repeat = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-3.json"]);
+    const repeat = store.assertGoal(taskId, "asset-baseline-diff", []);
     assert.equal(repeat.ok, true);
     assert.equal(store.listGoalProofs(taskId).length, 1, "重复提交不新增首次通过依据");
     assert.equal(
@@ -813,11 +810,13 @@ test("核算条件：两份清单齐全时“两侧都不存在的约定项”�
   const store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
   const taskId = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
   try {
-    seedDiffGoal(store, taskId);
-    const result = reconcileFixture();
-    result.counts.missing = 1; // required-key-absent-in-both：两份清单里都没有该资产
-    writeFileSync(join(evidenceDir, "reconcile", "asset-diff-both.json"), JSON.stringify(result, null, 2));
-    const passed = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-both.json"]);
+    // 约定检查项属于核算口径：目标声明了，核算也必须按同一口径跑。
+    seedDiffGoal(store, taskId, { business: true, requiredKeys: ["app-a-9"] });
+    writeMaterial(evidenceDir, "assets/baseline.csv", BASELINE_CSV);
+    writeMaterial(evidenceDir, "assets/current.csv", CURRENT_CSV);
+    const archived = reconcile(store, taskId, { requiredKeys: ["app-a-9"] });
+    assert.equal(archived.result.counts.missing, 1, "约定项两侧都没有 = 缺件结论");
+    const passed = store.assertGoal(taskId, "asset-baseline-diff", []);
     assert.equal(passed.ok, true, "缺项是核查结论，不是材料缺失");
     assert.equal(store.listGoals(taskId)[0]!.passes, true);
   } finally {
@@ -826,36 +825,51 @@ test("核算条件：两份清单齐全时“两侧都不存在的约定项”�
   }
 });
 
-test("核算条件：重复主键歧义、未知项、非核算文件都不得判通过", () => {
+test("核算条件：重复主键歧义与未知项都不得判通过；非核算文件也冒充不了", () => {
   const root = mkdtempSync(join(tmpdir(), "gy-hist-gate3-"));
   const evidenceDir = join(root, "evidence");
   mkdirSync(join(evidenceDir, "reconcile"), { recursive: true });
   const store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
   const taskId = "cccccccc-3333-4333-8333-cccccccccccc";
   try {
-    seedDiffGoal(store, taskId);
+    seedDiffGoal(store, taskId, { business: true });
 
-    writeFileSync(
-      join(evidenceDir, "reconcile", "ambiguous.json"),
-      JSON.stringify(reconcileFixture({ ambiguous: 1 }), null, 2),
-    );
-    const ambiguous = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/ambiguous.json"]);
-    assert.equal(ambiguous.ok, false);
-    if (!ambiguous.ok) assert.match(ambiguous.reason, /歧义 1 项/);
+    // 1) 当前侧同名主键冲突 → 歧义，不判通过。
+    writeMaterial(evidenceDir, "assets/baseline.csv", BASELINE_CSV);
+    writeMaterial(evidenceDir, "assets/current.csv", [
+      "host,role,version",
+      "app-a-1,web,1.5",
+      "app-a-1,web,9.9",
+      "app-a-2,db,2.1",
+    ].join("\n"));
+    const ambiguous = reconcile(store, taskId);
+    assert.equal(ambiguous.result.counts.ambiguous, 1);
+    const rejectedAmbiguous = store.assertGoal(taskId, "asset-baseline-diff", []);
+    assert.equal(rejectedAmbiguous.ok, false);
+    if (!rejectedAmbiguous.ok) assert.match(rejectedAmbiguous.reason, /歧义 1 项/);
 
-    writeFileSync(
-      join(evidenceDir, "reconcile", "unknown.json"),
-      JSON.stringify(reconcileFixture({ unknown: 1 }), null, 2),
-    );
-    const unknown = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/unknown.json"]);
-    assert.equal(unknown.ok, false);
-    if (!unknown.ok) assert.match(unknown.reason, /未知项 1 项/);
+    // 2) 未知项（缺一侧材料）同样不通过。
+    rmSync(join(evidenceDir, "assets/baseline.csv"));
+    const unknown = reconcile(store, taskId);
+    assert.equal(unknown.result.counts.unknown > 0, true);
+    const rejectedUnknown = store.assertGoal(taskId, "asset-baseline-diff", []);
+    assert.equal(rejectedUnknown.ok, false);
 
-    // 一份“长得像”的 JSON（占位/伪造）不算核算结果。
-    writeFileSync(join(evidenceDir, "reconcile", "stub.json"), JSON.stringify({ ok: true }, null, 2));
-    const stub = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/stub.json"]);
-    assert.equal(stub.ok, false);
-    if (!stub.ok) assert.match(stub.reason, /不是本平台的核算结果/);
+    // 3) 手写一份“长得像”的 JSON：不是核算实现产出的，也没有版本记录，冒充不了。
+    writeMaterial(evidenceDir, "reconcile/asset-diff-fake.json", JSON.stringify({
+      version: 1,
+      name: "asset-diff",
+      keyField: "host",
+      compareFields: ["version"],
+      baseline: { path: "assets/baseline.csv", format: "csv", rows: 2, sha256: "a".repeat(64) },
+      current: { path: "assets/current.csv", format: "csv", rows: 2, sha256: "b".repeat(64) },
+      missingMaterials: [],
+      counts: { added: 0, removed: 0, changed: 1, unchanged: 1, missing: 0, unknown: 0, ambiguous: 0, totalKeys: 2 },
+      items: [{ key: "app-a-1", status: "changed", baselineLine: 2, currentLine: 2, changes: [] }],
+    }, null, 2));
+    const fake = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-fake.json"]);
+    assert.equal(fake.ok, false, "没有归档版本的结果不能支撑首次通过");
+    if (!fake.ok) assert.match(fake.reason, /核算条件未满足/);
 
     assert.equal(store.listGoals(taskId)[0]!.passes, false);
     assert.deepEqual(store.listGoalProofs(taskId), []);

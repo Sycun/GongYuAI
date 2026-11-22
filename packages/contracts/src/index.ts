@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { CoverageStatusSchema } from "./coverage-audit.js";
-import { ReconcileGateSchema } from "./reconcile.js";
+import {
+  BUSINESS_RECONCILE_KIND,
+  BusinessReconcileConfigSchema,
+  ReconcileGateSchema,
+  reconcileGateFromConfig,
+  reconcileResultPattern,
+  type BusinessReconcileConfig,
+} from "./reconcile.js";
 export {
   CoverageReferenceSchema,
   CoverageSnapshotSchema,
@@ -8,10 +15,28 @@ export {
   type CoverageStatus,
 } from "./coverage-audit.js";
 export {
+  BUSINESS_RECONCILE_KIND,
+  BusinessReconcileConfigSchema,
+  GoalReconcileRequestSchema,
+  ReconcileInputRefSchema,
+  ReconcileInputStampSchema,
   ReconcileMaterialSchema,
   ReconcileRequestSchema,
   ReconcileGateSchema,
+  ReconcileRevisionIdPattern,
+  ReconcileRevisionSchema,
+  businessConfigFromRequest,
+  nextReconcileRevisionId,
+  reconcileConfigCanonical,
+  reconcileConfigDigest,
+  reconcileGateFromConfig,
+  reconcileInputDigest,
+  reconcileResultPattern,
+  type BusinessReconcileConfig,
+  type GoalReconcileRequest,
   type ReconcileGate,
+  type ReconcileInputRef,
+  type ReconcileInputStamp,
   type ReconcileCounts,
   type ReconcileFieldChange,
   type ReconcileItem,
@@ -19,6 +44,7 @@ export {
   type ReconcileMaterial,
   type ReconcileRequest,
   type ReconcileResult,
+  type ReconcileRevision,
   type ParsedMaterial,
   type MaterialRow,
   parseMaterial,
@@ -256,40 +282,86 @@ export type CoverageReviewInput = z.infer<typeof CoverageReviewSchema>;
 export { coverageLabels } from "./coverage.js";
 export type CoverageReview = CoverageReviewInput & { id: string; createdAt: string; sha256?: string };
 
-export const GoalSpecSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  description: z.string().min(1),
-  /**
-   * Assets this goal is accountable for (normalized host / CIDR / wildcard /
-   * URL host). Goal-scoped findings gates only count findings on these assets.
-   * Also used by delivery to state "this goal's scope".
-   */
-  assets: z.array(z.string().min(1)).optional(),
-  /** Glob patterns under evidence/ that must exist before pass. */
-  evidencePatterns: z.array(z.string().min(1)).min(1),
-  evidenceChecks: EvidenceChecksSchema,
-  /**
-   * P6-E1: require ≥N verified findings (severity/class filtered) to pass.
-   * Default scope is `goal`: only findings on the goal's declared assets count.
-   * Use `scope: "task"` only for a goal that explicitly aggregates the whole
-   * engagement.
-   */
-  findingsGate: FindingsGateSchema.optional(),
-  /**
-   * 业务完成条件（第七轮）：目标是“完成差异比对”时，必须由一份真实核算结果
-   * 满足这里声明的条件——只挂一份差异 JSON 不算完成。
-   */
-  reconcileGate: ReconcileGateSchema.optional(),
-  /**
-   * Optional benchmark semantics. Only `tsecbench` treats a file named
-   * `ALL_COMPLETE.json` as a challenge board (every `is_completed === true`).
-   * Ordinary engagements interpret the same filename by their declared
-   * evidencePatterns / evidenceChecks.
-   */
-  boardGate: z.enum(["tsecbench"]).optional(),
-});
+export const GoalSpecSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().min(1),
+    /**
+     * 目标类型。`file`（默认）= 普通材料留存目标，按 evidencePatterns 验收；
+     * `business-reconcile` = 业务核算目标，必须由一份满足 reconcileGate 的核算
+     * 结果满足。类型由建档界面显式选择，不从目标措辞里猜；省略按 `file` 处理
+     * （旧调用方的请求不需要改）。
+     */
+    kind: z.enum(["file", BUSINESS_RECONCILE_KIND]).optional(),
+    /**
+     * 业务核算配置（基线 / 当前材料 / 主键 / 检查项 / 判定阈值）。业务目标由
+     * 系统据此派生 evidencePatterns 与 reconcileGate，操作员不用手写 JSON。
+     */
+    business: BusinessReconcileConfigSchema.optional(),
+    /**
+     * Assets this goal is accountable for (normalized host / CIDR / wildcard /
+     * URL host). Goal-scoped findings gates only count findings on these assets.
+     * Also used by delivery to state "this goal's scope".
+     */
+    assets: z.array(z.string().min(1)).optional(),
+    /**
+     * Glob patterns under evidence/ that must exist before pass.
+     * 业务核算目标可省略：由核算配置派生为 reconcile/<name>-*.json。
+     */
+    evidencePatterns: z.array(z.string().min(1)).default([]),
+    evidenceChecks: EvidenceChecksSchema,
+    /**
+     * P6-E1: require ≥N verified findings (severity/class filtered) to pass.
+     * Default scope is `goal`: only findings on the goal's declared assets count.
+     * Use `scope: "task"` only for a goal that explicitly aggregates the whole
+     * engagement.
+     */
+    findingsGate: FindingsGateSchema.optional(),
+    /**
+     * 业务完成条件（第七轮）：目标是“完成差异比对”时，必须由一份真实核算结果
+     * 满足这里声明的条件——只挂一份差异 JSON 不算完成。
+     * 业务核算目标由 `business` 派生，不接受操作员手写。
+     */
+    reconcileGate: ReconcileGateSchema.optional(),
+    /**
+     * Optional benchmark semantics. Only `tsecbench` treats a file named
+     * `ALL_COMPLETE.json` as a challenge board (every `is_completed === true`).
+     * Ordinary engagements interpret the same filename by their declared
+     * evidencePatterns / evidenceChecks.
+     */
+    boardGate: z.enum(["tsecbench"]).optional(),
+  })
+  .refine(
+    (goal) => goal.kind !== BUSINESS_RECONCILE_KIND || Boolean(goal.business),
+    { message: "业务核算目标必须带 business 配置（基线材料、当前材料、主键字段）" },
+  )
+  .refine(
+    // kind 省略按 file 处理：普通文件目标必须给 patterns。
+    (goal) => (goal.kind ?? "file") !== "file" || goal.evidencePatterns.length > 0,
+    { message: "普通文件目标必须声明至少一个 evidencePatterns" },
+  );
 export type GoalSpec = z.infer<typeof GoalSpecSchema>;
+
+/**
+ * 建档请求的统一归一化：业务核算目标由系统派生 evidencePatterns 与
+ * reconcileGate，其他类型原样保留。
+ *
+ * 建档请求、服务端落库（seedGoals）、目标详情与恢复后的任务都以这里为唯一
+ * 权威——同一份 business 配置在任何地方派生结果都一致。
+ */
+export function normalizeGoalSpecs(specs: GoalSpec[]): GoalSpec[] {
+  return specs.map((spec) => {
+    if (!spec.business) return spec;
+    return {
+      ...spec,
+      kind: BUSINESS_RECONCILE_KIND,
+      // 业务目标的验收依据就是核算结果：严格由配置派生，不混入别的文件。
+      evidencePatterns: [reconcileResultPattern(spec.business.name)],
+      reconcileGate: reconcileGateFromConfig(spec.business),
+    };
+  });
+}
 
 /**
  * P4 — bounded Explore concurrency (user-set at task create).
@@ -394,13 +466,22 @@ export const CreateTaskRequestSchema = z.object({
   }),
   /** When true, worker uses scripted mock agent (no LLM). */
   mock: z.boolean().default(false),
-});
+}).transform((req) => ({
+  // 建档请求出口处归一化一次：业务核算目标在这里拿到系统派生的
+  // evidencePatterns 与 reconcileGate，后续落库/详情/恢复都读这份结果。
+  ...req,
+  goals: normalizeGoalSpecs(req.goals),
+}));
 export type CreateTaskRequest = z.infer<typeof CreateTaskRequestSchema>;
 
 export const GoalStateSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
+  /** 目标类型；旧档缺失时按普通文件目标解释。 */
+  kind: z.enum(["file", BUSINESS_RECONCILE_KIND]).optional(),
+  /** 业务核算配置（含基线/当前材料与判定阈值），业务目标与普通目标都可能有。 */
+  business: BusinessReconcileConfigSchema.optional(),
   assets: z.array(z.string()).optional(),
   evidencePatterns: z.array(z.string()),
   evidenceChecks: EvidenceChecksSchema,
@@ -566,6 +647,11 @@ export const HistoryEventKindSchema = z.enum([
   "delivery_correction_notice",
   "retest_requested",
   "peer_review_recorded",
+  /** 第八轮：核算材料的导入/替换与撤回都留痕，复核时能还原操作顺序。 */
+  "evidence_written",
+  "evidence_removed",
+  /** 操作员从控制台触发的目标判定（与 worker 自动判定同一条实现）。 */
+  "goal_assert_requested",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 
@@ -1004,10 +1090,14 @@ export const ToolsSettingsPatchSchema = z.object({
 export type ToolsSettingsPatch = z.infer<typeof ToolsSettingsPatchSchema>;
 
 export function goalsFromSpecs(specs: GoalSpec[]): GoalState[] {
-  return specs.map((g) => ({
+  // 建档请求已在 CreateTaskRequestSchema 里归一化；这里再走一次是幂等的，
+  // 覆盖直接构造 GoalSpec 的调用方（测试、CLI、runner 恢复）。
+  return normalizeGoalSpecs(specs).map((g) => ({
     id: g.id,
     title: g.title,
     description: g.description,
+    kind: g.business ? BUSINESS_RECONCILE_KIND : (g.kind ?? "file"),
+    ...(g.business ? { business: g.business } : {}),
     ...(g.assets?.length ? { assets: g.assets } : {}),
     evidencePatterns: g.evidencePatterns,
     evidenceChecks: g.evidenceChecks,

@@ -29,6 +29,7 @@
     "verify:acceptance": "tsx scripts/acceptance-verify.ts",
     "test:acceptance": "node --import tsx --test scripts/verify-acceptance.test.ts",
     "acceptance:business": "tsx scripts/business-acceptance.ts",
+    "acceptance:firstpass": "tsx scripts/firstpass-binding-acceptance.ts",
     "restore:selftest": "tsx scripts/restore-isolation.ts selftest",
     "restore:isolation": "tsx scripts/restore-isolation.ts"
   },

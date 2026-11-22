@@ -7,11 +7,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  BusinessReconcileConfigSchema,
   ReconcileRequestSchema,
+  ReconcileRevisionIdPattern,
+  nextReconcileRevisionId,
   parseMaterial,
+  reconcileConfigDigest,
+  reconcileGateFromConfig,
+  reconcileInputDigest,
   reconcileMaterials,
+  reconcileResultPattern,
   summarizeReconcile,
 } from "./reconcile.js";
+import { GoalSpecSchema, normalizeGoalSpecs } from "./index.js";
 
 const BASELINE_CSV = [
   "host,role,version,tls",
@@ -265,4 +273,160 @@ test("重复主键但内容完全相同：收敛为一行，行号取首次出�
   assert.deepEqual(result.baseline.duplicateKeys, [{ key: "test-A", lines: [2, 3], identical: true }]);
   assert.equal(result.counts.ambiguous, 0);
   assert.equal(result.counts.totalKeys, 2);
+});
+
+// ── 第八轮：业务核算目标的派生与核算版本身份 ────────────────────────────────
+
+test("业务配置派生核算条件：默认拒绝缺件、未知项与重复主键歧义", () => {
+  const config = BusinessReconcileConfigSchema.parse({
+    name: "asset-diff",
+    baseline: { path: "assets/baseline.csv" },
+    current: { path: "assets/current.csv" },
+  });
+  assert.equal(config.keyField, "host");
+  assert.equal(config.maxUnknown, 0);
+  assert.equal(config.maxAmbiguous, 0);
+  const gate = reconcileGateFromConfig(config);
+  assert.deepEqual(gate, {
+    pattern: "reconcile/asset-diff-*.json",
+    maxUnknown: 0,
+    maxAmbiguous: 0,
+  });
+  assert.equal(reconcileResultPattern("asset-diff"), "reconcile/asset-diff-*.json");
+});
+
+test("建档归一化：业务目标派生 patterns 与 gate，普通目标原样保留", () => {
+  const [business, plain] = normalizeGoalSpecs([
+    GoalSpecSchema.parse({
+      id: "biz",
+      title: "两份清单差异",
+      description: "比对基线与当前",
+      kind: "business-reconcile",
+      business: {
+        name: "asset-diff",
+        baseline: { path: "assets/baseline.csv" },
+        current: { path: "assets/current.csv" },
+      },
+    }),
+    GoalSpecSchema.parse({
+      id: "plain",
+      title: "材料留存",
+      description: "留一份说明",
+      evidencePatterns: ["goals/plain.md"],
+    }),
+  ]);
+  assert.equal(business!.kind, "business-reconcile");
+  assert.deepEqual(business!.evidencePatterns, ["reconcile/asset-diff-*.json"]);
+  assert.equal(business!.reconcileGate?.pattern, "reconcile/asset-diff-*.json");
+  assert.equal(plain!.kind ?? "file", "file");
+  assert.deepEqual(plain!.evidencePatterns, ["goals/plain.md"]);
+  assert.equal(plain!.reconcileGate, undefined);
+});
+
+test("业务目标缺少 business 配置或普通目标没有 patterns 时建档即被拒", () => {
+  assert.equal(
+    GoalSpecSchema.safeParse({
+      id: "biz",
+      title: "t",
+      description: "d",
+      kind: "business-reconcile",
+    }).success,
+    false,
+  );
+  assert.equal(
+    GoalSpecSchema.safeParse({ id: "plain", title: "t", description: "d", evidencePatterns: [] }).success,
+    false,
+  );
+});
+
+test("核算口径摘要：材料或字段不同即不同，键序与重复项不影响", () => {
+  const base = BusinessReconcileConfigSchema.parse({
+    name: "asset-diff",
+    keyField: "host",
+    baseline: { path: "assets/baseline.csv" },
+    current: { path: "assets/current.csv" },
+  });
+  const same = BusinessReconcileConfigSchema.parse({
+    current: { path: "assets/current.csv" },
+    baseline: { path: "assets/baseline.csv" },
+    keyField: "host",
+    name: "asset-diff",
+    compareFields: ["version", "version"],
+  });
+  assert.equal(
+    reconcileConfigDigest(base),
+    reconcileConfigDigest(BusinessReconcileConfigSchema.parse({
+      name: "asset-diff",
+      keyField: "host",
+      baseline: { path: "assets/baseline.csv" },
+      current: { path: "assets/current.csv" },
+      compareFields: [],
+    })),
+    "空数组与省略等价",
+  );
+  assert.notEqual(
+    reconcileConfigDigest(base),
+    reconcileConfigDigest(BusinessReconcileConfigSchema.parse({
+      name: "asset-diff",
+      keyField: "role",
+      baseline: { path: "assets/baseline.csv" },
+      current: { path: "assets/current.csv" },
+    })),
+    "主键不同 → 口径不同",
+  );
+  assert.notEqual(
+    reconcileConfigDigest(base),
+    reconcileConfigDigest(BusinessReconcileConfigSchema.parse({
+      name: "asset-diff",
+      keyField: "host",
+      baseline: { path: "assets/baseline2.csv" },
+      current: { path: "assets/current.csv" },
+    })),
+    "材料路径不同 → 口径不同",
+  );
+  assert.equal(
+    reconcileConfigDigest(same),
+    reconcileConfigDigest(BusinessReconcileConfigSchema.parse({
+      ...same,
+      compareFields: ["version"],
+    })),
+    "重复项收敛后相同",
+  );
+});
+
+test("核算版本号：单调唯一，同一毫秒内递增，时钟回拨不产生更小的号", () => {
+  const first = nextReconcileRevisionId([], 1_700_000_000_000);
+  assert.equal(first, "r1700000000000-0001");
+  const second = nextReconcileRevisionId([first], 1_700_000_000_000);
+  assert.equal(second, "r1700000000000-0002");
+  const nextMs = nextReconcileRevisionId([first, second], 1_700_000_000_750);
+  assert.equal(nextMs, "r1700000000750-0001");
+  // 时钟回拨：沿用上一毫秒并递增序号，字典序仍然单调。
+  const back = nextReconcileRevisionId([first, second, nextMs], 1_600_000_000_000);
+  assert.ok(back > nextMs, `${back} 应大于 ${nextMs}`);
+  assert.match(back, /^r\d{13}-\d{4}$/);
+  assert.equal(ReconcileRevisionIdPattern.test(back), true);
+});
+
+test("输入摘要：两侧内容哈希或口径任一变化都改变摘要", () => {
+  const stamp = (path: string, sha: string | null, present = true) => ({
+    path,
+    format: "csv" as const,
+    present,
+    sha256: sha,
+    rows: 2,
+  });
+  const a = reconcileInputDigest("c".repeat(64), stamp("a.csv", "1".repeat(64)), stamp("b.csv", "2".repeat(64)));
+  const b = reconcileInputDigest("c".repeat(64), stamp("a.csv", "1".repeat(64)), stamp("b.csv", "2".repeat(64)));
+  assert.equal(a, b, "同样的输入集合得到同样的摘要");
+  assert.notEqual(
+    a,
+    reconcileInputDigest("c".repeat(64), stamp("a.csv", "1".repeat(64)), stamp("b.csv", "3".repeat(64))),
+    "当前材料换了一份 → 摘要不同",
+  );
+  assert.notEqual(
+    a,
+    reconcileInputDigest("d".repeat(64), stamp("a.csv", "1".repeat(64)), stamp("b.csv", "2".repeat(64))),
+    "口径不同 → 摘要不同",
+  );
 });

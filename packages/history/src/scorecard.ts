@@ -23,6 +23,8 @@ export type SnapshotGoal = Pick<
   findingsGate?: GoalState["findingsGate"];
   reconcileGate?: GoalState["reconcileGate"];
   boardGate?: GoalState["boardGate"];
+  kind?: GoalState["kind"];
+  business?: GoalState["business"];
 };
 
 export type SnapshotFinding = {

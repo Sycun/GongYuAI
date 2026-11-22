@@ -60,6 +60,10 @@ git checkout -q "$COMMIT" || exit 1
   pnpm run acceptance:business 2>&1 | tail -4 || { echo "BUSINESS_FAILED"; exit 1; }
   echo
 
+  echo "== 首次通过绑定输入版本验收（A/B 反例）=="
+  pnpm run acceptance:firstpass 2>&1 | tail -4 || { echo "FIRSTPASS_FAILED"; exit 1; }
+  echo
+
   echo "== 恢复隔离自测 =="
   pnpm run restore:selftest 2>&1 | tail -6 || { echo "RESTORE_SELFTEST_FAILED"; exit 1; }
   echo

@@ -22,7 +22,11 @@ import type {
   Intent,
   IntentStatus,
   ReconcileGate,
+  ReconcileInputStamp,
+  ReconcileRequest,
   ReconcileResult,
+  ReconcileRevision,
+  BusinessReconcileConfig,
 } from "@gongyuai/contracts";
 import {
   ASSET_KIND_RANK,
@@ -46,8 +50,25 @@ import {
   parseAssetKindFromTags,
   parseAssetSourceFromTags,
   suggestFamilyKey,
+  businessConfigFromRequest,
+  nextReconcileRevisionId,
+  parseMaterial,
+  reconcileConfigDigest,
+  reconcileInputDigest,
+  reconcileMaterials,
+  summarizeReconcile,
 } from "@gongyuai/contracts";
-import { captureEvidence, checkReconcileGate, collectGoalEvidence, type EvidenceSnapshot } from "./goal-evidence.js";
+import {
+  captureEvidence,
+  collectGoalEvidence,
+  describeReconcileState,
+  selectAdoptedReconcile,
+  verifyRevisionInputs,
+  type ArchivedReconcile,
+  type EvidenceSnapshot,
+  type ReconcileStateReport,
+} from "./goal-evidence.js";
+import { readEvidenceBytes, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
 import { readIntegrationUsage, trackIntegrationCalls } from "./integration-usage.js";
 import {
   computeScorecard,
@@ -70,7 +91,15 @@ import {
   type RetestRequestStatus,
 } from "@gongyuai/contracts";
 
-export { collectGoalEvidence } from "./goal-evidence.js";
+export {
+  collectGoalEvidence,
+  describeReconcileState,
+  selectAdoptedReconcile,
+  verifyRevisionInputs,
+  type ArchivedReconcile,
+  type ReconcileState,
+  type ReconcileStateReport,
+} from "./goal-evidence.js";
 export type FactReview = CreateFactReview & { id: string; sha256: string; createdAt: string };
 export type GoalProof = { goalId: string; path: string; sha256: string };
 export type GoalFindingSupport = SnapshotGoalFinding;
@@ -104,7 +133,14 @@ export { computeScorecard, finalizeSnapshot, scorecardFromSnapshot, snapshotSha2
 export { describeGoalEvidence, formatAccounting, formatCorrections, type GoalEvidenceSupport } from "./delivery.js";
 export { minimatch } from "./minimatch.js";
 export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
-export { listEvidenceFiles, readEvidenceBytes, readEvidenceFile, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
+export {
+  listEvidenceFiles,
+  readEvidenceBytes,
+  readEvidenceFile,
+  removeEvidenceFile,
+  resolveEvidenceFile,
+  writeEvidenceFile,
+} from "./evidence.js";
 export { writeTaskReport, type TerminalReportStatus } from "./report.js";
 
 export type FanoutPolicy = {
@@ -227,6 +263,22 @@ export class HistoryStore {
         sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256),
         PRIMARY KEY(task_id, goal_id, path)
       );
+      -- 第八轮：核算版本归档。首次判定以这里的顺序为准（版本号单调唯一），
+      -- 不靠文件名排序或秒级时间戳；每条都记下对应目标、两侧材料内容哈希
+      -- 与采用的核算口径摘要。
+      CREATE TABLE IF NOT EXISTS reconcile_revisions (
+        task_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        revision_json TEXT NOT NULL,
+        goal_ids_json TEXT NOT NULL DEFAULT '[]',
+        config_digest TEXT NOT NULL,
+        evidence_path TEXT NOT NULL,
+        evidence_sha256 TEXT NOT NULL,
+        counts_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (task_id, id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_reconcile_revisions_task ON reconcile_revisions(task_id, id);
       CREATE TABLE IF NOT EXISTS coverage_reviews (
         id TEXT PRIMARY KEY, task_id TEXT NOT NULL, goal_id TEXT NOT NULL,
         status TEXT NOT NULL, reviewer TEXT NOT NULL, reason TEXT NOT NULL,
@@ -407,6 +459,12 @@ export class HistoryStore {
     if (!have.has("reconcile_gate_json")) {
       this.db.exec(`ALTER TABLE goals ADD COLUMN reconcile_gate_json TEXT`);
     }
+    if (!have.has("goal_kind")) {
+      this.db.exec(`ALTER TABLE goals ADD COLUMN goal_kind TEXT`);
+    }
+    if (!have.has("business_json")) {
+      this.db.exec(`ALTER TABLE goals ADD COLUMN business_json TEXT`);
+    }
   }
 
   /** Migrate pre-P0 DBs that lack source_fact_ids_json. */
@@ -455,8 +513,9 @@ export class HistoryStore {
     const stmt = this.db.prepare(`
       INSERT INTO goals
         (id, task_id, title, description, evidence_patterns_json, passes, evidence_paths_json,
-         asserted_at, findings_gate_json, assets_json, board_gate, reconcile_gate_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         asserted_at, findings_gate_json, assets_json, board_gate, reconcile_gate_json,
+         goal_kind, business_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(task_id, id) DO NOTHING
     `);
     this.db.exec("BEGIN");
@@ -475,6 +534,10 @@ export class HistoryStore {
           g.assets?.length ? JSON.stringify(g.assets) : null,
           g.boardGate ?? null,
           g.reconcileGate ? JSON.stringify(g.reconcileGate) : null,
+          // 目标类型与业务核算配置和 reconcileGate 一起落库：恢复后的任务读的
+          // 是同一份配置，不需要操作员再手抄一遍。
+          g.kind ?? "file",
+          g.business ? JSON.stringify(g.business) : null,
         );
         if (inserted.changes && g.evidenceChecks?.length) {
           this.db.prepare("INSERT INTO goal_checks VALUES (?, ?, ?)")
@@ -648,6 +711,10 @@ export class HistoryStore {
       ...(r.board_gate === "tsecbench" ? { boardGate: "tsecbench" as const } : {}),
       ...(r.reconcile_gate_json
         ? { reconcileGate: JSON.parse(String(r.reconcile_gate_json)) as ReconcileGate }
+        : {}),
+      kind: (r.goal_kind as "file" | "business-reconcile" | null) ?? "file",
+      ...(r.business_json
+        ? { business: JSON.parse(String(r.business_json)) as BusinessReconcileConfig }
         : {}),
       passes: Boolean(r.passes),
       evidencePaths: JSON.parse(String(r.evidence_paths_json)) as string[],
@@ -1226,6 +1293,12 @@ export class HistoryStore {
     taskId: string,
     goalId: string,
     evidencePaths: string[],
+    /**
+     * 测试注入点：用来制造“核算完成之后、首次通过提交之前输入又发生变化”
+     * 那个窗口（在通过事务内、封存之前触发），验证二次核对能把首次通过整体
+     * 回滚。生产路径不传。
+     */
+    hooks?: { beforeCommit?: () => void },
   ): { ok: true; goal: GoalState } | { ok: false; reason: string } {
     const goals = this.listGoals(taskId);
     const goal = goals.find((g) => g.id === goalId);
@@ -1234,18 +1307,36 @@ export class HistoryStore {
 
     let files: EvidenceSnapshot[];
     try {
-      files = collectGoalEvidence(this.evidenceDir, goal, evidencePaths);
+      files = collectGoalEvidence(this.evidenceDir, goal, evidencePaths, {
+        // 业务核算目标由核算条件判定是否缺件，并点名缺哪一份材料。
+        deferPatternsToReconcileGate: Boolean(goal.reconcileGate),
+      });
     } catch (err) {
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
 
-    // 第七轮：目标自报“完成差异比对”时，验收的是本次核算是否满足声明的业务条件。
-    // 只挂一份差异 JSON 不算完成：缺基线 / 缺当前 / 两侧都缺、结论停在未知或
-    // 重复主键歧义，都保持待补，不计入首次通过。通过时把实际采用的核算文件
-    // 收窄成首次通过依据（重复提交时 passes=1 已挡住，不再重复记账）。
-    let adopted: { path: string; sha256: string; name: string; counts: ReconcileResult["counts"] } | null = null;
+    // 第七轮 + 第八轮：目标自报“完成差异比对”时，验收的是**本次首次通过所对应
+    // 的那一版输入**算出的结果。只有归档里、口径一致、且两侧材料现在仍然是
+    // 核算时那两份字节的核算版本才能支撑首次通过；曾经合格但材料已撤走 /
+    // 已替换的旧结果只保留供追溯。重复提交时 passes=1 与事务内的二次核对
+    // 一起保证只记一条首次通过事件。
+    let adopted: {
+      path: string;
+      sha256: string;
+      name: string;
+      counts: ReconcileResult["counts"];
+      revision: ReconcileRevision;
+    } | null = null;
     if (goal.reconcileGate) {
-      const outcome = checkReconcileGate(files, goal.reconcileGate);
+      const outcome = selectAdoptedReconcile({
+        evidenceDir: this.evidenceDir,
+        gate: goal.reconcileGate,
+        goalId,
+        ...(goal.business
+          ? { expectedConfigDigest: reconcileConfigDigest(goal.business), goalConfig: goal.business }
+          : {}),
+        archives: this.listReconcileRevisions(taskId),
+      });
       if (!outcome.ok) {
         this.recordGoalRejection(taskId, goalId, outcome.reason);
         return { ok: false, reason: outcome.reason };
@@ -1255,6 +1346,7 @@ export class HistoryStore {
         sha256: outcome.adopted.sha256,
         name: outcome.result.name,
         counts: outcome.result.counts,
+        revision: outcome.revision,
       };
       files = [outcome.adopted];
     }
@@ -1307,6 +1399,18 @@ export class HistoryStore {
         )
         .run(JSON.stringify(normalized), this.now(), taskId, goalId);
       if (result.changes) {
+        // 核算完成之后、首次通过提交之前的最后一次核对：材料在这期间被撤走
+        // 或替换，本次首次通过整体回滚，旧结果保留供追溯。
+        hooks?.beforeCommit?.();
+        if (adopted) {
+          const recheck = verifyRevisionInputs(this.evidenceDir, adopted.revision);
+          if (!recheck.ok) {
+            this.db.exec("ROLLBACK");
+            const reason = `核算结果 ${adopted.path}（版本 ${adopted.revision.id}）不能支撑本次首次通过：${recheck.reason}`;
+            this.recordGoalRejection(taskId, goalId, reason);
+            return { ok: false, reason };
+          }
+        }
         for (const f of files) {
           this.saveVersion(f);
           this.db.prepare("INSERT INTO goal_proofs VALUES (?, ?, ?, ?)").run(taskId, goalId, f.path, f.sha256);
@@ -1329,6 +1433,17 @@ export class HistoryStore {
                   sha256: adopted.sha256,
                   name: adopted.name,
                   counts: adopted.counts,
+                  revisionId: adopted.revision.id,
+                  inputDigest: adopted.revision.inputDigest,
+                  configDigest: adopted.revision.configDigest,
+                  baseline: {
+                    path: adopted.revision.baseline.path,
+                    sha256: adopted.revision.baseline.sha256,
+                  },
+                  current: {
+                    path: adopted.revision.current.path,
+                    sha256: adopted.revision.current.sha256,
+                  },
                 },
               }
             : {}),
@@ -1340,6 +1455,213 @@ export class HistoryStore {
     } catch (err) {
       try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
       throw err;
+    }
+  }
+
+  /**
+   * 第八轮：执行一次核算并归档成“核算版本”。
+   *
+   * 一次核算 = 一份带版本号的结果文件 + 一条数据库记录。记录里有：对应的目标、
+   * 两侧材料的路径与内容哈希、采用的核算口径摘要、结果文件哈希。首次判定只认
+   * 这里的记录（顺序由单调版本号给出），文件本身则作为可复核的证据留在
+   * evidence/ 下；同名连续核算因为版本号不同而互不覆盖、互不混淆。
+   */
+  archiveReconcile(input: {
+    taskId: string;
+    request: ReconcileRequest;
+    /** 本次核算对应的目标；业务目标的核算必须点名。 */
+    goalIds?: string[];
+  }): {
+    revision: ReconcileRevision;
+    result: ReconcileResult;
+    evidencePath: string;
+    evidenceSha256: string;
+    factId: string;
+  } {
+    const { taskId, request } = input;
+    const goalIds = [...new Set(input.goalIds ?? request.goalIds ?? [])];
+    if (goalIds.length) {
+      const known = new Set(this.listGoals(taskId).map((goal) => goal.id));
+      for (const goalId of goalIds) {
+        if (!known.has(goalId)) throw new Error(`unknown goal: ${goalId}`);
+      }
+    }
+
+    const baselineState = this.stampMaterial(request.baseline.path);
+    const currentState = this.stampMaterial(request.current.path);
+    const baselineParsed = baselineState.bytes
+      ? parseMaterial({
+          path: request.baseline.path,
+          content: baselineState.bytes.toString("utf8"),
+          keyField: request.baseline.keyField ?? request.keyField,
+          ...(request.baseline.format ? { format: request.baseline.format } : {}),
+        })
+      : null;
+    const currentParsed = currentState.bytes
+      ? parseMaterial({
+          path: request.current.path,
+          content: currentState.bytes.toString("utf8"),
+          keyField: request.current.keyField ?? request.keyField,
+          ...(request.current.format ? { format: request.current.format } : {}),
+        })
+      : null;
+
+    const result = reconcileMaterials({
+      request,
+      baseline: baselineParsed,
+      current: currentParsed,
+      baselineSha256: baselineState.sha256,
+      currentSha256: currentState.sha256,
+    });
+
+    const config: BusinessReconcileConfig = businessConfigFromRequest(request);
+    const configDigest = reconcileConfigDigest(config);
+    const baselineStamp: ReconcileInputStamp = {
+      path: request.baseline.path,
+      format: baselineParsed?.format ?? request.baseline.format ?? null,
+      present: baselineState.present,
+      sha256: baselineState.sha256,
+      rows: baselineParsed?.rows.length ?? 0,
+    };
+    const currentStamp: ReconcileInputStamp = {
+      path: request.current.path,
+      format: currentParsed?.format ?? request.current.format ?? null,
+      present: currentState.present,
+      sha256: currentState.sha256,
+      rows: currentParsed?.rows.length ?? 0,
+    };
+
+    const revision: ReconcileRevision = {
+      id: nextReconcileRevisionId(this.listReconcileRevisions(taskId).map((entry) => entry.revision.id)),
+      taskId,
+      goalIds,
+      config,
+      configDigest,
+      inputDigest: reconcileInputDigest(configDigest, baselineStamp, currentStamp),
+      baseline: baselineStamp,
+      current: currentStamp,
+      createdAt: this.now(),
+    };
+
+    const resultWithRevision: ReconcileResult = { ...result, revision };
+    const serialized = JSON.stringify(resultWithRevision, null, 2) + "\n";
+    // 版本号进文件名：同名同路径的连续核算各自留档，不会互相覆盖。
+    const relativePath = `reconcile/${request.name}-${revision.id}.json`;
+    writeEvidenceFile(this.evidenceDir, relativePath, serialized);
+    const evidenceSha256 = createHash("sha256").update(Buffer.from(serialized, "utf8")).digest("hex");
+
+    const fact = this.appendFact({
+      taskId,
+      layer: "evidence",
+      title: `原始材料差异核算 · ${request.name}`,
+      summary: summarizeReconcile(resultWithRevision),
+      evidencePath: relativePath,
+      tags: ["reconcile", `reconcile:${request.name}`, `reconcile-revision:${revision.id}`, "source:operator"],
+    });
+
+    this.db
+      .prepare(
+        `INSERT INTO reconcile_revisions
+           (task_id, id, revision_json, goal_ids_json, config_digest, evidence_path, evidence_sha256, counts_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        taskId,
+        revision.id,
+        JSON.stringify(revision),
+        JSON.stringify(goalIds),
+        configDigest,
+        relativePath,
+        evidenceSha256,
+        JSON.stringify(resultWithRevision.counts),
+        revision.createdAt,
+      );
+
+    return { revision, result: resultWithRevision, evidencePath: relativePath, evidenceSha256, factId: fact.id };
+  }
+
+  /** 材料在“现在”的样子：读得到就有哈希，读不到就标记缺件（不猜）。 */
+  private stampMaterial(path: string): { path: string; present: boolean; sha256: string | null; bytes: Buffer | null } {
+    try {
+      resolveEvidenceFile(this.evidenceDir, path);
+      const bytes = readEvidenceBytes(this.evidenceDir, path);
+      return {
+        path,
+        present: true,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        bytes,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/ENOENT|no such file/i.test(message)) return { path, present: false, sha256: null, bytes: null };
+      throw err;
+    }
+  }
+
+  /** 任务的全部核算版本（按版本号倒序 = 时间倒序）。 */
+  listReconcileRevisions(taskId: string): ArchivedReconcile[] {
+    if (this.archiveTables && !this.archiveTables.has("reconcile_revisions")) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT revision_json, evidence_path, evidence_sha256, counts_json
+         FROM reconcile_revisions WHERE task_id = ? ORDER BY id DESC`,
+      )
+      .all(taskId) as Array<{
+        revision_json: string;
+        evidence_path: string;
+        evidence_sha256: string;
+        counts_json: string;
+      }>;
+    return rows.map((row) => ({
+      revision: JSON.parse(String(row.revision_json)) as ReconcileRevision,
+      evidencePath: String(row.evidence_path),
+      evidenceSha256: String(row.evidence_sha256),
+      counts: JSON.parse(String(row.counts_json)) as ReconcileResult["counts"],
+    }));
+  }
+
+  /** 某个目标的核算态：缺材料 / 待重算 / 结论不合格 / 可判定（或已通过）。 */
+  goalReconcileState(taskId: string, goalId: string): ReconcileStateReport | null {
+    const goal = this.listGoals(taskId).find((entry) => entry.id === goalId);
+    if (!goal?.reconcileGate) return null;
+    if (goal.passes) {
+      const proofs = this.listGoalProofs(taskId).filter((proof) => proof.goalId === goalId);
+      return {
+        state: "passed",
+        reason: null,
+        latestRevisionId: proofs[0]?.path.match(/r\d{13}-\d{4}/)?.[0] ?? null,
+        readyRevisionId: null,
+        materials: goal.business
+          ? {
+              baseline: { path: goal.business.baseline.path, present: this.hasEvidence(goal.business.baseline.path) },
+              current: { path: goal.business.current.path, present: this.hasEvidence(goal.business.current.path) },
+            }
+          : null,
+        drift: null,
+        // 已通过的目标不必再提示冲突项（当时的结论已经归档在首次通过依据里）。
+        ambiguous: [],
+      };
+    }
+    return describeReconcileState({
+      evidenceDir: this.evidenceDir,
+      gate: goal.reconcileGate,
+      goalId,
+      ...(goal.business
+        ? { expectedConfigDigest: reconcileConfigDigest(goal.business), goalConfig: goal.business }
+        : {}),
+      archives: this.listReconcileRevisions(taskId),
+      ...(goal.business
+        ? { declaredMaterials: { baseline: goal.business.baseline.path, current: goal.business.current.path } }
+        : {}),
+    });
+  }
+
+  private hasEvidence(path: string): boolean {
+    try {
+      resolveEvidenceFile(this.evidenceDir, path);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -1402,6 +1724,8 @@ export class HistoryStore {
       ...(goal.findingsGate ? { findingsGate: goal.findingsGate } : {}),
       ...(goal.reconcileGate ? { reconcileGate: goal.reconcileGate } : {}),
       ...(goal.boardGate ? { boardGate: goal.boardGate } : {}),
+      ...(goal.kind ? { kind: goal.kind } : {}),
+      ...(goal.business ? { business: goal.business } : {}),
     }));
     const findings: SnapshotFinding[] = this.listFindings(taskId).map((finding) => ({
       id: finding.id,

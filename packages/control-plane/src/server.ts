@@ -27,9 +27,12 @@ import {
   computeScorecard,
   describeGoalEvidence,
   listEvidenceFiles,
+  minimatch,
   listExecutionSteps,
   openHistory,
+  readEvidenceBytes,
   readEvidenceFile,
+  removeEvidenceFile,
   readExecutionStepCalls,
   resolveEvidenceFile,
   writeEvidenceFile,
@@ -830,8 +833,12 @@ export function startControlServer(opts: ServerOptions) {
             return send(res, 200, {
               overview: history.overview(task.id),
               goals: history.listGoals(task.id).map((goal) => ({
-                ...goal, assessment: describeGoalEvidence(goal, goalProofs, reviews),
+                ...goal,
+                assessment: describeGoalEvidence(goal, goalProofs, reviews),
+                // 核算态（缺材料 / 待重算 / 结论不合格 / 可判定 / 已通过）随目标一起返回。
+                reconcileState: history.goalReconcileState(task.id, goal.id),
               })),
+              reconcileRevisions: history.listReconcileRevisions(task.id),
               facts: history.listFacts(task.id),
               reviews,
               goalProofs,
@@ -911,11 +918,93 @@ export function startControlServer(opts: ServerOptions) {
           if (typeof body.path !== "string" || typeof body.content !== "string") {
             return send(res, 400, { error: "path and content (utf8 text) are required" });
           }
+          const { evidenceDir, historyDb } = taskPaths(task.dataDir);
+          let replaced = false;
           try {
-            const written = writeEvidenceFile(taskPaths(task.dataDir).evidenceDir, body.path, body.content);
-            return send(res, 201, { path: written });
+            resolveEvidenceFile(evidenceDir, body.path);
+            replaced = true;
+          } catch {
+            replaced = false;
+          }
+          try {
+            const written = writeEvidenceFile(evidenceDir, body.path, body.content);
+            const sha256 = createHash("sha256").update(Buffer.from(body.content, "utf8")).digest("hex");
+            // 材料导入/替换留痕：复核时能还原“谁在什么时候换了哪份材料”。
+            if (existsSync(historyDb)) {
+              const history = openHistory({ dbPath: historyDb, evidenceDir, readOnly: false });
+              try {
+                history.recordEvent(task.id, "evidence_written", {
+                  path: written,
+                  sha256,
+                  bytes: Buffer.byteLength(body.content, "utf8"),
+                  replaced,
+                  source: "console",
+                });
+              } finally {
+                history.close();
+              }
+            }
+            return send(res, 201, { path: written, sha256, replaced });
           } catch (err) {
             return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        if (method === "DELETE" && rest === "/evidence") {
+          const rel = url.searchParams.get("path");
+          if (!rel) return send(res, 400, { error: "path is required" });
+          const { evidenceDir, historyDb } = taskPaths(task.dataDir);
+          let sha256: string | null = null;
+          try {
+            sha256 = createHash("sha256").update(readEvidenceBytes(evidenceDir, rel)).digest("hex");
+            removeEvidenceFile(evidenceDir, rel);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const missing = /ENOENT|no such file/i.test(message);
+            return send(res, missing ? 404 : 400, { error: message });
+          }
+          if (existsSync(historyDb)) {
+            const history = openHistory({ dbPath: historyDb, evidenceDir, readOnly: false });
+            try {
+              // 撤回的材料不删历史：事件里留下撤回前的哈希，旧结果仍可追溯。
+              history.recordEvent(task.id, "evidence_removed", {
+                path: rel,
+                sha256,
+                source: "console",
+              });
+            } finally {
+              history.close();
+            }
+          }
+          return send(res, 200, { removed: rel, sha256 });
+        }
+        if (method === "POST" && rest === "/goals/assert") {
+          // 操作员触发的目标判定：与 worker 自动判定走同一条 assertGoal 实现，
+          // 因此首次通过的输入绑定、单条事件与重复提交幂等完全一致。
+          const body = await readJson(req) as { goalId?: unknown };
+          const goalId = typeof body.goalId === "string" ? body.goalId.trim() : "";
+          if (!goalId) return send(res, 400, { error: "goalId is required" });
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            const goal = history.listGoals(task.id).find((entry) => entry.id === goalId);
+            if (!goal) return send(res, 404, { error: `unknown goal: ${goalId}` });
+            history.recordEvent(task.id, "goal_assert_requested", { goalId, source: "console" });
+            const evidencePaths = listEvidenceFiles(paths.evidenceDir).filter((path) =>
+              goal.evidencePatterns.length === 0 ||
+              goal.evidencePatterns.some((pattern) => minimatch(path, pattern)),
+            );
+            const outcome = history.assertGoal(task.id, goalId, evidencePaths);
+            const state = history.goalReconcileState(task.id, goalId);
+            refreshTerminalReport(history);
+            return send(res, outcome.ok ? 200 : 409, {
+              ok: outcome.ok,
+              goal: outcome.ok ? outcome.goal : goal,
+              ...(outcome.ok ? {} : { reason: outcome.reason }),
+              reconcileState: state,
+            });
+          } finally {
+            history.close();
           }
         }
         if (method === "GET" && rest === "/evidence") {

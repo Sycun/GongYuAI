@@ -5,7 +5,9 @@ import {
   Col,
   Descriptions,
   Empty,
+  Input,
   List,
+  Modal,
   Row,
   Space,
   Table,
@@ -47,6 +49,7 @@ import { StatusTag } from "../components/StatusTag";
 import { GoalCoverage } from "../components/GoalCoverage";
 import { DeliveryScorecard } from "../components/DeliveryScorecard";
 import { ReconcilePanel } from "../components/ReconcilePanel";
+import { GoalReconcileCard, type AdoptedReconcile } from "../components/GoalReconcileCard";
 import { ExecutionTrace } from "../components/ExecutionTrace";
 import { IntegrationUsage } from "../components/IntegrationUsage";
 import { formatDateTime } from "../time";
@@ -69,6 +72,12 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   >([]);
   const [evidencePath, setEvidencePath] = useState<string | null>(null);
   const [evidenceBody, setEvidenceBody] = useState("请选择左侧文件");
+  const [materialPath, setMaterialPath] = useState("");
+  const [materialBody, setMaterialBody] = useState("");
+  const [materialBusy, setMaterialBusy] = useState(false);
+  const [removingPath, setRemovingPath] = useState<string | null>(null);
+  /** 核算/判定后要重读历史（核算态与事件台账都不在任务列表里）。 */
+  const [historyTick, setHistoryTick] = useState(0);
   const [paneText, setPaneText] = useState("");
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
@@ -128,7 +137,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [task?.id, task?.status, tab]);
+  }, [task?.id, task?.status, tab, historyTick]);
 
   // 运行中自动刷新运行态 / 步骤，保持与任务状态一致
   useEffect(() => {
@@ -290,6 +299,65 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     }
   };
 
+  const reloadEvidenceFiles = async () => {
+    const ev = await api.evidence(task.id);
+    setEvidenceFiles(ev.json.files ?? []);
+  };
+
+  /** 导入/替换一份原始材料：同一路径即替换，新内容重新算 SHA-256。 */
+  const importMaterial = async () => {
+    const path = materialPath.trim();
+    const content = materialBody;
+    if (!path) {
+      Toast.error("请填写材料路径（evidence/ 下相对路径）");
+      return;
+    }
+    if (!content.trim()) {
+      Toast.error("请填写材料内容");
+      return;
+    }
+    setMaterialBusy(true);
+    try {
+      const { json } = await api.writeEvidence(task.id, { path, content });
+      Toast.success(
+        `已写入 ${json.path}（${json.replaced ? "替换" : "新增"}，sha256 ${json.sha256.slice(0, 16)}…）`,
+      );
+      setMaterialPath("");
+      setMaterialBody("");
+      await reloadEvidenceFiles();
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMaterialBusy(false);
+    }
+  };
+
+  /** 撤回材料：文件移出 evidence/，旧结果保留供追溯（服务端只记事件）。 */
+  const removeMaterial = async (path: string) => {
+    setRemovingPath(path);
+    try {
+      await api.removeEvidence(task.id, path);
+      Toast.success(`已撤回 ${path}`);
+      if (evidencePath === path) {
+        setEvidencePath(null);
+        setEvidenceBody("请选择左侧文件");
+      }
+      await reloadEvidenceFiles();
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRemovingPath(null);
+    }
+  };
+
+  /** 核算/判定后：历史（核算态 + goal_asserted 事件）+ 任务本身一起刷新。 */
+  const reloadAfterGoalAction = async () => {
+    setHistoryTick((n) => n + 1);
+    await onRefresh();
+  };
+
   const goals = history?.goals?.length ? history.goals : task.goals;
 
   /**
@@ -297,11 +365,11 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
    * 倒序返回），控制台只做展示，不自己推断结论。
    */
   const goalEvents = history?.events ?? [];
-  const adoptedByGoal = new Map<string, { path: string; sha256: string; name?: string }>();
+  const adoptedByGoal = new Map<string, AdoptedReconcile>();
   for (const event of [...goalEvents].reverse()) {
     const payload = (event?.payload ?? {}) as {
       goalId?: string;
-      adoptedReconcile?: { path: string; sha256: string; name?: string };
+      adoptedReconcile?: AdoptedReconcile;
     };
     if (event?.kind === "goal_asserted" && payload.goalId && payload.adoptedReconcile && !adoptedByGoal.has(payload.goalId)) {
       adoptedByGoal.set(payload.goalId, payload.adoptedReconcile);
@@ -718,54 +786,71 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                 <List
                   dataSource={goals}
                   emptyContent="无目标"
-                  renderItem={(g) => (
-                    <List.Item
-                      main={
-                        <div>
-                          <Space>
-                            <Typography.Text strong>{g.title}</Typography.Text>
-                            <Tag>{g.assessment ?? (g.passes ? "控制面记录已通过，待核对" : "未验证")}</Tag>
-                          </Space>
-                          <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0" }}>
-                            {g.description}
-                          </Typography.Paragraph>
-                          <Typography.Text type="quaternary" size="small">
-                            证据：
-                            {(g.evidencePaths?.length
-                              ? g.evidencePaths
-                              : g.evidencePatterns
-                            ).join(", ") || "—"}
-                          </Typography.Text>
-                          {g.reconcileGate && (
-                            <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                              核算条件：{g.reconcileGate.pattern}
-                              （未知项≤{g.reconcileGate.maxUnknown}、重复主键歧义≤{g.reconcileGate.maxAmbiguous}；
-                              只挂差异文件不算完成比对）
-                              {!g.passes && rejectionByGoal.get(g.id)
-                                ? ` · 未通过原因：${rejectionByGoal.get(g.id)}`
-                                : ""}
+                  renderItem={(g) => {
+                    const adopted = adoptedByGoal.get(g.id) ?? null;
+                    const businessGoal = g.kind === "business-reconcile" || Boolean(g.business);
+                    return (
+                      <List.Item
+                        main={
+                          <div>
+                            <Space>
+                              <Typography.Text strong>{g.title}</Typography.Text>
+                              <Tag>{g.assessment ?? (g.passes ? "控制面记录已通过，待核对" : "未验证")}</Tag>
+                              {businessGoal ? (
+                                <Tag color="violet" size="small">
+                                  业务核算
+                                </Tag>
+                              ) : null}
+                            </Space>
+                            <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0" }}>
+                              {g.description}
                             </Typography.Paragraph>
-                          )}
-                          {g.passes && adoptedByGoal.get(g.id) && (
-                            <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                              首次通过采用的核算文件：{adoptedByGoal.get(g.id)!.path}
-                              {" · SHA-256 "}
-                              {adoptedByGoal.get(g.id)!.sha256}
-                            </Typography.Paragraph>
-                          )}
-                          {history && <GoalCoverage
-                            key={task.id + "/" + g.id}
-                            taskId={task.id}
-                            goalId={g.id}
-                            record={history.coverage?.filter((row) => row.goalId === g.id).at(-1)}
-                            onSaved={(row) => setHistory((prev) => prev && ({
-                              ...prev, coverage: [...(prev.coverage ?? []).filter((r) => r.id !== row.id), row],
-                            }))}
-                          />}
-                        </div>
-                      }
-                    />
-                  )}
+                            <Typography.Text type="quaternary" size="small">
+                              证据：
+                              {(g.evidencePaths?.length
+                                ? g.evidencePaths
+                                : g.evidencePatterns
+                              ).join(", ") || "—"}
+                            </Typography.Text>
+                            {g.reconcileGate && (
+                              <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                                核算条件：{g.reconcileGate.pattern}
+                                （未知项≤{g.reconcileGate.maxUnknown}、重复主键歧义≤{g.reconcileGate.maxAmbiguous}；
+                                只挂差异文件不算完成比对）
+                                {!g.passes && rejectionByGoal.get(g.id)
+                                  ? ` · 未通过原因：${rejectionByGoal.get(g.id)}`
+                                  : ""}
+                              </Typography.Paragraph>
+                            )}
+                            {businessGoal && (
+                              <GoalReconcileCard
+                                taskId={task.id}
+                                goal={g}
+                                adopted={adopted}
+                                onChanged={reloadAfterGoalAction}
+                              />
+                            )}
+                            {g.passes && adopted && !businessGoal && (
+                              <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                                首次通过采用的核算文件：{adopted.path}
+                                {" · SHA-256 "}
+                                {adopted.sha256}
+                              </Typography.Paragraph>
+                            )}
+                            {history && <GoalCoverage
+                              key={task.id + "/" + g.id}
+                              taskId={task.id}
+                              goalId={g.id}
+                              record={history.coverage?.filter((row) => row.goalId === g.id).at(-1)}
+                              onSaved={(row) => setHistory((prev) => prev && ({
+                                ...prev, coverage: [...(prev.coverage ?? []).filter((r) => r.id !== row.id), row],
+                              }))}
+                            />}
+                          </div>
+                        }
+                      />
+                    );
+                  }}
                 />
               </Card>
             </Col>
@@ -1081,6 +1166,53 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
 
         {tab === "evidence" && (
           <Row gutter={16}>
+            <Col span={24} style={{ marginBottom: 16 }}>
+              <Card
+                title="导入/替换材料"
+                style={{ background: "var(--semi-color-bg-1)" }}
+                headerExtraContent={
+                  <Typography.Text type="tertiary" size="small">
+                    写入 evidence/ 下相对路径 · 同路径即替换 · 导入与撤回都进事件台账
+                  </Typography.Text>
+                }
+              >
+                <Typography.Text strong size="small">
+                  路径
+                </Typography.Text>
+                <Input
+                  value={materialPath}
+                  onChange={(v) => setMaterialPath(v)}
+                  placeholder="assets/baseline.csv"
+                />
+                <div style={{ marginTop: 12 }}>
+                  <Typography.Text strong size="small">
+                    内容（utf8 文本）
+                  </Typography.Text>
+                  <TextArea
+                    value={materialBody}
+                    onChange={(v) => setMaterialBody(v)}
+                    placeholder={"host,os,version\na.example.com,linux,1"}
+                    autosize={{ minRows: 4, maxRows: 12 }}
+                  />
+                </div>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <Typography.Text type="tertiary" size="small">
+                    csv 需表头，json 需数组或对象行；核算只读这份材料，不读痕迹以外的东西
+                  </Typography.Text>
+                  <Button theme="solid" loading={materialBusy} onClick={() => void importMaterial()}>
+                    导入/替换
+                  </Button>
+                </div>
+              </Card>
+            </Col>
             <Col span={8}>
               <Card title="文件" style={{ background: "var(--semi-color-bg-1)", maxHeight: 520, overflow: "auto" }}>
                 <List
@@ -1100,6 +1232,27 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                             {f.size} 字节
                           </Typography.Text>
                         </div>
+                      }
+                      extra={
+                        <Button
+                          type="danger"
+                          theme="borderless"
+                          size="small"
+                          loading={removingPath === f.path}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            Modal.confirm({
+                              title: "撤回材料",
+                              content: "撤回后该材料不再支撑判定，旧结果保留供追溯",
+                              okText: "撤回",
+                              cancelText: "取消",
+                              okButtonProps: { type: "danger", theme: "solid" },
+                              onOk: () => removeMaterial(f.path),
+                            });
+                          }}
+                        >
+                          撤回
+                        </Button>
                       }
                     />
                   )}

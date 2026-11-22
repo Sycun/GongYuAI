@@ -9,8 +9,10 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, posix, resolve, win32 } from "node:path";
 
 function normalizeEvidencePath(path: string): string {
@@ -112,4 +114,18 @@ export function writeEvidenceFile(evidenceDir: string, path: string, content: st
     closeSync(fd);
   }
   return relativePath;
+}
+
+/**
+ * 撤回一份材料（正常入口：DELETE /tasks/:id/evidence）。
+ *
+ * 与写入同样走包含性检查：只删除 evidence/ 内的普通文件，符号链接与硬链接
+ * 一律拒绝。撤回不等于抹掉历史——调用方负责把撤回前的内容哈希记进事件台账，
+ * 这样旧结果仍可追溯，只是不再支撑本次首次通过。
+ */
+export function removeEvidenceFile(evidenceDir: string, path: string): { path: string; sha256: string } {
+  const { relativePath, absolutePath } = resolveEvidenceFile(evidenceDir, path);
+  const sha256 = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
+  unlinkSync(absolutePath);
+  return { path: relativePath, sha256 };
 }

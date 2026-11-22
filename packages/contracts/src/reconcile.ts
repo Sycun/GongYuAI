@@ -20,6 +20,7 @@
  * - 内容冲突 → 该项 `status = "ambiguous"`，列出材料、键与所有来源行；
  *   不生成“未变”，也不允许据此让目标通过。
  */
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 export const ReconcileMaterialSchema = z.object({
@@ -42,6 +43,11 @@ export const ReconcileRequestSchema = z.object({
   compareFields: z.array(z.string().trim().min(1)).optional(),
   /** 约定的检查项清单；其中未出现在当前记录里的键标为“缺件”。 */
   requiredKeys: z.array(z.string().trim().min(1)).optional(),
+  /**
+   * 本次核算对应的目标。业务核算目标必须点名，判定时据此拒绝跨目标套用；
+   * 手动核算留空表示不绑定目标。
+   */
+  goalIds: z.array(z.string().trim().min(1)).optional(),
 });
 export type ReconcileRequest = z.infer<typeof ReconcileRequestSchema>;
 
@@ -162,6 +168,12 @@ export type ReconcileResult = {
   missingMaterials: string[];
   counts: ReconcileCounts;
   items: ReconcileItem[];
+  /**
+   * 第八轮：本次核算的版本身份（对应目标、两侧材料内容哈希、采用的核算口径）。
+   * 纯函数 `reconcileMaterials` 不填这一项；正常入口（runReconcile）一定带上。
+   * 首次判定要求它存在，否则无法证明“判定当时读的是哪一版输入”。
+   */
+  revision?: ReconcileRevision;
 };
 
 /** 一条 CSV 记录：单元格、起始行、结束行。 */
@@ -596,4 +608,212 @@ export function summarizeReconcile(result: ReconcileResult): string {
     result.missingMaterials.length ? `缺失材料 ${result.missingMaterials.join("、")}` : "",
     c.ambiguous ? "存在重复主键冲突，相关项不给确定结论" : "",
   ].filter(Boolean).join("；");
+}
+
+/**
+ * 目标级核算请求：只点名目标，其余口径全部取目标建档时持久化的 business 配置。
+ * 避免操作员每次手抄基线/当前路径而与目标声明不一致。
+ */
+export const GoalReconcileRequestSchema = z.object({
+  goalId: z.string().trim().min(1),
+});
+export type GoalReconcileRequest = z.infer<typeof GoalReconcileRequestSchema>;
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * 第八轮：业务核算目标（正常建档入口的显式类型）与核算版本身份
+ *
+ * 两件事都在这里定死，其他地方只引用，不再各写一份：
+ * 1. 操作员在控制台选“业务核算”并填基线/当前材料与核算配置后，系统据此
+ *    派生 `reconcileGate` 与证据 glob。派生只发生在这一处，建档请求、落库、
+ *    目标详情、恢复后的任务读的是同一份派生结果。
+ * 2. 每次核算都带一个可排序、唯一、自描述的版本号（`reconcileRevision`），
+ *    记下对应的目标、两侧材料的内容哈希与采用的核算配置口径。首次判定用它
+ *    核对“判定当时有效的输入”，而不是在证据目录里挑一份曾经合格的文件。
+ * ───────────────────────────────────────────────────────────────────────── */
+
+/** evidence/ 下的一份核算材料。 */
+export const ReconcileInputRefSchema = z.object({
+  /** evidence/ 下的相对路径。 */
+  path: z.string().trim().min(1),
+  /** 省略时按扩展名判断。 */
+  format: z.enum(["csv", "json"]).optional(),
+  /** 覆盖核算级 keyField。 */
+  keyField: z.string().trim().min(1).optional(),
+});
+export type ReconcileInputRef = z.infer<typeof ReconcileInputRefSchema>;
+
+/**
+ * 业务核算配置：一次“比对两份原始清单”所需的全部业务口径。
+ *
+ * 这是操作员在建档界面填的东西，也就是服务端落库、目标详情与恢复后的任务
+ * 共同使用的那一份配置。判定阈值（maxUnknown / maxAmbiguous）属于目标条件，
+ * 由它派生到 `reconcileGate`，不参与 `configDigest`——阈值只决定“是否接受”，
+ * 不改变核算结果本身的口径。
+ */
+export const BusinessReconcileConfigSchema = z.object({
+  /** 核算名。结果文件为 reconcile/<name>-<revisionId>.json，同名的多次核算互不覆盖。 */
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .regex(/^[A-Za-z0-9._-]+$/, "name 只允许字母数字与 ._-")
+    .default("reconcile"),
+  /** 差异主键字段（资产名 / 主机名 / 配置项 ID）。 */
+  keyField: z.string().trim().min(1).default("host"),
+  /** 只比较这些字段；省略时比较两侧出现过的全部字段。 */
+  compareFields: z.array(z.string().trim().min(1)).optional(),
+  /** 约定的检查项清单；未出现在当前记录里的键标为“缺件”。 */
+  requiredKeys: z.array(z.string().trim().min(1)).optional(),
+  /** 允许的未知项上限（默认 0）。 */
+  maxUnknown: z.number().int().nonnegative().default(0),
+  /** 允许的重复主键歧义上限（默认 0）。 */
+  maxAmbiguous: z.number().int().nonnegative().default(0),
+  baseline: ReconcileInputRefSchema,
+  current: ReconcileInputRefSchema,
+});
+export type BusinessReconcileConfig = z.infer<typeof BusinessReconcileConfigSchema>;
+
+/** 业务核算目标的 kind 字面量。 */
+export const BUSINESS_RECONCILE_KIND = "business-reconcile" as const;
+
+/** 该核算名的结果归档 glob；同一核算名的多次核算都在这个集合里。 */
+export function reconcileResultPattern(name: string): string {
+  return `reconcile/${name}-*.json`;
+}
+
+/**
+ * 由业务配置派生目标级核算条件。默认值即“材料齐、无未知、无歧义才通过”，
+ * 操作员不需要手写 JSON，也不会因为自然语言措辞不同而得到不同结论。
+ */
+export function reconcileGateFromConfig(config: BusinessReconcileConfig): ReconcileGate {
+  return {
+    pattern: reconcileResultPattern(config.name),
+    maxUnknown: config.maxUnknown,
+    maxAmbiguous: config.maxAmbiguous,
+  };
+}
+
+/**
+ * 核算配置的规范化字符串：键序固定、省略项按默认值补齐，保证同一份配置
+ * 在任何进程里都得到同一个摘要。
+ */
+export function reconcileConfigCanonical(config: BusinessReconcileConfig): string {
+  const canonical = {
+    name: config.name,
+    keyField: config.keyField,
+    compareFields: [...new Set(config.compareFields ?? [])],
+    requiredKeys: [...new Set(config.requiredKeys ?? [])],
+    baseline: {
+      path: config.baseline.path.replace(/\\/g, "/"),
+      format: config.baseline.format ?? null,
+      keyField: config.baseline.keyField ?? null,
+    },
+    current: {
+      path: config.current.path.replace(/\\/g, "/"),
+      format: config.current.format ?? null,
+      keyField: config.current.keyField ?? null,
+    },
+  };
+  return JSON.stringify(canonical);
+}
+
+/** 核算口径摘要。用于确认“这次结果是不是按目标声明的口径算出来的”。 */
+export function reconcileConfigDigest(config: BusinessReconcileConfig): string {
+  return createHash("sha256").update(reconcileConfigCanonical(config), "utf8").digest("hex");
+}
+
+/** 由 ReconcileRequest 构造同一口径的业务配置（手动核算也带得上自描述信息）。 */
+export function businessConfigFromRequest(request: ReconcileRequest): BusinessReconcileConfig {
+  return BusinessReconcileConfigSchema.parse({
+    name: request.name,
+    keyField: request.keyField,
+    ...(request.compareFields?.length ? { compareFields: request.compareFields } : {}),
+    ...(request.requiredKeys?.length ? { requiredKeys: request.requiredKeys } : {}),
+    baseline: {
+      path: request.baseline.path,
+      ...(request.baseline.format ? { format: request.baseline.format } : {}),
+      ...(request.baseline.keyField ? { keyField: request.baseline.keyField } : {}),
+    },
+    current: {
+      path: request.current.path,
+      ...(request.current.format ? { format: request.current.format } : {}),
+      ...(request.current.keyField ? { keyField: request.current.keyField } : {}),
+    },
+  });
+}
+
+/** 一份材料在核算那一刻的样子（内容哈希是核对“输入是否变过”的唯一依据）。 */
+export const ReconcileInputStampSchema = z.object({
+  path: z.string().min(1),
+  format: z.enum(["csv", "json"]).nullable(),
+  /** 核算时该材料是否真的读到了。 */
+  present: z.boolean(),
+  /** 读到的字节的 SHA-256；没读到时为 null。 */
+  sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
+  /** 解析出的记录行数。 */
+  rows: z.number().int().nonnegative(),
+});
+export type ReconcileInputStamp = z.infer<typeof ReconcileInputStampSchema>;
+
+/**
+ * 核算版本号：`r<13 位毫秒>-<4 位序号>`。
+ *
+ * 字典序即时间序，同一毫秒内的连续核算靠序号区分（同名同路径也不撞），
+ * 因此“同名连续核算”可以被区分，也不需要用文件名或秒级时间戳来挑选结果。
+ */
+export const ReconcileRevisionIdPattern = /^r\d{13}-\d{4}$/;
+
+export const ReconcileRevisionSchema = z.object({
+  id: z.string().regex(ReconcileRevisionIdPattern, "核算版本号形如 r<毫秒>-<序号>"),
+  taskId: z.string().min(1),
+  /** 本次核算对应的目标；手动核算未指定时为空数组。 */
+  goalIds: z.array(z.string().min(1)).default([]),
+  /** 采用的核算配置（自描述，便于离线复核）。 */
+  config: BusinessReconcileConfigSchema,
+  /** 核算口径摘要。 */
+  configDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  /** 两侧材料哈希与口径摘要的合成摘要：输入集合一变就不一样。 */
+  inputDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  baseline: ReconcileInputStampSchema,
+  current: ReconcileInputStampSchema,
+  createdAt: z.string().min(1),
+});
+export type ReconcileRevision = z.infer<typeof ReconcileRevisionSchema>;
+
+/** 输入摘要：口径 + 两侧路径与内容哈希。任一变化都会改变它。 */
+export function reconcileInputDigest(
+  configDigest: string,
+  baseline: ReconcileInputStamp,
+  current: ReconcileInputStamp,
+): string {
+  const canonical = JSON.stringify({
+    configDigest,
+    baseline: { path: baseline.path, present: baseline.present, sha256: baseline.sha256 },
+    current: { path: current.path, present: current.present, sha256: current.sha256 },
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/** 下一个核算版本号：单调、唯一；时钟回拨也不会产生更小的号。 */
+export function nextReconcileRevisionId(previousIds: string[], nowMs = Date.now()): string {
+  let lastMs = 0;
+  let lastSeq = 0;
+  for (const id of previousIds) {
+    const match = /^r(\d{13})-(\d{4})$/.exec(id);
+    if (!match) continue;
+    const ms = Number(match[1]);
+    const seq = Number(match[2]);
+    if (ms > lastMs) {
+      lastMs = ms;
+      lastSeq = seq;
+    } else if (ms === lastMs) {
+      lastSeq = Math.max(lastSeq, seq);
+    }
+  }
+  // 时钟回拨（nowMs <= lastMs）时沿用上一毫秒并递增序号，保持严格单调。
+  if (lastMs > 0 && nowMs <= lastMs) {
+    return `r${String(lastMs).padStart(13, "0")}-${String(lastSeq + 1).padStart(4, "0")}`;
+  }
+  return `r${String(nowMs).padStart(13, "0")}-0001`;
 }

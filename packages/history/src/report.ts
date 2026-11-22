@@ -203,13 +203,24 @@ export function writeTaskReport(
     }
     // 首次通过采用的核算文件与最近一次拒绝原因都来自事件台账，不靠推断。
     const events = history.listEvents(id, 500);
-    const adoptedByGoal = new Map<string, { path: string; sha256: string; name: string; counts?: Record<string, number> }>();
+    type Adopted = {
+      path: string;
+      sha256: string;
+      name: string;
+      counts?: Record<string, number>;
+      revisionId?: string;
+      inputDigest?: string;
+      configDigest?: string;
+      baseline?: { path: string; sha256: string | null };
+      current?: { path: string; sha256: string | null };
+    };
+    const adoptedByGoal = new Map<string, Adopted>();
     const rejectionByGoal = new Map<string, string>();
     for (const event of [...events].reverse()) {
       const payload = event.payload as {
         goalId?: string;
         reason?: string;
-        adoptedReconcile?: { path: string; sha256: string; name: string; counts?: Record<string, number> };
+        adoptedReconcile?: Adopted;
       };
       if (!payload.goalId) continue;
       if (event.kind === "goal_asserted" && payload.adoptedReconcile && !adoptedByGoal.has(payload.goalId)) {
@@ -267,6 +278,25 @@ export function writeTaskReport(
               `（核算名 ${label(adopted.name)}；共 ${adopted.counts?.totalKeys ?? "?"} 项，未知 ${adopted.counts?.unknown ?? "?"}、` +
               `歧义 ${adopted.counts?.ambiguous ?? 0}）`,
           );
+          // 首次通过绑定的是这一版输入：把版本号、口径摘要与两侧材料哈希写进
+          // 可复验的依据里，复核者不用猜当时读的是哪两份文件。
+          if (adopted.revisionId) {
+            lines.push(
+              `- 首次通过采用的输入版本：${label(adopted.revisionId)}` +
+                (adopted.configDigest ? ` · 核算口径摘要 ${adopted.configDigest}` : "") +
+                (adopted.inputDigest ? ` · 输入摘要 ${adopted.inputDigest}` : ""),
+            );
+          }
+          if (adopted.baseline) {
+            lines.push(
+              `- 基线材料（判定时有效）：${label(adopted.baseline.path)} · SHA-256 ${adopted.baseline.sha256 ?? "未读到"}`,
+            );
+          }
+          if (adopted.current) {
+            lines.push(
+              `- 当前材料（判定时有效）：${label(adopted.current.path)} · SHA-256 ${adopted.current.sha256 ?? "未读到"}`,
+            );
+          }
         }
         const rejection = rejectionByGoal.get(goal.id);
         if (rejection && !goal.passes) {

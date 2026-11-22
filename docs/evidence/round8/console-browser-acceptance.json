@@ -1,0 +1,491 @@
+{
+  "kind": "console-browser-acceptance",
+  "recordedAt": "2026-11-22T23:07:20+08:00",
+  "console": "http://127.0.0.1:8899",
+  "dataRoot": "/tmp/gy-browser-a",
+  "tasks": {
+    "A": {
+      "narrative": "控制台建档→只交当前清单→核算/判定 0-1→补交基线→核算/判定 1-1",
+      "taskId": "0a0a5edb-1e08-4a16-8326-517b6c130e85",
+      "taskStatus": "completed",
+      "goal": {
+        "id": "main",
+        "kind": "business-reconcile",
+        "business": {
+          "name": "asset-diff",
+          "keyField": "host",
+          "requiredKeys": [
+            "app-a-1",
+            "app-a-6"
+          ],
+          "maxUnknown": 0,
+          "maxAmbiguous": 0,
+          "baseline": {
+            "path": "assets/baseline.csv"
+          },
+          "current": {
+            "path": "assets/current.csv"
+          }
+        },
+        "reconcileGate": {
+          "pattern": "reconcile/asset-diff-*.json",
+          "maxUnknown": 0,
+          "maxAmbiguous": 0
+        },
+        "passes": true,
+        "evidencePaths": [
+          "reconcile/asset-diff-r1795359768302-0001.json"
+        ],
+        "reconcileState": {
+          "state": "passed",
+          "reason": null,
+          "latestRevisionId": "r1795359768302-0001",
+          "ambiguous": []
+        }
+      },
+      "revisions": [
+        {
+          "id": "r1795359768302-0001",
+          "evidencePath": "reconcile/asset-diff-r1795359768302-0001.json",
+          "evidenceSha256": "debfe6db52f2876e999513e6e3f840e6c2159175bc90fafb40bde72231af427a",
+          "goalIds": [
+            "main"
+          ],
+          "inputDigest": "a81f38c138390eda30f3932a421b9598433ed50e37f05cc1e97920cae05e3550",
+          "configDigest": "2810f0a6fecac5b50e7c77a1ccaba3b1e3c0887e8f3edb6c959882215fbfb3f0",
+          "baseline": {
+            "path": "assets/baseline.csv",
+            "present": true,
+            "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+          },
+          "current": {
+            "path": "assets/current.csv",
+            "present": true,
+            "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+          }
+        },
+        {
+          "id": "r1795359711967-0001",
+          "evidencePath": "reconcile/asset-diff-r1795359711967-0001.json",
+          "evidenceSha256": "7d92d07085ad3fbe41834411e574012db1b8532833b269d7ffc0bf990c38280b",
+          "goalIds": [
+            "main"
+          ],
+          "inputDigest": "4b4dc54dad6884efa08242228d0f9935ad3c995fefb7cfd21ee9de375ed3a6ea",
+          "configDigest": "2810f0a6fecac5b50e7c77a1ccaba3b1e3c0887e8f3edb6c959882215fbfb3f0",
+          "baseline": {
+            "path": "assets/baseline.csv",
+            "present": false,
+            "sha256": null
+          },
+          "current": {
+            "path": "assets/current.csv",
+            "present": true,
+            "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+          }
+        }
+      ],
+      "goalAssertedEvents": 1,
+      "goalRejectedEvents": 2,
+      "firstPassProofs": [
+        {
+          "goalId": "main",
+          "path": "reconcile/asset-diff-r1795359768302-0001.json",
+          "sha256": "debfe6db52f2876e999513e6e3f840e6c2159175bc90fafb40bde72231af427a"
+        }
+      ],
+      "adoptedReconcile": {
+        "path": "reconcile/asset-diff-r1795359768302-0001.json",
+        "sha256": "debfe6db52f2876e999513e6e3f840e6c2159175bc90fafb40bde72231af427a",
+        "name": "asset-diff",
+        "counts": {
+          "added": 0,
+          "removed": 0,
+          "changed": 1,
+          "unchanged": 2,
+          "missing": 0,
+          "unknown": 0,
+          "ambiguous": 0,
+          "totalKeys": 3
+        },
+        "revisionId": "r1795359768302-0001",
+        "inputDigest": "a81f38c138390eda30f3932a421b9598433ed50e37f05cc1e97920cae05e3550",
+        "configDigest": "2810f0a6fecac5b50e7c77a1ccaba3b1e3c0887e8f3edb6c959882215fbfb3f0",
+        "baseline": {
+          "path": "assets/baseline.csv",
+          "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+        },
+        "current": {
+          "path": "assets/current.csv",
+          "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+        }
+      },
+      "rejectionReasons": [
+        "核算条件未满足：reconcile/asset-diff-r1795359711967-0001.json（版本 r1795359711967-0001）：核算时缺少基线材料 assets/baseline.csv（该结果本身是缺件结论）",
+        "核算条件未满足：该目标还没有按目标配置核算过（reconcile/asset-diff-*.json）——先补交材料并运行核算"
+      ],
+      "evidenceAudit": [
+        {
+          "kind": "evidence_written",
+          "path": "assets/baseline.csv",
+          "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea",
+          "replaced": false
+        },
+        {
+          "kind": "evidence_written",
+          "path": "assets/current.csv",
+          "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c",
+          "replaced": false
+        }
+      ],
+      "scorecard": {
+        "denominator": 1,
+        "historicallyPassed": 1,
+        "currentlySupported": 1,
+        "verdict": "supported"
+      },
+      "reportHasAdopted": true
+    },
+    "B1": {
+      "narrative": "合格旧结果→撤回基线→未重算判定 0-1→重算报缺件判定 0-1→补回→重算→首次通过",
+      "taskId": "37a10789-9cf8-440a-b4de-f4e9511ea70c",
+      "taskStatus": "completed",
+      "goal": {
+        "id": "main",
+        "kind": "business-reconcile",
+        "business": {
+          "name": "asset-diff",
+          "keyField": "host",
+          "maxUnknown": 0,
+          "maxAmbiguous": 0,
+          "baseline": {
+            "path": "assets/baseline.csv"
+          },
+          "current": {
+            "path": "assets/current.csv"
+          }
+        },
+        "reconcileGate": {
+          "pattern": "reconcile/asset-diff-*.json",
+          "maxUnknown": 0,
+          "maxAmbiguous": 0
+        },
+        "passes": true,
+        "evidencePaths": [
+          "reconcile/asset-diff-r1795359923524-0001.json"
+        ],
+        "reconcileState": {
+          "state": "passed",
+          "reason": null,
+          "latestRevisionId": "r1795359923524-0001",
+          "ambiguous": []
+        }
+      },
+      "revisions": [
+        {
+          "id": "r1795359923524-0001",
+          "evidencePath": "reconcile/asset-diff-r1795359923524-0001.json",
+          "evidenceSha256": "54c639f075be9c84cf8b9b5dbce79789af5fca52b28ad6afc3835a844dd74d2a",
+          "goalIds": [
+            "main"
+          ],
+          "inputDigest": "ea70f289039ab8d246cee417f7bb139be5fc0d64f4f4c34e00c6462ce6d505ae",
+          "configDigest": "2a95a68a908b1d5bb8b0fbba062383b8b1c50f8a5b378c8642dd5f85e97d2eeb",
+          "baseline": {
+            "path": "assets/baseline.csv",
+            "present": true,
+            "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+          },
+          "current": {
+            "path": "assets/current.csv",
+            "present": true,
+            "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+          }
+        },
+        {
+          "id": "r1795359893897-0001",
+          "evidencePath": "reconcile/asset-diff-r1795359893897-0001.json",
+          "evidenceSha256": "9ad00a4612e0696d76ee0ebe5882cb273df0cb5ff358741a916cccc47d03e468",
+          "goalIds": [
+            "main"
+          ],
+          "inputDigest": "61254aafc944e028d0f8e8fae15958d72874bc27516b7ad339062fba8397502f",
+          "configDigest": "2a95a68a908b1d5bb8b0fbba062383b8b1c50f8a5b378c8642dd5f85e97d2eeb",
+          "baseline": {
+            "path": "assets/baseline.csv",
+            "present": false,
+            "sha256": null
+          },
+          "current": {
+            "path": "assets/current.csv",
+            "present": true,
+            "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+          }
+        },
+        {
+          "id": "r1795359871638-0001",
+          "evidencePath": "reconcile/asset-diff-r1795359871638-0001.json",
+          "evidenceSha256": "3c269f4b800d0e71f91d20e289e894cb1f5ee34d24003c4743ef747d192b48b2",
+          "goalIds": [
+            "main"
+          ],
+          "inputDigest": "ea70f289039ab8d246cee417f7bb139be5fc0d64f4f4c34e00c6462ce6d505ae",
+          "configDigest": "2a95a68a908b1d5bb8b0fbba062383b8b1c50f8a5b378c8642dd5f85e97d2eeb",
+          "baseline": {
+            "path": "assets/baseline.csv",
+            "present": true,
+            "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+          },
+          "current": {
+            "path": "assets/current.csv",
+            "present": true,
+            "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+          }
+        }
+      ],
+      "goalAssertedEvents": 1,
+      "goalRejectedEvents": 3,
+      "firstPassProofs": [
+        {
+          "goalId": "main",
+          "path": "reconcile/asset-diff-r1795359923524-0001.json",
+          "sha256": "54c639f075be9c84cf8b9b5dbce79789af5fca52b28ad6afc3835a844dd74d2a"
+        }
+      ],
+      "adoptedReconcile": {
+        "path": "reconcile/asset-diff-r1795359923524-0001.json",
+        "sha256": "54c639f075be9c84cf8b9b5dbce79789af5fca52b28ad6afc3835a844dd74d2a",
+        "name": "asset-diff",
+        "counts": {
+          "added": 0,
+          "removed": 0,
+          "changed": 1,
+          "unchanged": 2,
+          "missing": 0,
+          "unknown": 0,
+          "ambiguous": 0,
+          "totalKeys": 3
+        },
+        "revisionId": "r1795359923524-0001",
+        "inputDigest": "ea70f289039ab8d246cee417f7bb139be5fc0d64f4f4c34e00c6462ce6d505ae",
+        "configDigest": "2a95a68a908b1d5bb8b0fbba062383b8b1c50f8a5b378c8642dd5f85e97d2eeb",
+        "baseline": {
+          "path": "assets/baseline.csv",
+          "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+        },
+        "current": {
+          "path": "assets/current.csv",
+          "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+        }
+      },
+      "rejectionReasons": [
+        "核算条件未满足：reconcile/asset-diff-r1795359893897-0001.json（版本 r1795359893897-0001）：核算时缺少基线材料 assets/baseline.csv（该结果本身是缺件结论） | reconcile/asset-diff-r1795359871638-0001.json（版本 r1795359871638-0001）：基线材料已撤走：assets/baseline.csv（核算时哈希 bb053f730160…）",
+        "核算条件未满足：reconcile/asset-diff-r1795359871638-0001.json（版本 r1795359871638-0001）：基线材料已撤走：assets/baseline.csv（核算时哈希 bb053f730160…）",
+        "核算条件未满足：该目标还没有按目标配置核算过（reconcile/asset-diff-*.json）——先补交材料并运行核算"
+      ],
+      "evidenceAudit": [
+        {
+          "kind": "evidence_written",
+          "path": "assets/baseline.csv",
+          "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea",
+          "replaced": false
+        },
+        {
+          "kind": "evidence_removed",
+          "path": "assets/baseline.csv",
+          "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea",
+          "replaced": null
+        },
+        {
+          "kind": "evidence_written",
+          "path": "assets/current.csv",
+          "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c",
+          "replaced": false
+        },
+        {
+          "kind": "evidence_written",
+          "path": "assets/baseline.csv",
+          "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea",
+          "replaced": false
+        }
+      ],
+      "scorecard": {
+        "denominator": 1,
+        "historicallyPassed": 1,
+        "currentlySupported": 1,
+        "verdict": "supported"
+      },
+      "reportHasAdopted": true
+    },
+    "B2": {
+      "narrative": "合格旧结果→同路径换成冲突重复键→歧义判定 0-1→改回→重算→首次通过",
+      "taskId": "4fcf3229-934a-4f09-9c98-b3ddac1937d3",
+      "taskStatus": "completed",
+      "goal": {
+        "id": "main",
+        "kind": "business-reconcile",
+        "business": {
+          "name": "asset-diff",
+          "keyField": "host",
+          "maxUnknown": 0,
+          "maxAmbiguous": 0,
+          "baseline": {
+            "path": "assets/baseline.csv"
+          },
+          "current": {
+            "path": "assets/current.csv"
+          }
+        },
+        "reconcileGate": {
+          "pattern": "reconcile/asset-diff-*.json",
+          "maxUnknown": 0,
+          "maxAmbiguous": 0
+        },
+        "passes": true,
+        "evidencePaths": [
+          "reconcile/asset-diff-r1795360012908-0001.json"
+        ],
+        "reconcileState": {
+          "state": "passed",
+          "reason": null,
+          "latestRevisionId": "r1795360012908-0001",
+          "ambiguous": []
+        }
+      },
+      "revisions": [
+        {
+          "id": "r1795360012908-0001",
+          "evidencePath": "reconcile/asset-diff-r1795360012908-0001.json",
+          "evidenceSha256": "58761c80f2c414c249afc247067ab8461f6423bdc6c218e351d2c69b7fd7ba99",
+          "goalIds": [
+            "main"
+          ],
+          "inputDigest": "ea70f289039ab8d246cee417f7bb139be5fc0d64f4f4c34e00c6462ce6d505ae",
+          "configDigest": "2a95a68a908b1d5bb8b0fbba062383b8b1c50f8a5b378c8642dd5f85e97d2eeb",
+          "baseline": {
+            "path": "assets/baseline.csv",
+            "present": true,
+            "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+          },
+          "current": {
+            "path": "assets/current.csv",
+            "present": true,
+            "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+          }
+        },
+        {
+          "id": "r1795359981643-0001",
+          "evidencePath": "reconcile/asset-diff-r1795359981643-0001.json",
+          "evidenceSha256": "6f80e2795e13c0e79e195bb15a0d1bdfcbcb6cf353100b7de258b272eee4a60c",
+          "goalIds": [
+            "main"
+          ],
+          "inputDigest": "cef1ac5b73b5b802ab9be35ad07c7e7b3562416e03cee42efe1fd2b55d3dbcb0",
+          "configDigest": "2a95a68a908b1d5bb8b0fbba062383b8b1c50f8a5b378c8642dd5f85e97d2eeb",
+          "baseline": {
+            "path": "assets/baseline.csv",
+            "present": true,
+            "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+          },
+          "current": {
+            "path": "assets/current.csv",
+            "present": true,
+            "sha256": "9bfbc8d6643a32b98d0e4905f5ba072cfaf1db97299671b1f59570e54043b70f"
+          }
+        },
+        {
+          "id": "r1795359969992-0001",
+          "evidencePath": "reconcile/asset-diff-r1795359969992-0001.json",
+          "evidenceSha256": "5f324ac2b10798bb080aafa0a793343d05f362197fbb4c0480f09a17dd9d740d",
+          "goalIds": [
+            "main"
+          ],
+          "inputDigest": "ea70f289039ab8d246cee417f7bb139be5fc0d64f4f4c34e00c6462ce6d505ae",
+          "configDigest": "2a95a68a908b1d5bb8b0fbba062383b8b1c50f8a5b378c8642dd5f85e97d2eeb",
+          "baseline": {
+            "path": "assets/baseline.csv",
+            "present": true,
+            "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+          },
+          "current": {
+            "path": "assets/current.csv",
+            "present": true,
+            "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+          }
+        }
+      ],
+      "goalAssertedEvents": 1,
+      "goalRejectedEvents": 2,
+      "firstPassProofs": [
+        {
+          "goalId": "main",
+          "path": "reconcile/asset-diff-r1795360012908-0001.json",
+          "sha256": "58761c80f2c414c249afc247067ab8461f6423bdc6c218e351d2c69b7fd7ba99"
+        }
+      ],
+      "adoptedReconcile": {
+        "path": "reconcile/asset-diff-r1795360012908-0001.json",
+        "sha256": "58761c80f2c414c249afc247067ab8461f6423bdc6c218e351d2c69b7fd7ba99",
+        "name": "asset-diff",
+        "counts": {
+          "added": 0,
+          "removed": 0,
+          "changed": 1,
+          "unchanged": 2,
+          "missing": 0,
+          "unknown": 0,
+          "ambiguous": 0,
+          "totalKeys": 3
+        },
+        "revisionId": "r1795360012908-0001",
+        "inputDigest": "ea70f289039ab8d246cee417f7bb139be5fc0d64f4f4c34e00c6462ce6d505ae",
+        "configDigest": "2a95a68a908b1d5bb8b0fbba062383b8b1c50f8a5b378c8642dd5f85e97d2eeb",
+        "baseline": {
+          "path": "assets/baseline.csv",
+          "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea"
+        },
+        "current": {
+          "path": "assets/current.csv",
+          "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c"
+        }
+      },
+      "rejectionReasons": [
+        "核算条件未满足：reconcile/asset-diff-r1795359981643-0001.json（版本 r1795359981643-0001）：重复主键歧义 1 项 > 允许 0 项 | reconcile/asset-diff-r1795359969992-0001.json（版本 r1795359969992-0001）：当前材料已替换：assets/current.csv（核算时 55933a60a577…，现在 9bfbc8d6643a…）",
+        "核算条件未满足：该目标还没有按目标配置核算过（reconcile/asset-diff-*.json）——先补交材料并运行核算"
+      ],
+      "evidenceAudit": [
+        {
+          "kind": "evidence_written",
+          "path": "assets/current.csv",
+          "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c",
+          "replaced": true
+        },
+        {
+          "kind": "evidence_written",
+          "path": "assets/current.csv",
+          "sha256": "9bfbc8d6643a32b98d0e4905f5ba072cfaf1db97299671b1f59570e54043b70f",
+          "replaced": true
+        },
+        {
+          "kind": "evidence_written",
+          "path": "assets/current.csv",
+          "sha256": "55933a60a577bde64f4130b72208f93082375c01ee587cd6ada2fb7f6887784c",
+          "replaced": false
+        },
+        {
+          "kind": "evidence_written",
+          "path": "assets/baseline.csv",
+          "sha256": "bb053f7301604f73b99292afed4585169daa06b36be77bf250e1980bb567beea",
+          "replaced": false
+        }
+      ],
+      "scorecard": {
+        "denominator": 1,
+        "historicallyPassed": 1,
+        "currentlySupported": 1,
+        "verdict": "supported"
+      },
+      "reportHasAdopted": true
+    }
+  }
+}
