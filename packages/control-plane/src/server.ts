@@ -19,6 +19,7 @@ import {
   RetestRequestSchema,
   ToggleToolsItemSchema,
   type TaskIntegrationUsage,
+  type TaskRecord,
   ToolsSettingsPatchSchema,
   UpdateScopeRequestSchema,
   UpdateSettingsPatchSchema,
@@ -39,6 +40,9 @@ import {
   writeTaskReport,
 } from "@gongyuai/history";
 import { deliverySummary } from "./delivery.js";
+import { handleOpsRoute } from "./routes-ops.js";
+import type { JobRunner } from "./jobs.js";
+import type { PlatformStore } from "./platform.js";
 import { projectIntegrationUsage } from "./integration-usage.js";
 import { runReconcile } from "./reconcile.js";
 import { taskPaths } from "./paths.js";
@@ -75,6 +79,9 @@ export type ServerOptions = {
   settings: SettingsStore;
   updater: SilentUpdater;
   version: string;
+  /** 第九轮：平台记忆/飞轮库与持久作业执行器。 */
+  platform: PlatformStore;
+  jobs: JobRunner;
 };
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -112,6 +119,22 @@ function readTaskWorkerLogs(dataDir: string): string {
     .join("\n");
 }
 
+/** 任务视图里的目标状态以 History 为准（作业/操作员判定都可能晚于建档）。 */
+function withLiveGoals(task: TaskRecord): TaskRecord {
+  try {
+    const paths = taskPaths(task.dataDir);
+    if (!existsSync(paths.historyDb)) return task;
+    const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+    try {
+      return { ...task, goals: history.listGoals(task.id) };
+    } finally {
+      history.close();
+    }
+  } catch {
+    return task;
+  }
+}
+
 function sendFile(res: ServerResponse, abs: string, cache = false): boolean {
   if (!abs.startsWith(webRoot) || !existsSync(abs) || !statSync(abs).isFile()) {
     return false;
@@ -140,12 +163,17 @@ function tryStatic(pathname: string, res: ServerResponse): boolean {
 }
 
 export function startControlServer(opts: ServerOptions) {
-  const { store, runner, settings, updater, version } = opts;
+  const { store, runner, settings, updater, version, platform, jobs } = opts;
 
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", `http://${opts.host}:${opts.port}`);
       const method = req.method ?? "GET";
+
+      // 第九轮新入口统一走委托边界检查；未命中时继续走既有路由。
+      if (await handleOpsRoute(req, res, method, url, { store, jobs, platform, runner })) {
+        return;
+      }
 
       if ((method === "GET" || method === "HEAD") && tryStatic(url.pathname, res)) {
         return;
@@ -317,7 +345,7 @@ export function startControlServer(opts: ServerOptions) {
           ) {
             store.save(t);
           }
-          return t;
+          return withLiveGoals(t);
         });
         return send(res, 200, { tasks });
       }
@@ -377,11 +405,12 @@ export function startControlServer(opts: ServerOptions) {
             toolCalls: task.usage.toolCalls - (base?.toolCalls ?? 0),
             installs: task.usage.installs - (base?.installs ?? 0),
           };
-          return send(res, 200, { task: { ...task, runUsage } });
+          return send(res, 200, { task: { ...withLiveGoals(task), runUsage } });
         }
         if (method === "POST" && rest === "/stop") {
           const stopped = await runner.stop(taskId);
-          return send(res, 200, { task: stopped });
+          const canceled = jobs.cancelTaskJobs(taskId, "task-stopped");
+          return send(res, 200, { task: stopped, canceledJobs: canceled });
         }
         if (method === "POST" && rest === "/start") {
           const started = await runner.start(taskId);
@@ -390,7 +419,8 @@ export function startControlServer(opts: ServerOptions) {
         if (method === "POST" && rest === "/pause") {
           try {
             const paused = await runner.pause(taskId);
-            return send(res, 200, { task: paused });
+            const pausedJobs = jobs.pauseTask(taskId);
+            return send(res, 200, { task: paused, jobs: pausedJobs });
           } catch (err) {
             return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
           }
@@ -398,7 +428,8 @@ export function startControlServer(opts: ServerOptions) {
         if (method === "POST" && rest === "/resume") {
           try {
             const resumed = await runner.resume(taskId);
-            return send(res, 200, { task: resumed });
+            const resumedJobs = jobs.resumeTask(taskId);
+            return send(res, 200, { task: resumed, jobs: resumedJobs });
           } catch (err) {
             return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
           }

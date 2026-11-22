@@ -10,7 +10,20 @@ AI-native **long-running** authorized pentest agent，产品面定位为 **Missi
 - **Harness 差分**：`pnpm diff-harness`（bare / history / relay）
 - **单用户 MVP** CLI（`gy`）；多人后置
 
-## 当前发布（第八轮，2026-11-22）
+## 当前发布（第九轮，2026-11-22/23）
+
+| 项 | 值 |
+| --- | --- |
+| 本轮范围 | 后端：委托边界、持久资料作业、24h 求助与跨班交接、材料语义/覆盖矩阵/证据撤回一致性、四图与因果 API、全局记忆与档案索引、冻结评测/提案晋升回退、角色分层与供应商韧性（模拟） |
+| 新增验收 | `pnpm acceptance:r9:ops`（67/67）· `pnpm acceptance:r9:flywheel`（57/57）· 证据 `docs/evidence/r9/` |
+| 单测 | 195 通过（contracts 51、history 57、control-plane 52、worker 35） |
+| 前端交接 | [docs/api-contract-r9.md](docs/api-contract-r9.md) |
+| 复核清单 | [docs/review-checklist-r9.md](docs/review-checklist-r9.md) |
+| 差距表（开工前 + 实施后） | [docs/round9-gap.md](docs/round9-gap.md) |
+| 未验证清单 | [docs/owner-unverified-r9.md](docs/owner-unverified-r9.md) |
+| 交付记录 | [docs/delivery-record.md](docs/delivery-record.md) §0 |
+
+## 上一轮发布（第八轮，2026-11-22）
 
 | 项 | 值 |
 | --- | --- |

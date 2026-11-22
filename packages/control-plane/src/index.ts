@@ -13,6 +13,8 @@ import { ControlStore } from "./store.js";
 import { WorkerRunner } from "./runner.js";
 import { Watchdog } from "./watchdog.js";
 import { SettingsStore } from "./settings.js";
+import { PlatformStore } from "./platform.js";
+import { JobRunner } from "./jobs.js";
 import { SilentUpdater, resolveInstallRoot } from "./updater.js";
 import { migrateLegacyHomeDataRoot, resolveCanonicalDataRoot } from "./data-root.js";
 export { startControlServer as startServer } from "./server.js";
@@ -75,6 +77,7 @@ export async function bootControlPlane(opts: BootOptions = {}) {
   process.env.GY_DATA_DIR = dataRoot;
 
   const store = new ControlStore(dataRoot);
+  const platform = new PlatformStore(dataRoot);
   const settings = new SettingsStore(dataRoot, installRoot);
   // Seed env for this process so any child inherits defaults
   Object.assign(process.env, settings.workerEnv());
@@ -91,6 +94,9 @@ export async function bootControlPlane(opts: BootOptions = {}) {
   );
   const watchdog = new Watchdog(store, runner, { intervalMs: watchdogMs, leaseMs, ownerId });
   if (!isolated) watchdog.start();
+  const jobs = new JobRunner(store, { defaultPaceMs: Number(process.env.GY_JOB_PACE_MS ?? 0) });
+  // 隔离副本（恢复演练）不消费作业队列，避免对副本产生副作用。
+  if (!isolated) jobs.start();
   const updater = new SilentUpdater(settings, installRoot, dataRoot);
 
   const { startControlServer } = await import("./server.js");
@@ -102,6 +108,8 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     settings,
     updater,
     version,
+    platform,
+    jobs,
   });
 
   return {
@@ -117,9 +125,12 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     url: server.url,
     async close() {
       await watchdog.stop();
+      await jobs.stop();
       await server.close();
       runner.dispose();
       store.close();
+      platform.close();
     },
   };
 }
+export * from "./platform.js";

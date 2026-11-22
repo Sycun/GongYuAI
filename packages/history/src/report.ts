@@ -142,6 +142,36 @@ export function writeTaskReport(
       lines.push(`已撤回 ${retractedCount} 条误报（保留可查，不进交付）。`);
     }
 
+    // 第九轮：证据撤回的影响必须与图/矩阵一致（受影响项与仍独立成立的项分开写）。
+    {
+      const removed = new Set(
+        history
+          .listEvents(id, 2000)
+          .filter((event) => event.kind === "evidence_removed")
+          .map((event) => String((event.payload as { path?: unknown }).path ?? ""))
+          .filter(Boolean),
+      );
+      if (removed.size > 0) {
+        lines.push("", "## 证据撤回影响", "");
+        lines.push(`已撤回材料 ${removed.size} 份：${[...removed].map((path) => label(path)).join("、")}`);
+        const affected = deliverable.filter((f) => f.evidence.some((e) => removed.has(e.path)));
+        const independent = affected.filter((f) => f.evidence.some((e) => !removed.has(e.path)));
+        for (const finding of affected) {
+          lines.push(
+            `- 受影响结论：${label(finding.title)}（${finding.id}）· ${independent.includes(finding) ? "仍有独立依据，结论继续有效" : "唯一依据已撤回，须复核"}`,
+          );
+        }
+        const manual = history.ops.listManualCoverage(id).filter((entry) => entry.evidenceRefs.some((ref) => removed.has(ref)));
+        for (const entry of manual) {
+          lines.push(`- 受影响人工覆盖：${label(entry.asset)} × ${label(entry.technique)}（${entry.reviewer}）`);
+        }
+        if (affected.length === 0 && manual.length === 0) {
+          lines.push("- 未发现引用该材料的已交付结论（撤回只留痕，不改写事实）。");
+        }
+        lines.push("");
+      }
+    }
+
     lines.push("", "");
     const factLabel = (f: Fact) => `${label(f.title)}（${f.id}）`;
 

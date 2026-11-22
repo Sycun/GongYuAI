@@ -66,6 +66,33 @@ Usage:
   gy archive <taskId>
   gy unarchive <taskId>
 
+  gy handoff <taskId> [--next-owner NAME] [--now ISO]   # 跨班接手包
+  gy jobs <taskId> [--receipts]        # 持久作业列表
+  gy job-submit <taskId> --kind material-check|evidence-pack|parse-import|role-plan|role-review
+        --label TEXT --input PATH[,PATH] [--sha SHA] [--asset A] [--options JSON]
+  gy job-retry <taskId> <jobId>        # unknown/failed/paused 才可重试
+  gy job-ack <taskId> <jobId> --key K [--by NAME]   # 幂等回执（重复投递只记一次）
+  gy consults <taskId>                 # 人工求助列表
+  gy consult <taskId> --question TEXT [--options a,b] [--blocking true|false]
+  gy answer <taskId> <consultId> "答复" --by NAME
+  gy consult-sweep <taskId> [--now ISO]  # 24h 转非阻塞（可控时钟）
+  gy material <taskId> --path P --file LOCAL --asset A [--kind K] [--secret-ref REF]
+  gy materials <taskId>
+  gy coverage-cell <taskId> --asset A --technique CWE-89 --state manual|verified --reviewer N --reason TEXT
+  gy matrix <taskId> | gy freshness <taskId>
+  gy changes <taskId> | gy change <taskId> --kind K --asset A --location L --rollback CMD [--before FILE]
+  gy rollback <taskId> --out FILE
+  gy graph <taskId> assets|surface|execution|memory | gy causality <taskId> <findingId> | gy today
+  gy memory list | gy memory draft --file F | gy memory review <id> --decision confirm|retract --reviewer N --reason TEXT
+  gy memory refs <id> | gy memory inject <taskId> [--asset A] | gy contact --targets A,B
+  gy proposals | gy proposal <id> | gy proposal-create --file F
+  gy proposal-decide <id> --decision approve|reject --by NAME [--reason TEXT]
+  gy proposal-promote <id> --by NAME --eval RUNID | gy proposal-rollback <id> --by NAME --reason TEXT
+  gy eval-run --file F | gy evals [--suite S] | gy trend [--tenant T]
+  gy role <taskId> --role planner|reviewer|assistant --kind plan|review|incident [--file F]
+  gy provider-fault <taskId> --provider NAME --fault rate-limit|timeout|insufficient-balance|egress-denied
+        [--attempt N] [--fallback true] [--billing billed] [--tokens N]
+
 Defaults: all budget gates unlimited (0). Pass --max-* only when you want a hard cap.
 Data dir defaults to <repo>/.gongyuai (not cwd). Legacy ~/.gongyuai tasks are imported on boot.
 
@@ -700,6 +727,497 @@ async function main(): Promise<void> {
   }
 
   // Direct local status from data dir without server
+
+  if (cmd === "handoff") {
+    const id = rest[0];
+    if (!id) throw new Error("gy handoff <taskId>");
+    const qs = new URLSearchParams();
+    if (flag(rest, "--next-owner")) qs.set("nextOwner", flag(rest, "--next-owner")!);
+    if (flag(rest, "--now")) qs.set("now", flag(rest, "--now")!);
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/handoff?${qs.toString()}`);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "jobs") {
+    const id = rest[0];
+    if (!id) throw new Error("gy jobs <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/jobs${has(rest, "--receipts") ? "?receipts=1" : ""}`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "job-submit") {
+    const id = rest[0];
+    const kind = flag(rest, "--kind");
+    const label = flag(rest, "--label") ?? "job";
+    const inputs = (flag(rest, "--input") ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+    if (!id || !kind || inputs.length === 0) throw new Error("gy job-submit <taskId> --kind K --label L --input PATH[,PATH]");
+    const sha = flag(rest, "--sha");
+    const options = flag(rest, "--options");
+    const body = {
+      kind,
+      label,
+      ...(flag(rest, "--asset") ? { asset: flag(rest, "--asset") } : {}),
+      submittedBy: flag(rest, "--by") ?? "operator",
+      inputs: inputs.map((path) => ({ path, sha256: sha ?? null })),
+      options: options ? JSON.parse(options) : {},
+    };
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/jobs`, body);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "job" || cmd === "job-retry") {
+    const id = rest[0];
+    const jobId = rest[1];
+    if (!id || !jobId) throw new Error(`gy ${cmd} <taskId> <jobId>`);
+    const owned = await ensureServer(opts);
+    try {
+      const r = cmd === "job"
+        ? await api(opts, "GET", `/tasks/${id}/jobs/${jobId}`)
+        : await api(opts, "POST", `/tasks/${id}/jobs/${jobId}/retry`, {});
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "job-ack") {
+    const id = rest[0];
+    const jobId = rest[1];
+    const key = flag(rest, "--key");
+    if (!id || !jobId || !key) throw new Error("gy job-ack <taskId> <jobId> --key K");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/jobs/${jobId}/receipt`, {
+        deliveryKey: key,
+        deliveredBy: flag(rest, "--by") ?? "operator",
+        note: flag(rest, "--note") ?? "",
+      });
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "consults") {
+    const id = rest[0];
+    if (!id) throw new Error("gy consults <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/consults`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "consult") {
+    const id = rest[0];
+    const question = flag(rest, "--question");
+    if (!id || !question) throw new Error("gy consult <taskId> --question TEXT");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/consults`, {
+        question,
+        options: (flag(rest, "--options") ?? "").split(",").map((v) => v.trim()).filter(Boolean),
+        context: flag(rest, "--context") ?? "",
+        blocking: (flag(rest, "--blocking") ?? "true") !== "false",
+        askedBy: flag(rest, "--by") ?? "agent",
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "answer") {
+    const id = rest[0];
+    const consultId = rest[1];
+    const answer = flag(rest, "--answer") ?? rest[2];
+    if (!id || !consultId || !answer) throw new Error('gy answer <taskId> <consultId> "答复" --by NAME');
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/consults/${consultId}/answer`, {
+        answer,
+        answeredBy: flag(rest, "--by") ?? "operator",
+        injectHint: true,
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "consult-sweep") {
+    const id = rest[0];
+    if (!id) throw new Error("gy consult-sweep <taskId> [--now ISO]");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/consults/sweep`, {
+        ...(flag(rest, "--now") ? { now: flag(rest, "--now") } : {}),
+      });
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "material") {
+    const id = rest[0];
+    const path = flag(rest, "--path");
+    const file = flag(rest, "--file");
+    const asset = flag(rest, "--asset");
+    if (!id || !path || !file || !asset) throw new Error("gy material <taskId> --path P --file LOCAL --asset A");
+    const content = readFileSync(resolve(file), "utf8");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/materials`, {
+        path,
+        content,
+        asset,
+        ...(flag(rest, "--kind") ? { kind: flag(rest, "--kind") } : {}),
+        ...(flag(rest, "--observed-at") ? { observedAt: flag(rest, "--observed-at") } : {}),
+        ...(flag(rest, "--secret-ref") ? { secretRef: flag(rest, "--secret-ref") } : {}),
+        source: flag(rest, "--source") ?? "operator-import",
+        locator: flag(rest, "--locator") ?? "",
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "materials") {
+    const id = rest[0];
+    if (!id) throw new Error("gy materials <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/materials`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "coverage-cell") {
+    const id = rest[0];
+    const asset = flag(rest, "--asset");
+    const technique = flag(rest, "--technique");
+    if (!id || !asset || !technique) throw new Error("gy coverage-cell <taskId> --asset A --technique CWE-89 --state manual");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/coverage-cells`, {
+        asset,
+        technique,
+        state: flag(rest, "--state") ?? "manual",
+        reviewer: flag(rest, "--reviewer") ?? "operator",
+        reason: flag(rest, "--reason") ?? "人工覆盖登记",
+        evidenceRefs: (flag(rest, "--evidence") ?? "").split(",").map((v) => v.trim()).filter(Boolean),
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "matrix" || cmd === "freshness") {
+    const id = rest[0];
+    if (!id) throw new Error(`gy ${cmd} <taskId>`);
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/${cmd}`);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "changes") {
+    const id = rest[0];
+    if (!id) throw new Error("gy changes <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/changes`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "change") {
+    const id = rest[0];
+    const kind = flag(rest, "--kind");
+    const asset = flag(rest, "--asset");
+    const location = flag(rest, "--location");
+    const rollbackCmd = flag(rest, "--rollback");
+    if (!id || !kind || !asset || !location || !rollbackCmd) {
+      throw new Error("gy change <taskId> --kind K --asset A --location L --rollback CMD");
+    }
+    const before = flag(rest, "--before");
+    const body = {
+      kind,
+      asset,
+      location,
+      rollbackCmd,
+      registeredBy: flag(rest, "--by") ?? "operator",
+      note: flag(rest, "--note") ?? "",
+      ...(before ? { beforeMaterial: { path: `changes/${Date.now()}-before.txt`, content: readFileSync(resolve(before), "utf8") } } : {}),
+    };
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/changes`, body);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "rollback") {
+    const id = rest[0];
+    const out = flag(rest, "--out");
+    if (!id) throw new Error("gy rollback <taskId> [--out FILE]");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/rollback`);
+      if (r.status >= 400) throw new Error(r.text);
+      if (out) {
+        writeFileSync(resolve(out), r.text);
+        console.log(`rollback script written: ${resolve(out)}`);
+      } else {
+        console.log(r.text);
+      }
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "graph" || cmd === "causality") {
+    const id = rest[0];
+    const target = rest[1];
+    if (!id || !target) throw new Error(`gy ${cmd} <taskId> ${cmd === "graph" ? "assets|surface|execution|memory" : "<findingId>"}`);
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", cmd === "graph" ? `/tasks/${id}/graphs/${target}` : `/tasks/${id}/causality/${target}`);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "today") {
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", "/today");
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "memory") {
+    const sub = rest[0];
+    const owned = await ensureServer(opts);
+    try {
+      if (sub === "list") {
+        const r = await api(opts, "GET", "/memory/nodes");
+        console.log(r.text);
+      } else if (sub === "draft") {
+        const file = flag(rest, "--file");
+        if (!file) throw new Error("gy memory draft --file F");
+        const r = await api(opts, "POST", "/memory/nodes", JSON.parse(readFileSync(resolve(file), "utf8")));
+        if (r.status >= 400) throw new Error(r.text);
+        console.log(r.text);
+      } else if (sub === "review") {
+        const id = rest[1];
+        const decision = flag(rest, "--decision");
+        if (!id || !decision) throw new Error("gy memory review <id> --decision confirm|retract --reviewer N --reason TEXT");
+        const r = await api(opts, "POST", `/memory/nodes/${id}/review`, {
+          decision,
+          reviewer: flag(rest, "--reviewer") ?? "operator",
+          reason: flag(rest, "--reason") ?? "",
+        });
+        if (r.status >= 400) throw new Error(r.text);
+        console.log(r.text);
+      } else if (sub === "refs") {
+        const id = rest[1];
+        if (!id) throw new Error("gy memory refs <id>");
+        const r = await api(opts, "GET", `/memory/nodes/${id}/references`);
+        console.log(r.text);
+      } else if (sub === "inject") {
+        const id = rest[1];
+        if (!id) throw new Error("gy memory inject <taskId> [--asset A]");
+        const r = await api(opts, "POST", `/tasks/${id}/memory/inject`, {
+          ...(flag(rest, "--asset") ? { asset: flag(rest, "--asset") } : {}),
+        });
+        if (r.status >= 400) throw new Error(r.text);
+        console.log(r.text);
+      } else {
+        throw new Error("gy memory list|draft|review|refs|inject");
+      }
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "contact") {
+    const targets = flag(rest, "--targets");
+    if (!targets) throw new Error("gy contact --targets A,B");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/archive/contact?targets=${encodeURIComponent(targets)}`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "proposals" || cmd === "proposal") {
+    const owned = await ensureServer(opts);
+    try {
+      const id = rest[0];
+      const r = cmd === "proposals" ? await api(opts, "GET", "/proposals") : await api(opts, "GET", `/proposals/${id ?? ""}`);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "proposal-create" || cmd === "eval-run") {
+    const file = flag(rest, "--file");
+    if (!file) throw new Error(`gy ${cmd} --file F`);
+    const owned = await ensureServer(opts);
+    try {
+      const body = JSON.parse(readFileSync(resolve(file), "utf8"));
+      const r = await api(opts, "POST", cmd === "proposal-create" ? "/proposals" : "/evaluations", body);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "proposal-decide" || cmd === "proposal-promote" || cmd === "proposal-rollback") {
+    const id = rest[0];
+    if (!id) throw new Error(`gy ${cmd} <id>`);
+    const owned = await ensureServer(opts);
+    try {
+      const path = cmd === "proposal-decide" ? "decide" : cmd === "proposal-promote" ? "promote" : "rollback";
+      const body = cmd === "proposal-decide"
+        ? { decision: flag(rest, "--decision") ?? "approve", decidedBy: flag(rest, "--by") ?? "operator", reason: flag(rest, "--reason") ?? "" }
+        : cmd === "proposal-promote"
+          ? { promotedBy: flag(rest, "--by") ?? "operator", evaluationRunId: flag(rest, "--eval") ?? "" }
+          : { rolledBackBy: flag(rest, "--by") ?? "operator", reason: flag(rest, "--reason") ?? "" };
+      const r = await api(opts, "POST", `/proposals/${id}/${path}`, body);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "evals" || cmd === "trend") {
+    const owned = await ensureServer(opts);
+    try {
+      const qs = new URLSearchParams();
+      if (flag(rest, "--suite")) qs.set("suite", flag(rest, "--suite")!);
+      if (flag(rest, "--tenant")) qs.set("tenantId", flag(rest, "--tenant")!);
+      const r = await api(opts, "GET", `/${cmd === "evals" ? "evaluations" : "trends"}?${qs.toString()}`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "role") {
+    const id = rest[0];
+    const role = flag(rest, "--role");
+    const kind = flag(rest, "--kind");
+    if (!id || !role || !kind) throw new Error("gy role <taskId> --role planner|reviewer|assistant --kind plan|review|incident");
+    const file = flag(rest, "--file");
+    const body = { role, kind, input: file ? JSON.parse(readFileSync(resolve(file), "utf8")) : {}, simulated: true };
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/roles`, body);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "provider-fault") {
+    const id = rest[0];
+    const provider = flag(rest, "--provider");
+    const fault = flag(rest, "--fault");
+    if (!id || !provider || !fault) throw new Error("gy provider-fault <taskId> --provider NAME --fault rate-limit");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/provider`, {
+        provider,
+        fault,
+        attempt: Number(flag(rest, "--attempt") ?? 0),
+        fallbackAllowed: (flag(rest, "--fallback") ?? "false") === "true",
+        billing: flag(rest, "--billing") ?? "none",
+        tokens: flag(rest, "--tokens") ? Number(flag(rest, "--tokens")) : null,
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
   if (cmd === "inspect") {
     const id = rest[0];
     const dataRoot = resolveCanonicalDataRoot({

@@ -69,6 +69,7 @@ import {
   type ReconcileStateReport,
 } from "./goal-evidence.js";
 import { readEvidenceBytes, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
+import { TaskOperations } from "./ops.js";
 import { readIntegrationUsage, trackIntegrationCalls } from "./integration-usage.js";
 import {
   computeScorecard,
@@ -90,6 +91,9 @@ import {
   type RetestRequestInput,
   type RetestRequestStatus,
 } from "@gongyuai/contracts";
+
+export { TaskOperations } from "./ops.js";
+export type { OpsScope, JobPatch } from "./ops.js";
 
 export {
   collectGoalEvidence,
@@ -165,6 +169,8 @@ export type OpenHistoryOptions = {
 export class HistoryStore {
   readonly dbPath: string;
   readonly evidenceDir: string;
+  /** 第九轮：持久作业 / 人工求助 / 材料 / 变更台账（同一任务的库）。 */
+  readonly ops: TaskOperations;
   private readonly db: DatabaseSync;
 
   private readonly archiveTables?: Set<string>;
@@ -182,6 +188,7 @@ export class HistoryStore {
         this.db.close();
         throw err;
       }
+      this.ops = new TaskOperations(this.db, { readOnly: true });
       return;
     }
     mkdirSync(dirname(opts.dbPath), { recursive: true });
@@ -195,6 +202,7 @@ export class HistoryStore {
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.migrate();
+    this.ops = new TaskOperations(this.db);
   }
 
   close(): void {
@@ -232,6 +240,8 @@ export class HistoryStore {
         status TEXT NOT NULL,
         source_fact_ids_json TEXT NOT NULL DEFAULT '["origin"]',
         claimed_by TEXT,
+        technique TEXT,
+        asset_root TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         concluded_at TEXT,
@@ -438,6 +448,7 @@ export class HistoryStore {
       CREATE INDEX IF NOT EXISTS idx_peer_reviews_engagement ON peer_reviews(engagement_id, created_at);
     `);
     this.ensureIntentSourceFactIdsColumn();
+    this.ensureIntentTechniqueColumns();
     this.ensureGoalColumns();
   }
 
@@ -465,6 +476,14 @@ export class HistoryStore {
     if (!have.has("business_json")) {
       this.db.exec(`ALTER TABLE goals ADD COLUMN business_json TEXT`);
     }
+  }
+
+  /** 第九轮：覆盖矩阵需要 Intent 的测试类与资产根（缺省允许）。 */
+  private ensureIntentTechniqueColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(intents)`).all() as Array<{ name: string }>;
+    const have = new Set(cols.map((column) => column.name));
+    if (!have.has("technique")) this.db.exec(`ALTER TABLE intents ADD COLUMN technique TEXT`);
+    if (!have.has("asset_root")) this.db.exec(`ALTER TABLE intents ADD COLUMN asset_root TEXT`);
   }
 
   /** Migrate pre-P0 DBs that lack source_fact_ids_json. */
@@ -908,6 +927,8 @@ export class HistoryStore {
     title: string;
     summary?: string;
     sourceFactIds: string[];
+    technique?: string | null;
+    assetRoot?: string | null;
     /**
      * When true (default), reject Intents whose only asset predecessors are oos.
      * Intel-only / origin-only Intents still pass.
@@ -931,6 +952,8 @@ export class HistoryStore {
       summary: input.summary ?? "",
       status: "proposed",
       sourceFactIds,
+      technique: input.technique?.trim() ? input.technique.trim() : null,
+      assetRoot: input.assetRoot ? normalizeHost(input.assetRoot) : null,
       claimedBy: null,
       createdAt: now,
       updatedAt: now,
@@ -940,8 +963,9 @@ export class HistoryStore {
     this.db
       .prepare(
         `INSERT INTO intents
-          (id, task_id, title, summary, status, source_fact_ids_json, claimed_by, created_at, updated_at, concluded_at, conclusion)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, task_id, title, summary, status, source_fact_ids_json, claimed_by, technique, asset_root,
+           created_at, updated_at, concluded_at, conclusion)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         intent.id,
@@ -951,6 +975,8 @@ export class HistoryStore {
         intent.status,
         JSON.stringify(intent.sourceFactIds),
         intent.claimedBy,
+        intent.technique,
+        intent.assetRoot,
         intent.createdAt,
         intent.updatedAt,
         intent.concludedAt,
@@ -1281,6 +1307,8 @@ export class HistoryStore {
       summary: String(r.summary),
       status: r.status as IntentStatus,
       sourceFactIds,
+      technique: (r.technique as string | null) ?? null,
+      assetRoot: (r.asset_root as string | null) ?? null,
       claimedBy: (r.claimed_by as string | null) ?? null,
       createdAt: String(r.created_at),
       updatedAt: String(r.updated_at),

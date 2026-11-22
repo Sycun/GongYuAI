@@ -210,6 +210,8 @@ export * from "./scope.js";
 export * from "./fanout.js";
 export * from "./family-key.js";
 export * from "./finding.js";
+/** 第九轮：委托边界 / 持久作业 / 人工求助 / 证据语义 / 四图 / 记忆 / 角色与韧性。 */
+export * from "./ops.js";
 import { FindingsGateSchema } from "./finding.js";
 
 /** Graph-driven worker phases (P2). Crash recovery still uses Durable; Relay ≠ crash. */
@@ -603,6 +605,10 @@ export const IntentSchema = z.object({
   status: IntentStatusSchema,
   /** Predecessor Fact ids (or `origin`); empty forbidden — no causeless explore. */
   sourceFactIds: z.array(z.string().min(1)).min(1),
+  /** 测试类（CWE-* / OWASP-* / ATT&CK Txxxx）；覆盖矩阵的列。 */
+  technique: z.string().trim().min(1).max(80).nullable().default(null),
+  /** 资产根（规范化地址）；缺省时由 sourceFactIds 的资产标签派生。 */
+  assetRoot: z.string().trim().min(1).max(255).nullable().default(null),
   claimedBy: z.string().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -652,6 +658,29 @@ export const HistoryEventKindSchema = z.enum([
   "evidence_removed",
   /** 操作员从控制台触发的目标判定（与 worker 自动判定同一条实现）。 */
   "goal_assert_requested",
+  /** 第九轮：持久作业 / 人工求助 / 材料 / 台账 / 记忆 / 飞轮 / 角色 / 韧性。 */
+  "job_submitted",
+  "job_started",
+  "job_finished",
+  "job_delivered",
+  "job_paused",
+  "job_reconcile_after_boot",
+  "job_late_result",
+  "consult_opened",
+  "consult_answered",
+  "consult_released",
+  "material_imported",
+  "change_registered",
+  "change_confirmed",
+  "memory_injected",
+  "memory_reviewed",
+  "proposal_decided",
+  "proposal_promoted",
+  "proposal_rolled_back",
+  "role_work_finished",
+  "provider_fault_handled",
+  "evaluation_recorded",
+  "graph_projected",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 

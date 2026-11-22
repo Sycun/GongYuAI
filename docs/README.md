@@ -67,6 +67,13 @@
 - `examples/dvwa-smoke/`
 - `examples/tsecbench/`
 
+## 第九轮后端（2026-11-22/23）
+
+- [round9-gap.md](./round9-gap.md) — 开工前逐项盘点（代码/入口/测试）+ 实施后对照
+- [api-contract-r9.md](./api-contract-r9.md) — 前端交接：可用 API、稳定 ID、样例、空值/错误语义
+- [review-checklist-r9.md](./review-checklist-r9.md) — 独立复核最短路径、失败反例、三端读数
+- [owner-unverified-r9.md](./owner-unverified-r9.md) — 未验证清单：工程缺项 / 缺真实供应商 / 缺真实材料
+
 ## 事实复核与验收
 
 [女娲、DAG 与证据复核](./evidence-review.md)说明复核入口、证据版本、报告判读和离线验收用例。

@@ -64,15 +64,15 @@
 | 并发扩容 ✅ | 有效并发=min(上限, max(靶标数, admitted/live 资产数))；运行中只扩不缩；控制台推荐 3–10；非战术纪律 | parallel-explore-scaling |
 | 证据复核 ✅ | evidenceChecks 内容判据+SHA-256 原版封存；confirmed/retracted 复核；覆盖快照+独立盲评（development/holdout） | evidence-review |
 
-### P6 渗透域语义 🔨（E1 并行会话进行中）
+### P6 渗透域语义 🔨（E1 已完成；E2–E6 第九轮后端部分落地）
 
 Finding 一等公民（tentative/verified/retested/accepted/retracted + findingsGate，双图分离落地）→ 凭据/会话结构化（secretRef 指针）→ HTTP 事务证据+parser lane → 覆盖矩阵（asset×technique）+**速率模型自判**（硬顶可选，用户定调修订）+破坏性分级 → 变更台账/回滚（只生成不执行）→ finding 级评测。详见 [pentest-enhancements.md](./pentest-enhancements.md)。
 
-### P7 Super-agent 调度经济 📐
+### P7 Super-agent 调度经济 🔨（第九轮：角色分层与供应商韧性契约级落地，真实路由待验证）
 
 三层模型路由（派单便宜/推理强/执行快，`execution.models`）；slot 0 指挥官自接力核对；偏航审计者（轻模型只写 `source=auditor` Hint，看门狗零策略不破）；Observe 事件两级过滤。脑手分离已由相位工具面结构性保证（Octop 0/5 委派教训的正面论据）。**差分协议已定**：中难度带 8 题子集、≥3 重复、配对差 CI、非劣界 -5pp（[absorb-eval-methodology.md](./absorb-eval-methodology.md)）。详见 [absorb-super-agent.md](./absorb-super-agent.md)。
 
-### P8 记忆层：项目记忆 × 全局记忆 📐
+### P8 记忆层：项目记忆 × 全局记忆 🔨（第九轮：全局记忆/档案索引/注入后端 + 记忆图 API；控制台与自动蒸馏未做）
 
 - **项目记忆**（任务级，✅ 已有）：History 黑板 + Relay π + Durable + 证据。
 - **全局记忆**（用户级，📐）：档案索引（所有任务联邦只读）+ 蒸馏图谱（Lesson/Playbook/Counterexample/ToolArtifact/SourceRef/MatchKey/SkillPack）+ Skill 固化提案 + 工具遗产 + 操作者画像。
@@ -80,15 +80,15 @@ Finding 一等公民（tentative/verified/retested/accepted/retracted + findings
 - **硬纪律**：无源不记忆（derived_from 强制）；旧 Fact 永不直写新任务图；注入只走建议层；不做 RAG；凭据明文不进全局；全局记忆不出本机。
 - 详见 [memory-layer.md](./memory-layer.md)。
 
-### P9 数据飞轮 📐
+### P9 数据飞轮 🔨（第九轮：F2/F3 后端落地；无真夹具与自动晋升）
 
 五环：采集（events/trace/usage/复核，大半已有）→ 评测（任务记分卡+趋势+基准回归）→ 蒸馏（经验+参数+prompt 纪律提案，必附证据）→ 改进（五类执行器全部人审）→ 验证（离线差分先行+holdout 只验不调+配置版本化回滚）。中心质量闸：人审/溯源/反例降级/坏事实防毒化/Goodhart 防护（目标函数=攻击面经营+可审计 finding，非 flag 数）/数据不出本机。**飞轮已手动转过两圈**（六批→结构化交接 57→59；路由 2/8→8/8）。转的是 harness 与知识，不是模型权重。详见 [data-flywheel.md](./data-flywheel.md)。
 
-### P10 图视图族 📐
+### P10 图视图族 🔨（第九轮：四图只读 API + 今日工作已落地；前端画布待做）
 
 一图一真相、五视图投影：DAG 核心 + 资产图（发现血缘/family/授权圈，数据已有）+ 攻击面图（资产×表面×测试状态，依赖 P6 E3/E4）+ 执行图（phase×slot 泳道，trace/events 投影）+ 记忆图（P8 M2）。跨图同 ID 导航；图提示（未测面/孤岛/高耗低产/过期/撤回波及）只写 Hint。只读投影、无第二状态、列表保留。详见 [graph-views.md](./graph-views.md)。
 
-### P11 渗透执行层与委托规则 📐
+### P11 渗透执行层与委托规则 🔨（第九轮：持久资料作业、operator_consult 24h、handoff 已落地；会话/隧道/浏览器未做）
 
 - **会话管理器**：session_open/write/read/list/close；process/listener/ssh/tunnel/browser；任务级 detached 对象，暂停/崩溃存活，重启 reconnect；单写者租约 CAS，跨 slot 复用。
 - **后台作业异步回流**：chord job；完成 → root.submit() durable 通知唤醒模型，不轮询；崩溃幂等补发；多步编排走 Code Mode。
@@ -99,7 +99,7 @@ Finding 一等公民（tentative/verified/retested/accepted/retracted + findings
 - **生命周期**：开始/暂停（非终态停表；**会话保活、后台作业 SIGSTOP 冻结**，恢复续跑）/继续/停止（清理+残留台账）/结束（交付归档）；紧急停止。
 - 详见 [pentest-ops-design.md](./pentest-ops-design.md)。
 
-### P12 长程完备性（定调后）
+### P12 长程完备性（定调后）🔨（第九轮：D1 时效、D3 韧性契约、D5/D6 模拟角色；D8 哈希链未做）
 
 **必补**：D1 目标漂移与事实保鲜（TTL 建议/基线差分/凭据健康）；D2 防御响应反馈（封锁检测/蜜罐启发式/金丝雀规避/噪音预算）；D3 Provider 韧性（key 池/failover/429 退避/成本预测）。**角色**：D5 战役规划→**规划者 Planner**（Reason 层强模型子会话，产出里程碑计划+Intent 提案，过正常硬闸）；D6 事故应急→**辅助者 Assistant**（独立轻量会话，**有 pause 权**无 stop/resume/扩 scope 权，break-glass/事故记录/通知 draft 人审）。**调研轨**：D4 Engagement 程序层（先调研产出 absorb 文档）。**通过**：D8 法律级证据（哈希链/可信时间戳/PTES·等保模板/CVSS4.0/复测工作流）。**删除**：D7 断网（无此场景）。详见 [long-range-completeness.md](./long-range-completeness.md)。
 
@@ -126,8 +126,9 @@ pi-durable（Experimental，锁版本+适配层）：reset(handoff)/compaction/s
 ## 5. 路线图与依赖
 
 ```text
-已落地：P0–P5 + 并发扩容 + 证据复核 + 技能路由修复
-进行中：P6 E1（并行会话）
+已落地：P0–P5 + 并发扩容 + 证据复核 + 技能路由修复 + P9-F1
+第九轮后端：委托边界 / 持久作业 / 24h 求助 / handoff / 材料语义 / 覆盖矩阵 / 四图 API / 全局记忆 / 冻结评测 / 角色与韧性（契约级）
+仍未做：会话管理器、隧道/浏览器、凭据表、parser lane 真格式、速率硬闸、事件哈希链、真实供应商与真实生产盲评
 建议顺序：F1 记分卡(无依赖) → P6 E1 → P8 M1 → G1 双图 → P11 S1 会话+作业
           → P7 模型路由差分 → P8 M2/P9 F2/P10 G2 → P11 S2–S4 → P12 底线(D1/D2/D6)
 依赖：P6 E1 是 P8/P9/P10-G2/P12-D8 的原料；P11 S1 与 E2 元数据联动；P7 路由是飞轮执行器

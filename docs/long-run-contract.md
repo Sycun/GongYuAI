@@ -247,3 +247,73 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 ## Termination
 
 `completed` | `failed` | `budget_exhausted` | `stopped` written to `worker-status.json`; Watchdog promotes TaskRecord.
+
+
+## 9. 第九轮新增契约（运营状态层）
+
+> 只写**已经进代码**的契约；类型定义在 `packages/contracts/src/ops.ts`，存储见 `packages/history/src/ops.ts`（任务级）与 `packages/control-plane/src/platform.ts`（平台级 `platform.sqlite`）。
+
+### 9.1 可见性
+
+- `VisibilityContext { tenantId, engagementId?, operator?, role }`。
+- `visibilityDenial(ctx, task)`：租户不等 → `tenant-mismatch`；显式委托不等 → `engagement-mismatch`；任务缺 `engagementId` 时自成一委托。
+- 新入口一律先过边界再读写；越界返回 403，不得静默返回空列表。
+- 资产身份：`assetIdentity(engagementId, address) = "<engagementId>::<normalizeHost(address)>"`；跨委托同名资产不得互相命中。
+
+### 9.2 持久作业
+
+- 表 `background_jobs`（每任务）：`id, task_id, engagement_id, kind, label, status, scope_version, asset, submitted_by, options_json, inputs_json, progress_json, artifacts_json, error, receipt_key, delivered_at, attempt, boot_id, pause_state, started_at, finished_at, created_at, updated_at, late_result, result_json`。
+- 状态：`queued|running|paused|draining|succeeded|failed|canceled|unknown`；`pause_state ∈ none|stopped|draining|unknown`。
+- 暂停：执行中 → `draining`；未开始 → `paused(stopped)`；重启后上一代 `running` → `unknown`（`reconcileJobAfterBoot`）。
+- 完成回流：`material-check` 完成后按目标声明的材料图案调用 `assertGoal`（与操作员入口同一实现）；任务已终态时重渲染报告。
+- 迟到结果：`lateResult = 完成时 scopeVersion > 提交时 scopeVersion`；结果保留，不自动计入当前结论。
+- 回执：`job_receipts(job_id, delivery_key)` 主键唯一；重复投递 `duplicate=true`，事件只记一次。
+
+### 9.3 人工求助
+
+- 表 `consultations`：`blocking` 与 `status` 分离；`dueAt = createdAt + 24h`。
+- `sweepConsult` 只把 `blocking=false` 并写 `releasedAt`，`status` 保持 `open`；**问题仍须明确答复**。
+- 答复写 `answeredAt/answeredBy/answer`；可回注 `source=human` Hint（`tags` 含 `consult:<id>`）。
+
+### 9.4 材料与证据语义
+
+- `EvidenceImport { kind, status, source, parser{name,version}, importedAt, observedAt, asset, materialPath, sha256, locator, sensitivity, secretRef, reason, scopeVersion }`。
+- `status ∈ accepted|unsupported|unknown-owner|expired`；**导入成功永不等于"已验证"**。
+- 疑似明文凭据必须走 `secretRef`（受控引用），落盘只有指针与原文摘要。
+- 材料 TTL：asset-inventory/config-check 14d、http-transaction 7d、manual-retest 30d。
+
+### 9.5 覆盖矩阵与时效
+
+- `CoverageState ∈ unknown|material|attempted|manual|verified|retracted`；优先级 `verified > manual > attempted > retracted > material > unknown`。
+- `retractedOnly`：唯一依据被撤回；`independentSupport`：未被撤回的依据条数。
+- 证据身份以**路径为主、sha 为辅**：撤回 `evidence_removed{path,sha256}` 后，引用该路径的结论失去依据。
+- `freshnessOf(fact, now)`：TTL 派生 `fresh|needs-review`，**不改写/不删除原 Fact**。
+- 报告新增 `## 证据撤回影响`：受影响结论与"仍有独立依据/唯一依据已撤回"分开写。
+
+### 9.6 图视图
+
+- 四个只读视图共用 `GraphView { taskId, engagementId, view, generatedAt, empty, emptyReason, nodes[{id,kind,label,badge,data}], edges[{id,from,to,kind,label,broken}], notes }`。
+- 稳定 ID：`asset:<engagementId>::<host>`、`fact:<id>`、`intent:<id>`、`finding:<id>`、`step:<id>`、`memory:<id>`、`source:<taskId>:<refId>`、`job:<id>`。
+- 缺依据的边必须 `broken=true` 并在 label/`broken[]` 说明缺什么；不建第二状态存储。
+
+### 9.7 记忆
+
+- 节点 `lesson|playbook|counterexample|tool-artifact`；状态 `draft|confirmed|retracted|superseded`。
+- `provenance` 至少一条（无源不记忆）；`contradicts`/`supersedes` 只追加不删除。
+- 注入：只取 `confirmed`；硬键命中正常注入，仅 ≥2 软键算参考；标题层 N=5，命中当前资产追加 ≤2；只写 `source=system` Hint，不写 Fact。
+- 注入事件 `memory_injections{memoryId,taskId,engagementId,hintId,layer,matchedKeys,injectedAt}` 可回查"哪些任务引用过它"。
+- 档案索引 `/archive/contact` 只回指针，非阻塞，`历史接触 ≠ 本次授权`。
+
+### 9.8 飞轮与角色
+
+- 提案：`evidence` 至少一条（无证据不提案）；`draft → approved|rejected → promoted → rolled-back`；晋升要求真实评测且 `metrics.adjudicated>0`；回退保留 `promotedAt`/`evaluationRunId`。
+- 评测：同 suite 组顺序由首次运行定义；新组只能追加；`isolatedFrom` 必须覆盖已完成的其他组；冻结 `suite+group+seed` 不可替换；`pending` 不进 FP/FN，`recall = tp/(tp+fn)`。
+- 角色权限：Planner 可提案、Reviewer 可复核、Assistant 可请求/触发暂停；三者都不可 stop/扩 scope/派单（`ROLE_AUTHORITY`）。
+- 供应商：`rate-limit` 退避后切换；`timeout` 重试一次后切换；`insufficient-balance` 直接切换；`egress-denied` 或备用未获准 → `blocked`，**不得换通道**；`billing:"none"` 时成本不可见。
+
+### 9.9 明确不做（本轮）
+
+- 不把作业做成 chord detached 进程（进程死 → `unknown`，由人 retry）。
+- 不让记忆/经验成为任务 Fact，不让图提示派单。
+- 不改 Watchdog 策略；暂停不杀会话（当前也还没有会话对象）。
+- 不做自动晋升、不自动执行回滚脚本、不自动修复客户系统。

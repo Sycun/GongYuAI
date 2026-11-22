@@ -127,3 +127,35 @@
 | 浏览器验收 | 本机控制台三笔任务（`0a0a5edb…`/`37a10789…`/`4fcf3229…`）与 Kali 正式控制台三笔任务（`a0c5638d…`/`bf6b3bac…`/`c8c451d3…`）全部经 UI 建档、导入/替换/撤回、核算与判定；最终构建 `f271955` 上另在 Kali 控制台复验一笔（`5e3490ce…`）并用同一批产品接口复检 A/B1/B2 与新增的老形状规则（`706ead3e…`/`7a15202a…`/`dfcbffcc…`/`af139adb…`）；读数见 `docs/evidence/round8/` 三份 JSON 与两张控制台截图 |
 | 采用规则 | 判定依据是**内容哈希**：每版核算记录两侧材料哈希与口径摘要，判定时重新读取材料字节比对，并在通过事务内再核对一次；材料被撤走或内容变化即失去资格并保留供追溯；内容换回与某次核算完全相同的字节时该次核算重新具备资格（不要求时间上最新） |
 | 状态 | 两项缺陷：**已验证**（本机 + Kali 正常入口）；真实生产效果：**缺外部材料**（见 delivery-record §0.7） |
+
+
+## 7. 第九轮：委托边界、持久资料作业、证据语义、记忆与四图 API
+
+> 基线 `298440a`（origin/main）；开发分支 `backend/r9-boundary-jobs`；受验提交与两端读数见 [delivery-record.md](./delivery-record.md) §0。
+> 本轮只做**后端**：没有页面、没有组件、没有交互演示；前端按 [api-contract-r9.md](./api-contract-r9.md) 独立实现。
+
+| 项 | 代码落点 | 正常入口 | 单测 / 验收 | 状态 |
+| --- | --- | --- | --- | --- |
+| 委托边界统一 | `contracts/src/ops.ts`（`VisibilityContext`/`visibilityDenial`/`assertVisible`/`assetIdentity`）、`control-plane/src/routes-ops.ts`（`boundaryOf`/`memoryVisible`） | 新增任务级与平台级入口；显式 `tenantId/engagementId` 不匹配 → 403 | `contracts/src/ops.test.ts`「可见性」；`r9-ops` 越界 2 步；`r9-flywheel` 客户隔离 5 步 | 已验证（新入口）；旧导出路由仍未逐个加边界 → 部分验证 |
+| 持久资料作业 | `history/src/ops.ts`（`background_jobs`/`job_receipts`）、`control-plane/src/jobs.ts`（boot 对账/暂停三态/幂等回执/迟到结果/重试/完成回流） | `POST/GET /tasks/:id/jobs*`、`gy jobs|job-submit|job-retry|job-ack` | `history/src/ops.test.ts` 4 例；`r9-ops` 作业 13 步（含 SIGKILL→unknown→retry→succeeded→目标首次通过） | 已验证（进程内异步执行；不是 chord detached） |
+| 人工求助 24h | `history/src/ops.ts`（`consultations`）、`contracts sweepConsult`（只解除阻塞） | `/tasks/:id/consults*`、`gy consult|answer|consult-sweep` | `history/src/ops.test.ts`；`r9-ops` 5 步（23h/24h+1s/答复/Hint） | 已验证 |
+| 跨班交接 | `control-plane/src/handoff.ts`（范围/已完成/受阻/撤回/待答/作业/下一责任人 + 今日工作） | `GET /tasks/:id/handoff`、`GET /today`、`gy handoff|today` | `r9-ops` 交接 5 步 | 已验证（`nextOwner` 由调用方给） |
+| 材料语义 | `contracts ImportMaterialSchema/classifyMaterial/detectMaterialKind`、`routes-ops /materials` | `POST/GET /tasks/:id/materials`、`gy material|materials` | `contracts/src/ops.test.ts`「材料分类」；`r9-ops` 材料 9 步（含明文凭据 422 与受控引用） | 已验证 |
+| 覆盖矩阵 + 事实时效 | `contracts deriveCoverageMatrix/freshnessOf`、`/coverage-matrix`、`/coverage-cells`、`/freshness`、`Intent.technique/assetRoot` | `gy matrix|freshness|coverage-cell` | `contracts/src/ops.test.ts` 2 例；`r9-ops` 矩阵 9 步 | 已验证（attemped 依赖 Intent.technique，目前由 worker/脚本写入） |
+| 证据撤回一致性 | `history/src/report.ts`「证据撤回影响」、矩阵按路径判失效、图边 broken | `DELETE /evidence` → `/coverage-matrix`、`/graphs/surface`、`/report` | `r9-ops` 撤回 5 步（独立依据仍 verified / 唯一依据 retracted / 报告两类措辞） | 已验证 |
+| 变更台账 | `history/src/ops.ts`（`change_ledger` + `rollbackScript`） | `/tasks/:id/changes*`、`/tasks/:id/rollback`、`gy change|changes|rollback` | `history/src/ops.test.ts`「变更台账」 | 部分验证（报告 §Changes 未加；worker 工具未接） |
+| 四图 + 因果 | `control-plane/src/graphs.ts` | `/tasks/:id/graphs/{assets,surface,execution,memory}`、`/causality/:findingId`、`gy graph|causality` | `r9-ops` 资产/攻击面/同名资产 8 步；`r9-flywheel` 记忆图 1 步 | 已验证（只读投影；前端未做） |
+| 全局记忆 / 档案索引 | `control-plane/src/platform.ts`（`platform.sqlite`：memory_nodes/injections/events）、`contracts matchMemory`、`/memory/*`、`/archive/contact` | `gy memory|contact` | `platform.test.ts` 15 例；`contracts/src/ops.test.ts`「记忆匹配」；`r9-flywheel` 记忆 10 步 | 已验证（蒸馏自动化与控制台未做） |
+| F2/F3 趋势/提案/冻结评测 | `platform.ts`（proposals/proposal_events/evaluations/evaluation_suite_groups）、`contracts findingMetrics` | `/trends`、`/proposals*`、`/evaluations*`、`gy proposals|proposal*|eval-run|evals|trend` | `r9-flywheel` 评测 7 步 + 提案 6 步 + 指标分母 3 步 | 已验证（无真夹具；晋升不改运行时配置） |
+| 角色分层 | `control-plane/src/roles.ts`（确定性模拟 + `ROLE_AUTHORITY` 限权） | `POST /tasks/:id/roles`、`gy role`（plan/review 走后台作业） | `contracts/src/ops.test.ts`「角色权限」；`r9-flywheel` 角色 6 步 | 部分验证（模拟；未接真实模型与真实信号源） |
+| 供应商韧性 | `contracts planProviderAttempt`、`/tasks/:id/provider`、`provider_fault_handled` 事件 | `gy provider-fault` | `contracts/src/ops.test.ts`；`r9-flywheel` 7 步（429/余额/外发/超时/重复记账/成本可见） | 部分验证（契约级；`pi-loop` 未接 router） |
+| 无进展告警 | `routes-ops /alerts` + `noProgressAlarm` | `GET /tasks/:id/alerts?threshold=` | `r9-flywheel` 2 步 | 已验证 |
+| 回归 | 195 单测（contracts 51 / history 57 / worker 35 / control-plane 52） | `pnpm -r run build && pnpm -r run test` | 另有 smoke、校验器 8 项、business 77、firstpass 69、engagement 80、restore:selftest、drill:restore 全过 | 已验证 |
+
+### 7.1 本轮没有做的事（按实际程度登记）
+
+- 只有数据表/契约、尚无正常入口的：事件哈希链（`prev_hash`）、TSA、PTES/等保模板、CVSS 4.0、Goal 树/milestone。
+- 只到契约级模拟的：角色分层、供应商故障、模拟模型请求。
+- 只有设计没有代码的：会话管理器、隧道/pivot、浏览器内核、凭据表/`credential_record`、parser lane 四种真实格式、速率硬闸/时间窗/RoE、自动蒸馏与 ToolArtifact 人审执行。
+- 页面/组件/交互：全部不在本轮范围。
+
