@@ -127,6 +127,7 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   logs: { title: "日志", subtitle: "执行节点日志" },
   settings: { title: "设置", subtitle: "模型 · 资产 · MCP · Skill · Token · 更新" },
   "settings-model": { title: "模型配置", subtitle: "OpenAI 兼容 API · 视觉能力" },
+  "settings-approval": { title: "命令审批", subtitle: "审批模型与风险范围" },
   "settings-assets": {
     title: "资产收集",
     subtitle: "FOFA · 鹰图 · 自定义 API · AI 自动发现写入清单",
@@ -203,6 +204,7 @@ export type DetailTab = (typeof DETAIL_TABS)[number]["key"];
 
 export const SETTINGS_SECTIONS = [
   { key: "settings-model", label: "模型配置", section: "model" },
+  { key: "settings-approval", label: "命令审批", section: "approval" },
   { key: "settings-assets", label: "资产收集", section: "assets" },
   { key: "settings-mcp", label: "MCP", section: "mcp" },
   { key: "settings-skills", label: "Skill", section: "skills" },

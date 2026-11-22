@@ -1,3 +1,5 @@
+import type { ChatApproval } from "@gongyuai/contracts/chat-input";
+import type { ChatCatalog, ChatConnection, ChatProfile } from "@gongyuai/contracts";
 import type { CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
 
 export type TaskRecord = {
@@ -59,6 +61,7 @@ export type TaskRecord = {
     reasonLeaseMs?: number;
   };
   usage: { tokens: number; toolCalls: number; installs: number };
+  commandReview?: { id: string; tool: string; at: string; reason: string; model: string; decision: "block" | "unavailable" };
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -491,7 +494,8 @@ export type CreateTaskBody = {
 export const api = {
   health: () => request<{ ok: boolean }>("/health"),
   overview: () => request<Overview>("/overview"),
-  tasks: () => request<{ tasks: TaskRecord[] }>("/tasks"),
+  tasks: (signal?: AbortSignal) => request<{ tasks: TaskRecord[] }>("/tasks", { signal }),
+  task: (id: string, signal?: AbortSignal) => request<{ task: TaskRecord }>(`/tasks/${encodeURIComponent(id)}`, { signal }),
   createTask: (body: CreateTaskBody) =>
     request<{ task: TaskRecord }>("/tasks", {
       method: "POST",
@@ -508,7 +512,7 @@ export const api = {
     request<{ task: TaskRecord }>(`/tasks/${id}/archive`, { method: "POST" }),
   unarchive: (id: string) =>
     request<{ task: TaskRecord }>(`/tasks/${id}/unarchive`, { method: "POST" }),
-  history: (id: string) => request<HistoryPayload>(`/tasks/${id}/history`),
+  history: (id: string, signal?: AbortSignal) => request<HistoryPayload>(`/tasks/${encodeURIComponent(id)}/history`, { signal }),
   assets: (id: string) => request<{ assets: AssetRecord[] }>(`/tasks/${id}/assets`),
   hints: (id: string) => request<{ hints: HintRecord[] }>(`/tasks/${id}/hints`),
   createHint: (id: string, body: { text: string; source?: string; tags?: string[] }) =>
@@ -517,7 +521,7 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
-  runtime: (id: string) => request<RuntimePayload>(`/tasks/${id}/runtime`),
+  runtime: (id: string, signal?: AbortSignal) => request<RuntimePayload>(`/tasks/${encodeURIComponent(id)}/runtime`, { signal }),
   executionTrace: (id: string, before: number) =>
     request<ExecutionTracePage>(`/tasks/${id}/trace?before=${before}`),
   executionStepCalls: (id: string, stepId: string, signal: AbortSignal) =>
@@ -581,6 +585,17 @@ export const api = {
   peerReviews: (id: string) => request<{ reviews: PeerReviewRecord[] }>(`/tasks/${id}/peer-reviews`),
   report: (id: string) => request<string>(`/tasks/${id}/report`),
   logs: (id: string) => request<string>(`/tasks/${id}/logs`),
+  approval: () => request<ChatApproval>("/settings/approval"),
+  saveApproval: (policy: ChatApproval) => request<ChatApproval>("/settings/approval", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(policy),
+  }),
+  chatModels: () => request<ChatCatalog>("/chat/models"),
+  saveChatProfile: (profile: ChatProfile, makeDefault: boolean) => request<ChatCatalog>("/settings/chat-models", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile, makeDefault }),
+  }),
+  queryChatModels: (connection: ChatConnection) => request<{ models: string[] }>("/settings/chat-models/query", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(connection),
+  }),
   settings: () => request<PublicSettings>("/settings"),
   saveModel: (body: Record<string, unknown>) =>
     request<PublicSettings>("/settings/model", {

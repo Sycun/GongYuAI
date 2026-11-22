@@ -1,4 +1,5 @@
 import { z } from "zod";
+export type { ChatCatalog, ChatConnection, ChatProfile, ChatProtocol, ChatSelection, PublicChatProfile, ThinkingEffort } from "./chat-models.js";
 import { CoverageStatusSchema } from "./coverage-audit.js";
 import {
   BUSINESS_RECONCILE_KIND,

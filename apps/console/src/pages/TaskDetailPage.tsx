@@ -411,6 +411,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
             {runtime?.externalState ? ` · 外部状态 ${runtime.externalState}` : ""}
             {runtime?.lastConfirmedAt ? ` · 最后确认 ${formatDateTime(runtime.lastConfirmedAt)}` : ""}
           </Typography.Text>
+          {task.commandReview && <a href={"#/chat/task-" + task.id}>在任务会话中查看命令审批记录</a>}
           {task.error ? (
             <Typography.Text type="danger" style={{ display: "block", marginTop: 4 }}>
               {task.error}
