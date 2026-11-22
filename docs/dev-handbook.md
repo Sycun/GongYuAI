@@ -37,7 +37,7 @@ MCP / Skill 是弹药，不是产品定义。
 | Auth ladder | `observe\|scan\|active-lab\|full` | — |
 | Harness 差分 | `pnpm diff-harness`：**bare**（`GY_HARNESS=bare`）/ history / relay | — |
 | TSecBench CLI | hint 默认禁；409 终态快失败；`probe` + ticket 记账 | 平台 ticket 须人工重置 |
-| 多 Worker 并行 Explore | **有（可配）** | 新建任务 `execution.maxConcurrentExplores`；有效并发 = min(配置, 靶标数) |
+| 多 Worker 并行 Explore | **有（可配 + 动态扩容）** | `execution.maxConcurrentExplores`；有效并发 = min(配置, max(靶标数, admitted/live 资产数))，运行中只扩不缩；控制台推荐 3–10，见 [parallel-explore-scaling](./parallel-explore-scaling.md) |
 | Hint API | **有** | `POST /tasks/:id/hints` + 控制台注入；Observe 吸收 |
 | 同族迁移 | **有** | `technique_transfer` → transferable Fact + 对端 Intent 扇出 |
 | 资产清单 + CIDR/通配准入 | seed / asset_record / 控制台资产 Tab | — |
@@ -48,8 +48,18 @@ MCP / Skill 是弹药，不是产品定义。
 | 证据邻域 / 元数据保真 | **有（P5）** | `formatFactDrill` + `recordedAt` |
 | 预算尽报告 / 工具单闸 | **有（P5）** | `writeTerminalReport` + `tool_gate` |
 | 默认不限预算 + 假耗尽修复 | **有** | `0=unlimited`；`incomplete`≠`budget_exhausted`；终态重启只重计墙钟，保留预算与累计用量 |
-| 软节奏提示（非停工） | **有** | `soft-pace.ts`：工具/墙钟里程碑只注入提示，不结束任务 |
-| 清板卡题/Intent 纪律 | **软注入** | `board-policy.ts` + `goals-autonomous.json`；硬闸仍靠图 |
+| 软节奏提示（非停工） | **有** | `soft-pace.ts`：工具/墙钟/同 Intent 换面；Pi afterTools 入队 |
+| 清板→渗透作业纪律 | **软注入** | `board-policy.ts` + `goals-autonomous.json`（含 engagement-report）；硬闸仍靠图 |
+| Finding 一等公民（P6-E1） | **有** | `findings` 表 + `finding_record/verify/retract/list`（explore+reason）；dedup 幂等；verified 须证据 SHA-256 + repro；tentative 不进报告 |
+| Goal findingsGate | **有** | `GoalSpec.findingsGate { minVerified, minSeverity?, vulnClasses? }`；`assert_goal` 与证据闸同事务校验 |
+| 报告 Findings 章 / 控制台漏洞 Tab | **有** | `report.ts` §Findings（severity 排序 + 封存证据链接）；控制台只读投影 |
+| 目标级发现归属（A1/A3/A5） | **有** | `goal_findings` + `findingsGate.scope/assets`；断言事务内重读 findings；撤回后分列历史/当前 |
+| 基准语义显式化 | **有** | `boardGate: "tsecbench"` 才做清板校验；同名业务附件按声明判据（回归见 delivery-assurance.test） |
+| 记分卡与可复算快照（F1） | **有** | `scorecard()` / `GET /tasks/:id/snapshot` / `gy scorecard --out|--recompute`；纯函数 `computeScorecard` |
+| 整改复测 / 客户风险处置 | **有** | `retestFinding` / `acceptFinding` + `finding_actions`；报告与交付摘要分列 |
+| 交付更正 | **有** | `delivery_corrections` 编号/影响清单/通知状态；旧 report 版本落 `reports/report-<sha12>.md` |
+| 暂停/恢复/范围版本 | **有** | `pause_requested/paused/stopping`；`POST /tasks/:id/pause|resume|scope`；`externalState` 含 unknown |
+| Skill 工具面对齐（P6 P-d） | **有** | 6 个内置 skill 的 `*_project_fact`/`record_vulnerability` 已改写为本仓工具名（grep 零命中） |
 | 控制台 Live / Assets / Goals | **有** | 相位·租约·扇出硬顶；资产 kind 汇总；开放 Intent 前驱 |
 | TSecBench 子集差分 | **有** | `pnpm diff-harness:tsec`（mock）；真平台见 tsecbench README |
 
@@ -114,7 +124,7 @@ History 收益按 `history − bare` 计算，Relay 增量按 `history + relay �
 
 ### P4 — 可选并行 ✅
 
-1. **Explore 并发**：新建任务 `execution.maxConcurrentExplores`（默认 1，硬顶 16）；有效并发 = min(配置, 靶标数)；共享 History + Intent CAS；slot 0 = Bootstrap/Reason/Report leader。  
+1. **Explore 并发**：新建任务 `execution.maxConcurrentExplores`（默认 1，硬顶 16）；有效并发 = min(配置, max(靶标数, admitted/live 资产数))，运行中只扩不缩动态扩容（[parallel-explore-scaling](./parallel-explore-scaling.md)）；共享 History + Intent CAS；slot 0 = Bootstrap/Reason/Report leader。  
 2. **Hint API**：`POST /tasks/:id/hints` / 控制台「战术 Hint」/ `gy hint`；写入 History，下次 Observe 吸收。  
 3. **同族迁移**：验证打法后 `technique_transfer` → `transferable` Fact + 对端非 oos 资产 Intent 扇出 + family Hint。  
 
@@ -132,6 +142,57 @@ History 收益按 `history − bare` 计算，Relay 增量按 `history + relay �
 **验收**：`pnpm --filter @gongyuai/history test`；`pnpm --filter @gongyuai/worker test`；`pnpm smoke`。
 
 **明确不做（本刀）**：嵌入/RRF、ARIA-X 代码、专家军团、五段 RAG。
+
+### P6 — 渗透专项增强（E1 + 目标级归属已落地，余刀提案）
+
+Finding / 凭据 / HTTP 事务 / 覆盖矩阵 / 变更台账 / finding 级评测六刀，见 [pentest-enhancements.md](./pentest-enhancements.md)。E1 Finding 一等公民同时是 ARIA-X「双图分离」（假设态 vs 证实态）的渗透域落地。
+
+**E1 ✅（2026-11-22）**：contracts `FindingSchema`/`findingsGate`；history `findings`/`finding_proofs` 表 + record/verify/retract（dedup 幂等、单向状态、retracted 保留）；worker `finding_*` 四工具（explore+reason，Observe 含台账）；`assert_goal` findingsGate 与证据闸同事务；报告 §Findings（tentative 不进交付）；控制台漏洞 Tab；smoke 含 gate 通过/失败两例。**P-d ✅**：6 个内置 skill 幻影工具名清零。
+
+**E1+ 目标级归属 ✅（2026-11-22）**：`GoalSpec.assets` + `findingsGate.scope|assets`；`goal_findings` 记录首次通过依据；撤回按提交顺序解释历史与当前；A1–A5 回归在 `delivery-assurance.test.ts`。
+
+### P7 — Super-agent 调度经济（提案，未动工）
+
+对照：[absorb-super-agent.md](./absorb-super-agent.md)。定位：**女娲管活下来，DAG 管走得对，Super-agent 管花得省**。本层是配置 + 小协议补丁，不是第二套编排系统。
+
+1. **相位级模型路由**：contracts `execution.models: { reason?, explore?, bootstrap? }` 可选三键，缺省回退单模型。派单/路由便宜（或纯代码）、战术推理强、执行验证快——三层而非两层（sapper 指挥贵/兵便宜与 DeepSeek Router 便宜/Worker 贵拆的轴不同）。
+2. **slot 0 指挥官 Relay 核对**：确认 Reason/Report leader 长会话边界也触发 π（sapper「指挥官自写交接接力自己」）；崩溃仍不写 π。
+3. **偏航审计者（可选，非默认）**：独立轻模型会话只读图 + worker-status，判「实质推进/逻辑死循环」，产出**只写 `source=auditor` Hint**；无 propose/assert/shell 工具面。保活看门狗保持纯脚本零策略。
+4. **事件两级过滤（可选）**：Observe 先代码 Fast Path（新 Fact / open Intent / 未吸收 Hint）再进 LLM。
+
+**验收**：真 TSecBench 子集「强脑+快兵 vs 全强模型」**同预算差分**，报 token / 成功率 / 墙钟三列；审计者单测断言工具面为空（只 Hint）。差分未证明收益前，各项不升默认。
+
+**明确不做**：主脑拿回执行工具（Octop 0/5 委派教训）；A*/MCTS 排序、事件溯源 CQRS 重写、语义坐标 RAG；人工确认当默认闸；内存收件箱当真相。
+
+### P8 — 记忆层：项目记忆 × 全局记忆（提案，未动工）
+
+对照：[memory-layer.md](./memory-layer.md)。项目记忆（任务内黑板/π/checkpoint/证据）已有；**全局记忆**（用户平台生涯）缺位：档案索引（联邦只读）+ 蒸馏图谱（Lesson/Playbook/Counterexample/ToolArtifact，溯源强制）+ Skill 固化提案 + 工具遗产登记。繁衍闭环：蒸馏 → 人审 → 结构化匹配注入（Hint/Skill 建议层）→ 反馈回写。控制台 Memory 页 + 记忆图画布 + 跨任务检索。M1 蒸馏库与注入 / M2 档案索引与画布 / M3 自动蒸馏提案；依赖 P6 E1 原料。
+
+**明确不做**：旧 Fact 直写新任务图、孤儿知识、向量 RAG、自动固化 Skill/执行遗产脚本、记忆注入绕过建议层、凭据明文进全局、全局记忆出本机。
+
+### P9 — 数据飞轮（提案，未动工）
+
+对照：[data-flywheel.md](./data-flywheel.md)。越用越好用 = 五环正反馈：采集（events/trace/usage/复核，大半已有）→ 评测（任务记分卡 + 趋势 + 基准回归）→ 蒸馏（P8 经验 + harness 参数/prompt 纪律提案）→ 改进（五类执行器全部人审）→ 验证（离线差分先行 + holdout 只验不调 + 配置版本化回滚）。飞轮已手动转过两圈（六批→结构化交接 57→59；路由 2/8→8/8），P9 自动化「评测→提案」段。F1 记分卡导出（无依赖可先做）/ F2 趋势看板 + 提案收件箱 / F3 闭环自动化。
+
+**明确不做**：模型微调/RL、自动晋升默认、holdout 调参、flag 数当目标函数、无证据提案、飞轮数据出本机。
+
+### P10 — 图视图族：DAG 四图扩展（提案，未动工）
+
+对照：[graph-views.md](./graph-views.md)。一图一真相、五视图投影：DAG 核心 + 资产图（发现血缘/family/授权圈）+ 攻击面图（资产×表面×测试状态，依赖 P6 E3/E4）+ 执行图（phase×slot 泳道，trace/events 投影）+ 记忆图（P8 M2）。跨图同 ID 导航；图提示只写 Hint。G1 资产+执行（数据已有）/ G2 攻击面 / G3 记忆 / G4 跨图导航+图提示。
+
+**明确不做**：图的第二套状态存储、图上编辑真相、布局表达语义、图提示派 Intent、列表 Tab 强改图、自由文本硬解析攻击面。
+
+### P11 — 渗透执行层与委托规则（提案，未动工）
+
+对照：[pentest-ops-design.md](./pentest-ops-design.md) + [pi-durable-integration.md](./pi-durable-integration.md)。用户定调：默认连续运转（时间窗可选不选）、RoE 自由填写默认无禁止、**速率模型自判**（E4 硬 bucket 改可选）、**模型主动求助**替代前置审批、任务级开始/暂停/继续/停止/结束。S1 会话管理器+后台作业异步回流（chord job + pi extension，完成通知 durable 回流不轮询）/ S2 生命周期 pause 保会话 + operator_consult + 契约三字段 / S3 隧道四件 MCP + 开源 Chromium browser MCP / S4 速率自判纪律+时间窗 idle+差分。
+
+**明确不做**：默认硬速率闸/时间窗/RoE 禁止、前置 ask 闸、暂停杀会话、系统级路由变更、proprietary Chrome、模型轮询作业。
+
+### P12 — 长程完备性（定调后）+ 攻击链图
+
+对照：[long-range-completeness.md](./long-range-completeness.md) · [attack-chain-graph.md](./attack-chain-graph.md)。必补 D1 事实保鲜 / D2 防御反馈 / D3 Provider 韧性；D5 规划者（Reason 层强模型子会话，提案过硬闸）/ D6 辅助者（独立轻量会话，有 pause 权无 stop/扩 scope 权）；D4 调研轨；D8 法律级证据通过；D7 删除。攻击链 = 血缘+provenance 投影，融合为攻击面图链模式，点击 finding 上下闭包聚焦；内网穿越 = 授权步骤因果链（补 session 溯源字段）。
+
+**明确不做**：链当授权依据、第二套链存储、臆造断点、绑定 C2 框架、规划者/辅助者绕硬闸、辅助者 stop/resume 权。
 
 ---
 
@@ -206,6 +267,14 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 - 成功 +9.1pp / token −32%（其设定下）；有重定向税。  
 - 应用：π 累积 + History 权威；勿用泛化摘要顶替图。
 
+### Super-agent（DeepSeek / Octop）
+
+- 脑手分离由相位工具面**结构性**保证；主脑永不拿回执行工具（Octop 提示词分工 0/5 委派）。  
+- 三层模型路由：派单便宜 / 推理强 / 执行快；时延与 token 数字绑定其设定，本仓只认同预算差分。  
+- 偏航审计只写 Hint（推荐≠授权）；保活看门狗保持纯脚本。  
+- 链式召回 ≈ 分层下钻 + 图邻域，不是向量 RAG。  
+- 对照全文：[absorb-super-agent.md](./absorb-super-agent.md)。
+
 ---
 
 ## 7. 反模式（看到就停）
@@ -232,8 +301,14 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ## 9. 下一件最小可做事项
 
-**P0–P5 + 扇出硬闸 / familyKey / Cairn 调度 / 控制台 UX / TSec 子集差分**已落地。  
-下一刀按**真实差分痛点**选：真 TSecBench（相对裸循环 / ARTEX）子集实测、或 Intentest 五段检索（仍默认不做）。History/Relay 语义 RAG 默认不做。
+**P0–P5 + 扇出硬闸 / familyKey / Cairn 调度 / 控制台 UX / TSec 子集差分 + P6-E1 Finding / P-d skill 对齐**已落地。  
+下一刀按**真实差分痛点**选，候选按依赖排序：
+
+1. **P6 E3 结构化落图 + HTTP 事务证据**（E1 已就位；finding_verify 需要事务证据时优先）或 **E2 凭据结构化**——见 [pentest-enhancements.md](./pentest-enhancements.md) §3 依赖图。
+2. **P7 相位级模型路由差分**（强脑+快兵 vs 全强模型，真 TSecBench 子集同预算）——Super-agent 层唯一需要实验背书的主张。
+3. 真 TSecBench（相对裸循环 / ARTEX）子集实测。
+
+Intentest 五段检索与 History/Relay 语义 RAG 仍默认不做；P7 审计者/事件过滤差分未证明收益前不升默认。
 
 验收：
 

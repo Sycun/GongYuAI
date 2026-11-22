@@ -26,6 +26,7 @@ import {
 } from "../api";
 import type { SettingsSection } from "../labels";
 import { formatDateTime } from "../time";
+import { IntegrationUsage } from "../components/IntegrationUsage";
 
 const UPDATE_RECONNECT_MS = 180_000;
 
@@ -45,11 +46,11 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
   const lastCommitBeforeUpdate = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
-    const [s, u] = await Promise.all([api.settings(), api.usage()]);
+    const [s, u] = await Promise.all([api.settings(), section === "usage" ? api.usage(true) : null]);
     setSettings(s.json);
-    setUsage(u.json);
+    if (u) setUsage(u.json);
     return s.json;
-  }, []);
+  }, [section]);
 
   useEffect(() => {
     void reload().catch((e) => Toast.error(e instanceof Error ? e.message : String(e)));
@@ -801,6 +802,8 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 
   if (section === "usage") {
     return (
+      <div style={{ display: "grid", gap: 16 }}>
+      <IntegrationUsage usage={usage?.integrations} />
       <Card title="Token 统计" style={cardStyle}>
         <Row gutter={12} style={{ marginBottom: 12 }}>
           <Col span={12}>
@@ -843,6 +846,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
           刷新用量
         </Button>
       </Card>
+      </div>
     );
   }
 

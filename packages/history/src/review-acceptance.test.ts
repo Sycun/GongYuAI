@@ -87,7 +87,7 @@ test("legacy assertions retain unknown evidence versions; evidence remains byte-
   writeEvidenceFile(evidenceDir, "old.txt", "today's bytes");
   const auth = AuthScopeSchema.parse({ targets: ["archive.invalid"], authorizationNote: "离线合成历史台账复核" });
   const path = writeTaskReport({ taskId, dataDir, auth }, history, { status: "completed" });
-  assert.match(readFileSync(path, "utf8"), /历史通过，原版证据未留存/);
+  assert.match(readFileSync(path, "utf8"), /历史通过，原依据归属未知/);
   assert.equal(history.listGoalProofs(taskId).length, 0);
   const [binary] = goalsFromSpecs([{ id: "binary", title: "原始字节", description: "二进制附件", evidencePatterns: ["item.bin"] }]);
   history.seedGoals(taskId, [binary!]);

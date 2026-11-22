@@ -3,7 +3,7 @@
   "note": "Compact skill router. Worker injects id/name/triggers only; full SKILL.md via load_skill. Overlaps trimmed: web depth → web-attack-methods; short web-app kept for OWASP keyword.",
   "routes": [
     { "id": "auth-scope-discipline", "triggers": ["授权", "scope", "targets", "越界", "oos"] },
-    { "id": "evidence-first", "triggers": ["evidence", "证据", "assert_goal", "DONE"] },
+    { "id": "evidence-first", "triggers": ["evidence", "证据", "assert_goal", "DONE", "原版复核", "撤回复核", "封存原件", "记录被撤回"] },
     { "id": "recon", "triggers": ["recon", "侦察", "nmap", "端口", "子域", "fingerprint"] },
     { "id": "attack-surface-recon", "triggers": ["攻击面", "asset", "枚举", "mapping", "资产清单"] },
     { "id": "osint", "triggers": ["osint", "whois", "邮箱", "passive"] },
@@ -29,6 +29,6 @@
     { "id": "proxy-tool-bootstrap", "triggers": ["burp", "proxy", "抓包", "mitm"] },
     { "id": "pentest-verification", "triggers": ["验证", "复现", "误报", "confirm"] },
     { "id": "pentest-output-standards", "triggers": ["格式", "finding", "输出规范"] },
-    { "id": "reporting", "triggers": ["report", "报告", "cvss", "收口"] }
+    { "id": "reporting", "triggers": ["report", "报告", "cvss", "收口", "蓝队交接", "检测交接", "移交给蓝队", "检测建议"] }
   ]
 }

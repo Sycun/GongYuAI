@@ -847,6 +847,9 @@ async function tryPiDurable(
                 })),
               });
               state.step = Math.max(state.step, step);
+              // Soft pace during long Pi sessions: queue for next continue/kickoff inject.
+              const softDuring = maybeSoftPaceMessage(state, ctx, workerStartedAt);
+              if (softDuring) state.pendingSoftPaceMessage = softDuring;
               ckpt.save(state);
               return undefined;
             },
@@ -933,14 +936,16 @@ async function tryPiDurable(
           state,
           ckpt,
         );
-        const softPace = maybeSoftPaceMessage(state, ctx, workerStartedAt);
-        if (softPace || timeoutNote) ckpt.save(state);
+        const pending = consumePendingSoftPace(state);
+        const softPace =
+          pending ?? maybeSoftPaceMessage(state, ctx, workerStartedAt);
+        if (softPace || timeoutNote || pending) ckpt.save(state);
         const content =
           round === 1
             ? [kickoff, timeoutNote, softPace].filter(Boolean).join("\n\n")
             : [
                 `长程续跑 #${round}：目标仍未全部通过。禁止收口/最终汇报。`,
-                "请继续用工具推进；完成语义以 assert_goal / evidence gate 为准。",
+                "按渗透测试节奏继续：建图/验证影响/写 finding/换面；完成语义以 assert_goal / evidence gate 为准。",
                 timeoutNote ?? "",
                 softPace ?? "",
                 "",
@@ -1090,7 +1095,7 @@ function formatBudgetLine(manifest: WorkerManifest): string {
   const b = manifest.budget;
   const fmt = (n: number, unit: string) =>
     n > 0 ? `${n}${unit}` : "不限";
-  return `无硬性倒计时（默认不限）。当前硬闸 tools=${fmt(b.maxToolCalls, "")} tokens=${fmt(b.maxTokens, "")} wall=${fmt(b.maxWallMs, "ms")} installs=${fmt(b.maxInstalls, "")}。另有软节奏提示（工具次数/墙钟里程碑），只是提醒换题或续跑，绝不是预算耗尽、绝不是停工令；未设硬闸则一直跑到目标全过或操作者停止。`;
+  return `无硬性倒计时（默认不限）。当前硬闸 tools=${fmt(b.maxToolCalls, "")} tokens=${fmt(b.maxTokens, "")} wall=${fmt(b.maxWallMs, "ms")} installs=${fmt(b.maxInstalls, "")}。另有软节奏提示（工具次数/墙钟/同 Intent 换面），只是提醒建图·验证·换面，绝不是预算耗尽、绝不是停工令；未设硬闸则一直跑到目标全过或操作者停止。`;
 }
 
 /** Soft milestone nudge — updates checkpoint markers; never stops the run. */
@@ -1104,15 +1109,26 @@ function maybeSoftPaceMessage(
     wallMs: Date.now() - workerStartedAt,
     lastSoftToolMilestone: state.lastSoftToolMilestone,
     lastSoftWallMilestone: state.lastSoftWallMilestone,
+    toolsAtIntentClaim: state.toolsAtIntentClaim,
+    lastSoftSurfaceMilestone: state.lastSoftSurfaceMilestone,
   });
   if (!advice) return null;
   state.lastSoftToolMilestone = advice.next.lastSoftToolMilestone;
   state.lastSoftWallMilestone = advice.next.lastSoftWallMilestone;
+  state.lastSoftSurfaceMilestone =
+    advice.next.lastSoftSurfaceMilestone ?? state.lastSoftSurfaceMilestone;
   appendProgress(
     ctx.manifest.workspaceDir,
-    `软节奏提示（非停工） tools=${ctx.usage.toolCalls} wallMs=${Date.now() - workerStartedAt}`,
+    `软节奏提示（非停工·渗透） tools=${ctx.usage.toolCalls} wallMs=${Date.now() - workerStartedAt}`,
   );
   return advice.message;
+}
+
+function consumePendingSoftPace(state: CheckpointState): string | null {
+  const msg = state.pendingSoftPaceMessage;
+  if (!msg) return null;
+  state.pendingSoftPaceMessage = null;
+  return msg;
 }
 
 function flushUsage(
@@ -1209,6 +1225,8 @@ Explore 并发：configured=${manifest.execution?.maxConcurrentExplores ?? 1} ef
 硬规则：
 - 必须使用工具，不得虚构证据。
 - 完成只能靠 assert_goal（evidence gate）；口头 DONE 在目标未通过时无效。
+- **渗透测试视角**：经营攻击面与可审计 finding（影响/复现/修复建议），不以夺旗为唯一目标；foothold 须横向复用，禁止孤岛磨题。
+- **Finding 纪律**：发现线索即 finding_record（tentative）；复现后 finding_verify（附 evidence/ 文件与 repro）；只有 verified finding 允许写进交付叙述与报告；误报用 finding_retract。Goal 带 findingsGate 时须先满足已验证 finding 数。
 - **禁止**因「预算将尽 / 还剩 N 分钟 / 本轮收口」提前停工或写最终汇报；目标未全过就继续推进。
 - 禁止修改主机网络/VPN/代理/路由；靶场 VPN 须任务前已连接。
 - 只探测 auth.targets（主机/URL/IPv4 CIDR/\`*.domain\`/裸域；即便目标含 * 也禁止主机网络改动）。

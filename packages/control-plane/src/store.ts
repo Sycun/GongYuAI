@@ -78,6 +78,10 @@ export class ControlStore {
       dataDir,
       error: null,
       usage: { tokens: 0, toolCalls: 0, installs: 0 },
+      scopeVersion: 1,
+      pauseRequestedAt: null,
+      pausedAt: null,
+      lastHeartbeatAt: null,
     };
     this.save(record);
     return record;
@@ -98,6 +102,10 @@ export class ControlStore {
     if (!Array.isArray(record.workerPids)) record.workerPids = [];
     if (!Array.isArray(record.containerIds)) record.containerIds = [];
     if (record.archivedAt === undefined) record.archivedAt = null;
+    if (record.scopeVersion === undefined) record.scopeVersion = 1;
+    if (record.pauseRequestedAt === undefined) record.pauseRequestedAt = null;
+    if (record.pausedAt === undefined) record.pausedAt = null;
+    if (record.lastHeartbeatAt === undefined) record.lastHeartbeatAt = null;
     return record;
   }
 

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { boardClearPolicyBlock } from "./board-policy.js";
+import { boardClearPolicyBlock, isBoardClearMission } from "./board-policy.js";
 import type { WorkerManifest } from "@gongyuai/contracts";
 
 function withGoals(
@@ -17,7 +17,7 @@ function withGoals(
 }
 
 describe("boardClearPolicyBlock", () => {
-  it("injects for clear-board goals", () => {
+  it("injects pentest engagement discipline for clear-board", () => {
     const text = boardClearPolicyBlock(
       withGoals([
         {
@@ -28,9 +28,27 @@ describe("boardClearPolicyBlock", () => {
         },
       ]),
     );
-    assert.match(text, /清板调度纪律/);
+    assert.match(text, /渗透测试/);
     assert.match(text, /intent_propose/);
     assert.match(text, /25/);
+    assert.match(text, /asset_record|建图/);
+    assert.match(text, /engagement\/report/);
+  });
+
+  it("treats engagement-report goal as board mission", () => {
+    assert.equal(
+      isBoardClearMission(
+        withGoals([
+          {
+            id: "engagement-report",
+            title: "Client-style engagement report",
+            description: "x",
+            evidencePatterns: ["engagement/report.md"],
+          },
+        ]),
+      ),
+      true,
+    );
   });
 
   it("stays empty for unrelated goals", () => {

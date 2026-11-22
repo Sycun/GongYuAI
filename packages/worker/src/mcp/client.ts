@@ -43,6 +43,7 @@ export async function openMcpHub(
     if (!pool.has(cfg.id)) pool.set(cfg.id, cfg);
   }
 
+  const startCall = ctx.history.trackIntegrationCalls(manifest.taskId);
   const sessions = new Map<string, McpServerSession>();
   const openaiTools: OpenAiFunctionTool[] = [];
   const promptLines: string[] = [];
@@ -141,30 +142,37 @@ export async function openMcpHub(
   persist();
 
   async function invoke(serverId: string, toolName: string, args: Record<string, unknown>) {
-    const session = gateTool(ctx, "mcp", () => {
-      assertCapabilityAllows(manifest, mcpActionForServer(serverId));
-      if (!enabled.has(serverId)) {
-        throw new Error(`MCP 未启用: ${serverId}。先调用 enable_mcp。`);
-      }
-      const active = sessions.get(serverId);
-      if (!active) throw new Error(`MCP 会话丢失: ${serverId}`);
-      if (!openaiTools.some((tool) => tool.function.name === mcpToolName(serverId, toolName))) {
-        throw new Error(`未知 MCP 工具: ${serverId}/${toolName}`);
-      }
-      const builtin = pool.get(serverId)?.transport === "builtin";
-      if (builtin || typeof args.target === "string") {
-        const target = typeof args.target === "string" ? args.target.trim() : "";
-        const { targets, outOfScope } = manifest.auth;
-        const allowed = isIpv4Cidr(target)
-          ? targets.includes(target) && !outOfScope?.length && targetAllows(targets, target)
-          : target && !/\s|\*/.test(target) && targetAllows(targets, target, outOfScope);
-        if (!allowed) throw new Error("denied: MCP target is outside the authorized scope");
-      }
-      chargeToolCall(ctx);
-      return active;
-    }, { serverId, toolName });
-    const result = await session.callTool(toolName, args);
-    return result.text.slice(0, 12_000);
+    const finish = startCall("mcp", serverId, toolName);
+    let success = false;
+    try {
+      const session = gateTool(ctx, "mcp", () => {
+        assertCapabilityAllows(manifest, mcpActionForServer(serverId));
+        if (!enabled.has(serverId)) {
+          throw new Error(`MCP 未启用: ${serverId}。先调用 enable_mcp。`);
+        }
+        const active = sessions.get(serverId);
+        if (!active) throw new Error(`MCP 会话丢失: ${serverId}`);
+        if (!openaiTools.some((tool) => tool.function.name === mcpToolName(serverId, toolName))) {
+          throw new Error(`未知 MCP 工具: ${serverId}/${toolName}`);
+        }
+        const builtin = pool.get(serverId)?.transport === "builtin";
+        if (builtin || typeof args.target === "string") {
+          const target = typeof args.target === "string" ? args.target.trim() : "";
+          const { targets, outOfScope } = manifest.auth;
+          const allowed = isIpv4Cidr(target)
+            ? targets.includes(target) && !outOfScope?.length && targetAllows(targets, target)
+            : target && !/\s|\*/.test(target) && targetAllows(targets, target, outOfScope);
+          if (!allowed) throw new Error("denied: MCP target is outside the authorized scope");
+        }
+        chargeToolCall(ctx);
+        return active;
+      }, { serverId, toolName });
+      const result = await session.callTool(toolName, args);
+      success = result.ok;
+      return result.text.slice(0, 12_000);
+    } finally {
+      finish(success);
+    }
   }
 
   return {

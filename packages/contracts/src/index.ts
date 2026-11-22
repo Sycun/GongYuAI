@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { CoverageStatusSchema } from "./coverage-audit.js";
-export { CoverageReferenceSchema, CoverageSnapshotSchema, type CoverageSnapshot } from "./coverage-audit.js";
+export {
+  CoverageReferenceSchema,
+  CoverageSnapshotSchema,
+  type CoverageSnapshot,
+  type CoverageStatus,
+} from "./coverage-audit.js";
 export type { ExecutionStep, ExecutionTracePage, ShellTraceCall } from "./execution-trace.js";
+export * from "./integration-usage.js";
 import {
   DEFAULT_EXPLORE_TIMEOUT_MS,
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
@@ -13,7 +19,21 @@ import {
 export const TenantIdSchema = z.string().min(1).default("default");
 export type TenantId = z.infer<typeof TenantIdSchema>;
 
-const ACTIVE_TASK_STATUSES = ["queued", "initializing", "running", "recovering"] as const;
+/**
+ * Active = the watchdog may keep the task alive / restart its workers.
+ * `pause_requested` and `stopping` are transitional active states: workers are
+ * being drained, but the pool is not yet confirmed gone.
+ */
+const ACTIVE_TASK_STATUSES = [
+  "queued",
+  "initializing",
+  "running",
+  "recovering",
+  "pause_requested",
+  "stopping",
+] as const;
+/** Non-terminal and intentionally not active: no worker may be (re)started. */
+const PAUSED_TASK_STATUSES = ["paused"] as const;
 const TERMINAL_TASK_STATUSES = [
   "completed",
   "failed",
@@ -23,15 +43,30 @@ const TERMINAL_TASK_STATUSES = [
   "stopped",
 ] as const;
 
-export const TaskStatusSchema = z.enum([...ACTIVE_TASK_STATUSES, ...TERMINAL_TASK_STATUSES]);
+export const TaskStatusSchema = z.enum([
+  ...ACTIVE_TASK_STATUSES,
+  ...PAUSED_TASK_STATUSES,
+  ...TERMINAL_TASK_STATUSES,
+]);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUSES)[number];
 
 const activeTaskStatuses = new Set<string>(ACTIVE_TASK_STATUSES);
+const pausedTaskStatuses = new Set<string>(PAUSED_TASK_STATUSES);
 const terminalTaskStatuses = new Set<string>(TERMINAL_TASK_STATUSES);
 
 export function isActiveTaskStatus(status: TaskStatus): boolean {
   return activeTaskStatuses.has(status);
+}
+
+/** Paused is a durable operator intent: neither "active" nor "terminal". */
+export function isPausedTaskStatus(status: TaskStatus): boolean {
+  return pausedTaskStatuses.has(status);
+}
+
+/** States where the operator has asked the pool to drain. */
+export function isDrainingTaskStatus(status: TaskStatus): boolean {
+  return status === "pause_requested" || status === "stopping";
 }
 
 export function isTerminalTaskStatus(status: unknown): status is TerminalTaskStatus {
@@ -118,6 +153,8 @@ export type AuthScope = z.infer<typeof AuthScopeSchema>;
 export * from "./scope.js";
 export * from "./fanout.js";
 export * from "./family-key.js";
+export * from "./finding.js";
+import { FindingsGateSchema } from "./finding.js";
 
 /** Graph-driven worker phases (P2). Crash recovery still uses Durable; Relay ≠ crash. */
 export const WorkerPhaseSchema = z.enum([
@@ -193,9 +230,29 @@ export const GoalSpecSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
   description: z.string().min(1),
+  /**
+   * Assets this goal is accountable for (normalized host / CIDR / wildcard /
+   * URL host). Goal-scoped findings gates only count findings on these assets.
+   * Also used by delivery to state "this goal's scope".
+   */
+  assets: z.array(z.string().min(1)).optional(),
   /** Glob patterns under evidence/ that must exist before pass. */
   evidencePatterns: z.array(z.string().min(1)).min(1),
   evidenceChecks: EvidenceChecksSchema,
+  /**
+   * P6-E1: require ≥N verified findings (severity/class filtered) to pass.
+   * Default scope is `goal`: only findings on the goal's declared assets count.
+   * Use `scope: "task"` only for a goal that explicitly aggregates the whole
+   * engagement.
+   */
+  findingsGate: FindingsGateSchema.optional(),
+  /**
+   * Optional benchmark semantics. Only `tsecbench` treats a file named
+   * `ALL_COMPLETE.json` as a challenge board (every `is_completed === true`).
+   * Ordinary engagements interpret the same filename by their declared
+   * evidencePatterns / evidenceChecks.
+   */
+  boardGate: z.enum(["tsecbench"]).optional(),
 });
 export type GoalSpec = z.infer<typeof GoalSpecSchema>;
 
@@ -259,13 +316,16 @@ export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
 export function resolveExploreWorkerCount(opts: {
   maxConcurrentExplores: number;
   targetCount: number;
+  /** Distinct admitted/live asset addresses; grows effective concurrency beyond seed targets. */
+  assetCount?: number;
 }): number {
   const configured = Math.min(
     MAX_CONCURRENT_EXPLORES,
     Math.max(1, Math.floor(opts.maxConcurrentExplores) || 1),
   );
   const targets = Math.max(1, Math.floor(opts.targetCount) || 1);
-  return Math.min(configured, targets);
+  const assets = Math.max(0, Math.floor(opts.assetCount ?? 0) || 0);
+  return Math.min(configured, Math.max(targets, assets));
 }
 
 export const CreateTaskRequestSchema = z.object({
@@ -301,8 +361,11 @@ export const GoalStateSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
+  assets: z.array(z.string()).optional(),
   evidencePatterns: z.array(z.string()),
   evidenceChecks: EvidenceChecksSchema,
+  findingsGate: FindingsGateSchema.optional(),
+  boardGate: z.enum(["tsecbench"]).optional(),
   passes: z.boolean(),
   evidencePaths: z.array(z.string()).default([]),
   assertedAt: z.string().datetime().nullable().default(null),
@@ -354,8 +417,30 @@ export const TaskRecordSchema = z.object({
   /** Counters previously visible only in a sidecar or the control record. */
   usageOffset: UsageCountersSchema.optional(),
   usage: UsageCountersSchema,
+  /**
+   * Monotonic scope revision. Every operator scope update bumps it; a resumed
+   * worker is started from the latest revision, never from a stale copy.
+   */
+  scopeVersion: z.number().int().positive().default(1),
+  /** Operator asked to pause at this time; cleared on resume. */
+  pauseRequestedAt: z.string().datetime().nullable().default(null),
+  /** Confirmed pause: workers are gone and the checkpoint is retained. */
+  pausedAt: z.string().datetime().nullable().default(null),
+  /** Last time the control plane observed a live worker / fresh status file. */
+  lastHeartbeatAt: z.string().datetime().nullable().default(null),
 });
 export type TaskRecord = z.infer<typeof TaskRecordSchema>;
+
+/**
+ * Stage 2 — operator scope revision. The newest written scope is the only
+ * authorization a resumed or handed-off worker may act on; historical facts,
+ * model suggestions and memory never widen it.
+ */
+export const UpdateScopeRequestSchema = z.object({
+  auth: AuthScopeSchema,
+  reason: z.string().trim().min(1),
+});
+export type UpdateScopeRequest = z.infer<typeof UpdateScopeRequestSchema>;
 
 export const FactLayerSchema = z.enum(["title", "summary", "evidence"]);
 export type FactLayer = z.infer<typeof FactLayerSchema>;
@@ -422,6 +507,19 @@ export const HistoryEventKindSchema = z.enum([
   "technique_broadcast",
   "reason_lease",
   "explore_timeout_conclude",
+  "explore_scaled",
+  "finding_recorded",
+  "finding_verified",
+  "finding_status_changed",
+  "finding_retracted",
+  "finding_retested",
+  "finding_accepted",
+  "scope_updated",
+  "task_pause_requested",
+  "task_paused",
+  "task_resumed",
+  "delivery_corrected",
+  "delivery_correction_notice",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 
@@ -862,8 +960,11 @@ export function goalsFromSpecs(specs: GoalSpec[]): GoalState[] {
     id: g.id,
     title: g.title,
     description: g.description,
+    ...(g.assets?.length ? { assets: g.assets } : {}),
     evidencePatterns: g.evidencePatterns,
     evidenceChecks: g.evidenceChecks,
+    findingsGate: g.findingsGate,
+    ...(g.boardGate ? { boardGate: g.boardGate } : {}),
     passes: false,
     evidencePaths: [],
     assertedAt: null,

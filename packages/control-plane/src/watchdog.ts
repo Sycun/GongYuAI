@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isActiveTaskStatus, isTerminalTaskStatus, isWallHit } from "@gongyuai/contracts";
+import { isActiveTaskStatus, isDrainingTaskStatus, isTerminalTaskStatus, isWallHit } from "@gongyuai/contracts";
 import { exhaustedCounter, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
@@ -82,6 +82,9 @@ export class Watchdog {
   private async handle(taskId: string): Promise<void> {
     const task = this.store.get(taskId);
     if (!task || !isActiveTaskStatus(task.status)) return;
+    // Draining states are owned by the operator action (pause/stop). The
+    // watchdog neither restarts nor promotes them.
+    if (isDrainingTaskStatus(task.status)) return;
     if (
       task.leaseOwner && task.leaseOwner !== this.cfg.ownerId &&
       task.leaseUntil && Date.parse(task.leaseUntil) > Date.now()
@@ -115,12 +118,17 @@ export class Watchdog {
 
     const alive = this.runner.isAlive(task);
     if (alive) {
+      // A control-plane-observed heartbeat, used to distinguish "running" from
+      // "external state unknown" in the runtime view.
+      task.lastHeartbeatAt = new Date().toISOString();
       if (task.status === "initializing" || task.status === "recovering") {
         task.status = "running";
         this.store.save(task);
       }
       if (task.leaseOwner === this.cfg.ownerId) {
         this.store.renewLease(taskId, this.cfg.ownerId, task.fence, this.cfg.leaseMs);
+        // Resource provisioning (non-tactical): scale-up only, asset-count driven.
+        await this.runner.reconcileWorkers(taskId);
       }
       return;
     }

@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { coverageLabels, type TaskRecord } from "@gongyuai/contracts";
-import { describeGoalEvidence, formatAccounting, listEvidenceFiles, openHistory } from "@gongyuai/history";
+import {
+  describeGoalEvidence,
+  formatAccounting,
+  formatCorrections,
+  listEvidenceFiles,
+  openHistory,
+} from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
 import { refreshTaskUsage } from "./usage.js";
 
@@ -15,6 +21,7 @@ export function deliverySummary(task: TaskRecord, hasReport: boolean): string {
   const lines = [
     "# 交付核对", "",
     `任务　${task.id}`, `控制面记录　${task.status}`,
+    `授权版本　v${task.scopeVersion}（最近更新 ${task.updatedAt}）`,
     `授权范围　${task.auth.targets.map(singleLine).join("、")}`,
     `排除范围　${task.auth.outOfScope?.map(singleLine).join("、") || "未列出"}`,
     `归档报告　${hasReport ? "已留存" : "未留存"}`,
@@ -31,11 +38,32 @@ export function deliverySummary(task: TaskRecord, hasReport: boolean): string {
         const coverage = new Map(history.listCoverage(task.id).map((entry) => [entry.goalId, entry]));
         const proofs = history.listGoalProofs(task.id);
         const reviews = history.listReviews(task.id);
+        const goalFindings = history.listGoalFindings(task.id);
+        const findings = history.listFindings(task.id);
+        const scorecard = history.scorecard(task.id);
         for (const goal of goals) {
           const cached = expected.get(goal.id);
           const conflict = !cached ? " · 控制面未列出此目标"
             : cached.passes !== goal.passes ? " · 与控制面记录不一致" : "";
-          lines.push(`- ${singleLine(goal.title)}（${singleLine(goal.id)}）　${describeGoalEvidence(goal, proofs, reviews)}${conflict}`);
+          lines.push(`- ${singleLine(goal.title)}（${singleLine(goal.id)}）　${
+            describeGoalEvidence(goal, proofs, reviews, { goalFindings, findings })
+          }${conflict}`);
+          const supports = goalFindings.filter((entry) => entry.goalId === goal.id);
+          if (supports.length) {
+            const live = supports.filter((entry) => {
+              const status = findings.find((f) => f.id === entry.findingId)?.status ?? entry.statusAtAssert;
+              return status === "verified" || status === "retested" || status === "accepted";
+            });
+            const detail = supports
+              .map((entry) => {
+                const status = findings.find((f) => f.id === entry.findingId)?.status ?? entry.statusAtAssert;
+                return `${entry.findingId}（首次通过时 ${entry.statusAtAssert}，当前 ${status}）`;
+              })
+              .join("、");
+            lines.push(`  发现依据　${detail}；仍有效 ${live.length}/${supports.length}`);
+          } else if (goal.findingsGate) {
+            lines.push("  发现依据　原依据归属未知（旧档未记录发现归属）");
+          }
           const review = coverage.get(goal.id);
           lines.push(review
             ? `  覆盖　${coverageLabels[review.status]}（${singleLine(review.reviewer)}，${review.createdAt}）　${singleLine(review.reason)}`
@@ -47,6 +75,17 @@ export function deliverySummary(task: TaskRecord, hasReport: boolean): string {
         if (task.status === "completed" && (expected.size || !goals.length || goals.some((g) => !g.passes))) {
           lines.push("- 终态冲突：控制面记为完成，History 无法支持全部目标已验收。");
         }
+        lines.push(
+          "", "## 记分卡", "",
+          `- 曾通过目标数 / 本次约定目标总数　${scorecard.historicallyPassed} / ${scorecard.totalGoals}` +
+            (scorecard.applicable ? "" : "（不适用：无目标）"),
+          `- 当前证据足以支持的目标数　${scorecard.currentlySupported} / ${scorecard.totalGoals}`,
+          `- 原依据归属未知　${scorecard.unknownAttribution}；已撤回依据引用　${scorecard.retractedReferences}`,
+          `- 覆盖　已测 ${scorecard.coverage.tested}、部分覆盖 ${scorecard.coverage.partial}、受阻 ${scorecard.coverage.blocked}、未测 ${scorecard.coverage.untested}、未知 ${scorecard.coverage.unknown}`,
+          `- 发现　已验证 ${scorecard.findings.verified}、线索 ${scorecard.findings.tentative}、已撤回 ${scorecard.findings.retracted}`,
+          `- 快照 SHA-256　${scorecard.snapshotSha256}`,
+        );
+        lines.push("", ...formatCorrections(history.listDeliveryCorrections(task.id)).slice(0, -1));
       });
     } finally {
       history.close();

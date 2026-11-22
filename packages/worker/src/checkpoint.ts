@@ -23,6 +23,12 @@ export type CheckpointState = {
   lastSoftToolMilestone: number;
   /** Soft pace: last wall-index advised (never stops the run). */
   lastSoftWallMilestone: number;
+  /** toolCalls snapshot when active Intent was claimed (surface rotation). */
+  toolsAtIntentClaim: number | null;
+  /** Soft pace: last tools-since-claim milestone advised for current Intent. */
+  lastSoftSurfaceMilestone: number;
+  /** Advisory text waiting to inject on next model turn (Pi afterTools). */
+  pendingSoftPaceMessage: string | null;
   lastError: string | null;
   updatedAt: string;
 };
@@ -40,6 +46,9 @@ const DEFAULT: CheckpointState = {
   activeIntentClaimedAt: null,
   lastSoftToolMilestone: 0,
   lastSoftWallMilestone: 0,
+  toolsAtIntentClaim: null,
+  lastSoftSurfaceMilestone: 0,
+  pendingSoftPaceMessage: null,
   lastError: null,
   updatedAt: new Date().toISOString(),
 };
@@ -81,6 +90,9 @@ export class CheckpointStore {
       activeIntentClaimedAt: parsed.activeIntentClaimedAt ?? null,
       lastSoftToolMilestone: parsed.lastSoftToolMilestone ?? 0,
       lastSoftWallMilestone: parsed.lastSoftWallMilestone ?? 0,
+      toolsAtIntentClaim: parsed.toolsAtIntentClaim ?? null,
+      lastSoftSurfaceMilestone: parsed.lastSoftSurfaceMilestone ?? 0,
+      pendingSoftPaceMessage: parsed.pendingSoftPaceMessage ?? null,
     };
   }
 

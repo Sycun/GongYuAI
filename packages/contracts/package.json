@@ -12,6 +12,10 @@
     "./coverage": {
       "types": "./dist/coverage.d.ts",
       "import": "./dist/coverage.js"
+    },
+    "./integration-usage": {
+      "types": "./dist/integration-usage.d.ts",
+      "import": "./dist/integration-usage.js"
     }
   },
   "scripts": {

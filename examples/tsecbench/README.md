@@ -27,7 +27,7 @@ pnpm gy serve --port 8877
 pnpm --filter @gongyuai/console dev   # http://127.0.0.1:5173
 ```
 
-Launch autonomous board clear (VPN must be up **before** start; prefer CIDR over bare `*`):
+Launch autonomous board clear as an **authorized pentest engagement** (VPN must be up **before** start; prefer CIDR over bare `*`). Goals require board clear + engagement ledger + `engagement/report.md`:
 
 ```bash
 pnpm gy run \

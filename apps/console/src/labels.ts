@@ -5,6 +5,9 @@ export const STATUS_LABEL: Record<string, string> = {
   initializing: "初始化",
   running: "运行中",
   recovering: "恢复中",
+  pause_requested: "正在暂停（收尾中）",
+  paused: "已暂停",
+  stopping: "正在停止（收尾中）",
   completed: "运行完成",
   failed: "失败",
   budget_exhausted: "预算耗尽",
@@ -26,7 +29,11 @@ export const ACTIVE_STATUSES = new Set([
   "initializing",
   "running",
   "recovering",
+  "pause_requested",
+  "stopping",
 ]);
+
+export const PAUSED_STATUSES = new Set(["paused"]);
 
 export const STARTABLE_STATUSES = new Set([
   "stopped",
@@ -50,6 +57,10 @@ export function isActiveStatus(status: string): boolean {
 
 export function isStartableStatus(status: string): boolean {
   return STARTABLE_STATUSES.has(status);
+}
+
+export function isPausedStatus(status: string): boolean {
+  return PAUSED_STATUSES.has(status);
 }
 
 export function isTerminalStatus(status: string): boolean {
@@ -109,6 +120,7 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   live: { title: "运行态", subtitle: "相位 · 租约 · 预算 · Hint" },
   assets: { title: "资产", subtitle: "授权靶标 · 发现 · 与 Observe 同表" },
   goals: { title: "目标", subtitle: "证据闸门 · 开放 Intent · DAG" },
+  findings: { title: "漏洞", subtitle: "Finding 台账 · 严重性 · 状态 · 封存证据" },
   history: { title: "历史", subtitle: "Fact–Intent DAG · 分层事实" },
   evidence: { title: "证据", subtitle: "证据文件" },
   report: { title: "报告", subtitle: "任务报告" },
@@ -127,7 +139,7 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
     title: "Skill",
     subtitle: "独立渗透方法论包 · 开关控制是否注入",
   },
-  "settings-usage": { title: "Token 统计", subtitle: "累计用量 · 按任务明细" },
+  "settings-usage": { title: "用量统计", subtitle: "Skill 与 MCP 调用 · Token 用量" },
   "settings-update": { title: "一键更新", subtitle: "GitHub 静默拉取 · 保留本机数据" },
   "settings-runtime": { title: "运行时", subtitle: "监听地址 · 控制台能力" },
 };
@@ -136,11 +148,48 @@ export const DETAIL_TABS = [
   { key: "live", label: "运行态" },
   { key: "assets", label: "资产" },
   { key: "goals", label: "目标" },
+  { key: "findings", label: "漏洞" },
   { key: "history", label: "历史" },
   { key: "evidence", label: "证据" },
   { key: "report", label: "报告" },
   { key: "logs", label: "日志" },
 ] as const;
+
+export const FINDING_STATUS_LABEL: Record<string, string> = {
+  tentative: "线索",
+  verified: "已复现",
+  retested: "修复后复测",
+  accepted: "接受风险",
+  retracted: "已撤回",
+};
+
+export const FINDING_SEVERITY_LABEL: Record<string, string> = {
+  critical: "严重",
+  high: "高危",
+  medium: "中危",
+  low: "低危",
+  info: "信息",
+};
+
+export function findingSeverityColor(
+  severity: string,
+): "red" | "orange" | "yellow" | "blue" | "grey" {
+  if (severity === "critical") return "red";
+  if (severity === "high") return "orange";
+  if (severity === "medium") return "yellow";
+  if (severity === "low") return "blue";
+  return "grey";
+}
+
+export function findingStatusColor(
+  status: string,
+): "green" | "orange" | "grey" | "red" | "blue" {
+  if (status === "verified" || status === "retested") return "green";
+  if (status === "tentative") return "orange";
+  if (status === "accepted") return "blue";
+  if (status === "retracted") return "red";
+  return "grey";
+}
 
 export const ASSET_KIND_LABEL: Record<string, string> = {
   seed: "种子",
@@ -157,7 +206,7 @@ export const SETTINGS_SECTIONS = [
   { key: "settings-assets", label: "资产收集", section: "assets" },
   { key: "settings-mcp", label: "MCP", section: "mcp" },
   { key: "settings-skills", label: "Skill", section: "skills" },
-  { key: "settings-usage", label: "Token 统计", section: "usage" },
+  { key: "settings-usage", label: "用量统计", section: "usage" },
   { key: "settings-update", label: "一键更新", section: "update" },
   { key: "settings-runtime", label: "运行时", section: "runtime" },
 ] as const;

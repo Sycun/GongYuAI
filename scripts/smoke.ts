@@ -78,6 +78,66 @@ async function checkWallTimeout(url: string, goals: unknown) {
   throw new Error("wall timeout task did not finish");
 }
 
+async function checkFindingsGate(url: string) {
+  // Gate-failure arm: mock findings synthesis off → assert_goal must refuse
+  // the findingsGate goal and the task ends incomplete with a terminal report.
+  process.env.GY_MOCK_FINDINGS = "off";
+  try {
+    const response = await fetch(`${url}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "smoke-findings-gate",
+        mock: true,
+        auth: {
+          authorizationNote: "Local mock for findings gate acceptance",
+          targets: ["example.invalid"],
+          capability: "full",
+        },
+        goals: [
+          {
+            id: "delivery",
+            title: "Delivery with findings gate",
+            description: "Requires verified findings",
+            assets: ["example.invalid"],
+            evidencePatterns: ["goals/*.md"],
+            findingsGate: { minVerified: 1, minSeverity: "high", scope: "goal", assets: ["example.invalid"] },
+          },
+        ],
+        budget: { maxWallMs: 60000 },
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    const { task } = await response.json() as { task: { id: string; dataDir: string } };
+    const taskUrl = `${url}/tasks/${task.id}`;
+    for (let i = 0; i < 100; i++) {
+      const result = await (await fetch(taskUrl)).json() as { task: { status: string; error: string } };
+      if (result.task.status === "incomplete") {
+        const report = await (await fetch(`${taskUrl}/report`)).text();
+        if (!report.includes("Status: incomplete") || !report.includes("## Findings")) {
+          throw new Error("findings-gate failure did not publish the terminal report");
+        }
+        if (report.includes("### [HIGH]")) {
+          throw new Error("findings gate passed without any verified finding");
+        }
+        const progress = readFileSync(join(task.dataDir, "workspace", "PROGRESS.md"), "utf8");
+        if (!progress.includes("findings gate")) {
+          throw new Error("findings gate denial not recorded in PROGRESS.md");
+        }
+        console.log("[smoke] findings gate failure arm PASS");
+        return;
+      }
+      if (["completed", "failed", "budget_exhausted"].includes(result.task.status)) {
+        throw new Error(`findings gate arm ended ${result.task.status}: ${result.task.error ?? ""}`);
+      }
+      await sleep(200);
+    }
+    throw new Error("findings gate task did not finish");
+  } finally {
+    delete process.env.GY_MOCK_FINDINGS;
+  }
+}
+
 async function main() {
   const dataRoot = mkdtempSync(join(tmpdir(), "gy-smoke-"));
   const goalsPath = join(dataRoot, "goals.json");
@@ -95,7 +155,9 @@ async function main() {
           id: "report",
           title: "Findings note",
           description: "Write findings",
+          assets: ["example.invalid"],
           evidencePatterns: ["goals/*.md"],
+          findingsGate: { minVerified: 1, minSeverity: "high", scope: "goal", assets: ["example.invalid"] },
         },
       ],
       null,
@@ -176,6 +238,12 @@ async function main() {
       if (!report.includes("GongYuAI Report")) {
         throw new Error("missing report");
       }
+      if (!report.includes("## Findings") || !report.includes("Mock 已验证漏洞")) {
+        throw new Error("report missing verified Findings chapter");
+      }
+      if (report.includes("Mock 未验证线索")) {
+        throw new Error("tentative finding leaked into the delivery report");
+      }
       const relay0 = join(dataRoot, "tasks", taskId, "workspace", "relay", "π0.json");
       if (!existsSync(relay0)) {
         throw new Error("missing Session Relay π0.json");
@@ -192,6 +260,7 @@ async function main() {
       if (final !== "completed") {
         throw new Error(`expected completed, got ${final}`);
       }
+      await checkFindingsGate(plane.url);
       await checkWallTimeout(plane.url, JSON.parse(readFileSync(goalsPath, "utf8")));
       console.log("[smoke] PASS");
       console.log(report.slice(0, 800));

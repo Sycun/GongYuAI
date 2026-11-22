@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@gongyuai/contracts": "workspace:*",
-    "@gongyuai/control-plane": "workspace:*"
+    "@gongyuai/control-plane": "workspace:*",
+    "@gongyuai/history": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

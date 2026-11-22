@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Button,
   Card,
@@ -8,6 +8,7 @@ import {
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
+import type { FormApi } from "@douyinfe/semi-ui/lib/es/form/interface";
 import { IconPlus } from "@douyinfe/semi-icons";
 import { api, type TaskRecord } from "../api";
 import { TaskTable } from "../components/TaskTable";
@@ -33,6 +34,12 @@ function parseTargets(raw: string): string[] {
     .split(/[\n,]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/** 靶标 ≤2 推荐靶标数；更多则推荐 3–10。运行中还会按发现资产自动扩容。 */
+function recommendedConcurrency(targetCount: number): number {
+  if (targetCount <= 2) return Math.max(1, targetCount);
+  return Math.min(10, Math.max(3, targetCount));
 }
 
 function hostHint(targets: string[]): string {
@@ -67,6 +74,9 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const formApiRef = useRef<FormApi | null>(null);
+  const concurrencyTouched = useRef(false);
+  const autoSettingConcurrency = useRef(false);
 
   const archivedCount = useMemo(
     () => tasks.filter((t) => isArchivedTask(t)).length,
@@ -182,7 +192,14 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
             已归档{archivedCount > 0 ? ` · ${archivedCount}` : ""}
           </Button>
         </Space>
-        <Button theme="solid" icon={<IconPlus />} onClick={() => setOpen(true)}>
+        <Button
+          theme="solid"
+          icon={<IconPlus />}
+          onClick={() => {
+            concurrencyTouched.current = false;
+            setOpen(true);
+          }}
+        >
           新建任务
         </Button>
       </div>
@@ -217,6 +234,9 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
         <Form
           id="create-task-form"
           labelPosition="top"
+          getFormApi={(api) => {
+            formApiRef.current = api;
+          }}
           initValues={{
             targets: "",
             objective: "",
@@ -231,6 +251,13 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
             autosize={{ minRows: 3, maxRows: 8 }}
             rules={[{ required: true, message: "必填" }]}
             extraText="多行或多个逗号分隔；作业范围仅允许在这些目标内执行"
+            onChange={(v) => {
+              if (concurrencyTouched.current) return;
+              const rec = recommendedConcurrency(parseTargets(String(v ?? "")).length);
+              autoSettingConcurrency.current = true;
+              formApiRef.current?.setValue("maxConcurrentExplores", rec);
+              autoSettingConcurrency.current = false;
+            }}
           />
           <Form.TextArea
             field="authorizationNote"
@@ -254,7 +281,10 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
             max={16}
             step={1}
             style={{ width: "100%" }}
-            extraText="同时推进的 Explore 数（默认 1=串行）。有效并发不超过靶标数；越高 Token/工具消耗越快"
+            extraText="按靶标数自动推荐 3–10，可手动改。有效并发 = min(此值, max(靶标数, 发现的可用资产数))，运行中自动扩容（只扩不缩）；越高 Token/工具消耗越快"
+            onChange={() => {
+              if (!autoSettingConcurrency.current) concurrencyTouched.current = true;
+            }}
           />
         </Form>
       </SideSheet>

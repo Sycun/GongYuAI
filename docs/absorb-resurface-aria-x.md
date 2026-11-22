@@ -1,6 +1,6 @@
 # 吸收对照：Resurface × ARIA-X
 
-调研日：2026-11-21。  
+调研日：2026-11-21；仓库机制补读：2026-11-22。  
 权威落地分期见 [dev-handbook.md](./dev-handbook.md) **P5**；运行硬约束见 [long-run-contract.md](./long-run-contract.md)；总映射见 [architecture.md](./architecture.md)。
 
 ## 结论（先读这三句）
@@ -40,6 +40,11 @@
 | 离线确定性 demo | 既有 mock / smoke；示例即回归 | 「零 MCP」教条 |
 | 重定向逐跳 Scope | 请求类 Skill 按需再鉴权 | Docker `--network none` 当默认产品 |
 | `ask` 审批门 | 能力阶梯之上可选（非本刀） | 复刻其 Web 控制面 |
+| **双图分离**（2026-11-22 补）：探索图（推理假设）与资产图（已证实资产）严格隔离，防假设污染事实 | P6 E1 `tentative/verified` finding 状态 + 既有复核撤回语义即其渗透域落地；资产投影已只认 `asset_record` | 另建第二张假设图当真相 |
+| **Planner 唯一意图源**（2026-11-22 补）：Worker 不得自产 Intent，防偏航 | **有意差异**：本仓 Worker 直接 propose（Cairn 式），靠 `sourceFactIds` 硬闸 + 相位隔离防偏航；勿改成纯 prompt 沙箱除非产品转向 | 照搬 Planner 垄断写图 |
+| 四维预算任一触顶→平稳收尾（时间/Token/LLM 次数/工具次数）+ 空转检测 | 硬闸收卷出报告已有；空转检测≈soft-pace 同 Intent 换面提示 | 把空转检测写成终止闸（现纪律：只提示不终止） |
+
+**工程教训（2026-11-22 补）**：ARIA-X 单连接串行写 SQLite 是其并发瓶颈——本仓多 Explore 共享 History 时注意 WAL 与写事务粒度（Intent CAS 已短事务）。
 
 ## 明确不吸收
 

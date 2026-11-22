@@ -13,7 +13,11 @@ export function captureEvidence(dir: string, input: string): EvidenceSnapshot {
   return { path, sha256, content };
 }
 
-export function collectGoalEvidence(dir: string, goal: Pick<GoalSpec, "evidencePatterns" | "evidenceChecks">, paths: string[]) {
+export function collectGoalEvidence(
+  dir: string,
+  goal: Pick<GoalSpec, "evidencePatterns" | "evidenceChecks" | "boardGate">,
+  paths: string[],
+) {
   const files = new Map<string, EvidenceSnapshot>();
   for (const path of paths) {
     try {
@@ -28,10 +32,15 @@ export function collectGoalEvidence(dir: string, goal: Pick<GoalSpec, "evidenceP
       throw new Error(`missing evidence for pattern "${pattern}"`);
     }
   }
-  for (const file of files.values()) {
-    if (/(^|\/)ALL_COMPLETE\.json$/i.test(file.path)) {
-      const reason = checkBoard(file.content.toString("utf8"));
-      if (reason) throw new Error(reason);
+  // Benchmark board semantics are opt-in per goal (`boardGate: "tsecbench"`).
+  // An ordinary engagement may legitimately attach a business file named
+  // ALL_COMPLETE.json; it is then judged by its declared patterns/checks only.
+  if (goal.boardGate === "tsecbench") {
+    for (const file of files.values()) {
+      if (/(^|\/)ALL_COMPLETE\.json$/i.test(file.path)) {
+        const reason = checkBoard(file.content.toString("utf8"));
+        if (reason) throw new Error(reason);
+      }
     }
   }
   for (const rule of goal.evidenceChecks ?? []) {

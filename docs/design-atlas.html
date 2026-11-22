@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GongYuAI 总体设计全图 · 女娲 × Super-agent × DAG</title>
+<style>
+:root {
+  --seed-fg:#1f2329; --seed-muted:#6b7280; --seed-primary:#2563eb;
+  --border-standard:#d1d5db; --border-subtle:#e5e7eb;
+  --card-bg:#ffffff; --inset-bg:#f3f4f6; --fill-1:#f9fafb; --fill-2:#f3f4f6; --fill-3:#e5e7eb;
+  --font-sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-code:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --viz-series-1:#3b82f6; --viz-series-2:#10b981; --viz-series-3:#ef4444;
+  --viz-series-4:#8b5cf6; --viz-series-5:#f59e0b; --viz-series-6:#06b6d4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --seed-fg:#e5e7eb; --seed-muted:#9ca3af; --seed-primary:#60a5fa;
+    --border-standard:#374151; --border-subtle:#1f2937;
+    --card-bg:#111827; --inset-bg:#0b1220; --fill-1:#1f2937; --fill-2:#374151; --fill-3:#4b5563;
+    --viz-series-1:#60a5fa; --viz-series-2:#34d399; --viz-series-3:#f87171;
+    --viz-series-4:#a78bfa; --viz-series-5:#fbbf24; --viz-series-6:#22d3ee;
+  }
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:20px; background:var(--inset-bg); color:var(--seed-fg); font-family:var(--font-sans); }
+.card { background:var(--card-bg); border:1px solid var(--border-subtle); border-radius:12px; }
+#gy-atlas { max-width:1600px; margin:0 auto; }
+</style>
+</head>
+<body>
+<div id="gy-atlas">
+  <style>
+    #gy-atlas { font-family: var(--font-sans, system-ui, sans-serif); color: var(--seed-fg, #1f2329); }
+    #gy-atlas .at-header { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+    #gy-atlas .at-header h1 { font-size:16px; font-weight:500; margin:0; }
+    #gy-atlas .at-header .at-sub { font-size:12px; color:var(--seed-muted,#6b7280); }
+    #gy-atlas .at-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+    #gy-atlas .at-controls input[type="search"] { font-size:13px; padding:6px 10px; border:1px solid var(--border-standard,#d1d5db); border-radius:8px; background:var(--fill-1,#f9fafb); color:var(--seed-fg,#1f2329); min-width:180px; }
+    #gy-atlas .at-controls button { font-size:13px; padding:6px 12px; border:1px solid var(--border-standard,#d1d5db); border-radius:8px; background:var(--fill-1,#f9fafb); color:var(--seed-fg,#1f2329); cursor:pointer; }
+    #gy-atlas .at-controls button:hover { background:var(--fill-2,#f3f4f6); }
+    #gy-atlas .at-controls button.at-primary { border-color:var(--seed-primary,#2563eb); color:var(--seed-primary,#2563eb); font-weight:500; }
+    #gy-atlas .at-filters { display:flex; flex-wrap:wrap; gap:10px; font-size:12px; color:var(--seed-muted,#6b7280); align-items:center; }
+    #gy-atlas .at-filters label { display:inline-flex; gap:4px; align-items:center; cursor:pointer; }
+    #gy-atlas .at-main { display:flex; gap:14px; align-items:flex-start; }
+    #gy-atlas .at-graph { flex:1 1 auto; min-width:0; }
+    #gy-atlas .at-graph svg { width:100%; height:auto; display:block; touch-action:none; cursor:grab; }
+    #gy-atlas .at-graph svg.at-dragging { cursor:grabbing; }
+    #gy-atlas .at-side { flex:0 0 350px; width:350px; }
+    #gy-atlas .at-tabs { display:flex; gap:6px; margin-bottom:8px; }
+    #gy-atlas .at-tabs button { font-size:13px; padding:5px 12px; border:1px solid var(--border-standard,#d1d5db); border-radius:8px; background:var(--fill-1,#f9fafb); color:var(--seed-fg,#1f2329); cursor:pointer; }
+    #gy-atlas .at-tabs button[aria-pressed="true"] { background:var(--fill-3,#e5e7eb); border-color:var(--seed-primary,#2563eb); font-weight:500; }
+    #gy-atlas .at-panel { padding:12px 14px; }
+    #gy-atlas .at-panel h3 { margin:0 0 6px; font-size:14px; font-weight:500; }
+    #gy-atlas .at-panel .at-badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--border-standard,#d1d5db); color:var(--seed-muted,#6b7280); margin-bottom:8px; }
+    #gy-atlas .at-panel ul { margin:0; padding-left:18px; }
+    #gy-atlas .at-panel li { font-size:13px; margin:4px 0; line-height:1.5; }
+    #gy-atlas .at-panel .at-src { font-size:12px; color:var(--seed-muted,#6b7280); margin-top:10px; }
+    #gy-atlas .at-panel .at-quote { font-size:12px; border-left:3px solid var(--seed-primary,#2563eb); padding-left:10px; color:var(--seed-muted,#6b7280); margin:8px 0; }
+    #gy-atlas .at-tourbar { display:flex; gap:8px; align-items:center; margin-top:10px; font-size:12px; color:var(--seed-muted,#6b7280); }
+    #gy-atlas .at-tourbar button { font-size:12px; padding:4px 10px; border:1px solid var(--border-standard,#d1d5db); border-radius:6px; background:var(--fill-1,#f9fafb); color:var(--seed-fg,#1f2329); cursor:pointer; }
+    #gy-atlas .at-legend { display:flex; flex-wrap:wrap; gap:12px; margin-top:10px; font-size:12px; color:var(--seed-muted,#6b7280); }
+    #gy-atlas .at-legend span { display:inline-flex; gap:5px; align-items:center; }
+    #gy-atlas .at-sw { width:12px; height:12px; border-radius:3px; display:inline-block; }
+    #gy-atlas .at-node { cursor:pointer; }
+    #gy-atlas .at-node rect.at-body { transition:opacity .15s ease, fill .15s ease; }
+    #gy-atlas .at-node:hover rect.at-body { fill:var(--fill-2,#f3f4f6); }
+    #gy-atlas .at-node.at-selected rect.at-body { fill:var(--fill-2,#f3f4f6); stroke-width:2.5; }
+    #gy-atlas .at-node.at-dim { opacity:0.22; }
+    #gy-atlas .at-node:focus { outline:none; }
+    #gy-atlas .at-node:focus rect.at-focusring { stroke:var(--seed-primary,#2563eb); stroke-width:2; stroke-dasharray:4 3; }
+    #gy-atlas .at-edge { stroke:var(--seed-muted,#6b7280); stroke-width:1.2; fill:none; opacity:0.45; }
+    #gy-atlas .at-edge.at-dash { stroke-dasharray:5 4; }
+    #gy-atlas .at-edge.at-active { opacity:1; stroke-width:2; stroke:var(--seed-primary,#2563eb); }
+    #gy-atlas .at-edge.at-dim { opacity:0.08; }
+    #gy-atlas .at-edge-label { font-size:11px; fill:var(--seed-muted,#6b7280); opacity:0.85; }
+    #gy-atlas .at-title { font-size:13px; font-weight:500; fill:var(--seed-fg,#1f2329); }
+    #gy-atlas .at-nsub { font-size:11px; fill:var(--seed-muted,#6b7280); }
+    #gy-atlas .at-band { font-size:12px; font-weight:500; fill:var(--seed-muted,#6b7280); opacity:0.8; }
+    #gy-atlas .at-log { font-size:12px; }
+    #gy-atlas .at-log dt { font-weight:500; margin-top:8px; }
+    #gy-atlas .at-log dd { margin:2px 0 0 0; color:var(--seed-muted,#6b7280); line-height:1.5; }
+    #gy-atlas .at-road { font-size:12px; line-height:1.7; }
+    #gy-atlas .at-road code { font-family:var(--font-code,monospace); background:var(--fill-2,#f3f4f6); padding:1px 5px; border-radius:4px; }
+    @media (max-width: 900px) { #gy-atlas .at-main { flex-direction:column; } #gy-atlas .at-side { flex:1 1 auto; width:100%; } }
+    @media (prefers-reduced-motion: reduce) { #gy-atlas .at-node rect.at-body, #gy-atlas .at-edge { transition:none; } }
+  </style>
+
+  <div class="at-header">
+    <h1>GongYuAI 总体设计全图</h1>
+    <span class="at-sub">女娲 × Super-agent × DAG · 长程授权渗透 · P0–P12 · 点击节点看细节，滚轮缩放，拖拽平移</span>
+  </div>
+
+  <div class="at-controls">
+    <input type="search" id="at-search" placeholder="搜索节点（如：会话 / 证据 / 飞轮）" aria-label="搜索节点" />
+    <button id="at-tour" class="at-primary">▶ 思路导览</button>
+    <button id="at-zoomin" aria-label="放大">＋</button>
+    <button id="at-zoomout" aria-label="缩小">－</button>
+    <button id="at-fit">复位</button>
+    <span class="at-filters" id="at-filters">
+      <label><input type="checkbox" data-status="core" checked />核心</label>
+      <label><input type="checkbox" data-status="done" checked />已落地</label>
+      <label><input type="checkbox" data-status="doing" checked />进行中</label>
+      <label><input type="checkbox" data-status="proposal" checked />提案</label>
+      <label><input type="checkbox" data-status="new" checked />新方向</label>
+      <label><input type="checkbox" data-status="ref" checked />对照</label>
+    </span>
+  </div>
+
+  <div class="at-main">
+    <div class="at-graph">
+      <svg id="at-svg" viewBox="0 0 1560 1420" role="group" aria-label="GongYuAI 总体设计交互全图">
+        <defs>
+          <marker id="at-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--seed-muted,#6b7280)"></path>
+          </marker>
+          <marker id="at-arrow-hl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--seed-primary,#2563eb)"></path>
+          </marker>
+        </defs>
+        <g id="at-bands"></g>
+        <g id="at-edges"></g>
+        <g id="at-nodes"></g>
+      </svg>
+      <div class="at-legend" aria-hidden="true">
+        <span><i class="at-sw" style="background:var(--seed-primary,#2563eb)"></i>核心基座</span>
+        <span><i class="at-sw" style="background:var(--viz-series-2,#10b981)"></i>已落地</span>
+        <span><i class="at-sw" style="background:var(--viz-series-5,#f59e0b)"></i>进行中</span>
+        <span><i class="at-sw" style="background:var(--viz-series-1,#3b82f6)"></i>提案</span>
+        <span><i class="at-sw" style="background:var(--viz-series-3,#ef4444)"></i>新方向 P12</span>
+        <span><i class="at-sw" style="background:var(--seed-muted,#6b7280)"></i>外部对照</span>
+        <span>虚线 = 建议层 / 投影 / 底座承载</span>
+      </div>
+    </div>
+
+    <div class="at-side">
+      <div class="at-tabs" role="tablist">
+        <button role="tab" aria-pressed="true" data-tab="detail">详情</button>
+        <button role="tab" aria-pressed="false" data-tab="log">定调日志</button>
+        <button role="tab" aria-pressed="false" data-tab="road">路线图</button>
+      </div>
+      <div class="at-panel card" id="at-panel-detail" aria-live="polite"></div>
+      <div class="at-panel card" id="at-panel-log" style="display:none">
+        <h3>用户定调日志（原始决策）</h3>
+        <dl class="at-log">
+          <dt>三层基座</dt><dd>以女娲系统设计 × Super-agent × DAG 融合为基础。</dd>
+          <dt>并行</dt><dd>大量目标并行 Worker，用户可选 3–10；智能推荐 + 按资产动态扩并发（已落地）。</dd>
+          <dt>记忆</dt><dd>分项目记忆（每任务过程）与全局记忆（用户整个平台生涯）；记忆成图给用户展现。</dd>
+          <dt>飞轮</dt><dd>做数据飞轮，让 Agent 越用越好用。</dd>
+          <dt>四图</dt><dd>DAG 扩展记忆图/资产图/攻击面图/执行图，能用图展现的都展现。</dd>
+          <dt>底座</dt><dd>项目底座是 Pi（earendil pi-durable/chord），参考并用好底座能力。</dd>
+          <dt>执行层</dt><dd>持久会话要设计；长任务后台+异步完成自动回流；补隧道/pivot；浏览器用开源 Chromium。</dd>
+          <dt>委托规则</dt><dd>默认连续运转（时间窗可选不选）；RoE 自由填写默认无禁止；速率模型自判；人工介入=模型主动求助（非前置审批）；任务级开始/暂停/继续/停止/结束。</dd>
+          <dt>交付</dt><dd>全部思路串联成一个可点击交付的中文交互全图（本文件）。</dd>
+        </dl>
+        <div class="at-src">出处：docs/MASTER-DESIGN.md §1</div>
+      </div>
+      <div class="at-panel card" id="at-panel-road" style="display:none">
+        <h3>路线图与依赖</h3>
+        <div class="at-road">
+          <p><strong>已落地</strong>：P0–P5 + 并发扩容 + 证据复核 + 技能路由修复。</p>
+          <p><strong>进行中</strong>：P6 E1 Finding（并行会话）。</p>
+          <p><strong>建议顺序</strong>：<code>F1 记分卡</code> → <code>P6 E1</code> → <code>P8 M1</code> → <code>G1 双图</code> → <code>P11 S1 会话+作业</code> → <code>P7 路由差分</code> → <code>P8 M2 / P9 F2 / P10 G2</code> → <code>P11 S2–S4</code> → <code>P12 底线 D1/D2/D6</code>。</p>
+          <p><strong>依赖</strong>：P6 E1 是 P8/P9/P10-G2/P12-D8 的原料；P11 S1 与 E2 元数据联动；P7 路由是飞轮执行器。</p>
+          <p><strong>原则</strong>：每刀同预算差分验收；提案不升默认直到差分证明；契约变了才同步 long-run-contract。</p>
+          <p><strong>待决策</strong>：P8 匹配键/注入上限 N/蒸馏入口；P11 暂停语义/求助超时兜底；P7 差分基准；P12 底线三件是否提前；F1 是否插队。</p>
+        </div>
+        <div class="at-src">出处：docs/MASTER-DESIGN.md §5/6 · dev-handbook.md</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = document.getElementById('at-svg');
+    var bandsG = document.getElementById('at-bands');
+    var edgesG = document.getElementById('at-edges');
+    var nodesG = document.getElementById('at-nodes');
+    var panelDetail = document.getElementById('at-panel-detail');
+    var FULL = { x:0, y:0, w:1560, h:1420 };
+    var view = { x:FULL.x, y:FULL.y, w:FULL.w, h:FULL.h };
+
+    var STATUS = {
+      core: { c:'var(--seed-primary,#2563eb)', t:'核心基座' },
+      done: { c:'var(--viz-series-2,#10b981)', t:'已落地' },
+      doing: { c:'var(--viz-series-5,#f59e0b)', t:'进行中' },
+      proposal: { c:'var(--viz-series-1,#3b82f6)', t:'提案' },
+      new: { c:'var(--viz-series-3,#ef4444)', t:'新方向 P12' },
+      ref: { c:'var(--seed-muted,#6b7280)', t:'外部对照' }
+    };
+
+    var BANDS = [
+      [20, '愿景'], [120, '三层基座'], [220, 'Pi 底座'], [320, '运行时契约 P0–P5 ✅'],
+      [430, '图调度 + 调度经济 P7'], [540, '渗透执行层 P11'], [650, '生命周期 + 渗透域语义 P6'],
+      [760, '证据与交付'], [870, '记忆层 P8'], [980, '数据飞轮 P9'], [1090, '图视图族 P10'],
+      [1200, '长程完备性 P12 新方向'], [1310, '外部对照吸收']
+    ];
+
+    var NODES = [
+      { id:'vision', l:'北极星 · 长程渗透 Mission Control', s:'断点续跑 · 完成有证据 · 接力不丢路径 · 越用越好', x:520, y:30, w:520, h:60, st:'core' },
+      { id:'nuwa', l:'女娲 · 存活与繁衍', s:'个体可死 · 图必须活 · 经验须传承', x:160, y:130, w:360, h:60, st:'core' },
+      { id:'dag', l:'DAG · 授权与真相', s:'Fact–Intent · 无因探索禁令 · 推荐≠授权', x:600, y:130, w:360, h:60, st:'core' },
+      { id:'sa', l:'Super-agent · 调度经济', s:'脑手分离 · 异步派单 · 模型分层', x:1040, y:130, w:360, h:60, st:'core' },
+      { id:'pi', l:'pi-durable', s:'reset/compaction/subagent/codemode/hooks', x:280, y:230, w:300, h:56, st:'done' },
+      { id:'chord', l:'chord', s:'对象/document/job/OutputBuffer', x:630, y:230, w:300, h:56, st:'done' },
+      { id:'piai', l:'pi-ai', s:'多 provider 模型接入', x:980, y:230, w:300, h:56, st:'done' },
+      { id:'lease', l:'lease / Watchdog', s:'零策略保活 · fence', x:40, y:330, w:190, h:60, st:'done' },
+      { id:'ckpt', l:'Durable checkpoint', s:'相位/计数 · 崩溃恢复', x:250, y:330, w:190, h:60, st:'done' },
+      { id:'fsm', l:'Intent FSM', s:'sourceFactIds 强制 · CAS', x:460, y:330, w:190, h:60, st:'done' },
+      { id:'gate', l:'证据闸 + 复核', s:'SHA-256 封存 · 判据 · sticky', x:670, y:330, w:190, h:60, st:'done' },
+      { id:'relay', l:'Relay π 换班', s:'双触发 · 增量 · 图权威', x:880, y:330, w:190, h:60, st:'done' },
+      { id:'ladder', l:'能力阶梯 · 工具单闸', s:'observe→full · gateTool', x:1090, y:330, w:190, h:60, st:'done' },
+      { id:'budget', l:'预算 · 软节奏', s:'0=不限 · 只提示不终止', x:1300, y:330, w:190, h:60, st:'done' },
+      { id:'phase', l:'Bootstrap/Explore/Reason', s:'图状态生成任务 · 相位工具面', x:100, y:440, w:300, h:60, st:'done' },
+      { id:'scale', l:'动态并发扩容', s:'min(上限,max(靶标,资产)) · 只扩不缩', x:450, y:440, w:270, h:60, st:'done' },
+      { id:'hint', l:'Hint · 同族迁移', s:'technique_transfer · 建议层', x:770, y:440, w:230, h:60, st:'done' },
+      { id:'asset', l:'资产准入 · 扇出硬闸', s:'CIDR/通配 · oos 拒利用 · 4/2', x:1050, y:440, w:250, h:60, st:'done' },
+      { id:'p7', l:'P7 模型路由 · 审计者', s:'三层模型 · 偏航只写 Hint', x:1340, y:440, w:180, h:60, st:'proposal' },
+      { id:'session', l:'会话管理器', s:'shell/listener/ssh/tunnel/browser', x:60, y:550, w:230, h:60, st:'proposal' },
+      { id:'job', l:'后台作业 · 异步回流', s:'chord job · 完成通知不轮询', x:320, y:550, w:240, h:60, st:'proposal' },
+      { id:'tunnel', l:'隧道 / pivot', s:'chisel/ligolo/proxychains/socat', x:590, y:550, w:210, h:60, st:'proposal' },
+      { id:'browser', l:'Chromium 浏览器', s:'playwright · profile 持久 · HAR', x:830, y:550, w:210, h:60, st:'proposal' },
+      { id:'roe', l:'委托规则', s:'时间窗/RoE/速率自判 · 默认放开', x:1070, y:550, w:240, h:60, st:'proposal' },
+      { id:'consult', l:'operator_consult', s:'模型主动求助 · 非前置审批', x:1340, y:550, w:180, h:60, st:'proposal' },
+      { id:'lifecycle', l:'开始/暂停/继续/停止/结束', s:'暂停保会话 · 停表 · 紧急停止', x:60, y:660, w:340, h:56, st:'proposal' },
+      { id:'finding', l:'Finding E1', s:'tentative/verified · findingsGate', x:450, y:660, w:180, h:56, st:'doing' },
+      { id:'cred', l:'凭据 E2', s:'secretRef 指针 · 复用', x:650, y:660, w:150, h:56, st:'proposal' },
+      { id:'http', l:'HTTP 证据 E3', s:'事务 + parser lane', x:820, y:660, w:160, h:56, st:'proposal' },
+      { id:'coverage', l:'覆盖矩阵 E4', s:'asset×technique · 速率自判', x:1000, y:660, w:180, h:56, st:'proposal' },
+      { id:'change', l:'变更台账 E5', s:'回滚只生成不执行', x:1200, y:660, w:160, h:56, st:'proposal' },
+      { id:'eval', l:'评测 E6', s:'finding P/R · 差分', x:1380, y:660, w:140, h:56, st:'proposal' },
+      { id:'report', l:'报告 · 只从图渲染', s:'report.md + SHA-256 附件', x:280, y:770, w:280, h:56, st:'done' },
+      { id:'review', l:'人工复核 · 覆盖盲评', s:'confirmed/retracted · holdout', x:620, y:770, w:280, h:56, st:'done' },
+      { id:'deliver', l:'交付归档 finish', s:'封存 + coverage 快照', x:960, y:770, w:240, h:56, st:'done' },
+      { id:'projmem', l:'项目记忆', s:'黑板 + π + checkpoint + 证据', x:60, y:880, w:220, h:56, st:'done' },
+      { id:'globalmem', l:'全局记忆 · 档案索引', s:'用户生涯 · 联邦只读', x:320, y:880, w:250, h:56, st:'proposal' },
+      { id:'distill', l:'蒸馏图谱', s:'Lesson/Playbook/反例/溯源', x:610, y:880, w:260, h:56, st:'proposal' },
+      { id:'inject', l:'注入 + 反馈', s:'MatchKey · title 层 · reuseCount', x:910, y:880, w:210, h:56, st:'proposal' },
+      { id:'legacy', l:'工具遗产 · Skill 固化', s:'ToolArtifact · 人审', x:1160, y:880, w:240, h:56, st:'proposal' },
+      { id:'collect', l:'① 采集', s:'events/trace/usage/复核', x:60, y:990, w:170, h:56, st:'doing' },
+      { id:'scorecard', l:'② 评测记分卡', s:'趋势 · 基准回归', x:260, y:990, w:190, h:56, st:'proposal' },
+      { id:'propose', l:'③ 蒸馏提案', s:'经验/参数/纪律 · 附证据', x:480, y:990, w:190, h:56, st:'proposal' },
+      { id:'improve', l:'④ 改进执行器', s:'五类 · 全部人审', x:700, y:990, w:190, h:56, st:'proposal' },
+      { id:'verify', l:'⑤ 验证晋升', s:'差分 · holdout · 回滚', x:920, y:990, w:190, h:56, st:'proposal' },
+      { id:'qgate', l:'质量闸', s:'人审/溯源/反例/Goodhart', x:1140, y:990, w:200, h:56, st:'proposal' },
+      { id:'vdag', l:'DAG 视图', s:'真相核心画布', x:60, y:1100, w:160, h:56, st:'done' },
+      { id:'vasset', l:'资产图', s:'血缘/family/授权圈', x:250, y:1100, w:160, h:56, st:'proposal' },
+      { id:'vsurface', l:'攻击面图', s:'资产×表面×测试状态', x:440, y:1100, w:180, h:56, st:'proposal' },
+      { id:'vexec', l:'执行图', s:'phase×slot 泳道', x:650, y:1100, w:160, h:56, st:'proposal' },
+      { id:'vmem', l:'记忆图', s:'全局+任务投影', x:840, y:1100, w:160, h:56, st:'proposal' },
+      { id:'vnav', l:'跨图导航 · 图提示', s:'同 ID 跳转 · 只写 Hint', x:1030, y:1100, w:230, h:56, st:'proposal' },
+      { id:'d1', l:'D1 事实保鲜 · 必补', s:'TTL · 基线差分 · 凭据健康', x:40, y:1210, w:175, h:60, st:'new' },
+      { id:'d2', l:'D2 防御反馈 · 必补', s:'封锁/蜜罐/金丝雀/噪音', x:225, y:1210, w:175, h:60, st:'new' },
+      { id:'d3', l:'D3 Provider 韧性 · 必补', s:'key 池/failover/成本预测', x:410, y:1210, w:175, h:60, st:'new' },
+      { id:'d4', l:'D4 Engagement · 定案', s:'复测可触发 · 跨任务复核 · AI 接手继承', x:595, y:1210, w:175, h:60, st:'proposal' },
+      { id:'d5', l:'D5 规划者 Planner', s:'战役规划 · 目标层级 · 提案过闸', x:780, y:1210, w:175, h:60, st:'new' },
+      { id:'d6', l:'D6 辅助者 Assistant', s:'break-glass · 有 pause 权', x:965, y:1210, w:175, h:60, st:'new' },
+      { id:'d7', l:'攻击链 · 内网穿越', s:'外网→组合漏洞→C2→内网', x:1150, y:1210, w:175, h:60, st:'new' },
+      { id:'d8', l:'D8 法律级证据 · 通过', s:'哈希链 · 合规报告', x:1335, y:1210, w:175, h:60, st:'new' },
+      { id:'cairn', l:'Cairn / Intentest', s:'黑板祖先 · DAG 形式化', x:100, y:1320, w:240, h:56, st:'ref' },
+      { id:'sapper', l:'sapper / 女娲', s:'分层史 · 交接 · 零策略', x:380, y:1320, w:240, h:56, st:'ref' },
+      { id:'chap', l:'CHAP', s:'protocol 接力', x:660, y:1320, w:160, h:56, st:'ref' },
+      { id:'aria', l:'ARIA-X / Resurface', s:'收卷报告 · 单闸 · 邻域', x:860, y:1320, w:250, h:56, st:'ref' },
+      { id:'octop', l:'DeepSeek / Octop', s:'脑手分离 · 链式召回', x:1150, y:1320, w:250, h:56, st:'ref' }
+    ];
+
+    var EDGES = [
+      ['vision','nuwa'],['vision','dag'],['vision','sa'],
+      ['nuwa','lease',null,1],['nuwa','relay',null,1],['nuwa','projmem',null,1],['nuwa','globalmem','繁衍',1],
+      ['dag','fsm'],['dag','gate'],['dag','phase'],
+      ['sa','p7',null,1],['sa','scale',null,1],['sa','phase','脑手分离'],
+      ['pi','ckpt','承载',1],['pi','relay','reset(handoff)',1],['pi','session','extension',1],['pi','job','submit 回流',1],
+      ['chord','session','对象',1],['chord','job','job',1],['piai','p7',null,1],['piai','d3',null,1],
+      ['lease','lifecycle'],['ckpt','phase'],['fsm','phase'],['gate','report'],['relay','projmem'],
+      ['phase','session','执行'],['phase','job'],['phase','asset'],['phase','hint'],
+      ['scale','phase'],['asset','scale','资产数'],
+      ['session','cred','元数据',1],['session','tunnel'],['session','browser'],['session','lifecycle','暂停保活',1],
+      ['job','phase','通知回流',1],['roe','phase'],['consult','hint','回复注入',1],['consult','review',null,1],
+      ['finding','http'],['finding','coverage'],['finding','eval'],['cred','session'],['http','finding','证据'],
+      ['finding','report'],['gate','finding','findingsGate',1],
+      ['report','review'],['review','deliver'],['review','distill','蒸馏原料',1],
+      ['projmem','collect'],['globalmem','distill'],['distill','inject'],['inject','phase','注入回建议层',1],['inject','hint',null,1],
+      ['legacy','improve',null,1],['distill','legacy'],
+      ['collect','scorecard'],['scorecard','propose'],['propose','improve'],['improve','verify'],['verify','collect','下一圈',1],
+      ['qgate','propose',null,1],['qgate','improve',null,1],['qgate','verify',null,1],
+      ['fsm','vdag','投影',1],['asset','vasset','投影',1],['finding','vsurface','投影',1],['phase','vexec','投影',1],['distill','vmem','投影',1],
+      ['vdag','vnav'],['vasset','vnav'],['vsurface','vnav'],['vexec','vnav'],['vmem','vnav'],['vnav','hint','图提示',1],
+      ['d1','fsm',null,1],['d2','roe',null,1],['d4','globalmem',null,1],['d5','phase',null,1],['d6','lifecycle',null,1],['d8','gate',null,1],
+      ['vsurface','d7','链模式',1],['finding','d7','点击聚焦',1],['session','d7','provenance',1],['d7','legacy','整链蒸馏',1],
+      ['cairn','fsm'],['cairn','phase'],['sapper','nuwa'],['sapper','relay'],['chap','relay'],['aria','gate'],['aria','report'],['octop','sa']
+    ];
+
+    var DETAILS = {
+      vision: { d:'给授权渗透长程任务的 Mission Control。问题本质：长程渗透是 POMDP 上的因果约束搜索，LLM 线性 context 承载全局信念必患遗忘与漂移——解法是信念外置成图。', m:['断点续跑 · 完成有证据 · 接力不丢路径 · 越用越好用','Harness 活 / History 信 / Evidence 证 / Relay 换班 / Flywheel 进化'], doc:'MASTER-DESIGN.md §0 · theory-fact-intent-dag.md' },
+      nuwa: { d:'女娲管活下来与繁衍：个体可死、图必须活、经验须传承。存活层已硬化，繁衍层（记忆+飞轮）是 P8/P9。', m:['lease/Watchdog 接班 · 分层 History · Relay 交接 · 族级打法','繁衍：蒸馏→人审→注入→反馈闭环','不抄 tmux 军团/兵种 UI/文明公理叙事'], doc:'architecture.md · absorb-sapper-v2-nuwa.md' },
+      dag: { d:'DAG 管走得对：Fact–Intent 图是唯一真相与执行驱动。无因探索禁令=结构性授权；推荐≠授权。', m:['Fact append-only 三层 · Intent 强制前驱 · 证据闸','只有 DAG 有执行权；四图投影零执行权','pi transcript 永不成为真相源'], doc:'theory-fact-intent-dag.md · long-run-contract.md' },
+      sa: { d:'Super-agent 管花得省：脑手分离、异步派单、模型分层。是配置+小协议补丁，不是第二套编排。', m:['相位工具面物理没收主脑执行工具（Octop 0/5 委派教训）','三层模型：派单便宜/推理强/执行快','主脑永不拿回执行工具'], doc:'absorb-super-agent.md' },
+      pi: { d:'底座 pi-durable（Experimental，锁版本+适配层）：会话持久性原生能力远超当前使用量。底座管活，图管对。', m:['reset(handoff)/compaction/subagents/child tasks','watchTaskGraph/Code Mode/hooks/beforeTool 闸','深化增量每步差分验收，fallback 保留作基线'], doc:'pi-durable-integration.md' },
+      chord: { d:'分布式对象框架：对象跨进程存活、document 事务持久、job outlive the call。会话/作业暂停保活的底座依据。', m:['对象/document/job/workers/OutputBuffer','任务级持久对象承载会话与后台作业'], doc:'pi-durable-integration.md' },
+      piai: { d:'统一模型接入层，多 provider。模型路由与 provider 韧性的承载点。', m:['provider 抽象 · 本地模型兜底（D7）'], doc:'pi-durable-integration.md' },
+      lease: { d:'租约保活 + 零策略看门狗：续租、死进程重启、到点收卷；不读路径、不派 Intent、不改 Goal。', m:['leaseOwner/leaseUntil/单调 fence','paused 排除出重启循环','动态扩容是资源供给非战术'], doc:'long-run-contract.md' },
+      ckpt: { d:'Worker 相位/计数器持久化，崩溃从最后相位恢复。进程级恢复≠上下文级（π）≠路径级（图）。', m:['Durable phase · 重启不写 π'], doc:'long-run-contract.md' },
+      fsm: { d:'Intent 四态 FSM + CAS claim；sourceFactIds 强制非空（无因探索禁令）；成功 conclude 同事务回写 Fact。', m:['proposed→claimed→running→succeeded|failed|expired','多前驱共同支持结论'], doc:'long-run-contract.md · theory §3' },
+      gate: { d:'完成必须有证据：evidencePatterns + 内容判据 + SHA-256 原版同事务封存；passes sticky；复核 confirmed/retracted。', m:['路径边界拒 traversal/符号/硬链接','ALL_COMPLETE 全题 true','口头 DONE 关 Goal = 反模式'], doc:'long-run-contract.md · evidence-review.md' },
+      relay: { d:'会话边界增量 handoff πₙ，累积注入下一实例；会话内全量、边界压缩；图仍权威，崩溃不写 π。', m:['双触发 + 最小工具间隔','底座原生 reset(handoff) 可承接机制','六批实验：结构化交接字段比自由文本关键'], doc:'long-run-contract.md · experiments' },
+      ladder: { d:'能力阶梯 observe→scan→active-lab→full；工具单闸 gateTool 统一入口（能力+scope+预算+审计，拒绝也记）。', m:['主机 VPN/代理/路由永拒','一工具一目录，禁单体 kali-mcp'], doc:'long-run-contract.md' },
+      budget: { d:'默认 0=unlimited 连续运转；软节奏只提示不终止；completed 仅全过，budget_exhausted 仅硬闸真触发；预算尽仍出报告。', m:['禁止预算倒计时提前收口','终态重启墙钟重计、累计保留'], doc:'long-run-contract.md' },
+      phase: { d:'图状态机算子（非固定 kill-chain）：Bootstrap/Explore/Reason；任务由图状态生成；相位工具面隔离。', m:['Explore 一次一 Intent CAS · 有 open Explore 不 Reason','reason lease · 扇出硬顶 4/2 · 超时两阶段 partial Fact'], doc:'long-run-contract.md · theory §5' },
+      scale: { d:'有效并发=min(上限, max(靶标数, admitted/live 资产数))；运行中只扩不缩、不超用户上限、只读资产计数（非战术）。', m:['控制台智能推荐 3–10 · 手动改不覆盖','单 CIDR 授权也能扩到资产规模','explore_scaled 审计事件'], doc:'parallel-explore-scaling.md（已落地）' },
+      hint: { d:'人类/系统战术注入通道；同族迁移 technique_transfer 广播成熟打法。建议层唯一入口。', m:['Hint API + Observe 吸收','图提示/审计者/记忆注入/求助回复都走这里','不另开私聊通道'], doc:'long-run-contract.md · asset-inventory.md' },
+      asset: { d:'资产=Fact 投影（非第二库）；seed/admitted/live/oos；CIDR/通配自动准入；outOfScope 覆盖；oos 不可作利用唯一前驱。', m:['seed↔发现双向 · 控制台与 Observe 同表','同根合并优先于盲目扇出'], doc:'asset-inventory.md' },
+      p7: { d:'调度经济提案：三层模型路由 execution.models；slot 0 指挥官自接力；偏航审计者只写 source=auditor Hint；Observe 事件两级过滤。差分按评测方法学：中难度带 8 题、≥3 重复、配对差 CI、非劣界 -5pp。', m:['看门狗零策略不破','差分证明收益前不升默认','脚手架指纹必须记录（路由配置=处理变量）'], doc:'absorb-super-agent.md · absorb-eval-methodology.md' },
+      session: { d:'拿 shell 之后的长链核心：任务级持久会话对象，detached 进程，暂停/崩溃存活，重启 reconnect。', m:['open/write/read/list/close · 五类 kind','单写者租约 CAS · 跨 slot 复用 reuseCount','日志 evidence 封存 · 敏感输出不进 Observe/π'], doc:'pentest-ops-design.md §一' },
+      job: { d:'长任务后台化：chord job 承载，完成→root.submit() durable 通知唤醒模型，不轮询；崩溃幂等补发。', m:['长扫描/爆破不再被 120s 杀掉','多步编排走 Code Mode 原生续跑','脚本遗产→ToolArtifact 人审'], doc:'pentest-ops-design.md §二' },
+      tunnel: { d:'隧道/pivot 工具补齐：chisel/ligolo-ng/proxychains-ng/socat；隧道=会话+变更台账；只包装特定命令。', m:['不改主机路由/VPN（硬底线）','对端须 admitted · 穿隧道发现走自动准入'], doc:'pentest-ops-design.md §三' },
+      browser: { d:'开源 Chromium（playwright-core bundled，BSD/Apache）；profile 任务级持久保登录态。', m:['DOM XSS/登录后流程/SPA','HAR→E3 证据 · cookies→E2 指针','验证码→operator_consult 请人判断'], doc:'pentest-ops-design.md §四' },
+      roe: { d:'委托规则默认放开（用户定调）：时间窗可选不选=连续运转；RoE 自由文本默认无禁止；速率 rateGuidance 模型自判，硬顶可选。', m:['窗外 idle 等待非终态','硬底线永远在 RoE 之上','E4 默认硬 bucket 提案已作废'], doc:'pentest-ops-design.md §五' },
+      consult: { d:'人工介入=模型主动求助（非前置审批）：判断不了主动发消息；blocking 挂起当前 Intent（心跳续租+超时豁免），其他继续。', m:['回复 source=human Hint 注入唤醒','无回复不终止 · soft-pace 提醒','consult/answer 留痕进报告'], doc:'pentest-ops-design.md §五' },
+      lifecycle: { d:'任务级一键：开始/暂停/继续/停止/结束。暂停非终态停表——**会话保活、后台作业 SIGSTOP 冻结**（恢复续跑、通知排队回放）；停止清理+残留台账；结束交付归档。', m:['Watchdog 排除 paused','blocking 求助 24h 转非阻塞','紧急停止立即 kill+残留突出'], doc:'pentest-ops-design.md §六' },
+      finding: { d:'漏洞成图对象（并行会话进行中）：tentative/verified/retested/accepted/retracted + findingsGate；双图分离落地。', m:['verified 须 repro+证据 · tentative 不进交付','报告 §Findings 从表渲染','dedupKey 幂等'], doc:'pentest-enhancements.md E1' },
+      cred: { d:'凭据/会话结构化：secretRef 指针（明文不进 Observe/π/日志）；横向 Intent 以它为前驱；reuseCount。', m:['与会话管理器联动','oos 横向复用仍拒'], doc:'pentest-enhancements.md E2' },
+      http: { d:'HTTP 事务证据：http_request 工具 + parser lane（nmap/httpx/nuclei/ffuf 结构化）；原文封存 SHA-256。', m:['解析只搬运不改结论','无法解析退化原文 evidence'], doc:'pentest-enhancements.md E3' },
+      coverage: { d:'覆盖矩阵 asset×technique（untested/attempted/verified）；速率模型自判（硬顶可选）；破坏性分级。', m:['verified 只认 verified finding','报告出未测面清单'], doc:'pentest-enhancements.md E4' },
+      change: { d:'变更台账与回滚：写前备份 beforeSha256；gy rollback 逆序生成脚本只生成不执行。', m:['报告 §Changes & Residual Risk','隧道/会话残留登记'], doc:'pentest-enhancements.md E5' },
+      eval: { d:'finding 级评测：precision/recall/severity 一致率/repro 可复现率/每 finding Token；bare/history/relay/+findings 四组。', m:['只有 E1 才允许声称 finding 层增益'], doc:'pentest-enhancements.md E6' },
+      report: { d:'报告只从图渲染，LLM 只填叙述；report-evidence 文件名=SHA-256 可离线复验；预算尽仍出报告。', m:['复核状态渲染：撤回+受影响下游','P6 增 §Findings/§Changes'], doc:'absorb-resurface-aria-x.md · evidence-review.md' },
+      review: { d:'人工复核 confirmed/retracted + 更正 Fact；覆盖快照 + 独立底稿盲评（development/holdout）。', m:['撤回可指向更正 Fact · 下游标待复核','蒸馏原料来源'], doc:'evidence-review.md' },
+      deliver: { d:'交付归档：报告+证据封存+coverage 快照+archive；中断时另一负责人凭交付物判断覆盖/受阻/证据。', m:['finish 与 stop 区别：交付 vs 停跑'], doc:'evidence-review.md · pentest-ops-design.md' },
+      projmem: { d:'项目记忆（任务级，已有）：History 黑板 + Relay π + Durable checkpoint + 证据封存。', m:['每任务一份 · task_id 作用域','跨会话唯一真相'], doc:'memory-layer.md §一' },
+      globalmem: { d:'全局记忆（用户级）：整个平台生涯的沉淀。档案索引（所有任务联邦只读）+ 蒸馏图谱 + 工具遗产 + Skill 演进 + 操作者画像。创建任务时自动非阻塞预检「历史接触」（定案）。', m:['档案按资产/CWE/family 检索 · 指针非拷贝','历史接触≠本次授权','创建时自动面板 · seedHints 只走建议层 · 不出本机'], doc:'memory-layer.md §一/三' },
+      distill: { d:'蒸馏图谱：Lesson/Playbook/Counterexample/ToolArtifact/SourceRef/MatchKey/SkillPack；无源不记忆（derived_from 强制）。', m:['draft→人审 confirmed 才可注入','反例只增不删 · supersedes 版本演进'], doc:'memory-layer.md §三' },
+      inject: { d:'注入+反馈：**分层键**匹配（硬键 familyKey/stack 正常注入；仅 ≥2 软键=低置信「参考」）→title 层（默认 N=5，Explore 命中当前资产 +2）+Hint source=system→memory_read 下钻；终态回写 reuseCount/反例/降级。', m:['不做 RAG · N 为配置项，注入 vs 不注入差分后再调','旧 Fact 永不直写新任务图'], doc:'memory-layer.md §三/四' },
+      legacy: { d:'工具遗产与 Skill 固化：任务自建脚本（codemode）登记+使用文档；成熟打法固化 Skill 草案。', m:['人审后才可执行/写盘','sapper auto_pivot.py 的结构化 durable 版'], doc:'memory-layer.md · pentest-ops-design.md' },
+      collect: { d:'飞轮①采集：events/execution-trace/usage/复核链，每任务自动留痕，大半已有；F1 建统一记分卡导出。', m:['零新埋点 · 可离线复算','采集观察性不影响运行'], doc:'data-flywheel.md §一①' },
+      scorecard: { d:'飞轮②评测：任务记分卡（通过率/precision/成本/交接损失/超时/幻影调用/路由命中）+ 纵向趋势 + 基准回归。', m:['只报相对差分 · 协议冻结','越用越好必须可测量'], doc:'data-flywheel.md §一②' },
+      propose: { d:'飞轮③蒸馏：经验线（P8）+ 参数线（Relay 阈值/扇出/路由）+ 纪律线（prompt 补丁）；每条必附证据链接。', m:['自动产物永远 draft','无证据不提案'], doc:'data-flywheel.md §一③' },
+      improve: { d:'飞轮④改进：五类执行器（记忆注入/技能/参数/纪律/工具）全部人审。', m:['配置版本化可回滚','Skill 写盘人审'], doc:'data-flywheel.md §一④' },
+      verify: { d:'飞轮⑤验证：离线差分先行→真平台子集；holdout 只验不调；通过晋升默认，不通过归档留痕。', m:['为什么变好了可复盘','已晋升出问题→回滚/retracted'], doc:'data-flywheel.md §一⑤' },
+      qgate: { d:'中心质量闸（飞轮本体部件）：人审/溯源/反例降级/坏事实防毒化/Goodhart 防护/数据不出本机。', m:['目标函数=攻击面经营+可审计 finding，非 flag 数','防垃圾飞轮越转越脏'], doc:'data-flywheel.md §二' },
+      vdag: { d:'DAG 视图：真相核心画布（既有 FactIntentDag）。', m:['图看关系 · 列表看明细'], doc:'graph-views.md' },
+      vasset: { d:'资产图：发现血缘（intentId→sourceFactIds）+ family + 授权圈；数据全已有（G1）。', m:['oos 灰显禁连利用边','孤岛资产→图提示'], doc:'graph-views.md §二' },
+      vsurface: { d:'攻击面图：资产×表面×测试状态 + finding 徽章；依赖 P6 E3/E4；落地前降级覆盖视图。', m:['未测面清单对齐客户 coverage','不硬解析自由文本'], doc:'graph-views.md §二' },
+      vexec: { d:'执行图：phase×slot 泳道 + trace/events 投影；数据全已有（G1）；飞轮记分卡可视化孪生。', m:['成本归因/卡死定位/拒绝审计','pi watchTaskGraph 补充数据源'], doc:'graph-views.md §二' },
+      vmem: { d:'记忆图：全局+任务投影；溯源边跨层连源任务（P8 M2=G3）。', m:['Playbook→源任务执行图→资产图'], doc:'graph-views.md · memory-layer.md' },
+      vnav: { d:'跨图导航+图提示：同实体同 ID 穿透五视图；结构信号（未测面/孤岛/高耗低产/过期/撤回波及）只写 Hint。', m:['投影零执行权','图提示不派 Intent 不终止'], doc:'graph-views.md §三/四' },
+      d1: { d:'必补。目标漂移与事实保鲜：网络是活目标。Fact freshness 派生态 + 周期 revalidation Intent + 凭据/会话健康 monitor。', m:['TTL 只建议不删 Fact','基线差分写新 Fact'], doc:'long-range-completeness.md D1' },
+      d2: { d:'必补。防御响应反馈：蓝队会反应。封锁检测/蜜罐启发式/金丝雀规避/噪音预算→自适应退避（模型自判）。', m:['检测信号写 Fact/Hint','不建自动绕过 EDR 能力'], doc:'long-range-completeness.md D2' },
+      d3: { d:'必补。Provider 韧性：key 池轮换 + 多 provider failover + 429 退避 + 成本预测。sapper 经济件补齐。', m:['保活/资源层非战术','凭据明文不进 History'], doc:'long-range-completeness.md D3' },
+      d4: { d:'调研完成、四问已定案：client→engagement→tasks 授权容器；客户（View 级）可主动触发复测；reviewer 为 engagement 级角色可跨任务署名复核整程序；member-admin 按 AttackForge 最佳实践做（单用户隐藏）；「跨团队」=AI 侧接手直接继承授权上下文。', m:['授权共享与经验共享两条通道严格分离','E-schema：engagement + askBefore + 角色标签留位（单用户行为不变）','交接包=继承载体（报告+封存+覆盖+待答 consult+会话/作业+台账+scope 版本）'], doc:'absorb-engagement-team.md §四/五' },
+      d5: { d:'规划者 Planner：Reason 层战役规划算子增强（强模型子会话）。读目标层级+覆盖+攻击链，产里程碑计划与 Intent 提案。', m:['Goal 增 parentGoalId/milestone · rollup','提案走正常 intent_propose 硬闸——推荐≠授权','不是固定 kill-chain 剧本'], doc:'long-range-completeness.md D5' },
+      d6: { d:'辅助者 Assistant：独立轻量会话监视安全信号（错误率/破坏闸/金丝雀/scope 漂移）。有 pause 权（break-glass 非终态可逆全审计），无 stop/resume/扩 scope/派 Intent 权。', m:['事故记录+客户通知 draft 人审后发','lab-first 建议 · 数据最小化','恢复必须人 · 不自动修复客户系统'], doc:'long-range-completeness.md D6' },
+      d7: { d:'攻击链图（替代原 D7 断网——用户定调无断网场景）。内网=外网经组合漏洞拿 C2/getshell 后进入：链=授权步骤因果链，不加新阶段/scope。', m:['链=Fact–Intent 血缘+provenance 投影','补 session.sourceIntentId/sourceCredentialId 即连链','融合为攻击面图链模式：点击 finding 上下闭包聚焦','断点标溯源缺失不编造 · 链可见≠可利用'], doc:'attack-chain-graph.md' },
+      d8: { d:'通过。证据法律级：事件哈希链 + 可选可信时间戳 + write-once 导出；PTES/等保报告模板；CVSS4.0+CWE；修复复测工作流。', m:['分数不自动算当结论','合规映射是渲染不改图'], doc:'long-range-completeness.md D8' },
+      cairn: { d:'工程祖先：Fact/Intent/Hint 黑板 + Bootstrap/Reason/Explore + stigmergy。AGPL 只吸机制不拷代码。', m:['Intentest 加严 FSM/无因探索','拒零 MCP 教条'], doc:'absorb-cairn.md' },
+      sapper: { d:'女娲测试：分层史+交接+零策略看门狗+同族迁移+模型分层。MIT 可借鉴实现。', m:['赛绩在 harness 非军团','文明级记忆→P8/P9'], doc:'absorb-sapper-v2-nuwa.md' },
+      chap: { d:'会话边界结构化 protocol 接力；双触发；会话内全量边界压缩。', m:['π 累积+History 权威','勿用泛化摘要顶替图'], doc:'theory §6' },
+      aria: { d:'ARIA-X 收卷报告/工具单闸/双图分离；Resurface 证据邻域/不编造元数据。AGPL 只吸机制。', m:['双图分离→P6 E1','单连接串行写库教训'], doc:'absorb-resurface-aria-x.md' },
+      octop: { d:'DeepSeek Super-agent 脑手分离/链式召回/事件过滤；Octop 主脑留执行工具→0/5 委派教训。', m:['链式召回≈分层下钻非 RAG','偏航审计只写 Hint'], doc:'absorb-super-agent.md' }
+    };
+
+    var TOUR = [
+      ['vision','一切从问题出发：长程渗透是未知状态空间里的因果搜索，LLM 记不住全局——所以信念必须外置。'],
+      ['dag','翻牌：Fact–Intent DAG 成为唯一真相与执行驱动。无因探索禁令=结构性授权，推荐≠授权。'],
+      ['nuwa','女娲让组织活下来：个体可死、图必须活。lease/Watchdog/分层 History/Relay 是存活层。'],
+      ['sa','Super-agent 让调度省：脑手分离由相位工具面结构性保证，主脑永不拿回执行工具。'],
+      ['pi','底座是 Pi：pi-durable/chord 原生提供 handoff/压缩/子代理/持久作业——底座管活，图管对，不重复造轮子。'],
+      ['fsm','图语义硬化：Intent 必须挂 Fact，成功同事务回写——历史成为攻击路径而非日志。'],
+      ['phase','调度是图算子而非固定剧本：Bootstrap/Explore/Reason 由图状态生成，相位隔离工具面。'],
+      ['scale','大量目标并行：有效并发跟着资产数涨，只扩不缩，用户上限不可越——已落地。'],
+      ['session','渗透后半程：拿 shell 之后靠任务级持久会话，暂停/崩溃都存活，跨 slot 复用。'],
+      ['job','长任务后台化：作业完成 durable 通知自动回流，模型不轮询——事件驱动。'],
+      ['gate','完成必须有证据：SHA-256 封存+内容判据+sticky，口头 DONE 无效。'],
+      ['review','人审复核与盲评：撤回可更正，覆盖独立底稿——可信度由复核链表达。'],
+      ['distill','文明开始繁衍：复核后的经验蒸馏成全局记忆图谱，无源不记忆。'],
+      ['inject','经验注入回建议层：MatchKey 匹配→title+Hint，新任务 Intent 仍挂自己的 Fact。'],
+      ['scorecard','飞轮评测：记分卡+趋势让「越用越好」可测量，只报相对差分。'],
+      ['qgate','质量闸是飞轮本体：人审/溯源/反例/Goodhart——防越转越脏。'],
+      ['vnav','全部思路成图：五视图投影、跨图同 ID 导航，图提示只递 Hint 条子。'],
+      ['d1','时间维度必补三件：目标会漂移、蓝队会反应、provider 会限流。规划者与辅助者两个角色补上战役与安全；攻击链图把外网到内网的每一步显影——点击漏洞，整条链亮起来。']
+    ];
+
+    function el(name, attrs) {
+      var e = document.createElementNS(NS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+    function nodeById(id) {
+      for (var i = 0; i < NODES.length; i++) if (NODES[i].id === id) return NODES[i];
+      return null;
+    }
+    function center(n) { return { x: n.x + n.w / 2, y: n.y + n.h / 2 }; }
+
+    BANDS.forEach(function (b) {
+      var t = el('text', { x: 20, y: b[0] + 12, 'class': 'at-band' });
+      t.textContent = b[1];
+      bandsG.appendChild(t);
+    });
+
+    var edgeEls = [];
+    EDGES.forEach(function (e) {
+      var a = nodeById(e[0]), b = nodeById(e[1]);
+      if (!a || !b) return;
+      var ca = center(a), cb = center(b);
+      var mx = (ca.x + cb.x) / 2, my = (ca.y + cb.y) / 2;
+      var dx = cb.x - ca.x, dy = cb.y - ca.y;
+      var len = Math.sqrt(dx * dx + dy * dy) || 1;
+      var off = Math.min(40, len * 0.12);
+      var cx = mx - dy / len * off, cy = my + dx / len * off;
+      var p = el('path', { d: 'M' + ca.x + ',' + ca.y + ' Q' + cx + ',' + cy + ' ' + cb.x + ',' + cb.y, 'class': 'at-edge' + (e[3] ? ' at-dash' : ''), 'marker-end': 'url(#at-arrow)', 'data-from': e[0], 'data-to': e[1] });
+      edgesG.appendChild(p);
+      edgeEls.push(p);
+      if (e[2]) {
+        var t = el('text', { x: cx, y: cy, 'class': 'at-edge-label', 'text-anchor': 'middle' });
+        t.textContent = e[2];
+        edgesG.appendChild(t);
+      }
+    });
+
+    var nodeEls = {};
+    NODES.forEach(function (n) {
+      var g = el('g', { 'class': 'at-node', 'data-id': n.id, 'data-status': n.st, tabindex: 0, role: 'button', 'aria-label': n.l + '，查看详情' });
+      var c = STATUS[n.st].c;
+      g.appendChild(el('rect', { 'class': 'at-focusring', x: n.x - 3, y: n.y - 3, width: n.w + 6, height: n.h + 6, rx: 12, fill: 'none', stroke: 'none' }));
+      g.appendChild(el('rect', { 'class': 'at-body', x: n.x, y: n.y, width: n.w, height: n.h, rx: 10, fill: 'var(--fill-1,#f9fafb)', stroke: c, 'stroke-width': 1.5 }));
+      g.appendChild(el('rect', { x: n.x, y: n.y + 8, width: 4, height: n.h - 16, rx: 2, fill: c }));
+      var t = el('text', { x: n.x + 14, y: n.y + 23, 'class': 'at-title' });
+      t.textContent = n.l;
+      g.appendChild(t);
+      var s = el('text', { x: n.x + 14, y: n.y + 42, 'class': 'at-nsub' });
+      s.textContent = n.s;
+      g.appendChild(s);
+      g.addEventListener('click', function (ev) { ev.stopPropagation(); select(n.id); });
+      g.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); select(n.id); }
+      });
+      nodesG.appendChild(g);
+      nodeEls[n.id] = g;
+    });
+
+    var selected = null;
+    function renderDetail(id, narration) {
+      var n = nodeById(id);
+      var d = DETAILS[id];
+      if (!n || !d) return;
+      panelDetail.innerHTML = '<h3></h3><span class="at-badge"></span><div class="at-desc"></div><ul></ul><div class="at-src"></div>';
+      panelDetail.querySelector('h3').textContent = n.l;
+      panelDetail.querySelector('.at-badge').textContent = STATUS[n.st].t;
+      var desc = panelDetail.querySelector('.at-desc');
+      desc.style.fontSize = '13px';
+      desc.style.lineHeight = '1.6';
+      desc.textContent = d.d;
+      if (narration) {
+        var q = document.createElement('div');
+        q.className = 'at-quote';
+        q.textContent = '导览：' + narration;
+        desc.appendChild(q);
+      }
+      var ul = panelDetail.querySelector('ul');
+      ul.style.marginTop = '8px';
+      d.m.forEach(function (line) {
+        var li = document.createElement('li');
+        li.textContent = line;
+        ul.appendChild(li);
+      });
+      panelDetail.querySelector('.at-src').textContent = '出处：' + d.doc;
+    }
+    function clearHighlight() {
+      Object.keys(nodeEls).forEach(function (k) { nodeEls[k].classList.remove('at-dim', 'at-selected'); });
+      edgeEls.forEach(function (p) { p.classList.remove('at-active', 'at-dim'); p.setAttribute('marker-end', 'url(#at-arrow)'); });
+    }
+    function select(id, narration) {
+      selected = id;
+      clearHighlight();
+      var neighbors = {};
+      neighbors[id] = true;
+      edgeEls.forEach(function (p) {
+        var f = p.getAttribute('data-from'), t = p.getAttribute('data-to');
+        if (f === id || t === id) {
+          p.classList.add('at-active');
+          p.setAttribute('marker-end', 'url(#at-arrow-hl)');
+          neighbors[f] = true; neighbors[t] = true;
+        } else {
+          p.classList.add('at-dim');
+        }
+      });
+      Object.keys(nodeEls).forEach(function (k) {
+        if (neighbors[k]) nodeEls[k].classList.add('at-selected');
+        else nodeEls[k].classList.add('at-dim');
+      });
+      nodeEls[id].classList.remove('at-dim');
+      renderDetail(id, narration);
+      switchTab('detail');
+    }
+    function deselect() {
+      selected = null;
+      clearHighlight();
+      applyFilters();
+      panelDetail.innerHTML = '<h3>总体设计全图</h3><ul><li>点击任意节点：看职责、机制、状态与文档出处，并高亮其关联。</li><li>▶ 思路导览：18 站串起全部设计思路。</li><li>滚轮缩放 / 拖拽平移 / 搜索定位 / 状态过滤。</li><li>右侧 tabs：定调日志（原始决策）与路线图。</li></ul><div class="at-src">GongYuAI · 女娲 × Super-agent × DAG · docs/MASTER-DESIGN.md</div>';
+    }
+    svg.addEventListener('click', function () { if (!dragMoved) deselect(); });
+
+    function applyView() { svg.setAttribute('viewBox', view.x + ' ' + view.y + ' ' + view.w + ' ' + view.h); }
+    function zoom(factor, cx, cy) {
+      var nw = Math.max(300, Math.min(FULL.w * 1.5, view.w * factor));
+      var nh = nw * FULL.h / FULL.w;
+      var px = cx === undefined ? view.x + view.w / 2 : cx;
+      var py = cy === undefined ? view.y + view.h / 2 : cy;
+      view.x = px - (px - view.x) * (nw / view.w);
+      view.y = py - (py - view.y) * (nh / view.h);
+      view.w = nw; view.h = nh;
+      applyView();
+    }
+    function panTo(n) {
+      var c = center(n);
+      view.w = Math.min(view.w, 760);
+      view.h = view.w * FULL.h / FULL.w;
+      view.x = c.x - view.w / 2;
+      view.y = c.y - view.h / 2;
+      applyView();
+    }
+    document.getElementById('at-zoomin').addEventListener('click', function () { zoom(0.8); });
+    document.getElementById('at-zoomout').addEventListener('click', function () { zoom(1.25); });
+    document.getElementById('at-fit').addEventListener('click', function () { view = { x:FULL.x, y:FULL.y, w:FULL.w, h:FULL.h }; applyView(); deselect(); });
+    svg.addEventListener('wheel', function (ev) {
+      ev.preventDefault();
+      var r = svg.getBoundingClientRect();
+      var cx = view.x + (ev.clientX - r.left) / r.width * view.w;
+      var cy = view.y + (ev.clientY - r.top) / r.height * view.h;
+      zoom(ev.deltaY > 0 ? 1.12 : 0.89, cx, cy);
+    }, { passive: false });
+
+    var dragging = false, dragMoved = false, lastX = 0, lastY = 0;
+    svg.addEventListener('pointerdown', function (ev) {
+      dragging = true; dragMoved = false; lastX = ev.clientX; lastY = ev.clientY;
+      svg.classList.add('at-dragging');
+      svg.setPointerCapture(ev.pointerId);
+    });
+    svg.addEventListener('pointermove', function (ev) {
+      if (!dragging) return;
+      var r = svg.getBoundingClientRect();
+      var dx = (ev.clientX - lastX) / r.width * view.w;
+      var dy = (ev.clientY - lastY) / r.height * view.h;
+      if (Math.abs(ev.clientX - lastX) + Math.abs(ev.clientY - lastY) > 3) dragMoved = true;
+      view.x -= dx; view.y -= dy;
+      lastX = ev.clientX; lastY = ev.clientY;
+      applyView();
+    });
+    svg.addEventListener('pointerup', function (ev) {
+      dragging = false; svg.classList.remove('at-dragging');
+      svg.releasePointerCapture(ev.pointerId);
+      setTimeout(function () { dragMoved = false; }, 0);
+    });
+
+    var searchInput = document.getElementById('at-search');
+    searchInput.addEventListener('input', function () {
+      var q = searchInput.value.trim().toLowerCase();
+      clearHighlight();
+      if (!q) { applyFilters(); return; }
+      var first = null;
+      NODES.forEach(function (n) {
+        var hit = (n.l + ' ' + n.s + ' ' + n.id).toLowerCase().indexOf(q) >= 0;
+        if (hit) { nodeEls[n.id].classList.remove('at-dim'); if (!first) first = n; }
+        else nodeEls[n.id].classList.add('at-dim');
+      });
+      edgeEls.forEach(function (p) { p.classList.add('at-dim'); });
+      if (first) panTo(first);
+    });
+
+    var filters = document.getElementById('at-filters');
+    function applyFilters() {
+      var on = {};
+      filters.querySelectorAll('input').forEach(function (cb) { on[cb.dataset.status] = cb.checked; });
+      NODES.forEach(function (n) {
+        if (on[n.st]) nodeEls[n.id].classList.remove('at-dim');
+        else nodeEls[n.id].classList.add('at-dim');
+      });
+    }
+    filters.addEventListener('change', function () { if (!selected) { clearHighlight(); applyFilters(); } });
+
+    function switchTab(name) {
+      document.querySelectorAll('#gy-atlas .at-tabs button').forEach(function (b) {
+        b.setAttribute('aria-pressed', b.dataset.tab === name ? 'true' : 'false');
+      });
+      document.getElementById('at-panel-detail').style.display = name === 'detail' ? '' : 'none';
+      document.getElementById('at-panel-log').style.display = name === 'log' ? '' : 'none';
+      document.getElementById('at-panel-road').style.display = name === 'road' ? '' : 'none';
+    }
+    document.querySelectorAll('#gy-atlas .at-tabs button').forEach(function (b) {
+      b.addEventListener('click', function () { switchTab(b.dataset.tab); });
+    });
+
+    var tourIdx = -1, tourBar = null;
+    function tourStop(i) {
+      tourIdx = i;
+      var stop = TOUR[i];
+      var n = nodeById(stop[0]);
+      select(stop[0], stop[1]);
+      panTo(n);
+      if (!tourBar) {
+        tourBar = document.createElement('div');
+        tourBar.className = 'at-tourbar';
+        tourBar.innerHTML = '<button id="at-tour-prev">上一站</button><button id="at-tour-next">下一站</button><span id="at-tour-count"></span><button id="at-tour-exit">退出导览</button>';
+        panelDetail.parentNode.insertBefore(tourBar, panelDetail.nextSibling);
+        document.getElementById('at-tour-prev').addEventListener('click', function () { if (tourIdx > 0) tourStop(tourIdx - 1); });
+        document.getElementById('at-tour-next').addEventListener('click', function () { if (tourIdx < TOUR.length - 1) tourStop(tourIdx + 1); else exitTour(); });
+        document.getElementById('at-tour-exit').addEventListener('click', exitTour);
+      }
+      document.getElementById('at-tour-count').textContent = (i + 1) + ' / ' + TOUR.length;
+      document.getElementById('at-tour-next').textContent = i < TOUR.length - 1 ? '下一站' : '完成 ✓';
+    }
+    function exitTour() {
+      tourIdx = -1;
+      if (tourBar) { tourBar.remove(); tourBar = null; }
+      view = { x:FULL.x, y:FULL.y, w:FULL.w, h:FULL.h };
+      applyView();
+      deselect();
+    }
+    document.getElementById('at-tour').addEventListener('click', function () { tourStop(0); });
+
+    deselect();
+    applyView();
+  })();
+  </script>
+</div>
+</body>
+</html>

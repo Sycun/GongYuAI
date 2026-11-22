@@ -188,7 +188,7 @@ export function App() {
         <Nav.Item itemKey="settings-assets" text="资产收集" icon={<IconSearch />} />
         <Nav.Item itemKey="settings-mcp" text="MCP" icon={<IconCode />} />
         <Nav.Item itemKey="settings-skills" text="Skill" icon={<IconPuzzle />} />
-        <Nav.Item itemKey="settings-usage" text="Token 统计" icon={<IconHistogram />} />
+        <Nav.Item itemKey="settings-usage" text="用量统计" icon={<IconHistogram />} />
         <Nav.Item itemKey="settings-update" text="一键更新" icon={<IconDownload />} />
         <Nav.Item itemKey="settings-runtime" text="运行时" icon={<IconServer />} />
       </Nav.Sub>

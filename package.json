@@ -23,11 +23,14 @@
     "tsecbench": "tsx scripts/tsecbench.ts",
     "typecheck": "pnpm -r run typecheck",
     "smoke:tools": "tsx scripts/smoke-tools.ts",
-    "smoke:unlock": "tsx scripts/smoke-tools-unlock.ts"
+    "smoke:unlock": "tsx scripts/smoke-tools-unlock.ts",
+    "e2e:engagement": "tsx scripts/engagement-e2e.ts",
+    "drill:restore": "tsx scripts/restore-drill.ts"
   },
   "dependencies": {
+    "@gongyuai/contracts": "workspace:*",
     "@gongyuai/control-plane": "workspace:*",
-    "@gongyuai/contracts": "workspace:*"
+    "@gongyuai/history": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.20.5",

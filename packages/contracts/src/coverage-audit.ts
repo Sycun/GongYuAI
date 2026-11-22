@@ -1,5 +1,6 @@
 import { z } from "zod";
 export const CoverageStatusSchema = z.enum(["untested", "partial", "tested", "blocked"]);
+export type CoverageStatus = z.infer<typeof CoverageStatusSchema>;
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const goalId = z.string().min(1);

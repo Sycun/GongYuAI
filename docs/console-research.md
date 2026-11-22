@@ -59,4 +59,6 @@ Settings          runtime / model / dataDir（先只读）
 
 资产 Tab 定案见 [asset-inventory.md](./asset-inventory.md)：开局 N 条 seed、发现后 N+M，人机双向同一清单。
 
+图视图族增量（P10 提案，见 [graph-views.md](./graph-views.md)）：任务深潜新增 **Graph workspace**——DAG / 资产 / 攻击面 / 执行 / 记忆五视图切换，全部只读投影、跨图同 ID 导航；既有列表 Tab 保留（图看关系，列表看明细）。
+
 视觉：深色操作台、等宽数据、侧栏导航；避免紫霓虹仿 ARTEX Neon，也避免奶油纸风。

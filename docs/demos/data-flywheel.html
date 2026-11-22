@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>数据飞轮五环与质量闸概念演示</title>
+<style>
+:root {
+  --seed-fg:#1f2329; --seed-muted:#6b7280; --seed-primary:#2563eb;
+  --border-standard:#d1d5db; --border-subtle:#e5e7eb;
+  --card-bg:#ffffff; --inset-bg:#f3f4f6; --fill-1:#f9fafb; --fill-2:#f3f4f6; --fill-3:#e5e7eb;
+  --font-sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-code:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --viz-series-1:#3b82f6; --viz-series-2:#10b981; --viz-series-3:#ef4444;
+  --viz-series-4:#8b5cf6; --viz-series-5:#f59e0b; --viz-series-6:#06b6d4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --seed-fg:#e5e7eb; --seed-muted:#9ca3af; --seed-primary:#60a5fa;
+    --border-standard:#374151; --border-subtle:#1f2937;
+    --card-bg:#111827; --inset-bg:#0b1220; --fill-1:#1f2937; --fill-2:#374151; --fill-3:#4b5563;
+    --viz-series-1:#60a5fa; --viz-series-2:#34d399; --viz-series-3:#f87171;
+    --viz-series-4:#a78bfa; --viz-series-5:#fbbf24; --viz-series-6:#22d3ee;
+  }
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:20px; background:var(--inset-bg); color:var(--seed-fg); font-family:var(--font-sans); }
+.card { background:var(--card-bg); border:1px solid var(--border-subtle); border-radius:12px; }
+#gy-atlas { max-width:1600px; margin:0 auto; }
+</style>
+</head>
+<body>
+<div id="gy-flywheel">
+  <style>
+    #gy-flywheel .fw-legend { display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:8px; }
+    #gy-flywheel .fw-legend span { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--seed-muted); }
+    #gy-flywheel .fw-sw { width:12px; height:12px; border-radius:3px; display:inline-block; }
+    #gy-flywheel .fw-hint { font-size:12px; color:var(--seed-muted); margin:0 0 8px; }
+    #gy-flywheel svg { width:100%; min-width:680px; height:auto; display:block; }
+    #gy-flywheel .fw-node { cursor:pointer; }
+    #gy-flywheel .fw-node rect.fw-body { transition:fill .15s ease; }
+    #gy-flywheel .fw-node:hover rect.fw-body, #gy-flywheel .fw-node:focus rect.fw-body { fill:var(--fill-2); }
+    #gy-flywheel .fw-node.fw-selected rect.fw-body { fill:var(--fill-2); stroke-width:2.5; }
+    #gy-flywheel .fw-node:focus { outline:none; }
+    #gy-flywheel .fw-node:focus rect.fw-focusring { stroke:var(--seed-primary); stroke-width:2; stroke-dasharray:4 3; }
+    #gy-flywheel .fw-edge { stroke:var(--seed-muted); stroke-width:1.6; fill:none; }
+    #gy-flywheel .fw-spoke { stroke:var(--viz-series-3); stroke-width:1; stroke-dasharray:3 4; opacity:0.55; }
+    #gy-flywheel .fw-edge-label { font-size:12px; fill:var(--seed-muted); }
+    #gy-flywheel .fw-title { font-size:13px; font-weight:500; fill:var(--seed-fg); }
+    #gy-flywheel .fw-sub { font-size:12px; fill:var(--seed-muted); }
+    #gy-flywheel .fw-tag { font-size:11px; fill:var(--seed-primary); font-weight:500; }
+    #gy-flywheel #fw-detail { margin-top:10px; padding:12px 14px; }
+    #gy-flywheel #fw-detail h3 { margin:0 0 6px; font-size:13px; font-weight:500; color:var(--seed-fg); }
+    #gy-flywheel #fw-detail ul { margin:0; padding-left:18px; }
+    #gy-flywheel #fw-detail li { font-size:13px; color:var(--seed-fg); margin:3px 0; }
+    #gy-flywheel #fw-detail .fw-src { font-size:12px; color:var(--seed-muted); margin-top:8px; }
+    @media (prefers-reduced-motion: reduce) { #gy-flywheel .fw-node rect.fw-body { transition:none; } }
+  </style>
+
+  <div class="fw-legend" aria-hidden="true">
+    <span><i class="fw-sw" style="background:var(--viz-series-1)"></i>飞轮环（顺时针）</span>
+    <span><i class="fw-sw" style="background:var(--viz-series-3)"></i>中心质量闸（每环都过）</span>
+    <span>角标 = 现状：已有 / 部分 / 提案</span>
+  </div>
+  <p class="fw-hint">数据飞轮（P9 提案）：让 Agent 越用越好用。点击节点看该环的机制与质量闸。</p>
+
+  <div class="table-responsive">
+    <svg id="fw-svg" viewBox="0 0 980 640" role="group" aria-label="数据飞轮五环结构概念演示">
+      <defs>
+        <marker id="fw-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--seed-muted)"></path>
+        </marker>
+      </defs>
+      <g id="fw-edges"></g>
+      <g id="fw-nodes"></g>
+    </svg>
+  </div>
+
+  <div id="fw-detail" class="card" aria-live="polite">
+    <h3>飞轮转的是 harness 与知识，不是模型权重</h3>
+    <ul>
+      <li>越用越好用 = 经验更准（记忆层）、技能更熟（Skill 演进）、调度更省（参数/模型路由）、纪律更硬（prompt 补丁）。</li>
+      <li>飞轮已手动转过两圈：六批实验格式违规 → 结构化交接字段 → 两批回归 57→59；技能路由固定用例 2/8→8/8。</li>
+      <li>P9 自动化「评测→提案」段；人审、差分验证、holdout 隔离保留——防垃圾飞轮与指标刷分。</li>
+      <li>原料大半已有：events 审计 / execution-trace / 用量记账 / 复核链，每任务自动留痕，无需新埋点。</li>
+    </ul>
+    <div class="fw-src">出处：docs/data-flywheel.md（P9 提案，未动工）· docs/memory-layer.md（P8）</div>
+  </div>
+
+  <script>
+  (function () {
+    var edgesG = document.getElementById('fw-edges');
+    var nodesG = document.getElementById('fw-nodes');
+    var detail = document.getElementById('fw-detail');
+    var NS = 'http://www.w3.org/2000/svg';
+
+    var NODES = [
+      { id:'collect', x:390, y:60, w:200, h:64, gate:false, title:'① 采集', sub:['events / trace / usage / 复核','每任务自动留痕'], tag:'大半已有' },
+      { id:'evaluate', x:640, y:210, w:220, h:64, gate:false, title:'② 评测', sub:['任务记分卡 + 纵向趋势','基准回归 · 只报相对差分'], tag:'部分已有' },
+      { id:'distill', x:540, y:460, w:200, h:64, gate:false, title:'③ 蒸馏', sub:['经验/技能/工具遗产 draft','参数 + prompt 纪律提案'], tag:'P8+P9 提案' },
+      { id:'improve', x:240, y:460, w:200, h:64, gate:false, title:'④ 改进', sub:['五类执行器落地','记忆注入/技能/参数/纪律/工具'], tag:'全部人审' },
+      { id:'verify', x:120, y:210, w:220, h:64, gate:false, title:'⑤ 验证', sub:['离线差分先行 · holdout 只验不调','通过晋升默认 · 配置版本化回滚'], tag:'部分已有' },
+      { id:'gate', x:380, y:268, w:220, h:80, gate:true, title:'质量闸', sub:['人审 · 溯源 · 反例降级','差分 · holdout · 指标对齐'], tag:'飞轮的一部分' }
+    ];
+
+    var DETAILS = {
+      collect: { t:'① 采集 · 使用即留痕', b:[
+        '已有原料：tool_gate 判定（允许/拒绝/原因）、execution-trace 每步工具/token/相位/shell 调用、runUsage/usage 记账、relay 写入/恢复/校验、超时 partial Fact、复核/覆盖链、finding 状态迁移（P6）。',
+        'F1 要建的只是统一只读导出：把上述聚合成「任务记分卡原料包」，零新埋点、可离线复算。',
+        '纪律：采集是观察性的，落盘失败不得影响任务运行（execution-trace 既有容错语义）。'
+      ], s:'data-flywheel.md §一① · execution-trace.ts / usage.ts' },
+      evaluate: { t:'② 评测 · 飞轮的仪表盘', b:[
+        '任务记分卡：目标通过率、finding precision（人工复核为底稿）、token/墙钟成本、交接损失、超时率、幻影调用数、路由命中。',
+        '纵向趋势按任务批次聚合——「越用越好」必须可测量：复用率↑、成本↓、precision↑；不显著就如实说未显著。',
+        '基准回归复用既有基建：TSecBench 子集、finding-bench（E6）、offline-review 夹具、skill-routing 用例、coverage-compare 盲评。',
+        '纪律：只报相对差分、协议先冻结、development/holdout 分组。'
+      ], s:'data-flywheel.md §一② · evidence-review.md' },
+      distill: { t:'③ 蒸馏 · 数据变提案', b:[
+        '经验线（P8）：verified finding / 撤回 / 超时 partial Fact → Lesson/Playbook/Counterexample/ToolArtifact draft。',
+        '参数线（新）：跨任务统计聚合 → Relay 阈值、扇出硬顶、soft-pace、模型路由（P7）、注入上限 N 的 draft 提案。',
+        '纪律线（新）：重复失败模式归纳 → prompt/board-policy 补丁 draft + 复现用例（六批格式违规就是成功案例）。',
+        '硬闸：每条提案必须附证据链接（记分卡差分 + 源任务）——无证据不提案；自动产物永远 draft。'
+      ], s:'data-flywheel.md §一③ · memory-layer.md §四' },
+      improve: { t:'④ 改进 · 五类执行器（全部人审）', b:[
+        '记忆注入：confirmed Lesson 按 MatchKey 进新任务（建议层 Hint）。',
+        '技能演进：Playbook 固化 Skill 草案 + 路由触发词更新，人审写盘。',
+        'harness 参数：配置变更人批准 + 版本化可回滚。',
+        'prompt 纪律：系统提示/board-policy 补丁，人审 + 回归用例。',
+        '工具遗产：登记脚本人审后才进可用工具面（未审不得执行）。'
+      ], s:'data-flywheel.md §一④' },
+      verify: { t:'⑤ 验证 · 晋升闸', b:[
+        '每项改进先过离线夹具差分（确定性桩、零网络），再按需过真平台子集同预算差分。',
+        'holdout 只验不调：留出集成绩只用于晋升判定，不得反向调参——防对自家历史过拟合。',
+        '通过 → 晋升默认；不通过 → 提案归档留痕（append-only）；已晋升项出问题 → 配置回滚 / Lesson retracted。',
+        '「为什么变好了」可复盘：晋升记录带差分依据。'
+      ], s:'data-flywheel.md §一⑤ · coverage-compare 盲评流程' },
+      gate: { t:'中心质量闸 · 防垃圾飞轮', b:[
+        '人审闸：draft 永不自动 confirmed / 自动晋升默认。',
+        '溯源闸：无源不记忆、无证据不提案。',
+        '反例驱动降级 + 时效衰减：注入失效追加 Counterexample，stack 版本漂移标记过时。',
+        '坏事实防毒化：注入携带复核状态与反例；源被撤回 → 记忆节点标「依据已撤回，待复核」。',
+        '指标对齐（Goodhart 防护）：目标函数是攻击面经营 + 可审计 finding，不是 flag 数。',
+        '数据不出本机：飞轮全部在 data-root 内运转。'
+      ], s:'data-flywheel.md §二' }
+    };
+
+    var EDGES = [
+      { d:'M590,108 L676,210', label:'使用即留痕', lx:598, ly:152 },
+      { d:'M750,274 L662,460', label:'记分卡差距 → 提案', lx:712, ly:372 },
+      { d:'M540,492 L440,492', label:'draft', lx:472, ly:484 },
+      { d:'M300,460 L216,274', label:'批准的变更', lx:196, ly:372 },
+      { d:'M250,210 L392,116', label:'晋升默认 → 下个任务', lx:236, ly:152 }
+    ];
+    var SPOKES = [
+      'M490,268 L490,124', 'M600,290 L640,252', 'M560,348 L612,460',
+      'M420,348 L368,460', 'M380,290 L340,252'
+    ];
+
+    function el(name, attrs) {
+      var e = document.createElementNS(NS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+
+    SPOKES.forEach(function (d) {
+      edgesG.appendChild(el('path', { d:d, 'class':'fw-spoke' }));
+    });
+    EDGES.forEach(function (e) {
+      edgesG.appendChild(el('path', { d:e.d, 'class':'fw-edge', 'marker-end':'url(#fw-arrow)' }));
+      var t = el('text', { x:e.lx, y:e.ly, 'class':'fw-edge-label' });
+      t.textContent = e.label;
+      edgesG.appendChild(t);
+    });
+
+    function showDetail(id) {
+      var d = DETAILS[id];
+      if (!d) return;
+      detail.innerHTML = '<h3></h3><ul></ul><div class="fw-src"></div>';
+      detail.querySelector('h3').textContent = d.t;
+      var ul = detail.querySelector('ul');
+      d.b.forEach(function (line) {
+        var li = document.createElement('li');
+        li.textContent = line;
+        ul.appendChild(li);
+      });
+      detail.querySelector('.fw-src').textContent = '出处：' + d.s;
+      var prev = nodesG.querySelector('.fw-selected');
+      if (prev) prev.classList.remove('fw-selected');
+      var g = nodesG.querySelector('[data-id="' + id + '"]');
+      if (g) g.classList.add('fw-selected');
+    }
+
+    NODES.forEach(function (n) {
+      var g = el('g', { 'class':'fw-node', 'data-id':n.id, tabindex:0, role:'button', 'aria-label':n.title + '，查看机制与质量闸' });
+      var color = n.gate ? 'var(--viz-series-3)' : 'var(--viz-series-1)';
+      g.appendChild(el('rect', { 'class':'fw-focusring', x:n.x-3, y:n.y-3, width:n.w+6, height:n.h+6, rx:12, fill:'none', stroke:'none' }));
+      g.appendChild(el('rect', { 'class':'fw-body', x:n.x, y:n.y, width:n.w, height:n.h, rx:10, fill:'var(--fill-1)', stroke:color, 'stroke-width':1.5 }));
+      g.appendChild(el('rect', { x:n.x, y:n.y+8, width:4, height:n.h-16, rx:2, fill:color }));
+      var t = el('text', { x:n.x+16, y:n.y+24, 'class':'fw-title' });
+      t.textContent = n.title;
+      g.appendChild(t);
+      n.sub.forEach(function (line, i) {
+        var s = el('text', { x:n.x+16, y:n.y+42+i*14, 'class':'fw-sub' });
+        s.textContent = line;
+        g.appendChild(s);
+      });
+      var tag = el('text', { x:n.x+n.w-10, y:n.y+24, 'class':'fw-tag', 'text-anchor':'end' });
+      tag.textContent = n.tag;
+      g.appendChild(tag);
+      g.addEventListener('click', function () { showDetail(n.id); });
+      g.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); showDetail(n.id); }
+      });
+      nodesG.appendChild(g);
+    });
+  })();
+  </script>
+</div>
+</body>
+</html>

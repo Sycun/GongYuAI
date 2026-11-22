@@ -92,6 +92,7 @@ export function openSkillHub(
   }
   const routeFile = loadRoutingFile(skillsRoots);
 
+  const startCall = history.trackIntegrationCalls(manifest.taskId);
   const loaded = new Set<string>();
 
   function triggersFor(id: string, rootDir?: string): string[] {
@@ -142,37 +143,44 @@ export function openSkillHub(
     },
 
     load(id, reason) {
-      const pack = pool.get(id);
-      if (!pack) {
-        const known = [...pool.keys()].slice(0, 30).join(", ");
-        return `未知 Skill id：${id}。已知：${known}`;
-      }
-      const path = join(pack.rootDir, "SKILL.md");
-      if (!existsSync(path)) return `Skill ${id} 缺少 SKILL.md`;
-      let body: string;
+      const finish = startCall("skill", id);
+      let success = false;
       try {
-        body = stripFrontmatter(readFileSync(path, "utf8")).trim();
-      } catch (err) {
-        return `读取失败：${err instanceof Error ? err.message : String(err)}`;
+        const pack = pool.get(id);
+        if (!pack) {
+          const known = [...pool.keys()].slice(0, 30).join(", ");
+          return `未知 Skill id：${id}。已知：${known}`;
+        }
+        const path = join(pack.rootDir, "SKILL.md");
+        if (!existsSync(path)) return `Skill ${id} 缺少 SKILL.md`;
+        let body: string;
+        try {
+          body = stripFrontmatter(readFileSync(path, "utf8")).trim();
+        } catch (err) {
+          return `读取失败：${err instanceof Error ? err.message : String(err)}`;
+        }
+        // Soft cap — keep tool results bounded
+        const max = 12_000;
+        const clipped =
+          body.length > max
+            ? `${body.slice(0, max)}\n\n…(已截断，全文 ${body.length} 字；按需再分节阅读)`
+            : body;
+        loaded.add(id);
+        appendProgress(
+          manifest.workspaceDir,
+          `load_skill ${id} · ${reason.slice(0, 100)}`,
+        );
+        history.appendFact({
+          taskId: manifest.taskId,
+          layer: "summary",
+          title: `加载 Skill ${id}`,
+          summary: reason.slice(0, 400),
+        });
+        success = body.length > 0;
+        return `# Skill ${pack.name} (\`${id}\`)\n理由：${reason.slice(0, 200)}\n\n${clipped}`;
+      } finally {
+        finish(success);
       }
-      // Soft cap — keep tool results bounded
-      const max = 12_000;
-      const clipped =
-        body.length > max
-          ? `${body.slice(0, max)}\n\n…(已截断，全文 ${body.length} 字；按需再分节阅读)`
-          : body;
-      loaded.add(id);
-      appendProgress(
-        manifest.workspaceDir,
-        `load_skill ${id} · ${reason.slice(0, 100)}`,
-      );
-      history.appendFact({
-        taskId: manifest.taskId,
-        layer: "summary",
-        title: `加载 Skill ${id}`,
-        summary: reason.slice(0, 400),
-      });
-      return `# Skill ${pack.name} (\`${id}\`)\n理由：${reason.slice(0, 200)}\n\n${clipped}`;
     },
 
     loadedIds: () => [...loaded],

@@ -2,7 +2,7 @@
  * Graph-driven Bootstrap → Explore → Reason protocol (P2 / handbook polish).
  * History remains authoritative; phase only gates Worker tool surface.
  */
-import type { ExecutionConfig, WorkerPhase } from "@gongyuai/contracts";
+import type { ExecutionConfig, FindingConfidence, FindingSeverity, WorkerPhase } from "@gongyuai/contracts";
 import {
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
   DEFAULT_MAX_INTENTS_PER_REASON,
@@ -30,6 +30,7 @@ const ALWAYS = new Set([
   "history_list_layer",
   "asset_list",
   "asset_record",
+  "finding_list",
   "load_skill",
   "enable_skill",
   "disable_skill",
@@ -54,6 +55,9 @@ const EXPLORE = new Set([
   "intent_claim",
   "intent_conclude",
   "technique_transfer",
+  "finding_record",
+  "finding_verify",
+  "finding_retract",
   "write_evidence",
   "asset_search",
   "shell",
@@ -69,6 +73,9 @@ const REASON = new Set([
   "history_append_fact",
   "intent_propose",
   "technique_transfer",
+  "finding_record",
+  "finding_verify",
+  "finding_retract",
   "write_evidence",
   "assert_goal",
   "enable_mcp",
@@ -114,15 +121,15 @@ export function phaseDirective(
   ];
   if (p === "bootstrap") {
     lines.push(
-      "Bootstrap：确认资产清单（auth.targets 已 seed）→ 若已配置资产收集 API 可用 asset_search（FOFA/鹰图/自定义）扩发现 → 写首批 Fact / asset_record → intent_propose（须 sourceFactIds）→ phase_set(explore)。禁止 shell / assert_goal。",
+      "Bootstrap（渗透建图）：确认资产清单（auth.targets 已 seed）→ 若已配置资产收集 API 可用 asset_search 扩发现 → 写首批 Fact / asset_record（主机/服务，不只题号）→ intent_propose（须 sourceFactIds）→ phase_set(explore)。禁止 shell / assert_goal。",
     );
   } else if (p === "explore") {
     lines.push(
-      "Explore：一次只 claim 一个 Intent（本 worker 的 activeIntentId）→ 工具验证 → intent_conclude（成功须附 ≥1 Fact）。多 Explore 并发时靠 History CAS 抢 Intent，勿重复做已 claimed 的工作。FOFA/鹰图/自定义收集用 asset_search；其它枚举发现的主机用 asset_record 写入清单（自动 CIDR/通配准入）。有 open Explore 时禁止进入 Reason。",
+      "Explore（验证影响）：一次只 claim 一个 Intent → 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro）才可进交付。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。有 open Explore 时禁止进入 Reason。",
     );
   } else if (p === "reason") {
     lines.push(
-      "Reason：读资产清单 + Hint + 可迁移打法 + 新 Fact → Complete / 有界扇出新 Intent / technique_transfer 同族广播 / no-op。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
+      "Reason（战役调度）：读资产清单 + Hint + transferable + Findings 台账 → 扇出跨资产 Intent / technique_transfer / 更新 engagement 叙事。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。交付叙述只引用 verified finding。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
     );
   }
   return lines.join("\n");
@@ -234,6 +241,81 @@ export const GRAPH_PHASE_TOOLS = [
           targetAddresses: { type: "string" },
         },
         required: ["sourceFactIds", "title", "summary"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "finding_record",
+      description:
+        "Record a vuln lead as a tentative Finding (dedup idempotent by asset|vulnClass|endpoint). severity=info|low|medium|high|critical; vulnClass like CWE-89. tentative 不进交付；复现后用 finding_verify。",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          asset: { type: "string" },
+          vulnClass: { type: "string" },
+          severity: { type: "string" },
+          endpoint: { type: "string" },
+          confidence: { type: "string" },
+          cvss: { type: "string" },
+          dedupKey: { type: "string" },
+          factIds: { type: "string" },
+          impact: { type: "string" },
+          fix: { type: "string" },
+        },
+        required: ["title", "asset", "vulnClass", "severity"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "finding_verify",
+      description:
+        "Promote a tentative Finding to verified. Requires ≥1 evidence file under evidence/ (comma-separated paths, SHA-256 sealed) AND non-empty repro steps. Only verified findings enter the delivery report.",
+      parameters: {
+        type: "object",
+        properties: {
+          findingId: { type: "string" },
+          evidencePaths: { type: "string" },
+          repro: { type: "string" },
+          impact: { type: "string" },
+          fix: { type: "string" },
+          cvss: { type: "string" },
+        },
+        required: ["findingId", "evidencePaths", "repro"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "finding_retract",
+      description:
+        "Retract a false-positive Finding (row retained for audit; terminal state). Requires reason.",
+      parameters: {
+        type: "object",
+        properties: {
+          findingId: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["findingId", "reason"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "finding_list",
+      description:
+        "List the Finding ledger (severity desc; includes tentative/retracted with status). Optional status filter.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string" },
+        },
       },
     },
   },
@@ -359,6 +441,8 @@ export function handleGraphTool(
     if (!claimed) return `claim failed (not proposed?): ${args.intentId ?? ""}`;
     ctx.state.activeIntentId = claimed.id;
     ctx.state.activeIntentClaimedAt = new Date().toISOString();
+    ctx.state.toolsAtIntentClaim = ctx.state.toolCalls;
+    ctx.state.lastSoftSurfaceMilestone = 0;
     ctx.state.phase = "explore";
     ctx.save();
     appendProgress(ctx.workspaceDir, `phase=explore claim=${claimed.id}`);
@@ -387,6 +471,8 @@ export function handleGraphTool(
       if (ctx.state.activeIntentId === done.id) {
         ctx.state.activeIntentId = null;
         ctx.state.activeIntentClaimedAt = null;
+        ctx.state.toolsAtIntentClaim = null;
+        ctx.state.lastSoftSurfaceMilestone = 0;
       }
       const open = ctx.history.openIntents(ctx.taskId);
       ctx.state.phase = open.length > 0 ? "explore" : "reason";
@@ -440,13 +526,92 @@ export function handleGraphTool(
     }
   }
 
+  if (name === "finding_record") {
+    const severity = String(args.severity ?? "").toLowerCase();
+    if (!["info", "low", "medium", "high", "critical"].includes(severity)) {
+      return `invalid severity: ${args.severity ?? ""} (info|low|medium|high|critical)`;
+    }
+    const confidence = args.confidence?.trim().toLowerCase();
+    if (confidence && confidence !== "tentative" && confidence !== "firm") {
+      return `invalid confidence: ${args.confidence} (tentative|firm)`;
+    }
+    try {
+      const r = ctx.history.recordFinding({
+        taskId: ctx.taskId,
+        title: args.title ?? "",
+        asset: args.asset ?? "",
+        vulnClass: args.vulnClass ?? "",
+        severity: severity as FindingSeverity,
+        confidence: (confidence as FindingConfidence | undefined) ?? undefined,
+        endpoint: args.endpoint?.trim() || null,
+        cvss: args.cvss?.trim() || null,
+        dedupKey: args.dedupKey?.trim() || undefined,
+        factIds: parseFactIds(args.factIds ?? ""),
+        intentId: ctx.state.activeIntentId,
+        impact: args.impact ?? "",
+        fix: args.fix ?? "",
+      });
+      appendProgress(
+        ctx.workspaceDir,
+        `finding_record ${r.finding.id} (${r.finding.severity}/${r.finding.status}) ${r.finding.title}${r.created ? "" : " [dedup]"}`,
+      );
+      return JSON.stringify(r);
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (name === "finding_verify") {
+    try {
+      const finding = ctx.history.verifyFinding(
+        ctx.taskId,
+        args.findingId ?? "",
+        {
+          evidencePaths: parseFactIds(args.evidencePaths ?? ""),
+          repro: args.repro ?? "",
+          impact: args.impact,
+          fix: args.fix,
+          cvss: args.cvss?.trim() || undefined,
+        },
+      );
+      appendProgress(
+        ctx.workspaceDir,
+        `finding_verify ${finding.id} → ${finding.status} evidence=${finding.evidence.length}`,
+      );
+      return JSON.stringify(finding);
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (name === "finding_retract") {
+    try {
+      const finding = ctx.history.retractFinding(
+        ctx.taskId,
+        args.findingId ?? "",
+        args.reason ?? "",
+      );
+      appendProgress(ctx.workspaceDir, `finding_retract ${finding.id}`);
+      return JSON.stringify(finding);
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (name === "finding_list") {
+    const status = args.status?.trim().toLowerCase();
+    const all = ctx.history.listFindings(ctx.taskId);
+    const findings = status ? all.filter((f) => f.status === status) : all;
+    return JSON.stringify({ ok: true, count: findings.length, findings });
+  }
+
   return null;
 }
 
 export function kickoffUserMessage(phase: WorkerPhase): string {
   const p = asGraphPhase(phase);
   if (p === "bootstrap") {
-    return "从 Bootstrap 开始：写入首批 Fact、提出候选 Intent，然后 phase_set(explore)。这是长程任务，禁止因预算/时间估计提前收口。完成语义以 assert_goal / evidence gate 为准；禁止口头 DONE；禁止改主机网络/VPN/代理。";
+    return "从 Bootstrap 建图开始：asset_record / Fact → intent_propose → phase_set(explore)。按授权渗透测试作业推进（攻击面、验证影响、可审计 finding），不是夺旗。长程任务禁止因预算/时间估计提前收口。完成语义以 assert_goal / evidence gate 为准；禁止口头 DONE；禁止改主机网络/VPN/代理。";
   }
-  return "按当前图相位推进未通过 Goals（长程，勿提前收口）。Explore 一次一个 Intent；Reason 在无 open Explore 时运行。全部 assert_goal 成功后可回复 DONE。禁止改主机网络/VPN/代理。";
+  return "按当前图相位以渗透测试节奏推进未通过 Goals（建图→验证→写 finding→横向/换面；长程勿提前收口）。Explore 一次一个 Intent；Reason 在无 open Explore 时运行。全部 assert_goal 成功后可回复 DONE。禁止改主机网络/VPN/代理。";
 }

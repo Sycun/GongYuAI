@@ -51,6 +51,8 @@ export function maybeForceExploreTimeout(opts: {
   });
   opts.state.activeIntentId = null;
   opts.state.activeIntentClaimedAt = null;
+  opts.state.toolsAtIntentClaim = null;
+  opts.state.lastSoftSurfaceMilestone = 0;
   const open = opts.history.openIntents(opts.taskId);
   opts.state.phase = open.length > 0 ? "explore" : "reason";
   opts.save();

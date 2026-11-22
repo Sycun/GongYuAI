@@ -32,6 +32,45 @@ test("resolveExploreWorkerCount caps by targets and configured max", () => {
   );
 });
 
+test("resolveExploreWorkerCount scales with admitted/live assets beyond seed targets", () => {
+  // Single CIDR target, many discovered assets.
+  assert.equal(
+    resolveExploreWorkerCount({ maxConcurrentExplores: 8, targetCount: 1, assetCount: 50 }),
+    8,
+  );
+  assert.equal(
+    resolveExploreWorkerCount({ maxConcurrentExplores: 10, targetCount: 1, assetCount: 4 }),
+    4,
+  );
+  // Targets still win when larger than asset count.
+  assert.equal(
+    resolveExploreWorkerCount({ maxConcurrentExplores: 10, targetCount: 6, assetCount: 2 }),
+    6,
+  );
+  // User cap and hard ceiling are never exceeded.
+  assert.equal(
+    resolveExploreWorkerCount({ maxConcurrentExplores: 3, targetCount: 1, assetCount: 100 }),
+    3,
+  );
+  assert.equal(
+    resolveExploreWorkerCount({
+      maxConcurrentExplores: MAX_CONCURRENT_EXPLORES + 10,
+      targetCount: 1,
+      assetCount: 1000,
+    }),
+    MAX_CONCURRENT_EXPLORES,
+  );
+  // Zero / missing assets keep legacy behavior.
+  assert.equal(
+    resolveExploreWorkerCount({ maxConcurrentExplores: 4, targetCount: 2, assetCount: 0 }),
+    2,
+  );
+  assert.equal(
+    resolveExploreWorkerCount({ maxConcurrentExplores: 4, targetCount: 2 }),
+    2,
+  );
+});
+
 test("CreateTaskRequest defaults execution.maxConcurrentExplores to 1", () => {
   const parsed = CreateTaskRequestSchema.parse({
     auth: {

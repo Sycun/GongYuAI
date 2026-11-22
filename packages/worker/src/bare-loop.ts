@@ -47,6 +47,7 @@ async function runBareMock(manifest: WorkerManifest): Promise<void> {
   const ckpt = new CheckpointStore(`${manifest.durableDb}.ckpt.sqlite`);
   let state = ckpt.load();
   const history = openHistory({ dbPath: manifest.historyDb, evidenceDir: manifest.evidenceDir });
+  history.trackIntegrationCalls(manifest.taskId);
   writeFileSync(
     join(manifest.workspaceDir, "PROGRESS.md"),
     `# Bare baseline\n\ntask ${manifest.taskId}\nmode=bare-mock\n`,
@@ -126,6 +127,7 @@ async function runBareOpenAi(manifest: WorkerManifest): Promise<void> {
   mkdirSync(manifest.evidenceDir, { recursive: true });
 
   const ledger = openHistory({ dbPath: manifest.historyDb, evidenceDir: manifest.evidenceDir });
+  ledger.trackIntegrationCalls(manifest.taskId);
   const ctx: ToolContext = {
     manifest,
     history: ledger,

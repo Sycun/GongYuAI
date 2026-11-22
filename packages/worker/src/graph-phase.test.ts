@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ORIGIN_FACT_ID } from "@gongyuai/contracts";
-import { openHistory } from "@gongyuai/history";
+import { openHistory, writeEvidenceFile } from "@gongyuai/history";
 import {
   allowedToolNames,
   asGraphPhase,
@@ -27,6 +27,9 @@ function tmpState(phase: CheckpointState["phase"] = "bootstrap"): CheckpointStat
     activeIntentClaimedAt: null,
     lastSoftToolMilestone: 0,
     lastSoftWallMilestone: 0,
+    toolsAtIntentClaim: null,
+    lastSoftSurfaceMilestone: 0,
+    pendingSoftPaceMessage: null,
     lastError: null,
     updatedAt: new Date().toISOString(),
   };
@@ -134,6 +137,107 @@ test("intent_claim then conclude advances to reason when no open Intents", () =>
     assert.ok(done && !done.startsWith("错误"));
     assert.equal(state.activeIntentId, null);
     assert.equal(state.phase, "reason");
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("finding tools are phase-gated: explore/reason write, bootstrap read-only", () => {
+  const explore = allowedToolNames("explore");
+  const reason = allowedToolNames("reason");
+  const bootstrap = allowedToolNames("bootstrap");
+  for (const name of ["finding_record", "finding_verify", "finding_retract"]) {
+    assert.ok(explore.has(name), `explore should allow ${name}`);
+    assert.ok(reason.has(name), `reason should allow ${name}`);
+    assert.ok(!bootstrap.has(name), `bootstrap must deny ${name}`);
+  }
+  assert.ok(bootstrap.has("finding_list"));
+  assert.ok(allowedToolNames("report").has("finding_list"));
+});
+
+test("finding_record → verify → retract through handleGraphTool", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-phase-find-"));
+  const history = openHistory({
+    dbPath: join(root, "h.sqlite"),
+    evidenceDir: join(root, "evidence"),
+  });
+  const state = tmpState("explore");
+  try {
+    const taskId = "t-find";
+    const ctx = { history, taskId, workspaceDir: root, state, save: () => {} };
+
+    const bad = handleGraphTool(
+      "finding_record",
+      { title: "x", asset: "a.com", vulnClass: "CWE-89", severity: "urgent" },
+      ctx,
+    );
+    assert.match(bad ?? "", /invalid severity/);
+
+    const recorded = JSON.parse(
+      handleGraphTool(
+        "finding_record",
+        {
+          title: "SQLi",
+          asset: "https://a.com/login",
+          vulnClass: "CWE-89",
+          severity: "high",
+          endpoint: "/login",
+        },
+        ctx,
+      )!,
+    ) as { finding: { id: string; status: string; asset: string }; created: boolean };
+    assert.equal(recorded.created, true);
+    assert.equal(recorded.finding.status, "tentative");
+    assert.equal(recorded.finding.asset, "a.com");
+
+    const dup = JSON.parse(
+      handleGraphTool(
+        "finding_record",
+        { title: "SQLi again", asset: "a.com", vulnClass: "CWE-89", severity: "high", endpoint: "/login" },
+        ctx,
+      )!,
+    ) as { created: boolean; finding: { id: string } };
+    assert.equal(dup.created, false);
+    assert.equal(dup.finding.id, recorded.finding.id);
+
+    const noEvidence = handleGraphTool(
+      "finding_verify",
+      { findingId: recorded.finding.id, evidencePaths: "", repro: "steps" },
+      ctx,
+    );
+    assert.match(noEvidence ?? "", /≥1 evidence/);
+
+    writeEvidenceFile(join(root, "evidence"), "findings/sqli.txt", "proof\n");
+    const verified = JSON.parse(
+      handleGraphTool(
+        "finding_verify",
+        {
+          findingId: recorded.finding.id,
+          evidencePaths: "findings/sqli.txt",
+          repro: "curl -d \"user='\" https://a.com/login",
+        },
+        ctx,
+      )!,
+    ) as { status: string; evidence: Array<{ sha256: string }> };
+    assert.equal(verified.status, "verified");
+    assert.equal(verified.evidence.length, 1);
+
+    const listed = JSON.parse(handleGraphTool("finding_list", {}, ctx)!) as {
+      count: number;
+      findings: Array<{ status: string }>;
+    };
+    assert.equal(listed.count, 1);
+    assert.equal(listed.findings[0]!.status, "verified");
+
+    const retracted = JSON.parse(
+      handleGraphTool(
+        "finding_retract",
+        { findingId: recorded.finding.id, reason: "误报" },
+        ctx,
+      )!,
+    ) as { status: string };
+    assert.equal(retracted.status, "retracted");
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

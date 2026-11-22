@@ -14,6 +14,9 @@ importers:
       '@gongyuai/control-plane':
         specifier: workspace:*
         version: link:packages/control-plane
+      '@gongyuai/history':
+        specifier: workspace:*
+        version: link:packages/history
     devDependencies:
       '@types/node':
         specifier: ^24.3.0
@@ -33,6 +36,9 @@ importers:
       '@gongyuai/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+      '@gongyuai/history':
+        specifier: workspace:*
+        version: link:../../packages/history
     devDependencies:
       '@types/node':
         specifier: ^24.3.0

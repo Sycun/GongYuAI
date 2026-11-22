@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -15,7 +16,9 @@ import {
   ImportSkillSchema,
   ModelSettingsPatchSchema,
   ToggleToolsItemSchema,
+  type TaskIntegrationUsage,
   ToolsSettingsPatchSchema,
+  UpdateScopeRequestSchema,
   UpdateSettingsPatchSchema,
 } from "@gongyuai/contracts";
 import {
@@ -26,9 +29,11 @@ import {
   readEvidenceFile,
   readExecutionStepCalls,
   resolveEvidenceFile,
+  writeEvidenceFile,
   writeTaskReport,
 } from "@gongyuai/history";
 import { deliverySummary } from "./delivery.js";
+import { projectIntegrationUsage } from "./integration-usage.js";
 import { taskPaths } from "./paths.js";
 import { readCheckpointGraph, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
@@ -220,6 +225,7 @@ export function startControlServer(opts: ServerOptions) {
         byTask.sort((a, b) => b.tokens - a.tokens || b.toolCalls - a.toolCalls);
         return send(res, 200, {
           totals: { tokens, toolCalls, installs, tasks: tasks.length },
+          ...(url.searchParams.get("integrations") === "1" ? { integrations: projectIntegrationUsage(tasks) } : {}),
           byTask: byTask.slice(0, 50),
         });
       }
@@ -336,6 +342,17 @@ export function startControlServer(opts: ServerOptions) {
         const rest = taskMatch[2] ?? "";
         const task = store.get(taskId);
         if (!task) return send(res, 404, { error: "not found" });
+        // Post-terminal changes (retest / client decision / retraction /
+        // correction) keep History authoritative; the report is re-rendered
+        // from it, preserving the previous delivered version on disk.
+        const refreshTerminalReport = (history: ReturnType<typeof openHistory>) => {
+          if (!isTerminalTaskStatus(task.status)) return;
+          writeTaskReport(
+            { taskId: task.id, dataDir: task.dataDir, auth: task.auth },
+            history,
+            { status: task.status, reason: task.error ?? undefined, accounting: task },
+          );
+        };
 
         if (method === "GET" && rest === "") {
           const before = task.usage;
@@ -362,6 +379,226 @@ export function startControlServer(opts: ServerOptions) {
         if (method === "POST" && rest === "/start") {
           const started = await runner.start(taskId);
           return send(res, 200, { task: started });
+        }
+        if (method === "POST" && rest === "/pause") {
+          try {
+            const paused = await runner.pause(taskId);
+            return send(res, 200, { task: paused });
+          } catch (err) {
+            return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        if (method === "POST" && rest === "/resume") {
+          try {
+            const resumed = await runner.resume(taskId);
+            return send(res, 200, { task: resumed });
+          } catch (err) {
+            return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        if (method === "POST" && rest === "/scope") {
+          const input = UpdateScopeRequestSchema.safeParse(await readJson(req));
+          if (!input.success) return send(res, 400, { error: input.error.message });
+          try {
+            const updated = runner.setScope(taskId, input.data.auth, input.data.reason);
+            const paths = taskPaths(updated.dataDir);
+            if (existsSync(paths.historyDb)) {
+              const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+              try {
+                history.appendFact({
+                  taskId,
+                  layer: "summary",
+                  title: `授权范围更新至 v${updated.scopeVersion}`,
+                  summary: `目标：${updated.auth.targets.join("、")}；排除：${updated.auth.outOfScope.join("、") || "未列出"}；原因：${input.data.reason}`,
+                  tags: ["scope", `scopeVersion:${updated.scopeVersion}`],
+                });
+              } finally {
+                history.close();
+              }
+            }
+            return send(res, 200, { task: updated });
+          } catch (err) {
+            return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        if (method === "GET" && rest === "/findings") {
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 200, { findings: [], actions: [] });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+          try {
+            return send(res, 200, {
+              findings: history.listFindings(task.id),
+              actions: history.listFindingActions(task.id),
+              goalFindings: history.listGoalFindings(task.id),
+            });
+          } finally {
+            history.close();
+          }
+        }
+        const operatorFinding = /^\/findings\/([^/]+)\/(verify|retract)$/.exec(rest);
+        if (method === "POST" && operatorFinding) {
+          const findingId = decodeURIComponent(operatorFinding[1]!);
+          const action = operatorFinding[2]!;
+          const body = await readJson(req) as Record<string, unknown>;
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            if (action === "retract") {
+              const reason = typeof body.reason === "string" ? body.reason : "";
+              const finding = history.retractFinding(task.id, findingId, reason);
+              refreshTerminalReport(history);
+              return send(res, 200, { finding });
+            }
+            const evidencePaths = Array.isArray(body.evidencePaths)
+              ? body.evidencePaths.filter((v): v is string => typeof v === "string")
+              : [];
+            const finding = history.verifyFinding(task.id, findingId, {
+              evidencePaths,
+              repro: typeof body.repro === "string" ? body.repro : "",
+              impact: typeof body.impact === "string" ? body.impact : undefined,
+              fix: typeof body.fix === "string" ? body.fix : undefined,
+            });
+            refreshTerminalReport(history);
+            return send(res, 200, { finding });
+          } catch (err) {
+            return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            history.close();
+          }
+        }
+        const findingAction = /^\/findings\/([^/]+)\/(retest|accept)$/.exec(rest);
+        if (method === "POST" && findingAction) {
+          const findingId = decodeURIComponent(findingAction[1]!);
+          const action = findingAction[2]!;
+          const body = await readJson(req) as Record<string, unknown>;
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            if (action === "retest") {
+              const result = body.result;
+              if (result !== "fixed" && result !== "still-present" && result !== "partially-fixed") {
+                return send(res, 400, { error: "result must be fixed|still-present|partially-fixed" });
+              }
+              const evidencePaths = Array.isArray(body.evidencePaths)
+                ? body.evidencePaths.filter((v): v is string => typeof v === "string")
+                : [];
+              const outcome = history.retestFinding(task.id, findingId, {
+                result,
+                evidencePaths,
+                repro: typeof body.repro === "string" ? body.repro : "",
+                note: typeof body.note === "string" ? body.note : undefined,
+              });
+              refreshTerminalReport(history);
+              return send(res, 201, outcome);
+            }
+            const outcome = history.acceptFinding(task.id, findingId, {
+              note: typeof body.note === "string" ? body.note : "",
+              evidencePath: typeof body.evidencePath === "string" ? body.evidencePath : "",
+            });
+            refreshTerminalReport(history);
+            return send(res, 201, outcome);
+          } catch (err) {
+            return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "GET" && rest === "/snapshot") {
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+          try {
+            const snapshot = history.deliverySnapshot(task.id);
+            return send(res, 200, { snapshot, scorecard: history.scorecard(task.id) });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "GET" && rest === "/scorecard") {
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+          try {
+            return send(res, 200, { scorecard: history.scorecard(task.id) });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "GET" && rest === "/corrections") {
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 200, { corrections: [] });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+          try {
+            return send(res, 200, { corrections: history.listDeliveryCorrections(task.id) });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "POST" && rest === "/corrections") {
+          const body = await readJson(req) as {
+            reason?: unknown;
+            findings?: unknown;
+            noticeStatus?: unknown;
+          };
+          const reason = typeof body.reason === "string" ? body.reason : "";
+          const findings = Array.isArray(body.findings)
+            ? body.findings.filter((id): id is string => typeof id === "string")
+            : [];
+          const notice = typeof body.noticeStatus === "string" &&
+            ["pending", "notified", "confirmed"].includes(body.noticeStatus)
+            ? (body.noticeStatus as "pending" | "notified" | "confirmed")
+            : "pending";
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            const reportPath = join(task.dataDir, "report.md");
+            const report = existsSync(reportPath)
+              ? [{
+                  path: "report.md",
+                  sha256: createHash("sha256").update(readFileSync(reportPath)).digest("hex"),
+                }]
+              : [];
+            const created = history.recordDeliveryCorrection(task.id, {
+              reason,
+              ...(findings.length ? { findings } : {}),
+              report,
+              noticeStatus: notice,
+            });
+            refreshTerminalReport(history);
+            return send(res, created.created ? 201 : 200, { correction: created.correction, created: created.created });
+          } catch (err) {
+            return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            history.close();
+          }
+        }
+        const noticeMatch = /^\/corrections\/([^/]+)\/notice$/.exec(rest);
+        if (method === "POST" && noticeMatch) {
+          const body = await readJson(req) as { status?: unknown; evidencePath?: unknown };
+          const status = typeof body.status === "string" &&
+            ["pending", "notified", "confirmed"].includes(body.status)
+            ? (body.status as "pending" | "notified" | "confirmed")
+            : null;
+          if (!status) return send(res, 400, { error: "status must be pending|notified|confirmed" });
+          const paths = taskPaths(task.dataDir);
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            const updated = history.setDeliveryCorrectionNotice(
+              task.id,
+              decodeURIComponent(noticeMatch[1]!),
+              status,
+              typeof body.evidencePath === "string" ? body.evidencePath : undefined,
+            );
+            refreshTerminalReport(history);
+            return send(res, 200, { correction: updated });
+          } catch (err) {
+            return send(res, 409, { error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            history.close();
+          }
         }
         if (method === "POST" && rest === "/archive") {
           try {
@@ -455,6 +692,7 @@ export function startControlServer(opts: ServerOptions) {
               events: [],
               assets: [],
               hints: [],
+              findings: [],
             });
           }
           const history = openHistory({
@@ -477,6 +715,7 @@ export function startControlServer(opts: ServerOptions) {
               events: history.listEvents(task.id, 100),
               assets: history.listAssets(task.id),
               hints: history.listHints(task.id, 50),
+              findings: history.listFindings(task.id),
             });
           } finally {
             history.close();
@@ -540,6 +779,18 @@ export function startControlServer(opts: ServerOptions) {
             history.close();
           }
         }
+        if (method === "POST" && rest === "/evidence") {
+          const body = await readJson(req) as { path?: unknown; content?: unknown };
+          if (typeof body.path !== "string" || typeof body.content !== "string") {
+            return send(res, 400, { error: "path and content (utf8 text) are required" });
+          }
+          try {
+            const written = writeEvidenceFile(taskPaths(task.dataDir).evidenceDir, body.path, body.content);
+            return send(res, 201, { path: written });
+          } catch (err) {
+            return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
         if (method === "GET" && rest === "/evidence") {
           const { evidenceDir } = taskPaths(task.dataDir);
           const files = listEvidenceFiles(evidenceDir).flatMap((path) => {
@@ -596,6 +847,7 @@ export function startControlServer(opts: ServerOptions) {
               .slice(-40);
           }
           const checkpointGraph = readCheckpointGraph(task.dataDir);
+          let integrations: TaskIntegrationUsage = { since: null, rows: [] };
           let recentFacts: Array<{
             id: string;
             title: string;
@@ -610,6 +862,7 @@ export function startControlServer(opts: ServerOptions) {
               evidenceDir: paths.evidenceDir,
             });
             try {
+              integrations = history.integrationUsage(task.id);
               recentFacts = history
                 .listFacts(task.id)
                 .slice(-30)
@@ -653,6 +906,21 @@ export function startControlServer(opts: ServerOptions) {
             }
           }
           const terminal = isTerminalTaskStatus(task.status);
+          const alive = runner.isAlive(task);
+          // Stage 2 — four distinct operator-facing states. "Unknown" is a
+          // first-class answer: an active record with no live worker and no
+          // fresh heartbeat is not "running".
+          const externalState = terminal
+            ? "stopped"
+            : task.status === "paused"
+              ? "paused"
+              : task.status === "pause_requested"
+                ? "pause_requested"
+                : task.status === "stopping"
+                  ? "stopping"
+                  : alive
+                    ? "running"
+                    : "unknown";
           const workerStatus = {
             ...workerSnapshot,
             status: terminal ? task.status : workerSnapshot.status ?? task.status,
@@ -664,6 +932,9 @@ export function startControlServer(opts: ServerOptions) {
             updatedAt: (terminal ? task.finishedAt : workerSnapshot.updatedAt) ?? task.updatedAt,
           };
           return send(res, 200, {
+            externalState,
+            lastConfirmedAt: task.lastHeartbeatAt ?? (workerSnapshot.updatedAt as string | undefined) ?? task.updatedAt,
+            scopeVersion: task.scopeVersion,
             leaseOwner: task.leaseOwner,
             leaseUntil: task.leaseUntil,
             fence: task.fence,
@@ -675,10 +946,11 @@ export function startControlServer(opts: ServerOptions) {
             phase: checkpointGraph.phase,
             activeIntentId: checkpointGraph.activeIntentId,
             workerStatus,
-            hasCheckpoint: existsSync(ckptPath),
+            hasCheckpoint: existsSync(ckptPath) || existsSync(paths.durableDb),
             dataDir: task.dataDir,
             progress,
             trace: listExecutionSteps(task.dataDir),
+            integrations,
             recentFacts,
             recentIntents,
             usage: mergedUsage,

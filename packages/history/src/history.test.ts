@@ -65,6 +65,7 @@ test("ALL_COMPLETE.json requires every is_completed=true", () => {
       title: "Clear board",
       description: "all done",
       evidencePatterns: ["tsec/ALL_COMPLETE.json"],
+      boardGate: "tsecbench",
       passes: false,
       evidencePaths: [],
       assertedAt: null,

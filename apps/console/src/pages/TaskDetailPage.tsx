@@ -19,6 +19,7 @@ import { IconArchive, IconPlay, IconRefresh, IconStop, IconUndo } from "@douyinf
 import {
   api,
   type AssetRecord,
+  type FindingRecord,
   type HintRecord,
   type HistoryPayload,
   type RuntimePayload,
@@ -28,10 +29,15 @@ import {
   ASSET_KIND_LABEL,
   DETAIL_TABS,
   type DetailTab,
+  FINDING_SEVERITY_LABEL,
+  FINDING_STATUS_LABEL,
   STATUS_LABEL,
+  findingSeverityColor,
+  findingStatusColor,
   formatWorkerStatus,
   isActiveStatus,
   isArchivedTask,
+  isPausedStatus,
   isStartableStatus,
   isTerminalStatus,
   shortId,
@@ -40,6 +46,7 @@ import {
 import { StatusTag } from "../components/StatusTag";
 import { GoalCoverage } from "../components/GoalCoverage";
 import { ExecutionTrace } from "../components/ExecutionTrace";
+import { IntegrationUsage } from "../components/IntegrationUsage";
 import { formatDateTime } from "../time";
 
 const FactIntentDag = lazy(() => import("../components/dag/FactIntentDag"));
@@ -67,6 +74,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   const [hints, setHints] = useState<HintRecord[]>([]);
   const [hintDraft, setHintDraft] = useState("");
   const [hintBusy, setHintBusy] = useState(false);
+  const [findingProof, setFindingProof] = useState<{ path: string; body: string } | null>(null);
 
   useEffect(() => {
     if (!task) return;
@@ -76,7 +84,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
       setLoading(true);
       setPaneText("");
       try {
-        if (tab === "live" || tab === "goals" || tab === "history") {
+        if (tab === "live" || tab === "goals" || tab === "history" || tab === "findings") {
           const [h, r] = await Promise.all([api.history(task!.id), api.runtime(task!.id)]);
           if (cancelled) return;
           setHistory(h.json);
@@ -127,6 +135,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
       tab !== "live" &&
       tab !== "goals" &&
       tab !== "history" &&
+      tab !== "findings" &&
       tab !== "assets" &&
       tab !== "logs"
     ) {
@@ -135,7 +144,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     let cancelled = false;
     const tick = async () => {
       try {
-        if (tab === "live" || tab === "goals" || tab === "history") {
+        if (tab === "live" || tab === "goals" || tab === "history" || tab === "findings") {
           const [h, r] = await Promise.all([api.history(task.id), api.runtime(task.id)]);
           if (cancelled) return;
           setHistory(h.json);
@@ -180,6 +189,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
 
   const usage = liveUsage ?? task.usage;
   const active = isActiveStatus(task.status);
+  const paused = isPausedStatus(task.status);
   const startable = isStartableStatus(task.status);
   const archived = isArchivedTask(task);
   const archivable = isTerminalStatus(task.status) && !archived;
@@ -190,6 +200,34 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     try {
       await api.stop(task.id);
       Toast.success("已发送停止");
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const pauseTask = async () => {
+    if (!active || actionBusy || task.status === "pause_requested" || task.status === "stopping") return;
+    setActionBusy(true);
+    try {
+      await api.pause(task.id);
+      Toast.success("已请求暂停；确认 worker 退出后显示已暂停");
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const resumeTask = async () => {
+    if (!paused || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await api.resume(task.id);
+      Toast.success("已继续；本次运行读取最新授权版本");
       await onRefresh();
     } catch (e) {
       Toast.error(e instanceof Error ? e.message : String(e));
@@ -275,7 +313,10 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
             {archived ? <Tag color="grey">已归档</Tag> : null}
           </Space>
           <Typography.Text type="tertiary" style={{ display: "block", marginTop: 6 }}>
-            编号 {shortId(task.id)} · 目标 {(task.auth.targets || []).join(", ") || "—"}
+            编号 {shortId(task.id)} · 目标 {(task.auth.targets || []).join(", ") || "—"} · 授权版本 v
+            {runtime?.scopeVersion ?? task.scopeVersion ?? 1}
+            {runtime?.externalState ? ` · 外部状态 ${runtime.externalState}` : ""}
+            {runtime?.lastConfirmedAt ? ` · 最后确认 ${formatDateTime(runtime.lastConfirmedAt)}` : ""}
           </Typography.Text>
           {task.error ? (
             <Typography.Text type="danger" style={{ display: "block", marginTop: 4 }}>
@@ -303,6 +344,22 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
               onClick={() => void unarchiveTask()}
             >
               取消归档
+            </Button>
+          ) : null}
+          {active && task.status !== "pause_requested" && task.status !== "stopping" ? (
+            <Button loading={actionBusy} onClick={() => void pauseTask()}>
+              暂停
+            </Button>
+          ) : null}
+          {paused ? (
+            <Button
+              type="primary"
+              theme="solid"
+              icon={<IconPlay />}
+              loading={actionBusy}
+              onClick={() => void resumeTask()}
+            >
+              继续
             </Button>
           ) : null}
           {active ? (
@@ -426,6 +483,9 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                   ]}
                 />
               </Card>
+            </Col>
+            <Col span={24} style={{ marginTop: 16 }}>
+              <IntegrationUsage usage={runtime?.integrations} />
             </Col>
             <Col span={24} style={{ marginTop: 16 }}>
               <Card
@@ -744,6 +804,176 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
               </Card>
             </Col>
           </Row>
+        )}
+
+        {tab === "findings" && (
+          <Card
+            title={`Finding 台账 · ${(history?.findings ?? []).length} 条`}
+            style={{ background: "var(--semi-color-bg-1)" }}
+            headerExtraContent={
+              <Typography.Text type="tertiary" size="small">
+                只读 History 投影 · tentative 不进交付 · verified 附封存证据
+              </Typography.Text>
+            }
+          >
+            {(history?.findings ?? []).length === 0 ? (
+              <Empty
+                title="暂无 Finding"
+                description="Worker 发现线索会 finding_record；复现并封存证据后 finding_verify。"
+              />
+            ) : (
+              <>
+                <Space style={{ marginBottom: 12 }} wrap>
+                  {(["critical", "high", "medium", "low", "info"] as const).map((s) => {
+                    const n = (history?.findings ?? []).filter(
+                      (f) => f.severity === s && f.status !== "retracted",
+                    ).length;
+                    if (!n) return null;
+                    return (
+                      <Tag key={s} color={findingSeverityColor(s)} size="small">
+                        {FINDING_SEVERITY_LABEL[s]} {n}
+                      </Tag>
+                    );
+                  })}
+                </Space>
+                <Table
+                  size="small"
+                  pagination={
+                    (history?.findings ?? []).length > 20 ? { pageSize: 20 } : false
+                  }
+                  dataSource={(history?.findings ?? []).map((f) => ({ ...f, key: f.id }))}
+                  expandedRowRender={(record?: FindingRecord) =>
+                    record ? (
+                    <div style={{ padding: "8px 16px" }}>
+                      {record.cvss && (
+                        <Typography.Paragraph size="small">
+                          CVSS vector：{record.cvss}
+                        </Typography.Paragraph>
+                      )}
+                      {record.repro && (
+                        <Typography.Paragraph size="small">
+                          复现：{record.repro}
+                        </Typography.Paragraph>
+                      )}
+                      {record.impact && (
+                        <Typography.Paragraph size="small">
+                          影响：{record.impact}
+                        </Typography.Paragraph>
+                      )}
+                      {record.fix && (
+                        <Typography.Paragraph size="small">
+                          修复建议：{record.fix}
+                        </Typography.Paragraph>
+                      )}
+                      {record.evidence.length === 0 ? (
+                        <Typography.Text type="tertiary" size="small">
+                          暂无封存证据（tentative 线索）
+                        </Typography.Text>
+                      ) : (
+                        record.evidence.map((e) => (
+                          <div key={e.path}>
+                            <Button
+                              size="small"
+                              theme="borderless"
+                              onClick={async () => {
+                                try {
+                                  const r = await api.evidenceFile(task!.id, e.path);
+                                  setFindingProof({ path: e.path, body: r.text });
+                                } catch (err) {
+                                  Toast.error(
+                                    err instanceof Error ? err.message : String(err),
+                                  );
+                                }
+                              }}
+                            >
+                              {e.path}
+                            </Button>
+                            <Typography.Text type="tertiary" size="small">
+                              SHA-256 {e.sha256.slice(0, 16)}…
+                            </Typography.Text>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    ) : null
+                  }
+                  columns={[
+                    {
+                      title: "严重性",
+                      dataIndex: "severity",
+                      width: 90,
+                      render: (s: string) => (
+                        <Tag color={findingSeverityColor(s)} size="small">
+                          {FINDING_SEVERITY_LABEL[s] ?? s}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      title: "标题",
+                      dataIndex: "title",
+                      width: 240,
+                      ellipsis: true,
+                    },
+                    {
+                      title: "资产 / 端点",
+                      dataIndex: "asset",
+                      width: 280,
+                      render: (v: string, record: FindingRecord) => (
+                        <Typography.Text
+                          style={{
+                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                          }}
+                        >
+                          {v}
+                          {record.endpoint ? ` · ${record.endpoint}` : ""}
+                        </Typography.Text>
+                      ),
+                    },
+                    {
+                      title: "类别",
+                      dataIndex: "vulnClass",
+                      width: 120,
+                    },
+                    {
+                      title: "状态",
+                      dataIndex: "status",
+                      width: 110,
+                      render: (s: string) => (
+                        <Tag color={findingStatusColor(s)} size="small">
+                          {FINDING_STATUS_LABEL[s] ?? s}
+                        </Tag>
+                      ),
+                    },
+                    {
+                      title: "证据",
+                      dataIndex: "evidence",
+                      width: 70,
+                      render: (e: FindingRecord["evidence"]) => e.length,
+                    },
+                    {
+                      title: "记录时间",
+                      dataIndex: "createdAt",
+                      width: 180,
+                      render: (t: string) => formatDateTime(t, true),
+                    },
+                  ]}
+                />
+                {findingProof && (
+                  <Card
+                    title={`证据 · ${findingProof.path}`}
+                    style={{ marginTop: 12 }}
+                    headerExtraContent={
+                      <Button size="small" onClick={() => setFindingProof(null)}>
+                        关闭
+                      </Button>
+                    }
+                  >
+                    <pre className="gy-mono">{findingProof.body}</pre>
+                  </Card>
+                )}
+              </>
+            )}
+          </Card>
         )}
 
         {tab === "history" && (

@@ -99,7 +99,7 @@ export function createBuiltinFromRoot(
         timeoutMs: 600_000,
       });
       return {
-        ok: r.exitCode === 0 || r.stdout.length > 0,
+        ok: r.exitCode === 0,
         text: JSON.stringify({
           exitCode: r.exitCode,
           evidencePath: r.evidencePath,

@@ -107,6 +107,7 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     async close() {
       await watchdog.stop();
       await server.close();
+      runner.dispose();
       store.close();
     },
   };

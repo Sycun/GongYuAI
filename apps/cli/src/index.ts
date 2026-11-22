@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { compareCommand, snapshotCommand } from "./coverage-audit.js";
 import {
   BUDGET_UNLIMITED,
   CreateTaskRequestSchema,
+  UpdateScopeRequestSchema,
   isTerminalTaskStatus,
 } from "@gongyuai/contracts";
+import { scorecardFromSnapshot } from "@gongyuai/history";
 import {
   bootControlPlane,
   resolveCanonicalDataRoot,
@@ -36,6 +38,21 @@ Usage:
   gy coverage-snapshot <taskId> --out FILE [--data-dir DIR]
   gy coverage-compare SNAPSHOT REFERENCE --snapshot-sha256 HASH --reference-sha256 HASH
   gy review <taskId> --file REVIEW.json
+  gy pause <taskId>             # 请求暂停；确认 worker 退出后记录为 paused
+  gy resume <taskId>            # 从 paused 继续；启动时读取最新授权版本
+  gy scope <taskId> --file SCOPE.json   # { "auth": {...}, "reason": "..." }
+  gy scorecard <taskId> [--out FILE]    # 交付记分卡；--out 导出可复算快照
+  gy scorecard --recompute FILE         # 只读快照，离线复算分子/分母
+  gy evidence <taskId> --path P --file LOCAL   # 导入材料（utf8 文本）
+  gy finding-verify <taskId> --finding ID --evidence FILE[,FILE] --repro TEXT
+  gy finding-retract <taskId> --finding ID --reason TEXT
+  gy findings <taskId>
+  gy retest <taskId> --finding ID --result fixed|still-present|partially-fixed
+            --evidence FILE[,FILE] --repro TEXT [--note TEXT]
+  gy accept <taskId> --finding ID --note TEXT --evidence FILE
+  gy correct <taskId> --reason TEXT [--findings ID,ID] [--notice pending|notified]
+  gy correction-notice <taskId> <correctionId> --status notified|confirmed [--evidence FILE]
+  gy corrections <taskId>
   gy stop <taskId>
   gy archive <taskId>
   gy unarchive <taskId>
@@ -308,6 +325,218 @@ async function main(): Promise<void> {
     try {
       const report = await api(opts, "GET", `/tasks/${id}/report`);
       process.stdout.write(report.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "evidence") {
+    const id = rest[0];
+    const path = flag(rest, "--path");
+    const file = flag(rest, "--file");
+    if (!id || !path || !file) throw new Error("gy evidence <taskId> --path P --file LOCAL");
+    const content = readFileSync(resolve(file), "utf8");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/evidence`, { path, content });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "finding-verify" || cmd === "finding-retract") {
+    const id = rest[0];
+    const finding = flag(rest, "--finding");
+    if (!id || !finding) throw new Error(`gy ${cmd} <taskId> --finding ID`);
+    const owned = await ensureServer(opts);
+    try {
+      const body = cmd === "finding-retract"
+        ? { reason: flag(rest, "--reason") ?? "" }
+        : {
+            evidencePaths: (flag(rest, "--evidence") ?? "").split(",").map((v) => v.trim()).filter(Boolean),
+            repro: flag(rest, "--repro") ?? "",
+          };
+      const r = await api(
+        opts,
+        "POST",
+        `/tasks/${id}/findings/${finding}/${cmd === "finding-retract" ? "retract" : "verify"}`,
+        body,
+      );
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "findings") {
+    const id = rest[0];
+    if (!id) throw new Error("gy findings <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/findings`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "retest") {
+    const id = rest[0];
+    const finding = flag(rest, "--finding");
+    const result = flag(rest, "--result");
+    const evidence = flag(rest, "--evidence");
+    const repro = flag(rest, "--repro");
+    if (!id || !finding || !result || !evidence || !repro) {
+      throw new Error("gy retest <taskId> --finding ID --result fixed|still-present|partially-fixed --evidence FILE --repro TEXT");
+    }
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/findings/${finding}/retest`, {
+        result,
+        evidencePaths: evidence.split(",").map((v) => v.trim()).filter(Boolean),
+        repro,
+        ...(flag(rest, "--note") ? { note: flag(rest, "--note") } : {}),
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "accept") {
+    const id = rest[0];
+    const finding = flag(rest, "--finding");
+    const note = flag(rest, "--note");
+    const evidence = flag(rest, "--evidence");
+    if (!id || !finding || !note || !evidence) {
+      throw new Error("gy accept <taskId> --finding ID --note TEXT --evidence FILE");
+    }
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/findings/${finding}/accept`, { note, evidencePath: evidence });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "pause" || cmd === "resume") {
+    const id = rest[0];
+    if (!id) throw new Error(`gy ${cmd} <taskId>`);
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/${cmd}`);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "scope") {
+    const id = rest[0];
+    const path = flag(rest, "--file");
+    if (!id || !path) throw new Error("gy scope <taskId> --file SCOPE.json");
+    const body = UpdateScopeRequestSchema.parse(JSON.parse(readFileSync(resolve(path), "utf8")));
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/scope`, body);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "scorecard") {
+    const recompute = flag(rest, "--recompute");
+    if (recompute) {
+      const parsed: unknown = JSON.parse(readFileSync(resolve(recompute), "utf8"));
+      const result = scorecardFromSnapshot(parsed);
+      if (!result.ok) throw new Error(result.reason);
+      console.log(JSON.stringify({ sealValid: result.sealValid, scorecard: result.scorecard }, null, 2));
+      if (!result.sealValid) process.exitCode = 2;
+      return;
+    }
+    const id = rest[0];
+    if (!id) throw new Error("gy scorecard <taskId> [--out FILE]");
+    const out = flag(rest, "--out");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/snapshot`);
+      if (r.status >= 400) throw new Error(r.text);
+      const payload = r.json as { snapshot: unknown; scorecard: unknown };
+      if (out) writeFileSync(resolve(out), JSON.stringify(payload.snapshot, null, 2) + "\n");
+      console.log(JSON.stringify(payload.scorecard, null, 2));
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "corrections") {
+    const id = rest[0];
+    if (!id) throw new Error("gy corrections <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/corrections`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "correct") {
+    const id = rest[0];
+    const reason = flag(rest, "--reason");
+    if (!id || !reason) throw new Error("gy correct <taskId> --reason TEXT");
+    const findings = flag(rest, "--findings");
+    const notice = flag(rest, "--notice");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/corrections`, {
+        reason,
+        ...(findings ? { findings: findings.split(",").map((v) => v.trim()).filter(Boolean) } : {}),
+        ...(notice ? { noticeStatus: notice } : {}),
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "correction-notice") {
+    const id = rest[0];
+    const correctionId = rest[1];
+    const status = flag(rest, "--status");
+    const evidence = flag(rest, "--evidence");
+    if (!id || !correctionId || !status) {
+      throw new Error("gy correction-notice <taskId> <correctionId> --status notified|confirmed [--evidence FILE]");
+    }
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/corrections/${correctionId}/notice`, {
+        status,
+        ...(evidence ? { evidencePath: evidence } : {}),
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
     } finally {
       if (owned.close) await owned.close();
     }

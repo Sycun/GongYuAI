@@ -74,6 +74,13 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 - Explore 墙钟：`exploreTimeoutMs`（默认 15min）超时强制 conclude + partial Fact；Reason 多 slot：`reasonLeaseMs` CAS。  
 - 细则：[asset-inventory.md](./asset-inventory.md)；匹配实现：`packages/contracts/src/scope.ts`。
 
+### Explore 并发与动态扩容
+
+- 有效并发 = `min(maxConcurrentExplores, max(seed靶标数, admitted/live 资产数))`；硬顶 16，下限 1。启动与崩溃重启均按此解析。
+- 运行中 Watchdog 存活分支调 `runner.reconcileWorkers`：**只扩不缩**、永不超用户上限、只读资产计数不读 Fact 内容（资源供给，非战术；零策略军规不破）。每任务检查节流 ≥10s。
+- 新 slot 为 follower（leader 判定只看 `slot===0`）；独立 Durable checkpoint；预算口径与聚合闸不变；扩容写 `explore_scaled` 事件。
+- 细则与验收：[parallel-explore-scaling.md](./parallel-explore-scaling.md)。
+
 ## Evidence gate
 
 `assertGoal(goalId, paths)` succeeds only when:
@@ -83,6 +90,29 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 3. If a path is `**/ALL_COMPLETE.json`, the JSON must be a non-empty challenge array and **every** `is_completed` must be `true`（TSecBench 清板）。
 
 普通目标至少需要非空材料。可配置 `evidenceChecks` 精确匹配 JSON 顶层字段；断言依据的原始字节与 SHA-256 在同一事务保存。旧记录缺少原版时报告标明未知。见[事实复核与离线验收](./evidence-review.md)。
+
+**基准语义必须显式选择**：只有目标声明 `boardGate: "tsecbench"` 时，名为 `ALL_COMPLETE.json` 的文件才按清板数组校验（非空、每条 `is_completed === true`）。普通委托附一份同名业务材料，只按该目标声明的 `evidencePatterns` / `evidenceChecks` 判读；交付摘要也不得以文件名推断"做过内容检查"。基准样例（`examples/tsecbench/goals-autonomous.json`）在目标里显式写入 `boardGate`。
+
+可配置 `findingsGate { minVerified, minSeverity?, vulnClasses?, scope?, assets? }`（P6-E1）：
+- `scope: "goal"`（默认）只计**本目标声明资产**（`assets`，或 `findingsGate.assets`）上的发现；未声明资产即拒绝断言，禁止退化为全任务累计（A1）。
+- `scope: "task"` 是显式的全委托汇总口径，只有汇总目标可以用。
+- 只计 `verified` / `retested` / `accepted`；severity 与 vulnClass 可收窄；不满足即拒绝，与证据闸同等硬。
+- 首次通过时把支持该目标的 `findingId`、当时状态与封存证据写入 `goal_findings`（A3/A5）。之后撤回不抹掉首次通过，但当前交付会显示"唯一依据已撤回"或"部分依据已撤回"。
+
+**提交顺序（A3）**：findings 查询与首次通过写在同一个 `BEGIN IMMEDIATE` 事务里。撤回先提交 → 本次断言看不到该发现；断言先提交 → 历史通过保留，当前核对按最新状态重算。
+
+## Finding ledger（P6-E1）
+
+漏洞是图对象，不是聊天叙述。`findings` 表 + `finding_proofs`（证据 SHA-256 封存，同 `evidence_versions`）。
+
+- **状态单向**：`tentative → verified → retested → accepted`；`retracted` 为终态，任何非终态可撤回。行永不删除（append-only 语义）。
+- **处置分列**：技术确认（`finding_verify`）、整改复测（`finding_actions.action=retest`，结果 fixed/still-present/partially-fixed，逐轮留存）、客户风险处置（`action=accept`，须客户决定文件）分别记录；复测/处置不覆盖原始验证证据。
+- **record**：`finding_record` 一律从 `tentative` 起步；`dedupKey`（缺省 asset|vulnClass|endpoint）唯一，重复记录幂等返回已有行。
+- **verify 硬闸**：≥1 个 `evidence/` 内 regular file（当场 SHA-256 封存）+ 非空 `repro`；缺一拒绝。verified 后 confidence=firm。
+- **交付边界**：报告 §Findings 只渲染 verified/retested/accepted；tentative 只计数提示，retracted 保留可查不进交付。
+- **工具相位**：`finding_record/verify/retract` 在 explore+reason；`finding_list` 全相位可读。Observe 注入 Findings 台账（近 30 条，含状态/severity）。
+- **事件**：`finding_recorded` / `finding_verified` / `finding_retracted` 入 `history_events`。
+- 不做：自动 CVSS 算分当结论（只存 vector 原文）；口头改状态；finding 级向量检索。
 
 ## Session Relay（CHAP 对齐，GongYuAI 化）
 
@@ -138,8 +168,8 @@ Worker OpenAI loop 按 Durable `phase` 过滤工具面：
 | phase | 允许（摘要） |
 | --- | --- |
 | bootstrap | History 读写、`intent_propose`、`phase_set`、Skill；无 shell/MCP 执行 |
-| explore | claim/conclude + shell/MCP/install/`assert_goal`/`technique_transfer`；**每 worker** 一次一个 `activeIntentId`；多 worker 靠 Intent CAS 并行 |
-| reason | propose / assert / History / `technique_transfer`；**有 open Intent 时强制回 explore**；吸收 Hint |
+| explore | claim/conclude + shell/MCP/install/`assert_goal`/`technique_transfer` + `finding_record/verify/retract`；**每 worker** 一次一个 `activeIntentId`；多 worker 靠 Intent CAS 并行 |
+| reason | propose / assert / History / `technique_transfer` / `finding_record/verify/retract`；**有 open Intent 时强制回 explore**；吸收 Hint |
 
 ## Hint（P4）
 
@@ -160,7 +190,9 @@ Worker OpenAI loop 按 Durable `phase` 过滤工具面：
 
 Prompt **禁止**把预算说成倒计时，禁止「还剩 N 分钟 / 本轮收口」提前停工。清板类任务另注入单题软限额与 Intent 纪律（见 `board-policy.ts`）。
 
-**软节奏提示**（`soft-pace.ts`）：默认每 50 次工具调用、每 2 小时墙钟注入一次用户侧提醒（换题/续跑）。**只提示，从不终止循环**，绝不写成 `budget_exhausted`。可用 `GY_SOFT_TOOL_STEP` / `GY_SOFT_WALL_MS` 调整。
+**软节奏提示**（`soft-pace.ts`）：默认每 50 次工具调用、每 2 小时墙钟、以及**同一 Intent 每 25 次工具**注入提醒（建图 / 验证影响 / 换面）。**只提示，从不终止循环**，绝不写成 `budget_exhausted`。Pi 长会话在 `afterTools` 入队，续跑时注入。可用 `GY_SOFT_TOOL_STEP` / `GY_SOFT_WALL_MS` / `GY_SOFT_SURFACE_STEP` 调整。
+
+**渗透作业视角**（清板/engagement 任务）：`board-policy.ts` + `goals-autonomous.json` 把目标函数定为攻击面经营与可审计 finding；flag/题号只是 PoC 条件。交付并行维护 `engagement/report.md`。
 
 Loop exits on any of: all goals pass, optional hard gate, fatal error, or operator stop.
 
@@ -194,9 +226,18 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 
 新任务 schema 默认 `observe`；`gy run` 默认传 `active-lab`。VPN/代理变更永远拒绝。
 
+## Pause / resume / scope revision（阶段 2）
+
+- **状态分层**：`pause_requested`（已请求、worker 收尾中）与 `stopping` 是活动过渡态；`paused` 非活动、非终态；`stopped` 才是终态。看门狗不重启也不提升过渡态。
+- **暂停确认**：`pause` 先写请求，再向 worker 发 SIGTERM，轮询确认进程消失后才写 `paused`。超时未确认则回 `recovering` 并报错——不发布"假暂停"。Checkpoint / History / 证据 / 用量全部保留；不写终态报告。
+- **恢复**：`resume` 从最新控制面记录重建 manifest，因此**恢复即读取最新授权版本**；范围更新（`POST /tasks/:id/scope`）只能在无 worker 运行时进行，`scopeVersion` 递增并写一条 summary Fact。旧的 π/图事实不会恢复旧范围。
+- **外部状态**：`GET /runtime` 返回 `externalState = running | pause_requested | stopping | paused | stopped | unknown` 与 `lastConfirmedAt`。活动记录但无存活 worker、无新心跳时如实报 `unknown`，不以进程启动或端口监听冒充健康。
+- **未实现**：`operator_consult` 与"24h 无回复自动转非阻塞"仍属提案（P11 S2）。
+
 ## Idempotency
 
 - History facts are append-only.
+- History SQLite 并发纪律：WAL + `busy_timeout=5000`；多 Explore 共享写，事务保持短（Intent CAS / conclude 回写均单事务）。控制面读资产计数用短开只读连接。
 - Intent claim is compare-and-swap on `proposed`.
 - Goal assert is sticky (`passes` never reverts).
 - Tool installs record History events.

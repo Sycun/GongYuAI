@@ -73,6 +73,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
     dbPath: manifest.historyDb,
     evidenceDir: manifest.evidenceDir,
   });
+  history.trackIntegrationCalls(manifest.taskId);
   const ckpt = new CheckpointStore(manifest.durableDb);
   let state = ckpt.load();
   const slot = manifest.workerSlot ?? 0;
@@ -279,6 +280,8 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           if (!claimed) throw new Error("failed to claim install intent");
           state.activeIntentId = intent.id;
           state.activeIntentClaimedAt = new Date().toISOString();
+          state.toolsAtIntentClaim = state.toolCalls;
+          state.lastSoftSurfaceMilestone = 0;
           save();
 
           dispatchMockTool(ctx, "mock_prepare");
@@ -288,6 +291,8 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           });
           state.activeIntentId = null;
           state.activeIntentClaimedAt = null;
+          state.toolsAtIntentClaim = null;
+          state.lastSoftSurfaceMilestone = 0;
           state.step = 1;
           save();
           continue;
@@ -308,6 +313,8 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           if (!claimed) throw new Error("failed to claim recon intent");
           state.activeIntentId = intent.id;
           state.activeIntentClaimedAt = new Date().toISOString();
+          state.toolsAtIntentClaim = state.toolCalls;
+          state.lastSoftSurfaceMilestone = 0;
 
           const { path: evidencePath, banner } = collectMockBanner(ctx);
           state.toolCallsSinceRelay += 1;
@@ -328,6 +335,8 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           });
           state.activeIntentId = null;
           state.activeIntentClaimedAt = null;
+          state.toolsAtIntentClaim = null;
+          state.lastSoftSurfaceMilestone = 0;
           appendProgress(manifest.workspaceDir, "mock banner saved");
           state.step = 2;
           save();
@@ -357,6 +366,13 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
       }
     }
 
+    // Operator handoff fixture: hold the run "alive" after the last assertion so
+    // a pause/scope revision can happen mid-run (cross-day换班).
+    const holdMs = Number(process.env.GY_MOCK_HOLD_MS ?? 0);
+    if (holdMs > 0) {
+      appendProgress(manifest.workspaceDir, `mock hold ${holdMs}ms before terminal`);
+      await new Promise((resolveHold) => setTimeout(resolveHold, holdMs));
+    }
     const status = history.allGoalsPass(manifest.taskId) ? "completed" : "incomplete";
     if (state.phase === "report") {
       writeTerminalReport(manifest, history, { status, includeRelay: relayEnabled });

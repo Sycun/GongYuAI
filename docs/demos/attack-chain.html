@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>攻击链图：点击漏洞聚焦整链</title>
+<style>
+:root {
+  --seed-fg:#1f2329; --seed-muted:#6b7280; --seed-primary:#2563eb;
+  --border-standard:#d1d5db; --border-subtle:#e5e7eb;
+  --card-bg:#ffffff; --inset-bg:#f3f4f6; --fill-1:#f9fafb; --fill-2:#f3f4f6; --fill-3:#e5e7eb;
+  --font-sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-code:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --viz-series-1:#3b82f6; --viz-series-2:#10b981; --viz-series-3:#ef4444;
+  --viz-series-4:#8b5cf6; --viz-series-5:#f59e0b; --viz-series-6:#06b6d4;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --seed-fg:#e5e7eb; --seed-muted:#9ca3af; --seed-primary:#60a5fa;
+    --border-standard:#374151; --border-subtle:#1f2937;
+    --card-bg:#111827; --inset-bg:#0b1220; --fill-1:#1f2937; --fill-2:#374151; --fill-3:#4b5563;
+    --viz-series-1:#60a5fa; --viz-series-2:#34d399; --viz-series-3:#f87171;
+    --viz-series-4:#a78bfa; --viz-series-5:#fbbf24; --viz-series-6:#22d3ee;
+  }
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:20px; background:var(--inset-bg); color:var(--seed-fg); font-family:var(--font-sans); }
+.card { background:var(--card-bg); border:1px solid var(--border-subtle); border-radius:12px; }
+#gy-atlas { max-width:1600px; margin:0 auto; }
+</style>
+</head>
+<body>
+<div id="gy-chain">
+  <style>
+    #gy-chain .ch-hint { font-size:12px; color:var(--seed-muted); margin:0 0 8px; }
+    #gy-chain .ch-bar { display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap; }
+    #gy-chain .ch-bar button { font-size:13px; padding:6px 12px; border:1px solid var(--border-standard); border-radius:8px; background:var(--fill-1); color:var(--seed-fg); cursor:pointer; }
+    #gy-chain .ch-bar button[aria-pressed="true"] { border-color:var(--seed-primary); color:var(--seed-primary); font-weight:500; }
+    #gy-chain .ch-bar .ch-state { font-size:12px; color:var(--seed-muted); }
+    #gy-chain svg { width:100%; min-width:760px; height:auto; display:block; }
+    #gy-chain .ch-node { cursor:pointer; }
+    #gy-chain .ch-node rect.ch-body { transition:opacity .15s ease, fill .15s ease; }
+    #gy-chain .ch-node:hover rect.ch-body { fill:var(--fill-2); }
+    #gy-chain .ch-node.ch-hl rect.ch-body { fill:var(--fill-2); stroke-width:2.5; }
+    #gy-chain .ch-node.ch-dim { opacity:0.2; }
+    #gy-chain .ch-node:focus { outline:none; }
+    #gy-chain .ch-node:focus rect.ch-focusring { stroke:var(--seed-primary); stroke-width:2; stroke-dasharray:4 3; }
+    #gy-chain .ch-edge { stroke:var(--seed-muted); stroke-width:1.4; fill:none; opacity:0.55; }
+    #gy-chain .ch-edge.ch-dash { stroke-dasharray:5 4; }
+    #gy-chain .ch-edge.ch-hl { opacity:1; stroke-width:2.4; stroke:var(--seed-primary); }
+    #gy-chain .ch-edge.ch-dim { opacity:0.08; }
+    #gy-chain .ch-edge-label { font-size:11px; fill:var(--seed-muted); }
+    #gy-chain .ch-title { font-size:13px; font-weight:500; fill:var(--seed-fg); }
+    #gy-chain .ch-sub { font-size:11px; fill:var(--seed-muted); }
+    #gy-chain #ch-panel { margin-top:10px; padding:12px 14px; }
+    #gy-chain #ch-panel h3 { margin:0 0 6px; font-size:13px; font-weight:500; }
+    #gy-chain #ch-panel ol { margin:0; padding-left:20px; }
+    #gy-chain #ch-panel li { font-size:13px; margin:4px 0; line-height:1.5; }
+    #gy-chain #ch-panel .ch-src { font-size:12px; color:var(--seed-muted); margin-top:8px; }
+    #gy-chain .ch-tag { font-size:11px; font-weight:500; }
+    @media (prefers-reduced-motion: reduce) { #gy-chain .ch-node rect.ch-body, #gy-chain .ch-edge { transition:none; } }
+  </style>
+
+  <p class="ch-hint">攻击链图概念演示：链 = Fact–Intent 血缘 + provenance 投影。<b>点击红色漏洞节点</b>（SQLi / actuator RCE）→ 上下闭包聚焦整条链；灰节点 = oos（链可见、利用被硬闸拒）。</p>
+  <div class="ch-bar">
+    <button id="ch-exit" aria-pressed="false">退出聚焦</button>
+    <span class="ch-state" id="ch-state">全链总览 · 外网 → 组合漏洞 → getshell → 隧道 → 内网 → C2</span>
+  </div>
+
+  <div class="table-responsive">
+    <svg id="ch-svg" viewBox="0 0 1300 440" role="group" aria-label="攻击链聚焦概念演示">
+      <defs>
+        <marker id="ch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--seed-muted)"></path>
+        </marker>
+        <marker id="ch-arrow-hl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--seed-primary)"></path>
+        </marker>
+      </defs>
+      <g id="ch-edges"></g>
+      <g id="ch-nodes"></g>
+    </svg>
+  </div>
+
+  <div id="ch-panel" class="card" aria-live="polite"></div>
+
+  <script>
+  (function () {
+    var NS = 'http://www.w3.org/2000/svg';
+    var edgesG = document.getElementById('ch-edges');
+    var nodesG = document.getElementById('ch-nodes');
+    var panel = document.getElementById('ch-panel');
+    var stateEl = document.getElementById('ch-state');
+    var exitBtn = document.getElementById('ch-exit');
+
+    var NODES = [
+      { id:'entry', x:30, y:210, w:170, h:60, c:1, t:'入口 · 外网', s:'/login · shop.example.com', kind:'entry' },
+      { id:'f1', x:240, y:210, w:180, h:60, c:3, t:'漏洞#1 · SQLi', s:'CWE-89 · verified · HIGH', kind:'exploit', focus:true },
+      { id:'cred1', x:460, y:110, w:170, h:56, c:5, t:'访问 · 面板凭据', s:'credential#1 · secretRef', kind:'access' },
+      { id:'sess1', x:460, y:300, w:170, h:56, c:5, t:'访问 · SSH getshell', s:'session#ssh · sourceIntentId', kind:'access' },
+      { id:'tun1', x:670, y:300, w:170, h:56, c:4, t:'穿越 · chisel 隧道', s:'change#net1 · 台账+回滚', kind:'pivot' },
+      { id:'host5', x:880, y:300, w:160, h:56, c:2, t:'内网 · 10.0.0.5', s:'live · CIDR 自动准入', kind:'asset' },
+      { id:'f2', x:880, y:110, w:180, h:60, c:3, t:'漏洞#2 · actuator RCE', s:'verified · HIGH', kind:'exploit', focus:true },
+      { id:'c2', x:1100, y:210, w:170, h:60, c:5, t:'访问 · C2 channel', s:'session.kind=c2 · beacon', kind:'access' },
+      { id:'oos', x:670, y:60, w:170, h:50, c:0, t:'10.0.0.99 · oos', s:'链可见 · 利用被硬闸拒', kind:'oos' }
+    ];
+    var EDGES = [
+      ['entry','f1','Intent 挂入口 Fact'],
+      ['f1','cred1','finding.factIds'],
+      ['cred1','sess1','凭据用于 SSH'],
+      ['sess1','tun1','session.sourceIntentId'],
+      ['tun1','host5','穿隧道发现'],
+      ['host5','f2','Intent 挂内网 Fact'],
+      ['f2','c2','getshell → C2'],
+      ['tun1','oos','oos 记账',1]
+    ];
+    var INFO = {
+      entry: '入口：外网资产端点 Fact。链的起点（origin 方向）。',
+      f1: '漏洞#1 SQLi：verified finding。上闭包=入口；下闭包=凭据→SSH→隧道→内网→漏洞#2→C2。点击已聚焦。',
+      cred1: '访问·凭据：credential.sourceFindingId 指回漏洞#1——provenance 边自动连链。明文不进 Observe/π。',
+      sess1: '访问·SSH getshell：session.sourceIntentId/sourceCredentialId 是本次要补的两个溯源字段之一。',
+      tun1: '穿越·隧道：change 台账（E5）kind=network + rollbackCmd；隧道=会话对象，暂停保活。',
+      host5: '内网资产：经既有 CIDR 自动准入（授权契约含内网段）；不是新 scope/新阶段。',
+      f2: '漏洞#2 actuator RCE：组合漏洞的第二跳；多前驱（内网 Fact+凭据）表达「组合」。',
+      c2: '访问·C2：session.kind=c2；链建模「访问」不绑 C2 框架（框架是工具层可选）。',
+      oos: 'oos 资产：若授权只给外网，穿隧道发现的内网地址记 oos——链图展示路径，但利用 Intent 被硬闸拒。链可见≠可利用。'
+    };
+
+    function el(n, a) { var e = document.createElementNS(NS, n); for (var k in a) e.setAttribute(k, a[k]); return e; }
+    function byId(id) { for (var i=0;i<NODES.length;i++) if (NODES[i].id===id) return NODES[i]; return null; }
+    function ctr(n) { return { x:n.x+n.w/2, y:n.y+n.h/2 }; }
+
+    var edgeEls = [];
+    EDGES.forEach(function (e) {
+      var a = ctr(byId(e[0])), b = ctr(byId(e[1]));
+      var p = el('path', { d:'M'+a.x+','+a.y+' L'+b.x+','+b.y, 'class':'ch-edge'+(e[3]?' ch-dash':''), 'marker-end':'url(#ch-arrow)', 'data-from':e[0], 'data-to':e[1] });
+      edgesG.appendChild(p); edgeEls.push(p);
+      var t = el('text', { x:(a.x+b.x)/2+6, y:(a.y+b.y)/2-6, 'class':'ch-edge-label' });
+      t.textContent = e[2]; edgesG.appendChild(t);
+    });
+
+    var nodeEls = {};
+    NODES.forEach(function (n) {
+      var g = el('g', { 'class':'ch-node', 'data-id':n.id, tabindex:0, role:'button', 'aria-label':n.t+'，'+(n.focus?'点击聚焦攻击链':'查看节点') });
+      var c = n.c===0 ? 'var(--seed-muted)' : 'var(--viz-series-'+n.c+')';
+      g.appendChild(el('rect', { 'class':'ch-focusring', x:n.x-3, y:n.y-3, width:n.w+6, height:n.h+6, rx:12, fill:'none', stroke:'none' }));
+      g.appendChild(el('rect', { 'class':'ch-body', x:n.x, y:n.y, width:n.w, height:n.h, rx:10, fill:'var(--fill-1)', stroke:c, 'stroke-width':1.5, 'stroke-dasharray': n.c===0?'5 4':'none' }));
+      g.appendChild(el('rect', { x:n.x, y:n.y+8, width:4, height:n.h-16, rx:2, fill:c }));
+      var t = el('text', { x:n.x+14, y:n.y+23, 'class':'ch-title' }); t.textContent = n.t; g.appendChild(t);
+      var s = el('text', { x:n.x+14, y:n.y+41, 'class':'ch-sub' }); s.textContent = n.s; g.appendChild(s);
+      if (n.focus) { var tag = el('text', { x:n.x+n.w-10, y:n.y+23, 'class':'ch-tag', 'text-anchor':'end', fill:'var(--viz-series-3)' }); tag.textContent='点击聚焦'; g.appendChild(tag); }
+      g.addEventListener('click', function () { n.focus ? focus(n.id) : showNode(n.id); });
+      g.addEventListener('keydown', function (ev) { if (ev.key==='Enter'||ev.key===' ') { ev.preventDefault(); n.focus ? focus(n.id) : showNode(n.id); } });
+      nodesG.appendChild(g); nodeEls[n.id] = g;
+    });
+
+    function closure(id) {
+      var up = {}, down = {};
+      var stack = [id]; up[id] = true;
+      while (stack.length) { var cur = stack.pop(); EDGES.forEach(function (e) { if (e[1]===cur && !up[e[0]]) { up[e[0]]=true; stack.push(e[0]); } }); }
+      stack = [id]; down[id] = true;
+      while (stack.length) { var cur2 = stack.pop(); EDGES.forEach(function (e) { if (e[0]===cur2 && !down[e[1]]) { down[e[1]]=true; stack.push(e[1]); } }); }
+      return { up:up, down:down };
+    }
+    function clear() {
+      Object.keys(nodeEls).forEach(function (k) { nodeEls[k].classList.remove('ch-hl','ch-dim'); });
+      edgeEls.forEach(function (p) { p.classList.remove('ch-hl','ch-dim'); p.setAttribute('marker-end','url(#ch-arrow)'); });
+    }
+    function focus(id) {
+      var cl = closure(id);
+      clear();
+      var inChain = {};
+      Object.keys(cl.up).forEach(function (k) { inChain[k]=true; });
+      Object.keys(cl.down).forEach(function (k) { inChain[k]=true; });
+      Object.keys(nodeEls).forEach(function (k) { nodeEls[k].classList.add(inChain[k] ? 'ch-hl' : 'ch-dim'); });
+      edgeEls.forEach(function (p) {
+        var f = p.getAttribute('data-from'), t = p.getAttribute('data-to');
+        var onPath = (cl.up[f] && cl.up[t]) || (cl.down[f] && cl.down[t]);
+        if (onPath) { p.classList.add('ch-hl'); p.setAttribute('marker-end','url(#ch-arrow-hl)'); }
+        else p.classList.add('ch-dim');
+      });
+      exitBtn.setAttribute('aria-pressed','true');
+      stateEl.textContent = '聚焦 ' + byId(id).t + ' · 上闭包 ' + (Object.keys(cl.up).length-1) + ' hop · 下闭包 ' + (Object.keys(cl.down).length-1) + ' hop';
+      var order = [];
+      EDGES.forEach(function (e) { if ((cl.up[e[0]]&&cl.up[e[1]])||(cl.down[e[0]]&&cl.down[e[1]])) order.push(e); });
+      panel.innerHTML = '<h3></h3><ol></ol><div class="ch-src"></div>';
+      panel.querySelector('h3').textContent = '攻击链叙述 · 聚焦 ' + byId(id).t;
+      var ol = panel.querySelector('ol');
+      var seen = {};
+      order.forEach(function (e) {
+        [e[0], e[1]].forEach(function (nid) {
+          if (seen[nid]) return; seen[nid] = true;
+          var n = byId(nid);
+          var li = document.createElement('li');
+          li.textContent = '[' + n.kind + '] ' + n.t + ' — ' + INFO[nid];
+          ol.appendChild(li);
+        });
+      });
+      panel.querySelector('.ch-src').textContent = '纪律：链=投影非真相；缺 provenance 显示「溯源缺失」不编造；链可见≠可利用（oos 硬闸照常）。出处：docs/attack-chain-graph.md';
+    }
+    function showNode(id) {
+      clear();
+      nodeEls[id].classList.add('ch-hl');
+      panel.innerHTML = '<h3></h3><ol></ol><div class="ch-src"></div>';
+      panel.querySelector('h3').textContent = byId(id).t;
+      var li = document.createElement('li'); li.textContent = INFO[id];
+      panel.querySelector('ol').appendChild(li);
+      panel.querySelector('.ch-src').textContent = '出处：docs/attack-chain-graph.md';
+      stateEl.textContent = '全链总览 · 外网 → 组合漏洞 → getshell → 隧道 → 内网 → C2';
+      exitBtn.setAttribute('aria-pressed','false');
+    }
+    function exit() {
+      clear();
+      exitBtn.setAttribute('aria-pressed','false');
+      stateEl.textContent = '全链总览 · 外网 → 组合漏洞 → getshell → 隧道 → 内网 → C2';
+      panel.innerHTML = '<h3>攻击链图（攻击面图·链模式）</h3><ol><li>点击红色漏洞节点：上闭包（怎么打出来的）+ 下闭包（打开了什么）整链高亮。</li><li>内网穿越 = 授权步骤因果链：每 hop 都是 Intent 挂前驱 Fact，过同一套硬闸；不加新阶段/scope。</li><li>补两个溯源字段（session.sourceIntentId/sourceCredentialId）链即自动连通；C2 = session.kind=c2。</li><li>融合而非第五张图：链模式宿主在攻击面图；DAG/资产/执行/记忆视图跨图同 ID 跳转。</li></ol><div class="ch-src">出处：docs/attack-chain-graph.md（P10 扩展提案）</div>';
+    }
+    exitBtn.addEventListener('click', exit);
+    exit();
+  })();
+  </script>
+</div>
+</body>
+</html>

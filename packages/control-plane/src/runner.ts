@@ -13,6 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   goalsFromSpecs,
   isActiveTaskStatus,
+  isDrainingTaskStatus,
   isTerminalTaskStatus,
   resolveExploreWorkerCount,
   type TaskRecord,
@@ -37,11 +38,24 @@ export type RunnerConfig = {
   ownerId: string;
 };
 
-function taskWorkerCount(task: TaskRecord): number {
+function taskWorkerCount(task: TaskRecord, assetCount?: number): number {
   return resolveExploreWorkerCount({
     maxConcurrentExplores: task.execution?.maxConcurrentExplores ?? 1,
     targetCount: task.auth.targets.length,
+    assetCount,
   });
+}
+
+/** Distinct admitted/live assets from the History projection; 0 when no History yet. */
+function countScalableAssets(task: TaskRecord): number {
+  const paths = taskPaths(task.dataDir);
+  if (!existsSync(paths.historyDb)) return 0;
+  const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+  try {
+    return history.listAssets(task.id).filter((a) => a.kind === "admitted" || a.kind === "live").length;
+  } finally {
+    history.close();
+  }
 }
 
 function writeManifestForSlot(
@@ -108,9 +122,16 @@ function writeManifestForSlot(
   return manifest;
 }
 
+/** How long a pause may wait for workers to drain before reporting a failed pause. */
+const PAUSE_DRAIN_MS = 15_000;
+
 export class WorkerRunner {
   /** taskId → slot → child */
   private readonly children = new Map<string, Map<number, ChildProcess>>();
+  /** taskId → last reconcile timestamp (throttle; in-memory only) */
+  private readonly lastScaleCheck = new Map<string, number>();
+  /** Set by boot shutdown: detached workers may outlive this control plane. */
+  private disposed = false;
 
   constructor(
     private readonly store: ControlStore,
@@ -125,6 +146,9 @@ export class WorkerRunner {
     if (this.isAlive(task)) {
       throw new Error("任务已在运行中");
     }
+    if (isDrainingTaskStatus(task.status)) {
+      throw new Error(`任务正在${task.status === "pause_requested" ? "暂停" : "停止"}，等待确认后再操作`);
+    }
 
     if (!isActiveTaskStatus(task.status)) {
       this.prepareRestart(task);
@@ -133,7 +157,7 @@ export class WorkerRunner {
     const lease = this.store.acquireLease(taskId, this.cfg.ownerId, this.cfg.leaseMs);
     if (!lease.ok) throw new Error(`lease: ${lease.reason}`);
 
-    const workerCount = taskWorkerCount(lease.task);
+    const workerCount = taskWorkerCount(lease.task, countScalableAssets(lease.task));
     for (let slot = 0; slot < workerCount; slot++) {
       writeManifestForSlot(lease.task, this.settings, slot, workerCount);
     }
@@ -173,9 +197,11 @@ export class WorkerRunner {
       }
     };
 
-    const count = taskWorkerCount(task);
+    const count = taskWorkerCount(task, countScalableAssets(task));
+    // The Durable checkpoint now lives inside the per-slot durable DB itself
+    // (CheckpointStore writes table `checkpoint`); `.ckpt.sqlite` is legacy.
     for (let slot = 0; slot < count; slot++) {
-      resetCkpt(`${durableDbForSlot(task.dataDir, slot)}.ckpt.sqlite`);
+      resetCkpt(durableDbForSlot(task.dataDir, slot));
     }
     // Legacy / stray slot checkpoints
     try {
@@ -248,65 +274,84 @@ export class WorkerRunner {
     slots.set(slot, child);
   }
 
-  private startLocal(task: TaskRecord, workerCount: number): TaskRecord {
+  private spawnLocalSlot(task: TaskRecord, slot: number, workerCount: number): ChildProcess {
     const entry = this.workerEntry();
-    const pids: number[] = [];
+    const manifestPath = manifestPathForSlot(task.dataDir, slot);
+    const args = entry.endsWith(".ts")
+      ? ["--import", "tsx", entry, "--manifest", manifestPath]
+      : [entry, "--manifest", manifestPath];
 
-    for (let slot = 0; slot < workerCount; slot++) {
-      const manifestPath = manifestPathForSlot(task.dataDir, slot);
-      const args = entry.endsWith(".ts")
-        ? ["--import", "tsx", entry, "--manifest", manifestPath]
-        : [entry, "--manifest", manifestPath];
+    const child = spawn(process.execPath, args, {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        ...this.settings.workerEnv(),
+        GY_TASK_ID: task.id,
+        GY_FENCE: String(task.fence),
+        GY_WORKER_SLOT: String(slot),
+        GY_WORKER_COUNT: String(workerCount),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
+    child.unref();
 
-      const child = spawn(process.execPath, args, {
-        cwd: repoRoot,
-        env: {
-          ...process.env,
-          ...this.settings.workerEnv(),
-          GY_TASK_ID: task.id,
-          GY_FENCE: String(task.fence),
-          GY_WORKER_SLOT: String(slot),
-          GY_WORKER_COUNT: String(workerCount),
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true,
-      });
-      child.unref();
+    const logPath = join(
+      task.dataDir,
+      workerCount > 1 ? `worker-w${slot}.log` : "worker.log",
+    );
+    const log = createWriteStream(logPath, { flags: "a" });
+    child.stdout?.pipe(log);
+    child.stderr?.pipe(log);
 
-      const logPath = join(
-        task.dataDir,
-        workerCount > 1 ? `worker-w${slot}.log` : "worker.log",
-      );
-      const log = createWriteStream(logPath, { flags: "a" });
-      child.stdout?.pipe(log);
-      child.stderr?.pipe(log);
-
-      const capturedSlot = slot;
-      child.on("exit", (code) => {
-        const slots = this.children.get(task.id);
-        if (slots?.get(capturedSlot) !== child) return;
-        slots.delete(capturedSlot);
-        if (slots.size === 0) this.children.delete(task.id);
-        const latest = this.store.get(task.id);
-        if (!latest || latest.fence !== task.fence || isTerminalTaskStatus(latest.status)) return;
-        // Only mark recovering when the whole pool is dead; watchdog will restart.
-        if (!this.isAlive(latest)) {
-          latest.status = "recovering";
-          latest.workerPid = null;
-          latest.workerPids = [];
-          latest.error = `worker slot ${capturedSlot} exited with code ${code}`;
-          this.store.save(latest);
-        } else {
-          // Drop dead pid from list while siblings keep running.
-          latest.workerPids = (latest.workerPids ?? []).filter((p) => p !== child.pid);
-          if (latest.workerPid === child.pid) {
-            latest.workerPid = latest.workerPids[0] ?? null;
-          }
-          this.store.save(latest);
+    const capturedSlot = slot;
+    child.on("exit", (code) => {
+      // The control plane may be stopping while detached workers keep running;
+      // their exit must not touch a closed store.
+      if (this.disposed) return;
+      try {
+      const slots = this.children.get(task.id);
+      if (slots?.get(capturedSlot) !== child) return;
+      slots.delete(capturedSlot);
+      if (slots.size === 0) this.children.delete(task.id);
+      const latest = this.store.get(task.id);
+      if (!latest || latest.fence !== task.fence || isTerminalTaskStatus(latest.status)) return;
+      // pause()/stop() own the transition out of a draining state; the exit
+      // handler must not turn a deliberate pause into a watchdog "recovering".
+      if (latest.status === "pause_requested" || latest.status === "stopping") {
+        latest.workerPids = (latest.workerPids ?? []).filter((p) => p !== child.pid);
+        if (latest.workerPid === child.pid) latest.workerPid = latest.workerPids[0] ?? null;
+        this.store.save(latest);
+        return;
+      }
+      // Only mark recovering when the whole pool is dead; watchdog will restart.
+      if (!this.isAlive(latest)) {
+        latest.status = "recovering";
+        latest.workerPid = null;
+        latest.workerPids = [];
+        latest.error = `worker slot ${capturedSlot} exited with code ${code}`;
+        this.store.save(latest);
+      } else {
+        // Drop dead pid from list while siblings keep running.
+        latest.workerPids = (latest.workerPids ?? []).filter((p) => p !== child.pid);
+        if (latest.workerPid === child.pid) {
+          latest.workerPid = latest.workerPids[0] ?? null;
         }
-      });
+        this.store.save(latest);
+      }
+      } catch {
+        /* store already closed or record gone: nothing to reconcile */
+      }
+    });
 
-      this.trackChild(task.id, slot, child);
+    this.trackChild(task.id, slot, child);
+    return child;
+  }
+
+  private startLocal(task: TaskRecord, workerCount: number): TaskRecord {
+    const pids: number[] = [];
+    for (let slot = 0; slot < workerCount; slot++) {
+      const child = this.spawnLocalSlot(task, slot, workerCount);
       if (child.pid) pids.push(child.pid);
     }
 
@@ -320,54 +365,117 @@ export class WorkerRunner {
     return task;
   }
 
-  private startDocker(task: TaskRecord, workerCount: number): TaskRecord {
+  /**
+   * Scale-up only resource provisioning (non-tactical): reads asset counts and
+   * liveness, never Fact content. Never exceeds the operator cap, never kills
+   * running workers. Called from the watchdog alive branch.
+   */
+  async reconcileWorkers(taskId: string): Promise<void> {
+    const last = this.lastScaleCheck.get(taskId) ?? 0;
+    if (Date.now() - last < 10_000) return;
+    this.lastScaleCheck.set(taskId, Date.now());
+
+    const task = this.store.get(taskId);
+    if (!task || !isActiveTaskStatus(task.status)) return;
+
+    let current: number;
+    if (this.cfg.mode === "local") {
+      const slots = this.children.get(taskId);
+      // Without a live child map (e.g. control-plane restarted) slot identity is
+      // unknown; skip rather than risk duplicating a surviving slot.
+      if (!slots || slots.size === 0) return;
+      current = slots.size;
+    } else {
+      current = task.containerIds?.length ?? 0;
+      if (current === 0) return;
+    }
+
+    const assetCount = countScalableAssets(task);
+    const desired = taskWorkerCount(task, assetCount);
+    if (desired <= current) return;
+
+    for (let slot = 0; slot < desired; slot++) {
+      writeManifestForSlot(task, this.settings, slot, desired);
+    }
+
+    if (this.cfg.mode === "local") {
+      for (let slot = current; slot < desired; slot++) {
+        const child = this.spawnLocalSlot(task, slot, desired);
+        if (child.pid) task.workerPids = [...(task.workerPids ?? []), child.pid];
+      }
+      task.workerPid = task.workerPids?.[0] ?? task.workerPid;
+    } else {
+      for (let slot = current; slot < desired; slot++) {
+        const containerId = this.spawnDockerSlot(task, slot, desired);
+        task.containerIds = [...(task.containerIds ?? []), containerId];
+      }
+      task.containerId = task.containerIds?.[0] ?? task.containerId;
+    }
+    this.store.save(task);
+
+    const paths = taskPaths(task.dataDir);
+    const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+    try {
+      history.recordExploreScaled(task.id, { from: current, to: desired, assetCount });
+    } finally {
+      history.close();
+    }
+  }
+
+  private spawnDockerSlot(task: TaskRecord, slot: number, workerCount: number): string {
     const absData = resolve(task.dataDir);
+    const name = `gy-task-${task.id.slice(0, 8)}-w${slot}`;
+    spawnSync("docker", ["rm", "-f", name], { encoding: "utf8" });
+    const manifestInContainer =
+      slot === 0 ? "/task/manifest.json" : `/task/manifest-w${slot}.json`;
+
+    const args = [
+      "run",
+      "-d",
+      "--name",
+      name,
+      "--network",
+      "bridge",
+      "-v",
+      `${absData}:/task`,
+      "-e",
+      `GY_MANIFEST=${manifestInContainer}`,
+      "-e",
+      `GY_WORKER_SLOT=${slot}`,
+      "-e",
+      `GY_WORKER_COUNT=${workerCount}`,
+      "-e",
+      `OPENAI_API_KEY=${this.settings.workerEnv().OPENAI_API_KEY}`,
+      "-e",
+      `OPENAI_BASE_URL=${this.settings.workerEnv().OPENAI_BASE_URL}`,
+      "-e",
+      `GY_MODEL=${this.settings.workerEnv().GY_MODEL}`,
+      "-e",
+      `GY_VISION=${this.settings.workerEnv().GY_VISION}`,
+      "-e",
+      `GY_VISION_MODEL=${this.settings.workerEnv().GY_VISION_MODEL}`,
+      this.cfg.workerImage,
+    ];
+
+    const result = spawnSync("docker", args, { encoding: "utf8" });
+    if (result.status !== 0) {
+      throw new Error(`docker run failed (slot ${slot}): ${result.stderr || result.stdout}`);
+    }
+    return (result.stdout || "").trim() || name;
+  }
+
+  private startDocker(task: TaskRecord, workerCount: number): TaskRecord {
     const containerIds: string[] = [];
-
     for (let slot = 0; slot < workerCount; slot++) {
-      const name = `gy-task-${task.id.slice(0, 8)}-w${slot}`;
-      spawnSync("docker", ["rm", "-f", name], { encoding: "utf8" });
-      const manifestInContainer =
-        slot === 0 ? "/task/manifest.json" : `/task/manifest-w${slot}.json`;
-
-      const args = [
-        "run",
-        "-d",
-        "--name",
-        name,
-        "--network",
-        "bridge",
-        "-v",
-        `${absData}:/task`,
-        "-e",
-        `GY_MANIFEST=${manifestInContainer}`,
-        "-e",
-        `GY_WORKER_SLOT=${slot}`,
-        "-e",
-        `GY_WORKER_COUNT=${workerCount}`,
-        "-e",
-        `OPENAI_API_KEY=${this.settings.workerEnv().OPENAI_API_KEY}`,
-        "-e",
-        `OPENAI_BASE_URL=${this.settings.workerEnv().OPENAI_BASE_URL}`,
-        "-e",
-        `GY_MODEL=${this.settings.workerEnv().GY_MODEL}`,
-        "-e",
-        `GY_VISION=${this.settings.workerEnv().GY_VISION}`,
-        "-e",
-        `GY_VISION_MODEL=${this.settings.workerEnv().GY_VISION_MODEL}`,
-        this.cfg.workerImage,
-      ];
-
-      const result = spawnSync("docker", args, { encoding: "utf8" });
-      if (result.status !== 0) {
+      try {
+        containerIds.push(this.spawnDockerSlot(task, slot, workerCount));
+      } catch (err) {
         // Best-effort cleanup of already-started siblings.
         for (const id of containerIds) {
           spawnSync("docker", ["rm", "-f", id], { encoding: "utf8" });
         }
-        throw new Error(`docker run failed (slot ${slot}): ${result.stderr || result.stdout}`);
+        throw err;
       }
-      const containerId = (result.stdout || "").trim() || name;
-      containerIds.push(containerId);
     }
 
     task.status = task.status === "queued" ? "initializing" : "running";
@@ -452,6 +560,80 @@ export class WorkerRunner {
     return this.store.finishTask(task, status, error);
   }
 
+  /**
+   * Stage 2 — pause. Drains workers, confirms they are gone, then records
+   * `paused` while retaining checkpoint / goals / evidence / usage. Never
+   * writes a terminal report and never claims "paused" before the drain is
+   * confirmed.
+   */
+  async pause(taskId: string): Promise<TaskRecord | null> {
+    const task = this.store.get(taskId);
+    if (!task) return null;
+    if (isTerminalTaskStatus(task.status)) throw new Error("终态任务不能暂停");
+    if (task.status === "paused") return task;
+    if (task.status === "stopping") throw new Error("任务正在停止，不能暂停");
+
+    task.status = "pause_requested";
+    task.pauseRequestedAt = new Date().toISOString();
+    task.error = null;
+    this.store.save(task);
+
+    if (this.isAlive(task)) this.stopWorkers(task);
+    const deadline = Date.now() + PAUSE_DRAIN_MS;
+    while (this.isAlive(task) && Date.now() < deadline) {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));
+    }
+    const latest = this.store.get(taskId);
+    if (!latest) return null;
+    if (this.isAlive(latest)) {
+      // Never publish a false pause: put the record back where it can be retried.
+      latest.status = "recovering";
+      latest.error = "pause not confirmed: worker still alive after drain window";
+      this.store.save(latest);
+      throw new Error(latest.error);
+    }
+    latest.status = "paused";
+    latest.pausedAt = new Date().toISOString();
+    latest.lastHeartbeatAt = latest.pausedAt;
+    latest.workerPid = null;
+    latest.workerPids = [];
+    latest.containerId = null;
+    latest.containerIds = [];
+    latest.leaseOwner = null;
+    latest.leaseUntil = null;
+    latest.error = null;
+    this.store.save(latest);
+    this.children.delete(taskId);
+    return latest;
+  }
+
+  /** Stage 2 — resume; start() rebuilds manifests from the latest scope revision. */
+  async resume(taskId: string): Promise<TaskRecord> {
+    const task = this.store.get(taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    if (isTerminalTaskStatus(task.status)) throw new Error("终态任务不能继续");
+    if (task.status !== "paused") throw new Error("仅已暂停任务可继续");
+    return this.start(taskId);
+  }
+
+  /**
+   * Stage 2 — write a new authorization revision. Refused while a worker is
+   * acting so a running engagement can never silently inherit a widened scope.
+   */
+  setScope(taskId: string, auth: TaskRecord["auth"], reason: string): TaskRecord {
+    const task = this.store.get(taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    if (isTerminalTaskStatus(task.status)) throw new Error("终态任务不能修改授权范围");
+    if (this.isAlive(task)) throw new Error("先暂停任务，再更新授权范围（恢复时会读取最新版本）");
+    const note = reason.trim();
+    if (!note) throw new Error("scope update requires a reason");
+    task.auth = auth;
+    task.scopeVersion += 1;
+    task.error = null;
+    this.store.save(task);
+    return task;
+  }
+
   async stop(taskId: string, cause: "operator" | "wall-timeout" | NonNullable<ReturnType<typeof exhaustedCounter>> = "operator"): Promise<TaskRecord | null> {
     const task = this.store.get(taskId);
     if (!task) return null;
@@ -463,6 +645,8 @@ export class WorkerRunner {
       return task;
     }
 
+    task.status = "stopping";
+    this.store.save(task);
     let status: "stopped" | "budget_exhausted" = "stopped";
     let error: string | null = null;
     if (cause !== "operator") {
@@ -470,6 +654,12 @@ export class WorkerRunner {
       error = cause === "wall-timeout" ? "maxWallMs exceeded" : `${cause} exceeded`;
     }
     return this.finishWorkerRun(task, status, error);
+  }
+
+  /** Stop observing children; used when the control plane shuts down. */
+  dispose(): void {
+    this.disposed = true;
+    this.children.clear();
   }
 
   isAlive(task: TaskRecord): boolean {

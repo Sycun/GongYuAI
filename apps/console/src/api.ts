@@ -1,10 +1,14 @@
-import type { CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall } from "@gongyuai/contracts";
+import type { CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
 
 export type TaskRecord = {
   id: string;
   name: string;
   status: string;
   mock: boolean;
+  scopeVersion?: number;
+  pauseRequestedAt?: string | null;
+  pausedAt?: string | null;
+  lastHeartbeatAt?: string | null;
   fence: number;
   leaseOwner: string | null;
   leaseUntil: string | null;
@@ -68,6 +72,27 @@ export type AssetRecord = {
   intentId?: string | null;
 };
 
+export type FindingRecord = {
+  id: string;
+  title: string;
+  asset: string;
+  vulnClass: string;
+  severity: "info" | "low" | "medium" | "high" | "critical" | string;
+  cvss?: string | null;
+  confidence: string;
+  status: "tentative" | "verified" | "retested" | "accepted" | "retracted" | string;
+  endpoint?: string | null;
+  dedupKey: string;
+  intentId?: string | null;
+  factIds?: string[];
+  evidence: Array<{ path: string; sha256: string }>;
+  repro?: string;
+  impact?: string;
+  fix?: string;
+  createdAt: string;
+  verifiedAt?: string | null;
+};
+
 export type HistoryPayload = {
   coverage?: CoverageReview[];
   overview: string;
@@ -96,6 +121,7 @@ export type HistoryPayload = {
   }>;
   events: unknown[];
   assets?: AssetRecord[];
+  findings?: FindingRecord[];
   hints?: Array<{
     id: string;
     text: string;
@@ -115,6 +141,9 @@ export type HintRecord = {
 };
 
 export type RuntimePayload = {
+  externalState?: "running" | "pause_requested" | "stopping" | "paused" | "stopped" | "unknown";
+  lastConfirmedAt?: string | null;
+  scopeVersion?: number;
   leaseOwner: string | null;
   leaseUntil: string | null;
   fence: number;
@@ -130,6 +159,7 @@ export type RuntimePayload = {
   dataDir: string;
   progress?: string[];
   trace?: ExecutionTracePage;
+  integrations?: TaskIntegrationUsage;
   recentFacts?: Array<{
     id?: string;
     title: string;
@@ -235,6 +265,7 @@ export type PublicSettings = {
 };
 
 export type UsageStats = {
+  integrations?: ProjectIntegrationUsage;
   totals: { tokens: number; toolCalls: number; installs: number; tasks: number };
   byTask: Array<{
     id: string;
@@ -294,6 +325,10 @@ export const api = {
     }),
   stop: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/stop`, { method: "POST" }),
   start: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/start`, { method: "POST" }),
+  pause: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/pause`, { method: "POST" }),
+  resume: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/resume`, { method: "POST" }),
+  updateScope: (id: string, body: { auth: TaskRecord["auth"]; reason: string }) =>
+    request<{ task: TaskRecord }>(`/tasks/${id}/scope`, { method: "POST", body: JSON.stringify(body) }),
   archive: (id: string) =>
     request<{ task: TaskRecord }>(`/tasks/${id}/archive`, { method: "POST" }),
   unarchive: (id: string) =>
@@ -344,7 +379,7 @@ export const api = {
       baseUrl?: string;
       visionEnabled?: boolean;
     }>("/settings/model/test", { method: "POST" }),
-  usage: () => request<UsageStats>("/settings/usage"),
+  usage: (integrations = false) => request<UsageStats>(integrations ? "/settings/usage?integrations=1" : "/settings/usage"),
   updateStatus: () => request<UpdateJobStatus>("/settings/update/status"),
   runUpdate: () =>
     request<UpdateJobStatus>("/settings/update/run", { method: "POST" }),

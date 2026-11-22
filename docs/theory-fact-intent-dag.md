@@ -161,10 +161,11 @@ Bootstrap / Explore / Reason 是 **图状态机算子**，不是「侦察→利�
 | **Intentest (A2)** | Fact–Intent DAG 形式化；FSM；推荐≠授权 | **本文件主理论** |
 | **sapper-v2** | 分层 History；指挥官不下工具；Watchdog 零策略；饱和写交接 | 同信仰的 harness 实践；竞赛军规非产品面 |
 | **CHAP (A22)** | 会话边界结构化 protocol 接力 | 压缩的是 **会话工作记忆**；**跨会话攻击路径权威仍是 DAG** |
+| **Super-agent**（DeepSeek / Octop） | 脑手分离、模型分层、异步派单、事件过滤 | **调度经济层**：不新增真相源；主脑无执行工具由相位工具面结构性保证。见 [absorb-super-agent.md](./absorb-super-agent.md) |
 
 一句话分工：
 
-> **DAG 管路径；分层 History 管可读性；Relay 管换班；Durable/lease 管进程活着；Evidence 管 Goal 可复核。**
+> **DAG 管路径；分层 History 管可读性；Relay 管换班；Durable/lease 管进程活着；Evidence 管 Goal 可复核；Super-agent 管调度经济。**
 
 ---
 

@@ -4,12 +4,18 @@
   "defaultEnabled": true,
   "refs": [
     "https://github.com/kekurttel/pentest-skills",
-    "https://github.com/briiirussell/cybersecurity-skills"
+    "https://github.com/briiirussell/cybersecurity-skills",
+    "https://github.com/W4L33Dx/Cyber-Monster/tree/19fbce7b1c8e23b8737295430ab3c105268cd5fa/blue-team/detection-and-monitoring/alert-tuning-and-false-positive-reduction",
+    "https://github.com/W4L33Dx/Cyber-Monster/tree/19fbce7b1c8e23b8737295430ab3c105268cd5fa/blue-team/purple-team-and-program/control-testing-and-audit-evidence"
   ],
   "triggers": [
     "report",
     "报告",
     "cvss",
-    "收口"
+    "收口",
+    "蓝队交接",
+    "检测交接",
+    "移交给蓝队",
+    "检测建议"
   ]
 }

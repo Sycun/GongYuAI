@@ -43,6 +43,6 @@ RCE只需满足任意一条等式,拆成可获取的原语去凑:
   ·时间维度: TOCTOU/token可预测/缓存投毒,把"偶尔"变"稳定",把不可利用变可利用。
   ·跨域兑现: 每拿一个能力问"它在别的域值多少钱"——能力是通用货币。Web SSRF→进云元数据接管账户; APK硬编码→直连内部API绕前端鉴权; 供应链→拿CI密钥进生产。
   ·创造模式(已知组合用尽时): 重审能力边界(只能读/var/log? /proc/self/environ呢) | 找等价RCE的sink(写crontab/.bashrc/CI配置/LD_PRELOAD/authorized_keys/systemd unit都=RCE) | 信息(报错/时序/响应长度)当侧信道 | 假设取反:列"我以为不可能"逐条问"凭什么不可能"
-> 推导出的链是假设(可 tentative 记 note/chain),实际执行+证据后才写 confirmed Fact / record_vulnerability。整条链每步都验证过才成立。
+> 推导出的链是假设(可写 tentative 线索 Fact),实际执行+证据后才写证据层 Fact / finding_record + finding_verify。整条链每步都验证过才成立。
 ```
 

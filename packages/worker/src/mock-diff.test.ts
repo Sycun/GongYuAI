@@ -58,6 +58,8 @@ test("all mock arms share fixture scoring and tool counts, with Relay only in th
     try {
       const [goal] = history.listGoals(manifest.taskId);
       assert.equal(goal?.passes, true, mode);
+      assert.ok(history.integrationUsage(manifest.taskId).since);
+      assert.deepEqual(history.integrationUsage(manifest.taskId).rows, []);
       assert.deepEqual(goal?.evidencePaths, ["recon/banner.txt", "notes/mock.md"], mode);
       const events = history.listEvents(manifest.taskId);
       assert.equal(events.filter((event) => event.kind === "tool_gate" && event.payload.ok).length, 2, mode);

@@ -14,6 +14,7 @@ import {
 } from "./tools.js";
 import { writeTerminalReport } from "./report.js";
 import { openMcpHub } from "./mcp/client.js";
+import { openSkillHub } from "./skills/runtime.js";
 import { runAssetSearch } from "./asset-collectors.js";
 import type { WorkerManifest } from "@gongyuai/contracts";
 
@@ -203,7 +204,54 @@ test("MCP aliases share authorization, scope and budget auditing with a local fi
     assert.equal(calls.filter((e) => e.payload.ok).length, 2);
     assert.ok(events.some((e) => e.payload.tool === "asset_search" && e.payload.ok === false));
     assert.ok(calls.every((e) => e.payload.serverId === "nmap" && e.payload.toolName === "run"));
+    assert.deepEqual(history.integrationUsage(m.taskId).rows, [
+      { kind: "mcp", name: "nmap", method: "run", calls: 6, succeeded: 2, failed: 4 },
+    ]);
   } finally {
     await hub.close();
+  }
+});
+
+test("skill and MCP outcomes follow returned content and protocol status", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-usage-outcomes-"));
+  const m = manifest(["archive.invalid"]);
+  m.dataDir = root;
+  m.workspaceDir = root;
+  m.evidenceDir = join(root, "evidence");
+  m.skillPool = [{ id: "receipt", name: "收件复核", rootDir: root }];
+  writeFileSync(join(root, "mcp.json"), JSON.stringify({ binary: "/usr/bin/printf", defaultFlags: "receipt%" }));
+  m.mcpServers = [
+    { id: "archive", name: "Archive", transport: "http", url: "http://archive.invalid", args: [], env: {} },
+    { id: "local-receipt", name: "Receipt fixture", transport: "builtin", rootDir: root, args: [], env: {} },
+  ];
+  const history = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir: join(root, "evidence") });
+  t.after(() => { history.close(); rmSync(root, { recursive: true, force: true }); });
+  t.mock.method(globalThis, "fetch", async (_url: string, options: RequestInit) => {
+    const { method } = JSON.parse(String(options.body));
+    const result = method === "tools/list" ? { tools: [{ name: "read" }] }
+      : { isError: true, content: [{ text: "receipt unavailable" }] };
+    return Response.json({ result });
+  });
+  const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+  const mcp = await openMcpHub(m, ctx);
+  try {
+    assert.equal(await mcp.call("mcp__archive__read", {}), "receipt unavailable");
+    const partial = JSON.parse(await mcp.invoke("local-receipt", "run", { target: "archive.invalid" }));
+    assert.notEqual(partial.exitCode, 0);
+    assert.equal(partial.stdout, "receipt");
+    const skill = openSkillHub(m, history);
+    skill.suggestForGoals();
+    skill.routingTable();
+    skill.load("receipt", "缺少文件");
+    writeFileSync(join(root, "SKILL.md"), "# 收件复核");
+    skill.load("receipt", "第一批");
+    skill.load("receipt", "第二批");
+    assert.deepEqual(history.integrationUsage(m.taskId).rows, [
+      { kind: "mcp", name: "archive", method: "read", calls: 1, succeeded: 0, failed: 1 },
+      { kind: "mcp", name: "local-receipt", method: "run", calls: 1, succeeded: 0, failed: 1 },
+      { kind: "skill", name: "receipt", method: "", calls: 3, succeeded: 2, failed: 1 },
+    ]);
+  } finally {
+    await mcp.close();
   }
 });
