@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "kind": "engagement-e2e-mock",
+  "runId": "engagement-1795356472774",
+  "taskId": "60837915-f18c-42e5-b0b2-f23714b3f103",
+  "dataRoot": "/private/tmp/gy-clean-78ac418/repo/.gongyuai/acceptance/engagement-1795356472774",
+  "startedAt": "2026-11-22T14:07:52.773Z",
+  "finishedAt": "2026-11-22T14:08:04.383Z",
+  "code": {
+    "commit": "78ac41885feb8f4b4818ed2f419772aa25f9b112",
+    "branch": "HEAD",
+    "dirty": false,
+    "dirtyPaths": []
+  },
+  "steps": {
+    "total": 80,
+    "passed": 80,
+    "failed": 0
+  },
+  "record": {
+    "markdown": "acceptance-record.md",
+    "json": "acceptance-record.json"
+  },
+  "files": {
+    "recordMd": {
+      "path": "acceptance-record.md",
+      "sha256": "8677bdb5d67a69b4bdea16864fe79ffd73e16a373397957ccf0dc8672d7e1cef"
+    },
+    "recordJson": {
+      "path": "acceptance-record.json",
+      "sha256": "ab71e6b63997aa7b6006897aea958c2a353c42c9f04eaa101d026bdb5d699aad"
+    },
+    "snapshot": {
+      "path": "delivery-snapshot.json",
+      "bytesSha256": "97ff33f3a14629ef27b0d6d286d2e94903aa7dd4fc35ea2843f734a2f5fc3986",
+      "sealSha256": "d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb",
+      "capturedAt": "2026-11-22T14:08:04.307Z"
+    }
+  },
+  "scorecard": {
+    "snapshotSha256": "d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb",
+    "denominator": 4,
+    "historicallyPassed": 4,
+    "currentlySupported": 2,
+    "unknownAttribution": 0,
+    "coverage": {
+      "untested": 0,
+      "partial": 1,
+      "tested": 1,
+      "blocked": 1,
+      "unregistered": 1
+    },
+    "capturedAt": "2026-11-22T14:08:04.307Z"
+  },
+  "notes": [
+    "内容封印 = 快照去掉 sha256 字段后对 canonical payload 计算的 sha256（可离线复算）。",
+    "字节哈希 = 快照文件原始字节的 sha256（确认交付的就是那一份文件）。",
+    "记分卡的 snapshotSha256 必须等于本清单 files.snapshot.sealSha256。",
+    "kind=engagement-e2e-mock：材料由 mock worker 生成，只证明流程语义。",
+    "同一份清单里的快照封印与文件字节哈希必须分别校验。"
+  ]
+}

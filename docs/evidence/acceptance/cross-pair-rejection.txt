@@ -1,31 +1,39 @@
+# 交叉配对反例（2026-11-22T14:08:38Z UTC）
+# 清单与快照来自 engagement-1795356472774，记录来自 business-1795356495176；两者单独都通过。
+# 命令：node --import tsx scripts/acceptance-verify.ts docs/evidence/acceptance/engagement-1795356472774 \
+#   --record docs/evidence/acceptance/business-1795356495176 --expect-commit 78ac41885feb8f4b4818ed2f419772aa25f9b112
 
-> gongyuai@0.1.0 verify:acceptance /Users/sycpro/GongYuAI
-> tsx scripts/acceptance-verify.ts docs/evidence/acceptance/engagement-1795354631468 --record docs/evidence/acceptance/business-1795354653869
-
-验收清单校验：/Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795354631468
-PASS  manifest.present  清单 /Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795354631468/acceptance-manifest.json
+验收清单校验：/Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795356472774
+PASS  manifest.present  清单 /Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795356472774/acceptance-manifest.json
 PASS  manifest.version  version=1
-PASS  manifest.runId  runId=engagement-1795354631468
-PASS  manifest.code.commit  代码提交 d7c46d4956246ba448b565136683daf155af1c62
-FAIL  record.md.bytes  acceptance-record.md 字节哈希 6dc6dea55702b3e043ee37d1e615fe74ce17f1ca1c5c42e1c21190b99ded991b（期望 811701e3aec9cc213d483d40068b7e6b9bcea1b2444ff95b8636c77f10d2bb87）
-FAIL  record.json.bytes  acceptance-record.json 字节哈希 692b425730c141342f952c3d0619b2d7ee8b26d6a2f1dd0d184b507f27c90b51（期望 4707e67efcb5d36b149dacb177335584e84e1b67ede7e01735890b48ebea7300）
-PASS  snapshot.file.bytes  快照文件字节哈希 2e760951a13e2ed43ac0f50f42d73e7eef00419297356350df06c4317e267a7f（期望 2e760951a13e2ed43ac0f50f42d73e7eef00419297356350df06c4317e267a7f）
-PASS  snapshot.seal  内容封印 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9；文件内 sha256=f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9；清单 sealSha256=f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9
-PASS  snapshot.distinct-from-bytes  内容封印 f05327fc54a2… 与文件字节哈希 2e760951a13e… 是两回事
-PASS  snapshot.capturedAt  快照 capturedAt=2026-11-22T13:37:22.986Z（清单 2026-11-22T13:37:22.986Z）
-PASS  snapshot.taskId  快照 taskId=d1d780b6-28ac-41a9-ba9a-5c75f43fe51d（清单 d1d780b6-28ac-41a9-ba9a-5c75f43fe51d）
+PASS  manifest.runId  runId=engagement-1795356472774
+PASS  manifest.code.commit  代码提交 78ac41885feb8f4b4818ed2f419772aa25f9b112
+PASS  code.commit.object  78ac41885feb8f4b4818ed2f419772aa25f9b112 是 /Users/sycpro/GongYuAI 里的真实提交对象
+PASS  code.commit.expected  运行时提交 78ac41885feb8f4b4818ed2f419772aa25f9b112；期望 78ac41885feb8f4b4818ed2f419772aa25f9b112（--expect-commit（调用方独立给定））
+PASS  code.clean  运行时代码状态干净（dirty=false）
+FAIL  record.md.bytes  acceptance-record.md 字节哈希 cdd94c3c9c1aaac4dd215f58919b79a12950ca4f446112ae3304ab94f25ae9f8（期望 8677bdb5d67a69b4bdea16864fe79ffd73e16a373397957ccf0dc8672d7e1cef）
+FAIL  record.json.bytes  acceptance-record.json 字节哈希 d4b93971a79008c9b31ae22578daff21aeeabfa13a80d6c57672fdb4c92541a8（期望 ab71e6b63997aa7b6006897aea958c2a353c42c9f04eaa101d026bdb5d699aad）
+PASS  snapshot.file.bytes  快照文件字节哈希 97ff33f3a14629ef27b0d6d286d2e94903aa7dd4fc35ea2843f734a2f5fc3986（期望 97ff33f3a14629ef27b0d6d286d2e94903aa7dd4fc35ea2843f734a2f5fc3986）
+PASS  snapshot.seal  内容封印 d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb；文件内 sha256=d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb；清单 sealSha256=d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb
+PASS  snapshot.distinct-from-bytes  内容封印 d6f744c3356a… 与文件字节哈希 97ff33f3a146… 是两回事
+PASS  snapshot.capturedAt  快照 capturedAt=2026-11-22T14:08:04.307Z（清单 2026-11-22T14:08:04.307Z）
+PASS  snapshot.taskId  快照 taskId=60837915-f18c-42e5-b0b2-f23714b3f103（清单 60837915-f18c-42e5-b0b2-f23714b3f103）
 PASS  scorecard.recompute  纯函数复算成功
-PASS  scorecard.points-at-this-snapshot  记分卡引用 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9；快照封印 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9
+PASS  scorecard.points-at-this-snapshot  记分卡引用 d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb；快照封印 d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb
 PASS  scorecard.numbers  复算 4/4 历史 · 2/4 当前 · 归属未知 0（清单 4/4 · 2/4 · 0）
-PASS  scorecard.capturedAt  复算 capturedAt=2026-11-22T13:37:22.986Z（清单 2026-11-22T13:37:22.986Z）
-FAIL  record.json.taskId  记录 taskId=fa3a8d43-c007-49a0-b6bc-a57f42baa90a（清单 d1d780b6-28ac-41a9-ba9a-5c75f43fe51d）
-FAIL  record.json.snapshotSha256  记录引用 fcdc2dce438883ec5565bc9982fae9afc2aabfb74f7f4c3476fc4dfc83efb63a；快照封印 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9
-FAIL  record.json.steps  记录 34 步、失败 0（清单 80 步、失败 0）
-FAIL  record.json.runId  记录数据目录 /Users/sycpro/GongYuAI/.gongyuai/acceptance/business-1795354653869（清单 runId engagement-1795354631468）
+PASS  scorecard.coverage  tested=1 partial=1 blocked=1 untested=0 unregistered=1（合计 4/4）
+PASS  scorecard.capturedAt  复算 capturedAt=2026-11-22T14:08:04.307Z（清单 2026-11-22T14:08:04.307Z）
+FAIL  record.json.taskId  记录 taskId=7d413b4b-dbe7-4d38-be1e-8f4b33a89e64（清单 60837915-f18c-42e5-b0b2-f23714b3f103）
+FAIL  record.json.snapshotSha256  记录引用 0439db0cc1336a62645b5fba1fee9aab9a61f904f430212650f6ba1903ccef92；快照封印 d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb
+FAIL  record.json.scorecard  denominator: 记录 3 ≠ 快照复算 4；historicallyPassed: 记录 3 ≠ 快照复算 4；currentlySupported: 记录 3 ≠ 快照复算 2；coverage.tested: 记录 0 ≠ 快照复算 1；coverage.partial: 记录 0 ≠ 快照复算 1；coverage.blocked: 记录 0 ≠ 快照复算 1；coverage.unregistered: 记录 3 ≠ 快照复算 1
+FAIL  record.json.steps  记录 77 步、失败 0（清单 80 步、失败 0）
+PASS  record.json.steps.failed  记录中没有失败步骤
+FAIL  record.json.runId  记录数据目录 /private/tmp/gy-clean-78ac418/repo/.gongyuai/acceptance/business-1795356495176（清单 runId engagement-1795356472774）
+PASS  manifest.steps.failed  清单记录 80 步全部通过
+PASS  manifest.steps.passed  清单通过 80 / 总数 80
 FAIL  record.md.sealMention  记录正文写出了这份快照的内容封印
 FAIL  record.md.runIdMention  记录正文写出了本次运行 ID
 PASS  record.md.manifestMention  记录正文指向同一份清单
 — 记分卡：历史通过 4/4；当前证据支持 2/4；归属未知 0；人工覆盖 untested=0 partial=1 tested=1 blocked=1 unregistered=1
 
 结论：存在失败项
- ELIFECYCLE  Command failed with exit code 1.

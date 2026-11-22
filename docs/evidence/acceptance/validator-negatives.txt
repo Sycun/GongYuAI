@@ -1,0 +1,32 @@
+# 验收校验器负例（2026-11-22T14:08:34Z UTC）
+原运行目录　docs/evidence/acceptance/engagement-1795356472774
+期望受验提交　78ac41885feb8f4b4818ed2f419772aa25f9b112
+
+## 原件必须先通过
+退出码　0（期望 0）
+通过项　30
+
+### 负例 zero-sha（只改这一处）
+退出码　1
+FAIL  code.commit.object  0000000000000000000000000000000000000000 不是本仓库里存在的提交对象
+FAIL  code.commit.expected  运行时提交 0000000000000000000000000000000000000000；期望 78ac41885feb8f4b4818ed2f419772aa25f9b112（--expect-commit（调用方独立给定））
+
+### 负例 other-commit（只改这一处）
+退出码　1
+FAIL  code.commit.expected  运行时提交 6ef71f926aad42cd2acc95ed147e66ead7872d95；期望 78ac41885feb8f4b4818ed2f419772aa25f9b112（--expect-commit（调用方独立给定））
+
+### 负例 dirty（只改这一处）
+退出码　1
+FAIL  code.clean  运行时代码状态 dirty=true，不能作为干净发布版本已验证：packages/contracts/src/reconcile.ts
+
+### 负例 coverage-99（只改这一处）
+退出码　1
+FAIL  scorecard.coverage  tested: 清单 99 ≠ 快照复算 1
+
+### 负例 failed-step（只改这一处）
+退出码　1
+FAIL  record.json.bytes  acceptance-record.json 字节哈希 a31e01dd1f772cb4034ef976bf81b7f4630f2b391bf24b5f5c6f0daf2704f953（期望 ab71e6b63997aa7b6006897aea958c2a353c42c9f04eaa101d026bdb5d699aad）
+FAIL  record.json.steps  记录 80 步、失败 1（清单 80 步、失败 0）
+FAIL  record.json.steps.failed  记录中有 1 个失败步骤：阶段1 建档
+
+结论：五个负例全部非零退出并指出失败字段；原件通过。
