@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "taskId": "c3d2d4fd-fb6e-4442-9475-b6b3e817c451",
+  "capturedAt": "2026-11-22T16:12:12.082Z",
+  "goals": [
+    {
+      "id": "g-a",
+      "title": "A 目标",
+      "passes": false,
+      "evidencePatterns": [
+        "recon/*.txt"
+      ],
+      "evidencePaths": [],
+      "assertedAt": null,
+      "kind": "file"
+    }
+  ],
+  "proofs": [],
+  "goalFindings": [],
+  "findings": [
+    {
+      "id": "b42f6801-5f4d-4f31-b813-162620d50d97",
+      "title": "A 客户专属 SQL 注入（marker A-ONLY-7731）",
+      "asset": "app-a-1.example.com",
+      "vulnClass": "CWE-89",
+      "severity": "high",
+      "status": "verified",
+      "evidence": [
+        {
+          "path": "http/tx-a.txt",
+          "sha256": "3e451851550fd0d6eadde58d546fbb69687c16673440326ff8528d1c49f41560"
+        }
+      ]
+    }
+  ],
+  "coverage": [],
+  "sha256": "3cf0bf7093a77ed93021a452451ac627577496285b8322de7a6f619b11dcd889"
+}

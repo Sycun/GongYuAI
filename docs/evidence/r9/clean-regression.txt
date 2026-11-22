@@ -1,0 +1,20 @@
+# 第九轮干净副本回归（受验提交 d6d32ae60974c366a6d70cf2506c1110a40d2025）
+
+副本：/tmp/gy-clean-r9（git clone 自本地仓库，checkout 受验提交，git status --porcelain = 0 行）
+环境：macOS 本机；pnpm install --frozen-lockfile
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| 安装 | pnpm install --frozen-lockfile | exit 0 |
+| 构建 | pnpm -r run build | exit 0 |
+| 全量单测 | pnpm -r run test | 195 通过 / 0 失败（contracts 51、history 57、control-plane 52、worker 35） |
+| 校验器自测 | pnpm test:acceptance | exit 0（8 项） |
+| 冒烟 | pnpm smoke | PASS |
+| 新增验收 P1/P2 | pnpm acceptance:r9:ops | 67/67，运行 r9-ops-1795363923307 |
+| 新增验收 P3/P4 | pnpm acceptance:r9:flywheel | 57/57，运行 r9-flywheel-1795363930629 |
+| 业务差异回归 | pnpm acceptance:business | 77 项，0 失败（运行 business-1795363956146） |
+| 首次通过绑定回归 | pnpm acceptance:firstpass | 69 项，0 失败（运行 firstpass-1795363958244） |
+| 跨日流程回归 | pnpm e2e:engagement | 80 项，0 失败（运行 engagement-1795363961424） |
+| 恢复隔离自测 | pnpm restore:selftest | exit 0 |
+
+记录里的 code 字段：commit=d6d32ae…，dirty=false，evidenceOnlyDirty=true（只有 docs/evidence/r9 产物未跟踪，源码零改动）。
