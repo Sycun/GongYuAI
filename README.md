@@ -14,13 +14,13 @@ AI-native **long-running** authorized pentest agent，产品面定位为 **Missi
 
 | 项 | 值 |
 | --- | --- |
-| 受验代码 | `77f8b8c2c526eb8106e63e40f0b01fb131c90e89`（tree `96ffb32`） |
+| 受验代码 | `f2719556d19dc7c5d35063e45d78bed70c19f031`（tree `657929f`） |
 | 本轮修复 | ① 控制台「业务核算」目标类型（系统派生核算条件）② 首次通过绑定判定时有效的那一版输入 |
-| 单测 | 162 通过（contracts 41、history 49、control-plane 37、worker 35） |
-| 跨日模拟运行 | `engagement-1795360108864`（80/80）· 快照封印 `966437660d6c…` |
-| 业务验收运行 | `business-1795360131311`（77/77）· 快照封印 `2f20073d8e5b…` |
-| 首次通过绑定验收 | `firstpass-1795360133436`（69/69）· `pnpm acceptance:firstpass` |
-| Kali 正式入口验收任务 | `a0c5638d…` / `bf6b3bac…` / `c8c451d3…` · 三笔均 1/1，各自 1 条首次通过事件 |
+| 单测 | 163 通过（contracts 41、history 50、control-plane 37、worker 35） |
+| 跨日模拟运行 | `engagement-1795361202971`（80/80）· 快照封印 `f8583e4f7f0c…` |
+| 业务验收运行 | `business-1795361225404`（77/77）· 快照封印 `0793116f38c8…` |
+| 首次通过绑定验收 | `firstpass-1795361227496`（69/69）· `pnpm acceptance:firstpass` |
+| Kali 正式入口验收任务 | `a0c5638d…` / `bf6b3bac…` / `c8c451d3…`（UI 复跑）+ `5e3490ce…`（最终构建 UI 复验）+ `706ead3e…` / `7a15202a…` / `dfcbffcc…` / `af139adb…`（最终构建接口复检）· 均 1/1，各自 1 条首次通过事件 |
 | 交付记录 | [docs/delivery-record.md](docs/delivery-record.md) §0 · [浏览器验收读数](docs/evidence/round8/kali-console-acceptance.json) |
 | 复核最短路径 | [docs/review-checklist.md](docs/review-checklist.md) §0 |
 
@@ -41,7 +41,7 @@ pnpm smoke
 | 角色 | 路径 | 动作 |
 | --- | --- | --- |
 | Mac | `/Users/sycpro/GongYuAI` | 开发；`git push origin main` |
-| Kali | `/home/parallels/GongYuAI-77f8b8c2`（systemd `gongyuai.service`） | `bash scripts/kali/deploy.sh prepare|switch <commit>`（clone + build + 迁移数据 + 切换） |
+| Kali | `/home/parallels/GongYuAI-f2719556`（systemd `gongyuai.service`） | `bash scripts/kali/deploy.sh prepare|switch <commit>`（clone + build + 迁移数据 + 切换） |
 
 首次在 Kali 从旧共享盘树切到 Git：`bash scripts/parallels/bootstrap-from-github.sh`。  
 不再使用 `~/Downloads/GongYuAI-sync` / Parallels 共享盘 rsync 做传输。

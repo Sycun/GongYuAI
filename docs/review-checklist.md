@@ -2,20 +2,20 @@
 
 给只拿到代码与证据包的复核人。每条都写清「命令 → 期望」，不依赖本机隐藏状态。
 
-**本轮（第八轮）受验代码 `77f8b8c2c526eb8106e63e40f0b01fb131c90e89`（tree `96ffb32`）**，
+**本轮（第八轮）受验代码 `f2719556d19dc7c5d35063e45d78bed70c19f031`（tree `657929f`）**，
 对应 [delivery-record.md](./delivery-record.md) §0。上一轮（第七轮，受验 `f34cc03`）的清单保留在 §0A。
 
 ## 0. 本轮（第八轮）最短路径
 
 ```bash
-git ls-remote origin refs/heads/main                 # 期望 fcd65f3…（受验提交 77f8b8c 之后的文档提交）
-git diff --stat 77f8b8c HEAD -- packages apps scripts # 期望为空（只有 README.md 与 docs/** 变化）
-bash scripts/clean-regression.sh 77f8b8c2c526eb8106e63e40f0b01fb131c90e89 /tmp/gy-clean
-# 期望：162 单测通过、校验器 8 项、smoke PASS、跨日 80/80、业务 77/77、首次通过 69/69、失败步骤 0
+git ls-remote origin refs/heads/main                 # 期望 f271955…（其后只有 README.md 与 docs/** 提交）
+git diff --stat f271955 HEAD -- packages apps scripts # 期望为空（只有 README.md 与 docs/** 变化）
+bash scripts/clean-regression.sh f2719556d19dc7c5d35063e45d78bed70c19f031 /tmp/gy-clean
+# 期望：163 单测通过、校验器 8 项、smoke PASS、跨日 80/80、业务 77/77、首次通过 69/69、失败步骤 0
 ```
 
 ```bash
-pnpm --filter @gongyuai/history test        # 期望 49 通过（含 reconcile-firstpass 10 例）
+pnpm --filter @gongyuai/history test        # 期望 50 通过（含 reconcile-firstpass 11 例）
 pnpm --filter @gongyuai/contracts test      # 期望 41 通过
 pnpm --filter @gongyuai/control-plane test  # 期望 37 通过（含 business-goal-api 5 例）
 pnpm acceptance:firstpass                   # 期望 69 项全过
@@ -29,9 +29,9 @@ python3 -c "import json;r=json.load(open('docs/evidence/round8/kali-console-acce
 
 ```bash
 # Kali 现场核对
-systemctl show -p ActiveState -p MainPID -p WorkingDirectory gongyuai.service   # active / 1720624 / GongYuAI-77f8b8c2
+systemctl show -p ActiveState -p MainPID -p WorkingDirectory gongyuai.service   # active / 1735540 / GongYuAI-f2719556
 readlink /proc/$(pgrep -f 'gy serve' | head -1)/cwd                              # 同一目录
-git -C /home/parallels/GongYuAI-77f8b8c2 rev-parse HEAD                          # 77f8b8c…
+git -C /home/parallels/GongYuAI-f2719556 rev-parse HEAD                          # f271955…
 curl -s localhost:8877/health                                                    # {"ok":true}
 curl -s localhost:8877/tasks | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tasks"]))'  # 22
 ```

@@ -12,25 +12,25 @@
 
 | 项 | 值 |
 | --- | --- |
-| 受验代码 | `77f8b8c2c526eb8106e63e40f0b01fb131c90e89`（tree `96ffb3222670a3b37299cf58ddc4ac847551a1fb`） |
+| 受验代码 | `f2719556d19dc7c5d35063e45d78bed70c19f031`（tree `657929f5ddb9f9b6fe747c7af0edadd907ad2ee6`） |
 | 上一轮受验 / 复核 | `f34cc03`（第三轮独立复核），当时 GitHub `main` = `c1d95e2` |
 | 本轮起点 | `c1d95e2`（工作区另有他人未提交的控制台 / 聊天改动，未纳入本次提交） |
-| GitHub `main` | `77f8b8c`（`git ls-remote origin refs/heads/main` 现场取值，与受验提交相同） |
-| 干净副本回归 | `/tmp/gy-clean-77f8b8c`（`git clone` 自本地仓库，checkout 受验提交，0 条未提交改动）；日志 `/tmp/gy-clean-77f8b8c/clean-regression.log` |
-| Kali 检出 | `/home/parallels/GongYuAI-77f8b8c2`，HEAD = 同一受验提交，tree 同 `96ffb32`，工作区 0 条改动 |
-| Kali 实际运行 | 同一提交（systemd `gongyuai.service`，MainPID 1720624，监听 PID 1720656 在 `/system.slice/gongyuai.service`，cwd = 上述目录） |
+| GitHub `main` | `f271955`（`git ls-remote origin refs/heads/main` 现场取值；其后仅文档 / 证据提交 `fcd65f3`、`06d8bad`） |
+| 干净副本回归 | `/tmp/gy-clean-f271955`（`git clone` 自本地仓库，checkout 受验提交，0 条未提交改动）；日志 `/tmp/gy-clean-f271955/clean-regression.log` |
+| Kali 检出 | `/home/parallels/GongYuAI-f2719556`，HEAD = 同一受验提交，tree 同 `657929f`，工作区 0 条改动 |
+| Kali 实际运行 | 同一提交（systemd `gongyuai.service`，MainPID 1735540，监听 PID 1735572 在 `/system.slice/gongyuai.service`，cwd = 上述目录，`NRestarts=0`） |
 
 ### 0.2 干净副本回归读数（受验提交）
 
 | 步骤 | 读数 |
 | --- | --- |
 | 冻结依赖安装 + 构建 | exit 0 |
-| 全量单测 | **162 通过 / 0 失败**（contracts 41、history 49、control-plane 37、worker 35） |
+| 全量单测 | **163 通过 / 0 失败**（contracts 41、history 50、control-plane 37、worker 35） |
 | 验收校验器测试 | 8 通过 / 0 失败 |
 | smoke | PASS |
-| 跨日模拟流程 | `engagement-1795360108864`：80/80，快照封印 `966437660d6c…`，文件字节 `e43a08932e7d…` |
-| 原始材料业务验收 | `business-1795360131311`：77/77，快照封印 `2f20073d8e5b…` |
-| 首次通过绑定验收（本轮新增） | `firstpass-1795360133436`：**69/69**（A、B1、B2 与原反例逐条对应） |
+| 跨日模拟流程 | `engagement-1795361202971`：80/80，快照封印 `f8583e4f7f0c…`，文件字节 `1e6634b3aebb…` |
+| 原始材料业务验收 | `business-1795361225404`：77/77，快照封印 `0793116f38c8…` |
+| 首次通过绑定验收（本轮新增） | `firstpass-1795361227496`：**69/69**（A、B1、B2 与原反例逐条对应） |
 | 恢复隔离自测 | 通过（含“源目录不可访问仍从副本读”负例） |
 | 失败步骤计数 | 0 |
 
@@ -49,7 +49,11 @@
 | B1（撤回基线两时点） | `bf6b3bac-b095-4399-9975-71c0dc914aaa` | `r1795360401215-0001` | `reconcile/asset-diff-r1795360401215-0001.json`（SHA-256 `652204a327ce…`） | completed · 1/1 |
 | B2（同路径冲突重复键） | `c8c451d3-9bec-4484-b9a4-0ee65269f5a6` | `r1795360478812-0001` | `reconcile/asset-diff-r1795360478812-0001.json`（SHA-256 `821437c8fb48…`） | completed · 1/1 |
 
-三笔任务的三次首次通过各只产生 1 条 `goal_asserted` 与 1 份 `goal_proofs`，报告均含「首次通过采用的核算文件」「首次通过采用的输入版本」「基线 / 当前材料 SHA-256」。完整读数（含全部核算版本、输入哈希、拒绝原因、材料审计事件）见
+三笔任务的三次首次通过各只产生 1 条 `goal_asserted` 与 1 份 `goal_proofs`，报告均含「首次通过采用的核算文件」「首次通过采用的输入版本」「基线 / 当前材料 SHA-256」。
+
+> 版本对齐说明：上面三笔 UI 复跑发生在受验提交 `77f8b8c` 上。按独立复核意见收紧老形状绑定后（`f271955`，见 §0.7），Kali 重新部署并**在同一正式控制台再跑了一遍 A**（`5e3490ce…`，UI），并用同一批产品接口复检 A/B1/B2 与新增规则（§0.8）。`f271955` 相对 `77f8b8c` 只改 `goal-evidence.ts` 的候选判定与拒绝措辞，业务目标的路径与结论未变；三笔旧任务在 `f271955` 上仍报 1/1。
+
+完整读数（含全部核算版本、输入哈希、拒绝原因、材料审计事件）见
 [`docs/evidence/round8/kali-console-acceptance.json`](./evidence/round8/kali-console-acceptance.json)；
 本机控制台同场景见 [`docs/evidence/round8/console-browser-acceptance.json`](./evidence/round8/console-browser-acceptance.json)。
 
@@ -57,12 +61,12 @@
 
 | 项 | 读数 |
 | --- | --- |
-| 保护备份 | `gongyuai-data-backup-20261122-231008.tar.gz`，21,420,362 字节，SHA-256 `b0ee2b48dd40…`，权限 0600 |
+| 保护备份 | `gongyuai-data-backup-20261122-232853.tar.gz`，21,520,234 字节，SHA-256 `f62ced14373c…`，权限 0600（上一版 `…231008.tar.gz` 亦保留） |
 | 切换 | `prepare`（parallels 用户：备份 → clone 受验提交 → 本机 `pnpm install --frozen-lockfile` + 构建 → 迁移 `.gongyuai` 与 `.env`）→ `switch`（root：改写单元 `WorkingDirectory` → 重启 → 逐项核对） |
-| 单元状态 | `ActiveState=active`、`SubState=running`、`UnitFileState=enabled`、`NRestarts=0` |
-| 监听与归属 | `0.0.0.0:8877`，PID 1720656，`/proc/<pid>/cwd` = `/home/parallels/GongYuAI-77f8b8c2`，cgroup `0::/system.slice/gongyuai.service` |
-| 实际构建产物 | 6 份编译产物（`control-plane/dist/{server,reconcile,store}.js`、`contracts/dist/reconcile.js`、`history/dist/{index,goal-evidence}.js`）与本机 / 干净副本**逐字节相同**；控制台 `web/index.html` 指向本机构建的 `assets/index-CkF6Raet.js`，`/assets/index-CkF6Raet.js` 返回 200 |
-| 数据保留 | 切换前后任务数 18 → 18；复跑后 22；第七轮正式任务 `497126a0…` 的 `passes=true` 与 `goal_proofs`（`reconcile/kali-eng-diff-20261122141507.json`，`478da5dfc3d0…`）保留 |
+| 单元状态 | `ActiveState=active`、`SubState=running`、`UnitFileState=enabled`、`NRestarts=0`（23:29:10 切换后启动） |
+| 监听与归属 | `0.0.0.0:8877`，PID 1735572，`/proc/<pid>/cwd` = `/home/parallels/GongYuAI-f2719556`，cgroup `0::/system.slice/gongyuai.service` |
+| 实际构建产物 | 关键编译产物（`control-plane/dist/{server,reconcile,store}.js`、`contracts/dist/reconcile.js`、`history/dist/{index,goal-evidence}.js`）与本机 / 干净副本**逐字节相同**（`goal-evidence.js` = `4d654949c70a…`）；独立复核人在 77f8b8c 上另比对 104/104 份产物一致；控制台 `web/index.html` 指向本机构建的 `assets/index-CkF6Raet.js`，该资产返回 200 |
+| 数据保留 | 第一次切换 18 → 18，第二次切换 22 → 22；第七轮正式任务 `497126a0…` 的 `passes=true` 与 `goal_proofs`（`reconcile/kali-eng-diff-20261122141507.json`，`478da5dfc3d0…`）保留；在 77f8b8c 上完成的三笔验收任务在 f271955 上仍报 1/1 |
 
 ### 0.6 提交差异（受验提交之后）
 
@@ -77,7 +81,32 @@ git diff --stat 77f8b8c HEAD -- packages apps scripts    # 期望：空
 git diff --stat 77f8b8c HEAD -- README.md docs          # 期望：只有上列文件
 ```
 
-### 0.7 仍然未验证的（工程验收 ≠ 生产盲评）
+### 0.7 独立复核与整改
+
+| 项 | 内容 |
+| --- | --- |
+| 复核报告 | `out/independent-review-77f8b8c-20261122-232235/review.md`（独立复核人自建干净副本 + 自建 HTTP harness，受验 77f8b8c） |
+| 两条主张 | 均判「成立」：业务核算走显式类型且四处同一份配置；首次通过绑定判定时有效输入（撤走→409、换内容→409、改归档 JSON→哈希不符拒绝、伪造结果→no-result、10 路并发判定→1 事件 1 依据） |
+| 复核人独立读数 | 163 单测口径下当时为 162/162（本轮收紧后 163/163）；校验器 8/8；smoke PASS；engagement 80/80；business 77/77；firstpass 69/69；恢复自测 20 项；24 路双进程同名并发 id 唯一、0 行哈希不一致；全库 6 条首次通过与归档/文件/事件互证失败 0 |
+| 复核发现（低危） | 只带 `reconcileGate`、不带 `business` 的老形状目标不做目标绑定，可借用**记在别的目标名下**的归档（输入哈希仍校验，故不能编造结论）。复现：`legacy` 目标采用 `biz` 的归档后 200 通过 |
+| 整改（f271955） | `packages/history/src/goal-evidence.ts` 新增 `archiveBelongsToGoal`：老形状目标只接受未绑定目标（`goalIds: []`，旧式手动核算）或记在本目标名下的归档；`selectAdoptedReconcile` 与 `describeReconcileState` 共用同一判据；拒绝措辞区分“没有可用归档（旧格式结果需重算）”与“没有核算结果”。回归：`reconcile-firstpass.test.ts` 新增 1 例（老形状目标拒绝外来归档、仍接受未绑定核算），history 50/50；业务验收 77/77 与首次通过 69/69 复跑通过 |
+| 仍留作已知边界 | ① 同一份内容被换回时旧版本重新具备采用资格（内容哈希绑定，非时间绑定，见 §0.8 说明）；② 版本号生成/写文件/入库非跨进程原子（当前单进程部署未触发）；③ 归档结果摘要未再与版本戳交叉比对（文件哈希已覆盖）。三条都在报告 §5 里逐条写了位置 |
+| 复核人未验 | 浏览器内完整提交表单（其浏览器掉回 about:blank，改用 HTTP 建档 + 源码/构建产物字符串）；跨进程同毫秒撞号；worker/console 跨进程判定窗口；真实委托材料 |
+
+### 0.8 Kali 验收任务全量登记（含早期尝试）
+
+| 任务 ID | 场景 | 结论 |
+| --- | --- | --- |
+| `a0c5638d-2e84-4581-b07f-23c738d6471a` | A（UI，77f8b8c） | completed · 1/1 · 采用 `r1795360324163-0001` |
+| `bf6b3bac-b095-4399-9975-71c0dc914aaa` | B1（UI，77f8b8c） | completed · 1/1 · 采用 `r1795360401215-0001` |
+| `c8c451d3-9bec-4484-b9a4-0ee65269f5a6` | B2（UI，77f8b8c，含冲突阶段截图） | completed · 1/1 · 采用 `r1795360478812-0001` |
+| `6413d3f3-96be-4d36-a3b7-59cf1d15ad13` | B2 早期一次脚本化尝试（同性质，界面脚本未回报结果，数据已核对） | completed · 1/1 · 同路径冲突阶段 0/1 已核对 |
+| `5e3490ce-30a9-4bf0-9831-a5c6bf5ee7b2` | A（UI，最终构建 f271955） | completed · 1/1 · 采用 `r1795361422364-0001`，报告引用输入版本 |
+| `706ead3e…` / `7a15202a…` / `dfcbffcc…` / `af139adb…` | 最终构建 f271955 上用同一批产品接口复检 A / B1 / B2 / 老形状绑定规则 | 全部按预期：A 409→200、B1 两时点 409→200、B2 歧义 409（`app-a-1`，当前第 2/3 行）→200、老形状借用被拒 409 而未绑定核算 200 |
+
+读数文件：`docs/evidence/round8/kali-console-acceptance.json`（前三笔 UI 复跑）、`docs/evidence/round8/kali-http-recheck.json`（最终构建复检）、`docs/evidence/round8/console-browser-acceptance.json`（本机三笔 UI）。
+
+### 0.9 仍然未验证的（工程验收 ≠ 生产盲评）
 
 - **真实生产效果待验证**：缺 (1) 一份获准用于本次验收的脱敏真实委托（含材料先后顺序、范围修订、撤回与实际覆盖、中途交接），(2) 客户对该材料用途的书面许可，(3) 平台结果产生前独立封存的人工底稿（预期差异、未验证项、已撤回结论、遗留事项）。
 - 本轮全部材料为虚构样本（`diff.example.com` / `app-a-*` 主机名），不构成真实业务结论。

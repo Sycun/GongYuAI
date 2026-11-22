@@ -1,7 +1,7 @@
 # 实施台账（Implementation Ledger）
 
 > 面向独立复核人：本文件把 P0–P12 与七个阶段映射到**实际代码、正常用户入口、测试证据、本轮实际走查结果与剩余差距**，并区分「文档已设计 / 代码已实现 / 入口已走查 / 真实委托已验证 / 缺外部材料」。
-> 本轮基线：第四轮独立复核（受验 `f34cc03`，复核记录 `out/independent-review-f34cc03-20261122-223538/review.md`）指出的两项缺陷；本轮受验代码 `77f8b8c2c526eb8106e63e40f0b01fb131c90e89`。验收运行与哈希见 [delivery-record.md](./delivery-record.md) §0 与 `docs/evidence/`。
+> 本轮基线：第四轮独立复核（受验 `f34cc03`，复核记录 `out/independent-review-f34cc03-20261122-223538/review.md`）指出的两项缺陷；本轮受验代码 `f2719556d19dc7c5d35063e45d78bed70c19f031`。验收运行与哈希见 [delivery-record.md](./delivery-record.md) §0 与 `docs/evidence/`。
 > 上一轮（第七轮）台账条目保留在 §1–§5，本轮新增内容见 §6。
 
 ## 0. 签收状态口径（全文统一）
@@ -117,13 +117,13 @@
 
 | 项 | 内容 |
 | --- | --- |
-| 受验代码 | `77f8b8c2c526eb8106e63e40f0b01fb131c90e89` |
+| 受验代码 | `f2719556d19dc7c5d35063e45d78bed70c19f031` |
 | 复核依据 | `out/independent-review-f34cc03-20261122-223538/review.md`（两项缺陷 + 两个反例日志） |
 | 代码落点（缺陷一） | `packages/contracts/src/index.ts`（`GoalSpec.kind` / `business` / `normalizeGoalSpecs` / `CreateTaskRequestSchema` 出口归一化）、`packages/contracts/src/reconcile.ts`（`BusinessReconcileConfigSchema` / `reconcileGateFromConfig` / `reconcileResultPattern`）、`packages/history/src/index.ts`（`goal_kind` / `business_json` 列与读写）、`apps/console/src/pages/TasksPage.tsx`（目标类型与业务核算配置）、`apps/console/src/components/GoalReconcileCard.tsx` |
 | 代码落点（缺陷二） | `packages/history/src/goal-evidence.ts`（`verifyRevisionInputs` / `selectAdoptedReconcile` / `describeReconcileState` / 冲突键与来源行）、`packages/history/src/index.ts`（`reconcile_revisions` 表、`archiveReconcile`、`assertGoal` 事务内二次核对、`goalReconcileState`）、`packages/control-plane/src/reconcile.ts`（`{goalId}` 目标级核算与口径校验）、`packages/control-plane/src/server.ts`（材料导入/撤回、操作员判定入口、`/history` 暴露核算版本与核算态）、`packages/history/src/report.ts`（报告写入采用的输入版本与两侧哈希） |
 | 正常入口 | 控制台：任务 → 新建任务（目标类型：业务核算）→ 证据页「导入/替换」「撤回」→ 目标页「运行核算」「触发判定」；API 同源：`POST /tasks`、`POST/DELETE /tasks/:id/evidence`、`POST /tasks/:id/reconcile`（`{goalId}`）、`POST /tasks/:id/goals/assert` |
-| 单测 | 162 通过 / 0 失败：contracts 41（业务配置派生、口径摘要、版本号单调、输入摘要）、history 49（`reconcile-firstpass.test.ts` 10 例：撤走/替换/窗口回滚/同名区分/跨目标/跨口径/核算态/冲突行号）、control-plane 37（`business-goal-api.test.ts` 5 例）、worker 35 |
+| 单测 | 163 通过 / 0 失败：contracts 41（业务配置派生、口径摘要、版本号单调、输入摘要）、history 50（`reconcile-firstpass.test.ts` 11 例：撤走/替换/窗口回滚/同名区分/跨目标/跨口径/核算态/冲突行号/老形状不借用）、control-plane 37（`business-goal-api.test.ts` 5 例）、worker 35 |
 | 验收 | `pnpm acceptance:firstpass` 69 项；`pnpm acceptance:business` 77 项；跨日模拟 80 项；校验器 8 项；恢复隔离自测 |
-| 浏览器验收 | 本机控制台三笔任务（`0a0a5edb…`/`37a10789…`/`4fcf3229…`）与 Kali 正式控制台三笔任务（`a0c5638d…`/`bf6b3bac…`/`c8c451d3…`）全部经 UI 建档、导入/替换/撤回、核算与判定；读数见 `docs/evidence/round8/` 的两份 JSON 与两张控制台截图 |
+| 浏览器验收 | 本机控制台三笔任务（`0a0a5edb…`/`37a10789…`/`4fcf3229…`）与 Kali 正式控制台三笔任务（`a0c5638d…`/`bf6b3bac…`/`c8c451d3…`）全部经 UI 建档、导入/替换/撤回、核算与判定；最终构建 `f271955` 上另在 Kali 控制台复验一笔（`5e3490ce…`）并用同一批产品接口复检 A/B1/B2 与新增的老形状规则（`706ead3e…`/`7a15202a…`/`dfcbffcc…`/`af139adb…`）；读数见 `docs/evidence/round8/` 三份 JSON 与两张控制台截图 |
 | 采用规则 | 判定依据是**内容哈希**：每版核算记录两侧材料哈希与口径摘要，判定时重新读取材料字节比对，并在通过事务内再核对一次；材料被撤走或内容变化即失去资格并保留供追溯；内容换回与某次核算完全相同的字节时该次核算重新具备资格（不要求时间上最新） |
 | 状态 | 两项缺陷：**已验证**（本机 + Kali 正常入口）；真实生产效果：**缺外部材料**（见 delivery-record §0.7） |

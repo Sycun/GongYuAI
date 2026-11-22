@@ -1,0 +1,137 @@
+{
+  "kind": "kali-http-recheck-after-hardening",
+  "recordedAt": "2026-11-22T23:29:28+08:00",
+  "console": "http://10.211.55.5:8877",
+  "note": "f271955 重新部署后，用正常 HTTP 入口（建档/材料导入撤回/目标核算/操作员判定）在 Kali 现场复跑两个反例与新增的老形状绑定规则",
+  "results": [
+    {
+      "case": "A-missing",
+      "taskId": "706ead3e-c8f2-40ea-b666-9457c38fb1bf",
+      "assertStatus": 409,
+      "reason": "核算条件未满足：reconcile/asset-diff-r1795361367359-0001.json（版本 r1795361367359-0001）：核算时缺少基线材料 assets/baseline.csv（该结果本身是缺件结论）",
+      "passes": false,
+      "asserted": 0,
+      "scorecard": [
+        0,
+        0,
+        1
+      ],
+      "state": "missing-material"
+    },
+    {
+      "case": "A-pass",
+      "taskId": "706ead3e-c8f2-40ea-b666-9457c38fb1bf",
+      "assertStatus": 200,
+      "passes": true,
+      "asserted": 1,
+      "proofs": 1,
+      "scorecard": [
+        1,
+        1,
+        1
+      ],
+      "adopted": "r1795361367385-0001",
+      "result": "reconcile/asset-diff-r1795361367385-0001.json",
+      "baselineSha": "0ba6ac81dce75c497128497ebed0cd06c32b0d9a0da2e9440bbeb9da65f658fc",
+      "currentSha": "dc4be6fe2748eada616ccf45393d18fbbc1c85173063f4535e94f0c84a0d9742"
+    },
+    {
+      "case": "B1-two-timepoints",
+      "taskId": "7a15202a-6b67-4ba1-9626-5f5133f79026",
+      "afterWithdraw": {
+        "status": 409,
+        "reason": "核算条件未满足：reconcile/asset-diff-r1795361367649-0001.json（版本 r1795361367649-0001）：基线材料已撤走：assets/baseline.csv（核算时哈"
+      },
+      "afterRecompute": {
+        "status": 409,
+        "reason": "核算条件未满足：reconcile/asset-diff-r1795361367671-0001.json（版本 r1795361367671-0001）：核算时缺少基线材料 assets/baseline.csv（该结"
+      },
+      "asserted": 0,
+      "proofs": 0,
+      "scorecard": [
+        0,
+        0,
+        1
+      ],
+      "revisions": [
+        "r1795361367671-0001",
+        "r1795361367649-0001"
+      ],
+      "oldResultStillReadable": true
+    },
+    {
+      "case": "B1-pass",
+      "taskId": "7a15202a-6b67-4ba1-9626-5f5133f79026",
+      "assertStatus": 200,
+      "adopted": "r1795361367696-0001",
+      "result": "reconcile/asset-diff-r1795361367696-0001.json",
+      "asserted": 1,
+      "proofs": 1
+    },
+    {
+      "case": "B2-conflict",
+      "taskId": "dfcbffcc-2d7e-494c-8ff8-26d4b82a06bc",
+      "assertStatus": 409,
+      "reason": "核算条件未满足：reconcile/asset-diff-r1795361367969-0001.json（版本 r1795361367969-0001）：重复主键歧义 1 项 > 允许 0 项 | reconcile/asset-diff-r1795361367957-0001",
+      "counts": {
+        "added": 0,
+        "removed": 0,
+        "changed": 0,
+        "unchanged": 2,
+        "missing": 0,
+        "unknown": 0,
+        "ambiguous": 1,
+        "totalKeys": 3
+      },
+      "ambiguous": [
+        {
+          "key": "app-a-1",
+          "reason": "duplicate-key-conflict: 主键 app-a-1 在 当前 assets/current.csv 中重复出现且内容冲突",
+          "lines": [
+            {
+              "material": "current",
+              "line": 2,
+              "endLine": 2
+            },
+            {
+              "material": "current",
+              "line": 3,
+              "endLine": 3
+            }
+          ]
+        }
+      ],
+      "asserted": 0,
+      "proofs": 0,
+      "scorecard": [
+        0,
+        0,
+        1
+      ],
+      "oldResultStillReadable": true
+    },
+    {
+      "case": "B2-pass",
+      "taskId": "dfcbffcc-2d7e-494c-8ff8-26d4b82a06bc",
+      "assertStatus": 200,
+      "adopted": "r1795361367995-0001",
+      "result": "reconcile/asset-diff-r1795361367995-0001.json",
+      "asserted": 1,
+      "proofs": 1
+    },
+    {
+      "case": "C-legacy-cannot-borrow",
+      "taskId": "af139adb-84af-4067-9f79-1dccc02cecca",
+      "assertStatus": 409,
+      "reason": "核算条件未满足：匹配 reconcile/asset-diff-*.json 的核算结果记在别的目标名下（biz-diff），不能套用——先补交材料并运行核算"
+    },
+    {
+      "case": "C-legacy-unbound-ok",
+      "taskId": "af139adb-84af-4067-9f79-1dccc02cecca",
+      "assertStatus": 200,
+      "revision": "r1795361368276-0001",
+      "goalIds": [],
+      "proof": "reconcile/asset-diff-r1795361368276-0001.json"
+    }
+  ]
+}
