@@ -50,21 +50,26 @@
 
 一个需要单独保留的产品选择是“同资产时是否默认带入历史参考”。原聊天明确选择了自动、非阻塞展示历史接触，随后总纲将默认带入也记成定案。建议先自动展示，由操作员显式选择带入。未来若调整默认值，适用前提包括同委托、资产身份可核对、历史结论未撤回。这个选项不影响第一轮开工。[定调日志](./MASTER-DESIGN.md) · [面板设计](./memory-layer.md)
 
-## 实施状态（2026-11-22，随本次发布）
+## 实施状态（2026-11-22 第二轮复核整改后）
 
 | 项 | 状态 | 证据 |
 | --- | --- | --- |
 | A1 发现归属 | ✅ | `packages/history/src/delivery-assurance.test.ts` A1/A1+；`findingsGate.scope/assets` + `goal_findings` |
-| A2 覆盖型目标 | ✅ | A2 用例：tested/partial/unknown 三态；零发现不证明覆盖 |
-| A3 提交顺序 | ✅ | A3 用例：撤回在先是断言失败；断言在先保留历史并提示唯一依据已撤回；另留独立依据须在**断言前**已备，归属首次通过时冻结 |
-| A4 旧档只读 | ✅ | A4 用例：两次记分卡一致；快照与历史库字节不变；归属未知单列且**不计入** `currentlySupported` |
-| A5 复用/去重/复算 | ✅ | A5 用例：两目标各计一次；更正幂等；快照独立复算一致 |
+| A2 覆盖型目标 | ✅ | A2 用例：tested/partial/unregistered 三态；零发现不证明覆盖；覆盖充分时报告写“在本次检查范围内未检出” |
+| A3 提交顺序（单写入方） | ✅ | A3 用例：撤回在先是断言失败；断言在先保留历史并提示唯一依据已撤回 |
+| **A3 提交顺序（双写入方并发）** | ✅ | `packages/history/src/a3-concurrency.test.ts`：两个独立连接、两个独立进程（`scripts/a3-writer.ts`），用标记文件控制两种提交先后；核对目标状态、冻结 Finding ID、证据版本、事件数，无重复记账、无半写入；含“首次通过时另有独立有效依据” |
+| A4 旧档只读 | ✅ | A4 用例：两次记分卡一致；快照与历史库字节不变；归属未知单列且**不计入** `currentlySupported`；Kali 真实备份恢复再次复现该语义 |
+| A5 复用/去重/复算 | ✅ | A5 用例：两目标各计一次；更正幂等；同一快照重复复算逐字节相同 |
 | 普通附件同名回归 | ✅ | `delivery-assurance.test.ts` 末例：业务 `ALL_COMPLETE.json` 按文件判据 |
-| 基准样例兼容 | ✅ | 同例：`boardGate: "tsecbench"` 未清板拒绝、清板通过；`examples/tsecbench/goals-autonomous.json` 已声明 |
+| 基准样例兼容 | ✅ | 同例：`boardGate: "tsecbench"` 未清板拒绝、清板通过 |
 | 交付更正 | ✅ | 编号、影响清单、通知状态、旧报告版本留存；`gy correct` / `gy correction-notice` |
-| 恢复演练 | 见交付记录 | 控制面中断恢复 + 独立备份还原演练 |
-| 生产盲评 | ⏳ 待验证 | 缺少已获准的脱敏历史委托与独立人工底稿；不影响工程验收 |
+| **覆盖与当前支持分列** | ✅ | 记分卡 `denominator` + `coverage.{tested,partial,blocked,untested,unregistered}`；API/控制台/报告/交付摘要四处同源（`packages/control-plane/src/coverage-support.test.ts`） |
+| **原始材料差异核算** | ✅（虚构材料） | `packages/contracts/src/reconcile.ts` + `POST /tasks/:id/reconcile` + `gy reconcile` + 控制台面板；`scripts/business-acceptance.ts` 34 步，预期预先封存并逐项比对 |
+| **可机器校验的验收清单** | ✅ | `scripts/acceptance-manifest.ts` / `acceptance-verify.ts`；区分快照内容封印与文件字节哈希；交叉配对反例必须失败 |
+| **阶段 5 两个入口** | ✅ | 客户复测申请（`retest_requests`）、同一委托内跨任务署名复核（`peer_reviews`，跨委托 409）；贯穿样例实跑 |
+| 恢复演练 | 部分验证 | 本机 `pnpm drill:restore` PASS；Kali 真实备份隔离恢复见 `docs/evidence/restore/20261122-kali-backup/`（封存版不可验的上限已写明） |
+| 生产盲评 | ⏳ 缺外部材料 | 缺已获准的脱敏历史委托、独立人工底稿、客户书面确认；不影响工程验收。报告与台账一律写“生产盲评待验证” |
 
 ## 工作区基线
 
-规划时 HEAD 为 `8e0a641`；本次发布提交包含上述实现与测试（SHA 见交付记录）。
+规划时 HEAD 为 `8e0a641`；上轮复核修复 `6c6bebd`（文档 `04c798b`）；本轮受验代码 `d7c46d4…`，验收运行与哈希见 [delivery-record.md](./delivery-record.md)。

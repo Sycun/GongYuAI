@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "taskId": "fa3a8d43-c007-49a0-b6bc-a57f42baa90a",
+  "capturedAt": "2026-11-22T13:37:34.753Z",
+  "goals": [
+    {
+      "id": "asset-baseline-diff",
+      "title": "原始资产清单差异",
+      "passes": true,
+      "evidencePatterns": [
+        "reconcile/asset-diff-*.json"
+      ],
+      "evidencePaths": [
+        "reconcile/asset-diff-20261122133734.json"
+      ],
+      "assertedAt": "2026-11-22T13:37:34.261Z",
+      "assets": [
+        "diff.example.com"
+      ]
+    },
+    {
+      "id": "config-baseline-diff",
+      "title": "配置基线差异",
+      "passes": true,
+      "evidencePatterns": [
+        "reconcile/config-diff-*.json"
+      ],
+      "evidencePaths": [
+        "reconcile/config-diff-20261122133734.json"
+      ],
+      "assertedAt": "2026-11-22T13:37:34.262Z",
+      "assets": [
+        "diff.example.com"
+      ]
+    }
+  ],
+  "proofs": [
+    {
+      "goalId": "asset-baseline-diff",
+      "path": "reconcile/asset-diff-20261122133734.json",
+      "sha256": "d82cb9303ffedbe64e5ec2b3f36e8bd0cb4ac17e6b28f2c6ede477eca6d152d5"
+    },
+    {
+      "goalId": "config-baseline-diff",
+      "path": "reconcile/config-diff-20261122133734.json",
+      "sha256": "f5f3278dd746453fd0746d7c3093e443c8ebbb3e4e3da9d6cd36fb5e544ff3de"
+    }
+  ],
+  "goalFindings": [],
+  "findings": [],
+  "coverage": [],
+  "sha256": "fcdc2dce438883ec5565bc9982fae9afc2aabfb74f7f4c3476fc4dfc83efb63a"
+}

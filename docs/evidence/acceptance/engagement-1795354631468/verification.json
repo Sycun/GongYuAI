@@ -1,0 +1,182 @@
+{
+  "ok": true,
+  "dir": "/Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795354631468",
+  "checks": [
+    {
+      "id": "manifest.present",
+      "ok": true,
+      "detail": "清单 /Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795354631468/acceptance-manifest.json"
+    },
+    {
+      "id": "manifest.version",
+      "ok": true,
+      "detail": "version=1"
+    },
+    {
+      "id": "manifest.runId",
+      "ok": true,
+      "detail": "runId=engagement-1795354631468"
+    },
+    {
+      "id": "manifest.code.commit",
+      "ok": true,
+      "detail": "代码提交 d7c46d4956246ba448b565136683daf155af1c62"
+    },
+    {
+      "id": "record.md.bytes",
+      "ok": true,
+      "detail": "acceptance-record.md 字节哈希 811701e3aec9cc213d483d40068b7e6b9bcea1b2444ff95b8636c77f10d2bb87（期望 811701e3aec9cc213d483d40068b7e6b9bcea1b2444ff95b8636c77f10d2bb87）"
+    },
+    {
+      "id": "record.json.bytes",
+      "ok": true,
+      "detail": "acceptance-record.json 字节哈希 4707e67efcb5d36b149dacb177335584e84e1b67ede7e01735890b48ebea7300（期望 4707e67efcb5d36b149dacb177335584e84e1b67ede7e01735890b48ebea7300）"
+    },
+    {
+      "id": "snapshot.file.bytes",
+      "ok": true,
+      "detail": "快照文件字节哈希 2e760951a13e2ed43ac0f50f42d73e7eef00419297356350df06c4317e267a7f（期望 2e760951a13e2ed43ac0f50f42d73e7eef00419297356350df06c4317e267a7f）"
+    },
+    {
+      "id": "snapshot.seal",
+      "ok": true,
+      "detail": "内容封印 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9；文件内 sha256=f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9；清单 sealSha256=f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9"
+    },
+    {
+      "id": "snapshot.distinct-from-bytes",
+      "ok": true,
+      "detail": "内容封印 f05327fc54a2… 与文件字节哈希 2e760951a13e… 是两回事"
+    },
+    {
+      "id": "snapshot.capturedAt",
+      "ok": true,
+      "detail": "快照 capturedAt=2026-11-22T13:37:22.986Z（清单 2026-11-22T13:37:22.986Z）"
+    },
+    {
+      "id": "snapshot.taskId",
+      "ok": true,
+      "detail": "快照 taskId=d1d780b6-28ac-41a9-ba9a-5c75f43fe51d（清单 d1d780b6-28ac-41a9-ba9a-5c75f43fe51d）"
+    },
+    {
+      "id": "scorecard.recompute",
+      "ok": true,
+      "detail": "纯函数复算成功"
+    },
+    {
+      "id": "scorecard.points-at-this-snapshot",
+      "ok": true,
+      "detail": "记分卡引用 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9；快照封印 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9"
+    },
+    {
+      "id": "scorecard.numbers",
+      "ok": true,
+      "detail": "复算 4/4 历史 · 2/4 当前 · 归属未知 0（清单 4/4 · 2/4 · 0）"
+    },
+    {
+      "id": "scorecard.capturedAt",
+      "ok": true,
+      "detail": "复算 capturedAt=2026-11-22T13:37:22.986Z（清单 2026-11-22T13:37:22.986Z）"
+    },
+    {
+      "id": "record.json.taskId",
+      "ok": true,
+      "detail": "记录 taskId=d1d780b6-28ac-41a9-ba9a-5c75f43fe51d（清单 d1d780b6-28ac-41a9-ba9a-5c75f43fe51d）"
+    },
+    {
+      "id": "record.json.snapshotSha256",
+      "ok": true,
+      "detail": "记录引用 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9；快照封印 f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9"
+    },
+    {
+      "id": "record.json.steps",
+      "ok": true,
+      "detail": "记录 80 步、失败 0（清单 80 步、失败 0）"
+    },
+    {
+      "id": "record.json.runId",
+      "ok": true,
+      "detail": "记录数据目录 /Users/sycpro/GongYuAI/.gongyuai/acceptance/engagement-1795354631468（清单 runId engagement-1795354631468）"
+    },
+    {
+      "id": "record.md.sealMention",
+      "ok": true,
+      "detail": "记录正文写出了这份快照的内容封印"
+    },
+    {
+      "id": "record.md.runIdMention",
+      "ok": true,
+      "detail": "记录正文写出了本次运行 ID"
+    },
+    {
+      "id": "record.md.manifestMention",
+      "ok": true,
+      "detail": "记录正文指向同一份清单"
+    }
+  ],
+  "manifest": {
+    "version": 1,
+    "kind": "engagement-e2e-mock",
+    "runId": "engagement-1795354631468",
+    "taskId": "d1d780b6-28ac-41a9-ba9a-5c75f43fe51d",
+    "dataRoot": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/engagement-1795354631468",
+    "startedAt": "2026-11-22T13:37:11.468Z",
+    "finishedAt": "2026-11-22T13:37:23.056Z",
+    "code": {
+      "commit": "d7c46d4956246ba448b565136683daf155af1c62",
+      "branch": "main",
+      "dirty": false,
+      "dirtyPaths": []
+    },
+    "steps": {
+      "total": 80,
+      "passed": 80,
+      "failed": 0
+    },
+    "record": {
+      "markdown": "acceptance-record.md",
+      "json": "acceptance-record.json"
+    },
+    "files": {
+      "recordMd": {
+        "path": "acceptance-record.md",
+        "sha256": "811701e3aec9cc213d483d40068b7e6b9bcea1b2444ff95b8636c77f10d2bb87"
+      },
+      "recordJson": {
+        "path": "acceptance-record.json",
+        "sha256": "4707e67efcb5d36b149dacb177335584e84e1b67ede7e01735890b48ebea7300"
+      },
+      "snapshot": {
+        "path": "delivery-snapshot.json",
+        "bytesSha256": "2e760951a13e2ed43ac0f50f42d73e7eef00419297356350df06c4317e267a7f",
+        "sealSha256": "f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9",
+        "capturedAt": "2026-11-22T13:37:22.986Z"
+      }
+    },
+    "scorecard": {
+      "snapshotSha256": "f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9",
+      "denominator": 4,
+      "historicallyPassed": 4,
+      "currentlySupported": 2,
+      "unknownAttribution": 0,
+      "coverage": {
+        "untested": 0,
+        "partial": 1,
+        "tested": 1,
+        "blocked": 1,
+        "unregistered": 1
+      },
+      "capturedAt": "2026-11-22T13:37:22.986Z"
+    },
+    "notes": [
+      "内容封印 = 快照去掉 sha256 字段后对 canonical payload 计算的 sha256（可离线复算）。",
+      "字节哈希 = 快照文件原始字节的 sha256（确认交付的就是那一份文件）。",
+      "记分卡的 snapshotSha256 必须等于本清单 files.snapshot.sealSha256。",
+      "kind=engagement-e2e-mock：材料由 mock worker 生成，只证明流程语义。",
+      "同一份清单里的快照封印与文件字节哈希必须分别校验。"
+    ]
+  },
+  "summary": [
+    "记分卡：历史通过 4/4；当前证据支持 2/4；归属未知 0；人工覆盖 untested=0 partial=1 tested=1 blocked=1 unregistered=1"
+  ],
+  "verifiedAt": "2026-11-22T13:37:37.443Z"
+}

@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "kind": "business-acceptance",
+  "runId": "business-1795354653869",
+  "taskId": "fa3a8d43-c007-49a0-b6bc-a57f42baa90a",
+  "dataRoot": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/business-1795354653869",
+  "startedAt": "2026-11-22T13:37:33.869Z",
+  "finishedAt": "2026-11-22T13:37:34.795Z",
+  "code": {
+    "commit": "d7c46d4956246ba448b565136683daf155af1c62",
+    "branch": "main",
+    "dirty": false,
+    "dirtyPaths": []
+  },
+  "steps": {
+    "total": 34,
+    "passed": 34,
+    "failed": 0
+  },
+  "record": {
+    "markdown": "acceptance-record.md",
+    "json": "acceptance-record.json"
+  },
+  "files": {
+    "recordMd": {
+      "path": "acceptance-record.md",
+      "sha256": "6dc6dea55702b3e043ee37d1e615fe74ce17f1ca1c5c42e1c21190b99ded991b"
+    },
+    "recordJson": {
+      "path": "acceptance-record.json",
+      "sha256": "692b425730c141342f952c3d0619b2d7ee8b26d6a2f1dd0d184b507f27c90b51"
+    },
+    "snapshot": {
+      "path": "delivery-snapshot.json",
+      "bytesSha256": "d4ea92c6e2c1d333c8a81d4c263675f907e850948d87948aaa90376d17b9454f",
+      "sealSha256": "fcdc2dce438883ec5565bc9982fae9afc2aabfb74f7f4c3476fc4dfc83efb63a",
+      "capturedAt": "2026-11-22T13:37:34.753Z"
+    }
+  },
+  "scorecard": {
+    "snapshotSha256": "fcdc2dce438883ec5565bc9982fae9afc2aabfb74f7f4c3476fc4dfc83efb63a",
+    "denominator": 2,
+    "historicallyPassed": 2,
+    "currentlySupported": 2,
+    "unknownAttribution": 0,
+    "coverage": {
+      "untested": 0,
+      "partial": 0,
+      "tested": 0,
+      "blocked": 0,
+      "unregistered": 2
+    },
+    "capturedAt": "2026-11-22T13:37:34.753Z"
+  },
+  "notes": [
+    "内容封印 = 快照去掉 sha256 字段后对 canonical payload 计算的 sha256（可离线复算）。",
+    "字节哈希 = 快照文件原始字节的 sha256（确认交付的就是那一份文件）。",
+    "记分卡的 snapshotSha256 必须等于本清单 files.snapshot.sealSha256。",
+    "kind=business-acceptance：差异由平台实现从原始材料算出，预期差异另行封存。",
+    "两份检验：单值变更必须改变对应差异；移除必要材料必须显示缺件/未知。",
+    "材料为虚构样本；真实生产效果不在本次工程验收范围内。"
+  ]
+}

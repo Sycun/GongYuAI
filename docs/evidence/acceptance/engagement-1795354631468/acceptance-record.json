@@ -1,0 +1,581 @@
+{
+  "runId": "engagement-1795354631468",
+  "kind": "engagement-e2e-mock",
+  "taskId": "d1d780b6-28ac-41a9-ba9a-5c75f43fe51d",
+  "dataRoot": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/engagement-1795354631468",
+  "finishedAt": "2026-11-22T13:37:23.056Z",
+  "scopeVersion": 2,
+  "code": {
+    "commit": "d7c46d4956246ba448b565136683daf155af1c62",
+    "branch": "main",
+    "dirty": false,
+    "dirtyPaths": []
+  },
+  "steps": [
+    {
+      "step": "阶段1 建档",
+      "ok": true,
+      "detail": "POST /tasks → 201",
+      "at": "2026-11-22T13:37:11.506Z"
+    },
+    {
+      "step": "阶段1 授权版本",
+      "ok": true,
+      "detail": "v1",
+      "at": "2026-11-22T13:37:11.506Z"
+    },
+    {
+      "step": "阶段1 启动",
+      "ok": true,
+      "detail": "创建即进入运行：status=initializing",
+      "at": "2026-11-22T13:37:11.506Z"
+    },
+    {
+      "step": "阶段1 导入清单",
+      "ok": true,
+      "detail": "inventory/sys-a.csv → 201",
+      "at": "2026-11-22T13:37:11.508Z"
+    },
+    {
+      "step": "阶段1 导入清单",
+      "ok": true,
+      "detail": "inventory/sys-b.csv → 201",
+      "at": "2026-11-22T13:37:11.509Z"
+    },
+    {
+      "step": "阶段2 中断",
+      "ok": true,
+      "detail": "控制面关闭；worker 为 detached 进程继续运行",
+      "at": "2026-11-22T13:37:13.017Z"
+    },
+    {
+      "step": "阶段2 恢复后读取任务",
+      "ok": true,
+      "detail": "status=running",
+      "at": "2026-11-22T13:37:13.026Z"
+    },
+    {
+      "step": "阶段1 首日运行中交接",
+      "ok": true,
+      "detail": "status=running",
+      "at": "2026-11-22T13:37:13.031Z"
+    },
+    {
+      "step": "阶段1 首日缺件",
+      "ok": true,
+      "detail": "3/4 目标已过（应 3/4：整改材料待补）；engagement-summary=true、remediation-a=false、sys-a-baseline=true、sys-b-diff=true",
+      "at": "2026-11-22T13:37:13.031Z"
+    },
+    {
+      "step": "阶段3 甲专项通过",
+      "ok": true,
+      "detail": "有本资产已验证发现",
+      "at": "2026-11-22T13:37:13.031Z"
+    },
+    {
+      "step": "阶段3 覆盖型目标通过",
+      "ok": true,
+      "detail": "零发现可交付",
+      "at": "2026-11-22T13:37:13.031Z"
+    },
+    {
+      "step": "阶段1 缺件保持未验证",
+      "ok": true,
+      "detail": "整改材料首日未齐",
+      "at": "2026-11-22T13:37:13.031Z"
+    },
+    {
+      "step": "阶段3 汇总目标通过",
+      "ok": true,
+      "detail": "显式 task 范围",
+      "at": "2026-11-22T13:37:13.031Z"
+    },
+    {
+      "step": "阶段2 无重复记账",
+      "ok": true,
+      "detail": "[[\"sys-b-diff\",1],[\"sys-a-baseline\",1],[\"engagement-summary\",1]]",
+      "at": "2026-11-22T13:37:13.031Z"
+    },
+    {
+      "step": "阶段2 事实只增不减",
+      "ok": true,
+      "detail": "8 → 8",
+      "at": "2026-11-22T13:37:13.031Z"
+    },
+    {
+      "step": "阶段3 技术确认",
+      "ok": true,
+      "detail": "verified=1",
+      "at": "2026-11-22T13:37:13.032Z"
+    },
+    {
+      "step": "阶段3 线索保留",
+      "ok": true,
+      "detail": "tentative=1",
+      "at": "2026-11-22T13:37:13.032Z"
+    },
+    {
+      "step": "阶段3 记分卡历史分子",
+      "ok": true,
+      "detail": "3/4",
+      "at": "2026-11-22T13:37:13.034Z"
+    },
+    {
+      "step": "阶段3 记分卡当前分子",
+      "ok": true,
+      "detail": "3/4",
+      "at": "2026-11-22T13:37:13.034Z"
+    },
+    {
+      "step": "阶段2 暂停确认",
+      "ok": true,
+      "detail": "status=paused",
+      "at": "2026-11-22T13:37:13.237Z"
+    },
+    {
+      "step": "阶段2 暂停后无存活 worker",
+      "ok": true,
+      "detail": "workerPids=[]",
+      "at": "2026-11-22T13:37:13.237Z"
+    },
+    {
+      "step": "阶段2 检查点保留",
+      "ok": true,
+      "detail": "durable.sqlite 留存",
+      "at": "2026-11-22T13:37:13.237Z"
+    },
+    {
+      "step": "阶段2 范围更新",
+      "ok": true,
+      "detail": "scopeVersion=2",
+      "at": "2026-11-22T13:37:13.242Z"
+    },
+    {
+      "step": "阶段2 授权版本递增",
+      "ok": true,
+      "detail": "v2",
+      "at": "2026-11-22T13:37:13.242Z"
+    },
+    {
+      "step": "阶段2 新范围生效",
+      "ok": true,
+      "detail": "a.example.com",
+      "at": "2026-11-22T13:37:13.242Z"
+    },
+    {
+      "step": "阶段2 次日补交材料",
+      "ok": true,
+      "detail": "remediation/sys-a/fix.json",
+      "at": "2026-11-22T13:37:13.244Z"
+    },
+    {
+      "step": "阶段2 次日补交材料",
+      "ok": true,
+      "detail": "remediation/retest.txt",
+      "at": "2026-11-22T13:37:13.245Z"
+    },
+    {
+      "step": "阶段2 次日补交材料",
+      "ok": true,
+      "detail": "findings/lead-proof.txt",
+      "at": "2026-11-22T13:37:13.246Z"
+    },
+    {
+      "step": "阶段2 次日补交材料",
+      "ok": true,
+      "detail": "client/decision.md",
+      "at": "2026-11-22T13:37:13.247Z"
+    },
+    {
+      "step": "阶段2 恢复运行",
+      "ok": true,
+      "detail": "status=initializing",
+      "at": "2026-11-22T13:37:13.254Z"
+    },
+    {
+      "step": "阶段1 跨日完成",
+      "ok": true,
+      "detail": "status=completed",
+      "at": "2026-11-22T13:37:22.918Z"
+    },
+    {
+      "step": "阶段2 恢复读取最新授权",
+      "ok": true,
+      "detail": "a.example.com",
+      "at": "2026-11-22T13:37:22.918Z"
+    },
+    {
+      "step": "阶段2 版本保持",
+      "ok": true,
+      "detail": "v2",
+      "at": "2026-11-22T13:37:22.918Z"
+    },
+    {
+      "step": "阶段2 跨日无重复通过",
+      "ok": true,
+      "detail": "[[\"remediation-a\",1],[\"sys-b-diff\",1],[\"sys-a-baseline\",1],[\"engagement-summary\",1]]",
+      "at": "2026-11-22T13:37:22.923Z"
+    },
+    {
+      "step": "阶段2 范围修订入图",
+      "ok": true,
+      "detail": "facts=1",
+      "at": "2026-11-22T13:37:22.923Z"
+    },
+    {
+      "step": "阶段5 整改复测",
+      "ok": true,
+      "detail": "retested",
+      "at": "2026-11-22T13:37:22.931Z"
+    },
+    {
+      "step": "阶段5 技术确认线索",
+      "ok": true,
+      "detail": "verified",
+      "at": "2026-11-22T13:37:22.937Z"
+    },
+    {
+      "step": "阶段5 客户发起复测申请",
+      "ok": true,
+      "detail": "201 {\"request\":{\"requester\":\"客户安全负责人\",\"role\":\"客户方\",\"findingIds\":[\"3dcb1fa1-8587-40cf-88cb-9e93b8c4167b\"],\"reason\":\"整改窗口已到，请复测该越权结论\",\"evidencePath\":\"client/decision.md\",\"id\":\"274fc601-61d3-4abb-bf78-40e56a240285\",\"status\":\"pending\",\"createdAt\":\"2026-11-22T13:37:22.939Z\",\"sha256\":\"8f4b28c9533f57ab20572c13",
+      "at": "2026-11-22T13:37:22.944Z"
+    },
+    {
+      "step": "阶段5 申请依据留存哈希",
+      "ok": true,
+      "detail": "8f4b28c9533f",
+      "at": "2026-11-22T13:37:22.944Z"
+    },
+    {
+      "step": "阶段5 按申请复测",
+      "ok": true,
+      "detail": "retested",
+      "at": "2026-11-22T13:37:22.949Z"
+    },
+    {
+      "step": "阶段5 申请转为已完成",
+      "ok": true,
+      "detail": "[{\"id\":\"274fc601-61d3-4abb-bf78-40e56a240285\",\"requester\":\"客户安全负责人\",\"role\":\"客户方\",\"findingIds\":[\"3dcb1fa1-8587-40cf-88cb-9e93b8c4167b\"],\"reason\":\"整改窗口已到，请复测该越权结论\",\"evidencePath\":\"client/decision.md\",\"sha256\":\"8f4b28c9533f57ab20572c13e81ff9f62e89c6819b0725ce2bc1f046bdeee3e9\",\"status\":\"fulfilled\",\"fulfilledAt\":\"2026-11-22T13:37:22.945Z\",\"fulfilledResult\":\"partially-fixed\",\"createdAt\":\"2026-11-22T13:37:22.939Z\"}]",
+      "at": "2026-11-22T13:37:22.949Z"
+    },
+    {
+      "step": "阶段5 客户风险处置",
+      "ok": true,
+      "detail": "accepted",
+      "at": "2026-11-22T13:37:22.955Z"
+    },
+    {
+      "step": "阶段3 结论撤回",
+      "ok": true,
+      "detail": "retracted",
+      "at": "2026-11-22T13:37:22.959Z"
+    },
+    {
+      "step": "阶段5 更正生成",
+      "ok": true,
+      "detail": "#1",
+      "at": "2026-11-22T13:37:22.964Z"
+    },
+    {
+      "step": "阶段5 更正影响清单",
+      "ok": true,
+      "detail": "[\"engagement-summary\",\"sys-a-baseline\"]",
+      "at": "2026-11-22T13:37:22.964Z"
+    },
+    {
+      "step": "阶段5 通知状态",
+      "ok": true,
+      "detail": "notified",
+      "at": "2026-11-22T13:37:22.969Z"
+    },
+    {
+      "step": "验收3 覆盖登记",
+      "ok": true,
+      "detail": "sys-b-diff → 201",
+      "at": "2026-11-22T13:37:22.974Z"
+    },
+    {
+      "step": "验收3 覆盖登记",
+      "ok": true,
+      "detail": "remediation-a → 201",
+      "at": "2026-11-22T13:37:22.978Z"
+    },
+    {
+      "step": "验收3 覆盖登记",
+      "ok": true,
+      "detail": "engagement-summary → 201",
+      "at": "2026-11-22T13:37:22.983Z"
+    },
+    {
+      "step": "验收3 覆盖意见留痕",
+      "ok": true,
+      "detail": "3 条",
+      "at": "2026-11-22T13:37:22.985Z"
+    },
+    {
+      "step": "阶段3 历史通过保留",
+      "ok": true,
+      "detail": "4/4",
+      "at": "2026-11-22T13:37:22.986Z"
+    },
+    {
+      "step": "阶段3 当前支持下降",
+      "ok": true,
+      "detail": "2/4",
+      "at": "2026-11-22T13:37:22.986Z"
+    },
+    {
+      "step": "阶段3 撤回引用计数",
+      "ok": true,
+      "detail": "2",
+      "at": "2026-11-22T13:37:22.986Z"
+    },
+    {
+      "step": "验收3 分母为约定目标总数",
+      "ok": true,
+      "detail": "4",
+      "at": "2026-11-22T13:37:22.986Z"
+    },
+    {
+      "step": "验收3 覆盖五类互斥",
+      "ok": true,
+      "detail": "{\"untested\":0,\"partial\":1,\"tested\":1,\"blocked\":1,\"unregistered\":1}",
+      "at": "2026-11-22T13:37:22.986Z"
+    },
+    {
+      "step": "阶段3 快照可复算",
+      "ok": true,
+      "detail": "seal valid",
+      "at": "2026-11-22T13:37:22.987Z"
+    },
+    {
+      "step": "阶段3 独立复算一致",
+      "ok": true,
+      "detail": "4/4 · 2/4",
+      "at": "2026-11-22T13:37:22.987Z"
+    },
+    {
+      "step": "验收3 同一快照重复复算一致",
+      "ok": true,
+      "detail": "两次逐字节相同",
+      "at": "2026-11-22T13:37:22.987Z"
+    },
+    {
+      "step": "阶段5 交付摘要可核对",
+      "ok": true,
+      "detail": "更正与撤回提示",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "阶段3 交付摘要含记分卡",
+      "ok": true,
+      "detail": "分子/分母",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "阶段2 交付摘要含版本",
+      "ok": true,
+      "detail": "v2",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "阶段5 报告分列处置",
+      "ok": true,
+      "detail": "accepted 可见",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "阶段5 报告含更正",
+      "ok": true,
+      "detail": "#1",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "验收3 报告含覆盖与支持",
+      "ok": true,
+      "detail": "分子/分母同段",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "验收3 报告当前支持 2/4",
+      "ok": true,
+      "detail": "2 / 4",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "验收3 报告含未登记",
+      "ok": true,
+      "detail": "未登记 1",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "验收3 零发现写成未检出",
+      "ok": true,
+      "detail": "sys-b-diff",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "验收3 交付摘要含未登记与统计时点",
+      "ok": true,
+      "detail": "一致",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "阶段5 报告含客户复测申请",
+      "ok": true,
+      "detail": "fulfilled",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "阶段5 交付摘要含客户复测申请",
+      "ok": true,
+      "detail": "一致",
+      "at": "2026-11-22T13:37:22.989Z"
+    },
+    {
+      "step": "阶段5 同委托第二任务建档",
+      "ok": true,
+      "detail": "engagementId=d1d780b6-28ac-41a9-ba9a-5c75f43fe51d",
+      "at": "2026-11-22T13:37:22.997Z"
+    },
+    {
+      "step": "阶段5 委托标识一致",
+      "ok": true,
+      "detail": "221c7e0a",
+      "at": "2026-11-22T13:37:22.997Z"
+    },
+    {
+      "step": "阶段5 另一委托建档",
+      "ok": true,
+      "detail": "engagementId=engagement-foreign-1795354642997",
+      "at": "2026-11-22T13:37:23.005Z"
+    },
+    {
+      "step": "阶段5 跨任务署名复核",
+      "ok": true,
+      "detail": "复核丙 → confirm",
+      "at": "2026-11-22T13:37:23.009Z"
+    },
+    {
+      "step": "阶段5 跨委托复核被拒绝",
+      "ok": true,
+      "detail": "status=409",
+      "at": "2026-11-22T13:37:23.010Z"
+    },
+    {
+      "step": "阶段5 被拒绝的复核未写入",
+      "ok": true,
+      "detail": "1 条",
+      "at": "2026-11-22T13:37:23.011Z"
+    },
+    {
+      "step": "阶段5 报告含跨任务署名复核",
+      "ok": true,
+      "detail": "复核丙",
+      "at": "2026-11-22T13:37:23.011Z"
+    },
+    {
+      "step": "阶段5 报告写出源任务",
+      "ok": true,
+      "detail": "221c7e0a",
+      "at": "2026-11-22T13:37:23.011Z"
+    },
+    {
+      "step": "阶段5 交付摘要含两个新入口",
+      "ok": true,
+      "detail": "一致",
+      "at": "2026-11-22T13:37:23.013Z"
+    },
+    {
+      "step": "阶段5 工作项关闭",
+      "ok": true,
+      "detail": "archived",
+      "at": "2026-11-22T13:37:23.013Z"
+    }
+  ],
+  "scorecard": {
+    "taskId": "d1d780b6-28ac-41a9-ba9a-5c75f43fe51d",
+    "capturedAt": "2026-11-22T13:37:22.986Z",
+    "snapshotSha256": "f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9",
+    "denominator": 4,
+    "totalGoals": 4,
+    "applicable": true,
+    "historicallyPassed": 4,
+    "currentlySupported": 2,
+    "unknownAttribution": 0,
+    "retractedReferences": 2,
+    "coverage": {
+      "untested": 0,
+      "partial": 1,
+      "tested": 1,
+      "blocked": 1,
+      "unregistered": 1
+    },
+    "findings": {
+      "verified": 1,
+      "tentative": 0,
+      "retracted": 1,
+      "other": 0
+    },
+    "goals": [
+      {
+        "goalId": "engagement-summary",
+        "title": "全委托交付汇总",
+        "historicalPass": true,
+        "currentSupported": false,
+        "verdict": "supported-by-retracted-only",
+        "proofCount": 1,
+        "supportFindingIds": [
+          "58d79651-b3b0-4002-b0c6-4fae8f195eb4"
+        ],
+        "retractedSupportFindingIds": [
+          "58d79651-b3b0-4002-b0c6-4fae8f195eb4"
+        ],
+        "coverage": "blocked",
+        "missingAttribution": false
+      },
+      {
+        "goalId": "remediation-a",
+        "title": "甲系统整改复核材料",
+        "historicalPass": true,
+        "currentSupported": true,
+        "verdict": "supported",
+        "proofCount": 1,
+        "supportFindingIds": [],
+        "retractedSupportFindingIds": [],
+        "coverage": "partial",
+        "missingAttribution": false
+      },
+      {
+        "goalId": "sys-a-baseline",
+        "title": "甲系统配置基线核查",
+        "historicalPass": true,
+        "currentSupported": false,
+        "verdict": "supported-by-retracted-only",
+        "proofCount": 1,
+        "supportFindingIds": [
+          "58d79651-b3b0-4002-b0c6-4fae8f195eb4"
+        ],
+        "retractedSupportFindingIds": [
+          "58d79651-b3b0-4002-b0c6-4fae8f195eb4"
+        ],
+        "coverage": "unregistered",
+        "missingAttribution": false
+      },
+      {
+        "goalId": "sys-b-diff",
+        "title": "乙系统资产与配置差异核查",
+        "historicalPass": true,
+        "currentSupported": true,
+        "verdict": "supported",
+        "proofCount": 1,
+        "supportFindingIds": [],
+        "retractedSupportFindingIds": [],
+        "coverage": "tested",
+        "missingAttribution": false
+      }
+    ]
+  },
+  "snapshotPath": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/engagement-1795354631468/delivery-snapshot.json",
+  "manifest": "acceptance-manifest.json"
+}

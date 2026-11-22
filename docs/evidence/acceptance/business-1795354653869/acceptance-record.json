@@ -1,0 +1,615 @@
+{
+  "runId": "business-1795354653869",
+  "kind": "business-acceptance",
+  "taskId": "fa3a8d43-c007-49a0-b6bc-a57f42baa90a",
+  "dataRoot": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/business-1795354653869",
+  "finishedAt": "2026-11-22T13:37:34.795Z",
+  "fixturesDir": "/Users/sycpro/GongYuAI/docs/evidence/acceptance/business-fixtures",
+  "sealed": {
+    "expectedSha256": "9175379b936394c5e2b293b32bdc56556c83f8758d2b951e8d17f222c65eebe7",
+    "materials": {
+      "baseline.csv": "921a581262678e0dfc919d22b89895e9ee5c6de1c02aa1ba4da96189fe174934",
+      "current.csv": "1b5848c77599e5d1f5c8a9f0c15677e496b3f8dd33628333064ab8325f3091bf",
+      "current-mutated.csv": "cafbfeb1fd2e0926a0e549cc066680573a1c5c742b498c0df84feb50d8b10249",
+      "config-baseline.json": "dffe7c3faabd640edbeb2a2ef6fd3c9c65b2bec8489342a91535f8659086ff70",
+      "config-current.json": "685bba707d6ac31a0d134c6d665637ae22947e8fbe0587866f279f3ce2b8feac"
+    }
+  },
+  "comparisons": {
+    "asset-diff": {
+      "problems": []
+    },
+    "asset-diff-mutated": {
+      "problems": []
+    },
+    "config-diff": {
+      "problems": []
+    },
+    "asset-diff-missing": {
+      "problems": []
+    }
+  },
+  "actual": {
+    "asset-diff": {
+      "version": 1,
+      "name": "asset-diff",
+      "keyField": "host",
+      "compareFields": [
+        "role",
+        "version",
+        "tls"
+      ],
+      "baseline": {
+        "path": "assets/baseline.csv",
+        "format": "csv",
+        "rows": 4,
+        "sha256": "921a581262678e0dfc919d22b89895e9ee5c6de1c02aa1ba4da96189fe174934"
+      },
+      "current": {
+        "path": "assets/current.csv",
+        "format": "csv",
+        "rows": 4,
+        "sha256": "1b5848c77599e5d1f5c8a9f0c15677e496b3f8dd33628333064ab8325f3091bf"
+      },
+      "missingMaterials": [],
+      "counts": {
+        "added": 1,
+        "removed": 1,
+        "changed": 2,
+        "unchanged": 1,
+        "missing": 1,
+        "unknown": 0,
+        "totalKeys": 6
+      },
+      "items": [
+        {
+          "key": "app-a-1",
+          "status": "changed",
+          "baselineLine": 2,
+          "currentLine": 2,
+          "changes": [
+            {
+              "field": "version",
+              "before": "1.4",
+              "after": "1.5"
+            }
+          ]
+        },
+        {
+          "key": "app-a-2",
+          "status": "unchanged",
+          "baselineLine": 3,
+          "currentLine": 3,
+          "changes": []
+        },
+        {
+          "key": "app-a-3",
+          "status": "removed",
+          "baselineLine": 4,
+          "currentLine": null,
+          "changes": []
+        },
+        {
+          "key": "app-a-5",
+          "status": "changed",
+          "baselineLine": 5,
+          "currentLine": 5,
+          "changes": [
+            {
+              "field": "tls",
+              "before": "required",
+              "after": "optional"
+            }
+          ]
+        },
+        {
+          "key": "app-a-4",
+          "status": "added",
+          "baselineLine": null,
+          "currentLine": 4,
+          "changes": []
+        },
+        {
+          "key": "app-a-6",
+          "status": "missing",
+          "baselineLine": null,
+          "currentLine": null,
+          "changes": [],
+          "reason": "required-key-absent-in-both"
+        }
+      ]
+    },
+    "asset-diff-mutated": {
+      "version": 1,
+      "name": "asset-diff-mutated",
+      "keyField": "host",
+      "compareFields": [
+        "role",
+        "version",
+        "tls"
+      ],
+      "baseline": {
+        "path": "assets/baseline.csv",
+        "format": "csv",
+        "rows": 4,
+        "sha256": "921a581262678e0dfc919d22b89895e9ee5c6de1c02aa1ba4da96189fe174934"
+      },
+      "current": {
+        "path": "assets/current-v2.csv",
+        "format": "csv",
+        "rows": 4,
+        "sha256": "cafbfeb1fd2e0926a0e549cc066680573a1c5c742b498c0df84feb50d8b10249"
+      },
+      "missingMaterials": [],
+      "counts": {
+        "added": 1,
+        "removed": 1,
+        "changed": 3,
+        "unchanged": 0,
+        "missing": 1,
+        "unknown": 0,
+        "totalKeys": 6
+      },
+      "items": [
+        {
+          "key": "app-a-1",
+          "status": "changed",
+          "baselineLine": 2,
+          "currentLine": 2,
+          "changes": [
+            {
+              "field": "version",
+              "before": "1.4",
+              "after": "1.5"
+            }
+          ]
+        },
+        {
+          "key": "app-a-2",
+          "status": "changed",
+          "baselineLine": 3,
+          "currentLine": 3,
+          "changes": [
+            {
+              "field": "version",
+              "before": "2.1",
+              "after": "2.2"
+            }
+          ]
+        },
+        {
+          "key": "app-a-3",
+          "status": "removed",
+          "baselineLine": 4,
+          "currentLine": null,
+          "changes": []
+        },
+        {
+          "key": "app-a-5",
+          "status": "changed",
+          "baselineLine": 5,
+          "currentLine": 5,
+          "changes": [
+            {
+              "field": "tls",
+              "before": "required",
+              "after": "optional"
+            }
+          ]
+        },
+        {
+          "key": "app-a-4",
+          "status": "added",
+          "baselineLine": null,
+          "currentLine": 4,
+          "changes": []
+        },
+        {
+          "key": "app-a-6",
+          "status": "missing",
+          "baselineLine": null,
+          "currentLine": null,
+          "changes": [],
+          "reason": "required-key-absent-in-both"
+        }
+      ]
+    },
+    "config-diff": {
+      "version": 1,
+      "name": "config-diff",
+      "keyField": "id",
+      "compareFields": [
+        "value",
+        "owner"
+      ],
+      "baseline": {
+        "path": "config/baseline.json",
+        "format": "json",
+        "rows": 3,
+        "sha256": "dffe7c3faabd640edbeb2a2ef6fd3c9c65b2bec8489342a91535f8659086ff70"
+      },
+      "current": {
+        "path": "config/current.json",
+        "format": "json",
+        "rows": 3,
+        "sha256": "685bba707d6ac31a0d134c6d665637ae22947e8fbe0587866f279f3ce2b8feac"
+      },
+      "missingMaterials": [],
+      "counts": {
+        "added": 0,
+        "removed": 0,
+        "changed": 2,
+        "unchanged": 1,
+        "missing": 0,
+        "unknown": 0,
+        "totalKeys": 3
+      },
+      "items": [
+        {
+          "key": "tls.minVersion",
+          "status": "changed",
+          "baselineLine": 2,
+          "currentLine": 2,
+          "changes": [
+            {
+              "field": "value",
+              "before": "1.2",
+              "after": "1.3"
+            }
+          ]
+        },
+        {
+          "key": "session.timeout",
+          "status": "unchanged",
+          "baselineLine": 3,
+          "currentLine": 3,
+          "changes": []
+        },
+        {
+          "key": "audit.retention",
+          "status": "changed",
+          "baselineLine": 4,
+          "currentLine": 4,
+          "changes": [
+            {
+              "field": "value",
+              "before": "90",
+              "after": "180"
+            }
+          ]
+        }
+      ]
+    },
+    "asset-diff-missing": {
+      "version": 1,
+      "name": "asset-diff-missing",
+      "keyField": "host",
+      "compareFields": [],
+      "baseline": {
+        "path": "assets/baseline.csv",
+        "format": null,
+        "rows": 0,
+        "sha256": null
+      },
+      "current": {
+        "path": "assets/current.csv",
+        "format": "csv",
+        "rows": 4,
+        "sha256": "1b5848c77599e5d1f5c8a9f0c15677e496b3f8dd33628333064ab8325f3091bf"
+      },
+      "missingMaterials": [
+        "assets/baseline.csv"
+      ],
+      "counts": {
+        "added": 0,
+        "removed": 0,
+        "changed": 0,
+        "unchanged": 0,
+        "missing": 0,
+        "unknown": 5,
+        "totalKeys": 5
+      },
+      "items": [
+        {
+          "key": "app-a-1",
+          "status": "unknown",
+          "baselineLine": null,
+          "currentLine": 2,
+          "changes": [],
+          "reason": "baseline-material-missing"
+        },
+        {
+          "key": "app-a-2",
+          "status": "unknown",
+          "baselineLine": null,
+          "currentLine": 3,
+          "changes": [],
+          "reason": "baseline-material-missing"
+        },
+        {
+          "key": "app-a-4",
+          "status": "unknown",
+          "baselineLine": null,
+          "currentLine": 4,
+          "changes": [],
+          "reason": "baseline-material-missing"
+        },
+        {
+          "key": "app-a-5",
+          "status": "unknown",
+          "baselineLine": null,
+          "currentLine": 5,
+          "changes": [],
+          "reason": "baseline-material-missing"
+        },
+        {
+          "key": "app-a-6",
+          "status": "unknown",
+          "baselineLine": null,
+          "currentLine": null,
+          "changes": [],
+          "reason": "baseline-material-missing"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "step": "0 封存哈希",
+      "ok": true,
+      "detail": "expected.json 9175379b9363…",
+      "at": "2026-11-22T13:37:33.870Z"
+    },
+    {
+      "step": "0 封存哈希",
+      "ok": true,
+      "detail": "baseline.csv 921a58126267…",
+      "at": "2026-11-22T13:37:33.870Z"
+    },
+    {
+      "step": "0 封存哈希",
+      "ok": true,
+      "detail": "current.csv 1b5848c77599…",
+      "at": "2026-11-22T13:37:33.870Z"
+    },
+    {
+      "step": "0 封存哈希",
+      "ok": true,
+      "detail": "current-mutated.csv cafbfeb1fd2e…",
+      "at": "2026-11-22T13:37:33.870Z"
+    },
+    {
+      "step": "0 封存哈希",
+      "ok": true,
+      "detail": "config-baseline.json dffe7c3faabd…",
+      "at": "2026-11-22T13:37:33.870Z"
+    },
+    {
+      "step": "0 封存哈希",
+      "ok": true,
+      "detail": "config-current.json 685bba707d6a…",
+      "at": "2026-11-22T13:37:33.870Z"
+    },
+    {
+      "step": "0 预期差异已封存",
+      "ok": true,
+      "detail": "expected.json 9175379b9363…（平台看不到这一份）",
+      "at": "2026-11-22T13:37:33.870Z"
+    },
+    {
+      "step": "1 建档",
+      "ok": true,
+      "detail": "POST /tasks → 201",
+      "at": "2026-11-22T13:37:33.905Z"
+    },
+    {
+      "step": "1 委托标识",
+      "ok": true,
+      "detail": "engagementId=fa3a8d43-c007-49a0-b6bc-a57f42baa90a",
+      "at": "2026-11-22T13:37:33.905Z"
+    },
+    {
+      "step": "1 暂停模拟 Worker",
+      "ok": true,
+      "detail": "status=paused",
+      "at": "2026-11-22T13:37:34.110Z"
+    },
+    {
+      "step": "2 导入原始材料",
+      "ok": true,
+      "detail": "assets/baseline.csv ← baseline.csv（126 字节）",
+      "at": "2026-11-22T13:37:34.113Z"
+    },
+    {
+      "step": "2 导入原始材料",
+      "ok": true,
+      "detail": "assets/current.csv ← current.csv（127 字节）",
+      "at": "2026-11-22T13:37:34.116Z"
+    },
+    {
+      "step": "3 差异核算",
+      "ok": true,
+      "detail": "POST /reconcile → 201",
+      "at": "2026-11-22T13:37:34.120Z"
+    },
+    {
+      "step": "3 逐项比对（原始输入）",
+      "ok": true,
+      "detail": "全部一致",
+      "at": "2026-11-22T13:37:34.120Z"
+    },
+    {
+      "step": "3 结果落成证据",
+      "ok": true,
+      "detail": "reconcile/asset-diff-20261122133734.json · d82cb9303ffe…",
+      "at": "2026-11-22T13:37:34.120Z"
+    },
+    {
+      "step": "2 导入原始材料",
+      "ok": true,
+      "detail": "assets/current-v2.csv ← current-mutated.csv（127 字节）",
+      "at": "2026-11-22T13:37:34.122Z"
+    },
+    {
+      "step": "4 单值变更核算",
+      "ok": true,
+      "detail": "POST /reconcile → 201",
+      "at": "2026-11-22T13:37:34.124Z"
+    },
+    {
+      "step": "4 逐项比对（改一个值）",
+      "ok": true,
+      "detail": "全部一致",
+      "at": "2026-11-22T13:37:34.124Z"
+    },
+    {
+      "step": "4 对应差异确实变化",
+      "ok": true,
+      "detail": "app-a-2: unchanged → changed（[{\"field\":\"version\",\"before\":\"2.1\",\"after\":\"2.2\"}]）",
+      "at": "2026-11-22T13:37:34.124Z"
+    },
+    {
+      "step": "2 导入原始材料",
+      "ok": true,
+      "detail": "config/baseline.json ← config-baseline.json（181 字节）",
+      "at": "2026-11-22T13:37:34.126Z"
+    },
+    {
+      "step": "2 导入原始材料",
+      "ok": true,
+      "detail": "config/current.json ← config-current.json（200 字节）",
+      "at": "2026-11-22T13:37:34.126Z"
+    },
+    {
+      "step": "5 配置基线核算",
+      "ok": true,
+      "detail": "POST /reconcile → 201",
+      "at": "2026-11-22T13:37:34.129Z"
+    },
+    {
+      "step": "5 逐项比对（配置基线）",
+      "ok": true,
+      "detail": "全部一致",
+      "at": "2026-11-22T13:37:34.129Z"
+    },
+    {
+      "step": "5 恢复运行",
+      "ok": true,
+      "detail": "status=initializing",
+      "at": "2026-11-22T13:37:34.135Z"
+    },
+    {
+      "step": "5 目标由核算结果满足",
+      "ok": true,
+      "detail": "status=completed",
+      "at": "2026-11-22T13:37:34.741Z"
+    },
+    {
+      "step": "5 两个目标均通过",
+      "ok": true,
+      "detail": "asset-baseline-diff=true、config-baseline-diff=true",
+      "at": "2026-11-22T13:37:34.747Z"
+    },
+    {
+      "step": "6 删除前材料存在",
+      "ok": true,
+      "detail": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/business-1795354653869/tasks/fa3a8d43-c007-49a0-b6bc-a57f42baa90a/evidence/assets/baseline.csv",
+      "at": "2026-11-22T13:37:34.748Z"
+    },
+    {
+      "step": "6 移除必要材料",
+      "ok": true,
+      "detail": "assets/baseline.csv 已从 evidence/ 删除",
+      "at": "2026-11-22T13:37:34.748Z"
+    },
+    {
+      "step": "6 缺件核算",
+      "ok": true,
+      "detail": "POST /reconcile → 201",
+      "at": "2026-11-22T13:37:34.752Z"
+    },
+    {
+      "step": "6 逐项比对（移除材料）",
+      "ok": true,
+      "detail": "全部一致",
+      "at": "2026-11-22T13:37:34.752Z"
+    },
+    {
+      "step": "6 缺件不是猜结论",
+      "ok": true,
+      "detail": "unknown=5/5，changed=0",
+      "at": "2026-11-22T13:37:34.752Z"
+    },
+    {
+      "step": "7 快照可复算",
+      "ok": true,
+      "detail": "seal valid",
+      "at": "2026-11-22T13:37:34.754Z"
+    },
+    {
+      "step": "7 四次核算都留了凭据",
+      "ok": true,
+      "detail": "4 条 reconcile Fact",
+      "at": "2026-11-22T13:37:34.755Z"
+    },
+    {
+      "step": "7 记分卡历史分子",
+      "ok": true,
+      "detail": "2/2",
+      "at": "2026-11-22T13:37:34.755Z"
+    }
+  ],
+  "scorecard": {
+    "taskId": "fa3a8d43-c007-49a0-b6bc-a57f42baa90a",
+    "capturedAt": "2026-11-22T13:37:34.753Z",
+    "snapshotSha256": "fcdc2dce438883ec5565bc9982fae9afc2aabfb74f7f4c3476fc4dfc83efb63a",
+    "denominator": 2,
+    "totalGoals": 2,
+    "applicable": true,
+    "historicallyPassed": 2,
+    "currentlySupported": 2,
+    "unknownAttribution": 0,
+    "retractedReferences": 0,
+    "coverage": {
+      "untested": 0,
+      "partial": 0,
+      "tested": 0,
+      "blocked": 0,
+      "unregistered": 2
+    },
+    "findings": {
+      "verified": 0,
+      "tentative": 0,
+      "retracted": 0,
+      "other": 0
+    },
+    "goals": [
+      {
+        "goalId": "asset-baseline-diff",
+        "title": "原始资产清单差异",
+        "historicalPass": true,
+        "currentSupported": true,
+        "verdict": "supported",
+        "proofCount": 1,
+        "supportFindingIds": [],
+        "retractedSupportFindingIds": [],
+        "coverage": "unregistered",
+        "missingAttribution": false
+      },
+      {
+        "goalId": "config-baseline-diff",
+        "title": "配置基线差异",
+        "historicalPass": true,
+        "currentSupported": true,
+        "verdict": "supported",
+        "proofCount": 1,
+        "supportFindingIds": [],
+        "retractedSupportFindingIds": [],
+        "coverage": "unregistered",
+        "missingAttribution": false
+      }
+    ]
+  },
+  "snapshotPath": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/business-1795354653869/delivery-snapshot.json",
+  "manifest": "acceptance-manifest.json"
+}

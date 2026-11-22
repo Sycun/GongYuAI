@@ -1,124 +1,174 @@
 # 交付记录（Release / Deployment Record）
 
-日期：2026-11-22（Asia/Shanghai）  
-实施与发布：DSH 实施会话（lead）  
-状态口径见 [implementation-ledger.md](./implementation-ledger.md)。
+日期：2026-11-22（Asia/Shanghai）
+实施与发布：DSH 实施会话（lead）
+状态口径见 [implementation-ledger.md](./implementation-ledger.md) §0；复核最短路径见 [review-checklist.md](./review-checklist.md)。
 
 ## 1. 三个可验证结果
 
 | # | 结果 | 状态 | 证据 |
 | --- | --- | --- | --- |
-| 1 | 普通操作员从正常入口完成一笔跨日生产委托 | ✅ | `scripts/engagement-e2e.ts` 53 项全过；验收记录 `.gongyuai/acceptance/engagement-1795350021687/acceptance-record.md`；控制台交付页（报告 Tab）可见记分卡/更正/撤回提示 |
-| 2 | GitHub `Sycun/GongYuAI` 收到验收后的本次提交 | ✅ | `main` = `3a6b174bf544b61c58f28d631aa136a3c34b9e3a`（[提交](https://github.com/Sycun/GongYuAI/commit/3a6b174bf544b61c58f28d631aa136a3c34b9e3a)），远端 `git ls-remote` 复核一致 |
-| 3 | Kali 用该提交完整替换旧项目、正式入口验收、旧程序目录删除 | ✅ | 服务 `gongyuai.service` active，`MainPID` cwd=`/home/parallels/GongYuAI`；首版替换用 `3a6b174`，复核后当前代码树 `6c6bebd…`，HEAD=当前 `main`；旧目录 `GongYuAI.old-20261122-202221` 已删除 |
+| 1 | 普通操作员从正常入口完成一笔跨日委托（模拟流程），且业务差异可由原始材料算出 | ✅ | 运行 `engagement-1795354631468`（80 步，mock）；运行 `business-1795354653869`（34 步，非 mock 核算）；两份清单 `pnpm verify:acceptance` 全部通过 |
+| 2 | GitHub `Sycun/GongYuAI` 收到本轮代码提交 | ✅ | 受验代码 `d7c46d4956246ba448b565136683daf155af1c62`（[提交](https://github.com/Sycun/GongYuAI/commit/d7c46d4956246ba448b565136683daf155af1c62)）；`git ls-remote origin refs/heads/main` 与推送结果一致（回执见 §8） |
+| 3 | Kali 用该代码完整替换旧程序目录、正式入口验收、旧目录清理 | ✅ | `/home/parallels/GongYuAI`，HEAD `d7c46d4`，14 个任务（13 历史 + 本轮验收 1）；旧目录 `GongYuAI.old-20261122-213828` 已删除；正式入口读数见 §8 |
 
-## 2. 发布提交
+## 2. 提交
 
 | 项 | 值 |
 | --- | --- |
 | 仓库 | https://github.com/Sycun/GongYuAI |
 | 分支 | `main` |
-| 代码发布提交 | `6c6bebd9f7aa0075d4378095230fa527b84a31ae`（含独立复核修复）；前序 `3a6b174`（首版）、`8e0a641`（基线） |
-| 记录提交 | 本文件所在的当前 `main` HEAD（`git rev-parse HEAD`）；相对代码提交仅 docs 差异 |
-| 提交链接 | https://github.com/Sycun/GongYuAI/commit/6c6bebd9f7aa0075d4378095230fa527b84a31ae |
-| 父提交 | `907cb63df069119f6af9fd3855436b6c2b3be3bf`（首版发布 `3a6b174` 的文档后续） |
-| 提交范围 | 首版 106 文件（+9299/−354）+ 复核修复 17 文件（+212/−30）；源码、契约、控制台、测试、脚本、锁文件、文档 |
-| 排除 | `.env`、`.gongyuai/`（任务库/证据/验收产物）、`node_modules/`、`dist/`、构建缓存、28MB 本地 PPTX |
+| **受验代码提交** | `d7c46d4956246ba448b565136683daf155af1c62`（本轮全部代码、测试、脚本、验收夹具；构建/单测/冒烟/两套验收/恢复演练都在这棵树上跑） |
+| 记录提交（docs） | 本文件所在提交，父提交为受验代码；`git diff d7c46d4 HEAD -- ':!docs'` 为空 |
+| 发布回执 | `docs/evidence/release/receipt.json`（三端读数 + 时间戳，独立提交追加） |
+| 排除 | `.env`、`.gongyuai/`、`node_modules/`、`dist/`、`out/`、构建缓存、28MB 本地 PPTX（已加入 `.gitignore`） |
 | 推送方式 | 普通 `git push`，无 force |
 
-发布前在**该提交的工作区**上依次执行：
+受验代码提交的文件范围：17 个修改 + 18 个新增（源码、契约、控制台、测试、脚本、验收夹具、证据），详见 `git show --stat d7c46d4`。
 
-| 检查 | 命令 | 结果 |
-| --- | --- | --- |
-| 构建 | `pnpm -r run build` | exit 0（6 个含 build 脚本的 workspace 项目） |
-| 单测 | `pnpm -r run test` | 111 通过 / 0 失败（contracts 22、history 31、control-plane 23、worker 35） |
-| 冒烟 | `pnpm smoke` | PASS（findings gate 失败臂、墙钟收卷、证据边界） |
-| 贯穿样例 | `pnpm e2e:engagement` | 53/53 通过 |
-| 恢复演练 | `pnpm drill:restore` | 委托/目标/证据/发现/报告/记分卡均可读，原文可读 |
-| 控制台构建 | `pnpm --filter @gongyuai/console build` | 通过 |
-| 浏览器验收 | 控制台交付页（Mac 验收数据 + Kali 正式入口） | 记分卡、发现依据、撤回提示、更正 #1、授权版本 v2/v1 均可见 |
+## 3. 验收运行与清单（可机器校验）
 
-## 3. 贯穿样例（跨日生产委托）
+| 运行 | 类型 | 步骤 | 代码提交 | 记录字节哈希 | 快照字节哈希 | 快照内容封印 | 记分卡 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `engagement-1795354631468` | 普通 API 的**模拟**跨日流程 | 80/80 | `d7c46d4` | `acceptance-manifest.json` 的 `files.recordMd/recordJson` | `2e760951a13e…` | `f05327fc54a2…` | 历史 4/4、当前支持 2/4、归属未知 0、覆盖 已测 1/部分 1/受阻 1/未登记 1 |
+| `business-1795354653869` | **业务差异核算**（原始材料） | 34/34 | `d7c46d4` | 同上 | `d4ea92c6e2c1…` | `fcdc2dce4388…` | 历史 2/2、当前 2/2、覆盖 未登记 2 |
 
-- 委托：`甲乙双系统资产与配置基线评估及整改复核`（任务 `d18e5e27…` / 复跑 `53f577f7…`）。
-- 首日：甲基线（发现闸）、乙差异（覆盖型、零发现）、全委托汇总通过；整改材料缺件 → 3/4。
-- 中断：关闭控制面后从同一数据目录恢复；无重复 `goal_asserted`（逐目标各 1 次），事实只增不减。
-- 换班：`pause` → `paused`（workerPids=[]、checkpoint 留存）→ 范围修订 v2（乙移出）→ 补交材料 → `resume` → completed；恢复后 auth 只含甲，`scopeVersion=2`。
-- 交付：复测 `fixed` → `retested`；线索确认 → `verified`；客户接受剩余风险 → `accepted`；撤回一条被两个目标引用的发现；更正 #1 影响 `engagement-summary`、`sys-a-baseline`，通知状态 `已通知`；归档关闭。
-- 记分卡：曾通过 4/4；当前证据足以支持 2/4；撤回引用 2；归属未知 0（旧档归属未知不计入当前支持）。
-- 快照与发布 hash 同源：`delivery-snapshot.json` 的 `sha256` 与验收记录里的 `scorecard.snapshotSha256` 必须相等（本机 `6b299710…`，Kali `22b86de8…`），`gy scorecard --recompute` 输出 `sealValid=true`。
-- 交付页（报告 Tab）里的“快照 SHA-256”是**实时读数**：每次请求会重新取 `capturedAt`，因此会变化；不可变凭据只认 `GET /tasks/:id/snapshot` 或 `gy scorecard --out` 落盘的那一份。
+- 证据包：`docs/evidence/acceptance/engagement-1795354631468/`、`docs/evidence/acceptance/business-1795354653869/`（记录 md/json、快照、清单、校验回执 `verification.json`）。
+- 校验命令：`pnpm verify:acceptance docs/evidence/acceptance/<run>` → 23 项检查全过。
+- **两种哈希分开校验**：内容封印是快照去掉 `sha256` 字段后对 canonical payload 的 sha256；文件字节哈希是快照文件原始字节的 sha256。清单同时记录两者，校验器分别断言，并额外断言二者不相等。
+- 反例（交叉配对必须失败）：`docs/evidence/acceptance/cross-pair-rejection.txt` —— 把 `business-1795354653869` 的记录配到 `engagement-1795354631468` 的清单与快照上，7 项失败（任务 ID、快照封印、运行 ID、记录字节哈希等）；两次运行单独都通过。
 
-独立复算一条结论：
+## 4. 业务验收：从原始材料算差异（输入 / 预期 / 实际 / 逐项比对）
 
-```bash
-pnpm gy scorecard <taskId> --out snapshot.json      # 正常入口导出不可变快照
-pnpm gy scorecard --recompute snapshot.json         # 纯函数复算，sealValid=true
-curl -s localhost:8877/tasks/<taskId>/history       # Fact/Intent/事件
-curl -s "localhost:8877/tasks/<taskId>/evidence/file?path=baseline/sys-a/config.json"
-```
-
-## 4. Kali 完整替换部署
+材料只含业务字段，通过 `POST /tasks/:id/evidence` 导入；预期差异由验收端**预先封存**，平台实现全程读不到：
 
 | 项 | 值 |
 | --- | --- |
-| 主机 | `10.211.55.5`（kali-linux-2025-2，aarch64，SSH 用户 `parallels`） |
-| 正式目录 | `/home/parallels/GongYuAI`（完整新目录，非覆盖复制） |
-| 代码树 | `6c6bebd9f7aa0075d4378095230fa527b84a31ae`（非 docs 差异为空） |
-| Git HEAD | 当前 `main`（含文档提交，`git diff --stat 6c6bebd HEAD -- ':!docs'` 为空），工作区干净 |
-| 服务 | `gongyuai.service`（systemd，User=parallels，WorkingDirectory=/home/parallels/GongYuAI） |
-| 启动命令 | `pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir /home/parallels/GongYuAI/.gongyuai` |
-| 持久数据 | `/home/parallels/GongYuAI/.gongyuai`（control.sqlite、tasks、settings、证据） |
+| 原始材料 | `docs/evidence/acceptance/business-fixtures/{baseline.csv,current.csv,current-mutated.csv,config-baseline.json,config-current.json}` |
+| 封存预期 | `expected.json`（SHA-256 `9175379b936394c5e2b293b32bdc56556c83f8758d2b951e8d17f222c65eebe7`）+ `SHA256SUMS` |
+| 核算入口 | `POST /tasks/:id/reconcile`（CLI `gy reconcile`、控制台「原始材料差异核算」面板同一实现） |
+
+逐项比对结果（详见该运行 `acceptance-record.json` 的 `comparisons` 与 `actual` 字段）：
+
+| 用例 | 预期 | 实际 | 未命中 |
+| --- | --- | --- | --- |
+| `asset-diff`（原始输入） | 新增 1、移除 1、变更 2、未变 1、缺件 1，共 6 项 | 同上；`app-a-1` 变更 `version 1.4→1.5`（基线第 2 行/当前第 2 行）、`app-a-2` 未变（3/3）、`app-a-3` 移除（第 4 行）、`app-a-5` 变更 `tls required→optional`（5/5）、`app-a-4` 新增（当前第 4 行）、`app-a-6` 缺件（两侧都没有） | 无 |
+| `asset-diff-mutated`（只改一个值） | 变更 3、未变 0，`app-a-2` 变为 `version 2.1→2.2` | 同上 | 无 |
+| `config-diff`（JSON 对象映射 vs 数组） | 变更 2、未变 1 | `tls.minVersion 1.2→1.3`、`audit.retention 90→180`、`session.timeout` 未变，行号 2/3/4 | 无 |
+| `asset-diff-missing`（移除必要材料） | `missingMaterials=["assets/baseline.csv"]`、6 项→5 项全部 `unknown` | `unknown 5/5`、`changed 0`，原因 `baseline-material-missing` | 无 |
+
+两项检验都成立：**只改一个值 → 对应差异随之变化**（`app-a-2` 由未变转为变更，其余项结论不变）；**移除必要材料 → 对应项显示缺件/未知**（不猜结论）。用虚构材料跑通，可认定工程通过；真实生产效果见 §9。
+
+## 5. “当前证据支持”与“实际覆盖”分开
+
+同一份快照在四个入口显示同一组数字（分母相同、采集时点写出）：
+
+| 入口 | 历史通过 | 当前证据支持 | 归属未知 | 人工覆盖 | 采集时点 |
+| --- | --- | --- | --- | --- | --- |
+| API `GET /tasks/:id/scorecard`、`/snapshot` | 4 / 4 | 2 / 4 | 0 / 4 | 已测 1、部分 1、受阻 1、未测 0、未登记 1 | `capturedAt` 字段 |
+| 控制台（报告 Tab「交付记分卡」） | 4 / 4 | 2 / 4 | 0 / 4 | 同上 | 统计时点行 + 实时快照 SHA |
+| 导出报告 `/report`（`## 覆盖与当前支持`） | 4 / 4 | 2 / 4 | 0 / 4 | 同上 | 统计时点行 |
+| 交付摘要 `/delivery`（`## 记分卡`） | 4 / 4 | 2 / 4 | 0 / 4 | 同上 | 统计时点行 |
+
+- 覆盖意见全部从正常入口 `POST /tasks/:id/coverage` 登记（署名 + 依据 + 证据哈希）：已测、部分覆盖、受阻各 1 条；甲系统目标**故意不登记**，它已有附件（配置基线 + 发现证据）——四个入口都显示“未登记”，证明“有附件 ≠ 覆盖已知”。
+- 另保留一例“覆盖充分、零发现”：乙系统 `tested` + 0 条发现，报告写成“在本次检查范围内未检出（人工覆盖：已测；关联发现 0 条……）”。
+- 同一份快照重复复算逐字节相同（`coverage-support.test.ts` 与贯穿样例各断言一次）。
+- 控制台视觉证据：`docs/evidence/ui/20261122-scorecard-card.png`。
+
+## 6. A3 双写入方并发
+
+`packages/history/src/a3-concurrency.test.ts`（4 例，全部通过），保留原有单 store 顺序用例作为对照：
+
+| 用例 | 写入方 | 同步点 | 断言 |
+| --- | --- | --- | --- |
+| 并发 1 | 两个独立 `openHistory`（同一库文件） | 撤回事务提交后再断言 | 首次通过不成立；`goal_findings`/`goal_proofs`/`goal_asserted` 均为 0（没有半写入） |
+| 并发 2 | 两个独立进程（`scripts/a3-writer.ts`） | 撤回进程写标记文件，断言进程等标记后才打开事务 | 跨进程同样不得通过；事件与归属行仍为 0 |
+| 并发 3 | 两个独立进程 | 断言进程写标记，撤回进程等标记后才撤回 | 首次通过保留；冻结的 Finding ID 与证据版本完整；`readProofVersion` 可回读；当前结论变为 `supported-by-retracted-only`；重复断言不产生第二条通过记录 |
+| 并发 4 | 另一连接撤回 | 断言后依次撤回两条独立依据 | 撤一条仍支持（`retractedReferences=1`）；撤两条才失守；归属行 2、事件各 1 |
+
+## 7. Kali 真实备份的隔离恢复
+
+详见 `docs/evidence/restore/20261122-kali-backup/README.md`（含 `drill.log`）。要点：
+
+- 备份：`/home/parallels/gongyuai-data-backup-20261122-202154.tar.gz`，21,217,525 字节，SHA-256 `cef807d98dc0567b2ff8fa58764c9a295ae6965465bfc938c60d8e24a89d1925`；只解 `.gongyuai`，未解 `.env`/`tmp`。
+- 隔离：`/tmp/gy-restore-ecec`，仅回环 `127.0.0.1:18877`，禁用模型外发（`env -u OPENAI_API_KEY -u OPENAI_BASE_URL -u GY_MODEL`）与自动续跑（`GY_WATCHDOG_MS=86400000`）；正式实例全程未受影响（MainPID、cwd、任务数不变）。
+- 结果：11 个任务 ID 与备份内 `control.sqlite` 完全一致；`kali-demo` 2/2 历史通过；证据原件（`recon/banner.txt`、`goals/report.md`）API 字节 = 磁盘字节；历史报告 API 字节 = 磁盘字节（`df3b63ad…`）；快照封印与离线复算一致（`b827ac83…`，`sealValid=true`）。
+- **验证上限**：备份时点所有任务 `goal_proofs=0`、`evidence_versions=0`、无 `report-evidence/`，因此“封存原件 ↔ 交付记录同源”这一层无法核对；能核对的是字节一致与可复算。这是“原备份验证”，不是新备份演练。
+- 切换后新增、不在备份内的任务：`9aa06c00…`（kali-deploy-acceptance）、`c459008e…`（kali-pause-resume-acceptance），以及本轮 `59252500…`（kali-release-acceptance）。
+
+## 8. Kali 正式入口复验（受验代码 `d7c46d4`）
+
+| 项 | 值 |
+| --- | --- |
+| 主机 | `10.211.55.5`（kali-linux-2025-2，aarch64，SSH `parallels`） |
+| 正式目录 | `/home/parallels/GongYuAI`（完整新目录，`git clone` 自 `git bundle`，SHA 一致） |
+| 运行版本 | HEAD `d7c46d4956246ba448b565136683daf155af1c62`；监听进程 cwd = `/home/parallels/GongYuAI` |
 | 依赖与构建 | Kali 本机 `pnpm install --frozen-lockfile` + `pnpm -r run build`（未复制 macOS 依赖） |
-| 迁移验证 | 先对旧数据副本启动新版本：11 个委托可读、目标/事实/证据/报告正常；随后切换真实副本 |
-| 切换 | 冻结旧进程 → 复制 `.gongyuai`/`.env` → 目录对调 → 终止旧主进程触发 `Restart=on-failure` → 6s 后新版本 active |
-| 部署后验收 | 11 个历史委托保留；`kali-demo` 目标/证据/报告可读；CLI 新建 `kali-deploy-acceptance`（completed，记分卡 1/1）；`kali-pause-resume-acceptance` pause→paused（workerPids=0）→resume→completed；CLI `scorecard` 与离线 `--recompute` seal 一致；浏览器在 `http://10.211.55.5:8877` 读取交付页；复核后同步 `6c6bebd`、重建并重启，Kali 侧 `pnpm e2e:engagement` 53/53 通过（`.gongyuai/acceptance/engagement-1795350565377`），发布 hash 与快照文件一致（`22b86de8…`） |
-| 旧程序目录 | `/home/parallels/GongYuAI.old-20261122-202221` → 已删除（删除前确认无进程 cwd、无 systemd 引用、无任务 dataDir 引用） |
-| 保留备份 | `/home/parallels/gongyuai-data-backup-20261122-202154.tar.gz`（21MB，0600；含 `.gongyuai`、`.env`、切换前本地 diff 617 行） |
-| 未处理 | `/home/parallels/GongYuAI-hosted-build`：旧静态构建副本，属主 UID 501、部分目录不可读；无进程/单元引用，未删除，待确认归属后处理 |
+| 数据与配置 | 切换前另取保护备份 `gongyuai-data-backup-20261122-213828.tar.gz`（21,305,901 字节，SHA-256 `b488916f…`），再复制 `.env` 与 `.gongyuai` 到新目录后切换 |
+| 切换 | 目录对调 → 终止旧主进程 → 新目录起服务（本轮 sudo 需密码，`systemd` 单元由 `Restart=on-failure` 未能自动重启，改用 `setsid nohup pnpm gy serve`；单元 `enabled`，重启机器即回到 systemd 托管；恢复托管的命令见 §10） |
+| 旧程序目录 | `GongYuAI.old-20261122-213828` → 已删除（删除前确认无进程 cwd、无单元引用、无 dataDir 引用） |
+| 未触碰 | `/home/parallels/GongYuAI-hosted-build`（属主 UID 501，归属未确认，未删除）；`CyberStrikeAI` 未触碰 |
+| 正式入口验收 | 历史任务 13 个可读（11 个备份时点任务 + 2 个切换后任务）；新建 `kali-release-acceptance`（`59252500…`）completed，2/2；原始清单差异：新增 1、移除 1、变更 2、未变 1、缺件 1，与封存预期逐项一致；覆盖登记 `tested`（证据 SHA `d82cb930…`），记分卡 `已测 1 · 未登记 1`；报告含 `## 覆盖与当前支持` 与“未检出”口径；离线复算 `sealValid=true`（封印 `9354f3ff…`）；浏览器在 `http://10.211.55.5:8877` 读取报告 Tab |
+| 控制台资源 | 服务端返回 `assets/index-DgoApZO2.js`，对应文件存在于 `packages/control-plane/web/assets/` |
 
-一致性证据：
+正式入口视觉证据：`docs/evidence/ui/20261122-kali-official-entry.png`。
+三端读数与时间戳：`docs/evidence/release/receipt.json`（受验代码 SHA、GitHub main SHA、Kali HEAD 与运行读数）。
 
-```text
-GitHub refs/heads/main : 当前 HEAD（与 Kali 相同；git ls-remote origin refs/heads/main）
-Kali git HEAD          : 当前 HEAD（同上）
-代码树（两端）         : 6c6bebd9f7aa0075d4378095230fa527b84a31ae（非 docs 文件差异为空）
-Kali MainPID cwd       : /home/parallels/GongYuAI
-Kali health            : {"ok":true,"version":"0.1.0"}
-Kali tasks             : 13（切换前 11 + 验收 2）
-```
+## 9. 阶段签收摘要
 
-## 5. 阶段与 P0–P12
+七个阶段的用户操作、入口、预期、实际、证据与剩余差距见 [implementation-ledger.md](./implementation-ledger.md) §2。签收状态：
 
-完整映射、入口、测试证据与差距见 [implementation-ledger.md](./implementation-ledger.md)。摘要：
+- **已验证**：阶段 5（含本轮补通的客户复测申请、同一委托内跨任务署名复核）。
+- **部分验证**：阶段 1、2、3、4、7（逐条差距见台账 §2.1）。
+- **未实现**：阶段 6（全局记忆、客户隔离、评测隔离）。
+- **缺外部材料**：生产盲评 —— 需要获准的脱敏历史委托 + 独立人工底稿，缺任一项即写“生产盲评待验证”。
 
-- ✅ 阶段 1、3、5；P0–P5、P6-E1(+目标级归属)、P9-F1、阶段 2 暂停/恢复/范围版本（`pause-scope.test.ts` 覆盖状态语义、看门狗跳 draining、范围修订门禁）。
-- 🔨 阶段 2 后台作业回流与 24h 咨询、阶段 4 四图/今日首页、阶段 7 供应商故障演练。
-- 📐 P7 模型路由、P8 全局记忆与隔离、P10 四图、P11 会话/作业/隧道/浏览器、P12 D1/D2/D3/D5/D6/D8/攻击链。
-- ⏳ 生产盲评：缺已获准的脱敏历史委托与独立人工底稿，标记“生产盲评待验证”。
+生产盲评具体缺件：
 
-## 6. 独立复核清单
+1. 一份已人工结项、已脱敏、并获准用于本次验收的历史委托（含材料先后顺序、范围修订、中途交接点）；
+2. 该委托的独立人工底稿（覆盖、未验证项、已撤回结论、遗留事项）；
+3. 客户对“用该委托做验收”的书面确认。
 
-1. `git ls-remote origin refs/heads/main` 对照本文 SHA。
-2. 在干净副本 `pnpm install --frozen-lockfile && pnpm -r run build && pnpm -r run test && pnpm smoke`。
-3. `pnpm e2e:engagement`，读 `.gongyuai/acceptance/<run>/acceptance-record.md`。
-4. 任选一条结论：`gy scorecard <id> --out` → `--recompute`（`sealValid=true`），核对发布 hash 与快照文件 `sha256` 相等；再下钻 `history` / `evidence/file` / `report-evidence/<sha>`。
-5. SSH Kali：`systemctl show gongyuai.service -p MainPID -p ExecStart`、`readlink /proc/<pid>/cwd`、`git -C /home/parallels/GongYuAI rev-parse HEAD`。
-6. 确认 `/home/parallels/GongYuAI.old-*` 不存在；备份 tar 权限 0600。`git diff --stat 6c6bebd origin/main -- ':!docs'` 为空。
-7. 浏览器 `http://10.211.55.5:8877`：任务列表、报告 Tab 的交付核对/记分卡/更正。
+上述任一缺失时，不用工程夹具、演示页面或模型生成的答案替代人工底稿。
 
-## 7. 独立复核结论与处置（2026-11-22）
+## 10. 独立复核（最短路径）
 
-独立复核（只读；上一轮基线 `907cb63`，两端树 hash `df6286a5…`，107 项测试）确认：GitHub 三方 SHA 一致、smoke 通过、A1–A5 与阶段 2 实现符合契约、Kali 服务/目录/备份/任务数/旧目录清理与记录一致。提出的 Important 项已处置，复验基线 `6e1db7a`（树 hash `8601654…`，111 项测试）：
+完整清单见 [review-checklist.md](./review-checklist.md)；本轮最小集：
+
+1. `git ls-remote origin refs/heads/main` 对照受验代码与记录提交。
+2. `pnpm install --frozen-lockfile && pnpm -r run build && pnpm -r run test && pnpm test:acceptance && pnpm smoke`（期望 126 + 2 通过、smoke PASS）。
+3. `pnpm verify:acceptance docs/evidence/acceptance/engagement-1795354631468` 与 `…/business-1795354653869`（23 项全过）；再跑一次交叉配对（`--record` 指向另一次运行）必须失败。
+4. `pnpm acceptance:business` 复跑业务验收：先核对 `expected.json` 封存哈希，再逐项比对。
+5. `gy scorecard --recompute <snapshot>`：`sealValid=true`，分子分母与清单一致。
+6. Kali：`readlink /proc/<pid>/cwd`、`git -C /home/parallels/GongYuAI rev-parse HEAD`、`curl :8877/health`、`curl :8877/tasks`（14 个）；确认 `GongYuAI.old-*` 不存在、两份备份 tar 权限 0600。
+7. 恢复托管（需人工执行，sudo 需要密码）：
+   ```bash
+   pkill -f "gy serve --host 0.0.0.0 --port 8877" && sudo systemctl restart gongyuai.service
+   ```
+
+## 11. 独立复核结论与处置
+
+### 第一轮（2026-11-22，基线 `907cb63`）
+
+确认 GitHub 三方 SHA 一致、smoke 通过、A1–A5 与阶段 2 实现符合契约、Kali 服务/目录/备份/任务数/旧目录清理与记录一致。Important 项处置见下表（I1–I5、M1–M7），复验基线 `6e1db7a`。
 
 | 项 | 处置 |
 | --- | --- |
-| I1 快照 hash 与交付件不对应 | `/snapshot` 改为对同一次快照做纯函数记分卡；e2e 只取一次 `/snapshot` 并落盘同一对象；复核后验收记录 `6b299710…` 与文件 hash 相等 |
-| I2 交付记录 Kali HEAD 过期 | §1 与 §4 统一为“首版替换 3a6b174 / 当前代码树 6c6bebd / HEAD=当前 main”，复核后 Kali 已同步 |
-| I3 首次通过后无法重新归属 | 明确为**首次通过时冻结归属**；重新打开需新目标/重跑，文档不再暗示自动重归属 |
-| I4 归属未知计入当前支持 | `unknown-attribution` 改为 `currentSupported=false`，记分卡与交付摘要分开报；A4 夹具断言 0 |
-| I5 阶段 2 无单测 | 新增 `packages/control-plane/src/pause-scope.test.ts`（状态语义、看门狗不重启 draining、范围修订门禁） |
-| M1/M6 | 构建项目数改为 6；Kali「代码树」「HEAD」拆行 |
-| M4 | 删除未使用的 `validateAllCompleteEvidence` 导出 |
-| M3 | 契约措辞改为“证据哈希与首次通过同事务；字节采集在事务前并经 SHA 校验” |
-| M7 | `assets:["*"]` 在目标级发现闸中被拒绝，要求显式 `scope:"task"` |
+| I1 快照 hash 与交付件不对应 | `/snapshot` 改为对同一次快照做纯函数记分卡；本轮进一步用清单 + 校验器固定“记录↔快照↔记分卡”三者同源 |
+| I2 交付记录 Kali HEAD 过期 | 本轮改为“受验代码 / 记录提交 / 实际运行版本”三行并附回执 |
+| I3 首次通过后无法重新归属 | 明确为首次通过时冻结归属；`a3-concurrency.test.ts` 并发 3/4 复核该语义 |
+| I4 归属未知计入当前支持 | `unknown-attribution` 为 `currentSupported=false`；A4 夹具断言 0 |
+| I5 阶段 2 无单测 | `pause-scope.test.ts` |
+
+### 第二轮（本轮，基线 `04c798b`）
+
+复核指出：验收记录串用了不同运行；缺少从原始材料出发的业务验收；覆盖与支持未分列；A3 只有单写入方顺序用例；备份恢复未验证到真实备份；阶段签收与台账不符。逐项处置：
+
+| 项 | 处置 | 证据 |
+| --- | --- | --- |
+| 验收记录串用不同运行 | 旧运行 `engagement-1795350021687` 的记分卡哈希 `027c4f06…` 与快照内哈希 `5989425c…` 不一致（两次 `/scorecard`、`/snapshot` 各自取时）——保留为回归对照；本轮 `/snapshot` 一次生成并落盘，清单 + 校验器固定同源，另加交叉配对反例 | §3；`scripts/acceptance-verify.ts` |
+| 缺业务验收 | 新增 `reconcile` 纯函数与三个入口（API/CLI/控制台），业务验收 34 步 | §4 |
+| 覆盖与支持未分列 | 记分卡加 `denominator` 与 `unregistered`，四入口同源，五类互斥 | §5 |
+| A3 只有顺序用例 | 新增两个连接 + 两个进程的并发用例 | §6 |
+| 备份未验到真实备份 | 用 Kali 真实备份做隔离恢复，写明上限 | §7 |
+| 阶段签收不符 | 台账 §2 逐阶段列入口与实测，阶段 5 补通两个入口 | §9、台账 §2.1 |
