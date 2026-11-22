@@ -16,7 +16,36 @@
     "nonDocsDiffFromTestedCode": "scripts/kali/formal-acceptance.py（Kali 正式入口验收驱动，不参与运行时）",
     "note": "受验提交之后的提交只追加验收证据与驱动脚本；回执与三份文档在下一个 docs-only 提交里",
     "noForcePush": true,
-    "receiptCommitNote": "本回执与三份文档在 f34cc03 之后的第二个 docs-only 提交里；该提交推送后 main 前进到本提交本身"
+    "receiptCommitNote": "本回执与三份文档在 f34cc03 之后的第二个 docs-only 提交里；该提交推送后 main 前进到本提交本身",
+    "docsOnlyAfterTestedCode": [
+      {
+        "commit": "493b238",
+        "note": "验收证据 + Kali 入口驱动脚本（docs/evidence/** 与 scripts/kali/formal-acceptance.py）"
+      },
+      {
+        "commit": "7e377c9",
+        "note": "交付记录 / 台账 / 复核清单 / 回执 + kali-formal、restore-r7、service 证据；deploy.sh 改为改写基础单元文件、restore-isolation.ts 增 --task"
+      },
+      {
+        "commit": "697ed68",
+        "note": "回执与交付记录写入 GitHub main 采样值 7e377c9"
+      },
+      {
+        "commit": "29ff96d",
+        "note": "README 首页固定本轮运行与 Kali 入口任务"
+      }
+    ],
+    "nonDocsDiffSummary": {
+      "files": [
+        "README.md",
+        "scripts/kali/deploy.sh",
+        "scripts/kali/formal-acceptance.py",
+        "scripts/restore-isolation.ts"
+      ],
+      "note": "相对受验提交 f34cc03 的非 docs 差异只有这四个文件：README 首页、两个 Kali 驱动/部署脚本、恢复演练脚本的 --task 选项；运行时源码（packages/**、apps/**）零差异",
+      "sampledAt": "2026-11-22T22:21+08:00",
+      "command": "git diff --stat f34cc03 HEAD -- ':!docs'"
+    }
   },
   "kali": {
     "host": "10.211.55.5",
