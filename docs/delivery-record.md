@@ -26,14 +26,14 @@
 
 受验代码提交的文件范围：16 个修改 + 24 个新增（源码、契约、控制台、测试、脚本、验收夹具、证据），详见 `git show --stat d7c46d4`。
 
-两个文档提交（相对受验代码只有 `docs/` 差异）：
+文档提交（相对受验代码只有 `docs/` 差异；完整序列以 `git log --oneline d7c46d4..HEAD` 为准，下表列关键两个）：
 
 | 提交 | 角色 | 文件 |
 | --- | --- | --- |
 | `abc2485ce703f3695b8634c568e845aaa170c606` | 交付记录 + 台账 + 复核清单 + 验收证据 | 3 改 13 增 |
 | `aece9c7374876d8d3aa72e9ba3fa4d2a26ca13fe` | 发布回执（`docs/evidence/release/receipt.json`）与 §8 读数 | 1 改 1 增 |
 
-`git diff --stat d7c46d4 abc2485 -- ':!docs'` 与 `git diff --stat d7c46d4 aece9c7 -- ':!docs'` 均为空。
+`git diff --stat d7c46d4 abc2485 -- ':!docs'`、`git diff --stat d7c46d4 aece9c7 -- ':!docs'` 与 `git diff --stat d7c46d4 HEAD -- ':!docs'` 均为空。
 
 ## 3. 验收运行与清单（可机器校验）
 
