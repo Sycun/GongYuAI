@@ -150,6 +150,12 @@ export function resolveGateAssets(
         "use findingsGate.scope:\"task\" for an explicit engagement-wide aggregate",
     );
   }
+  if (normalized.includes("*")) {
+    throw new Error(
+      "goal-scoped findings gate must declare concrete assets; " +
+        "assets:[\"*\"] equals a task-wide aggregate and requires scope:\"task\"",
+    );
+  }
   return normalized;
 }
 

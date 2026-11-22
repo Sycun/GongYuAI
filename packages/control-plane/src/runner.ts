@@ -89,6 +89,7 @@ function writeManifestForSlot(
     evidenceDir: paths.evidenceDir,
     workspaceDir: paths.workspaceDir,
     auth: task.auth,
+    scopeVersion: task.scopeVersion,
     goals: task.goals,
     budget,
     execution: task.execution,

@@ -89,7 +89,7 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 2. Every provided path is relative to `evidence/` and resolves to a regular file there. Parent traversal, symbolic links and hard-linked files are rejected. The same boundary applies to Worker evidence writes and console reads.
 3. If a path is `**/ALL_COMPLETE.json`, the JSON must be a non-empty challenge array and **every** `is_completed` must be `true`（TSecBench 清板）。
 
-普通目标至少需要非空材料。可配置 `evidenceChecks` 精确匹配 JSON 顶层字段；断言依据的原始字节与 SHA-256 在同一事务保存。旧记录缺少原版时报告标明未知。见[事实复核与离线验收](./evidence-review.md)。
+普通目标至少需要非空材料。可配置 `evidenceChecks` 精确匹配 JSON 顶层字段；证据哈希与首次通过在同一事务保存，原始字节在事务前采集并在写入时按 SHA-256 校验。旧记录缺少原版时报告标明未知。见[事实复核与离线验收](./evidence-review.md)。
 
 **基准语义必须显式选择**：只有目标声明 `boardGate: "tsecbench"` 时，名为 `ALL_COMPLETE.json` 的文件才按清板数组校验（非空、每条 `is_completed === true`）。普通委托附一份同名业务材料，只按该目标声明的 `evidencePatterns` / `evidenceChecks` 判读；交付摘要也不得以文件名推断"做过内容检查"。基准样例（`examples/tsecbench/goals-autonomous.json`）在目标里显式写入 `boardGate`。
 
@@ -97,7 +97,8 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 - `scope: "goal"`（默认）只计**本目标声明资产**（`assets`，或 `findingsGate.assets`）上的发现；未声明资产即拒绝断言，禁止退化为全任务累计（A1）。
 - `scope: "task"` 是显式的全委托汇总口径，只有汇总目标可以用。
 - 只计 `verified` / `retested` / `accepted`；severity 与 vulnClass 可收窄；不满足即拒绝，与证据闸同等硬。
-- 首次通过时把支持该目标的 `findingId`、当时状态与封存证据写入 `goal_findings`（A3/A5）。之后撤回不抹掉首次通过，但当前交付会显示"唯一依据已撤回"或"部分依据已撤回"。
+- 首次通过时把支持该目标的 `findingId`、当时状态与封存证据写入 `goal_findings`（A3/A5）。归属在首次通过时冻结；之后撤回不抹掉首次通过，但当前交付会显示"唯一依据已撤回"或"部分依据已撤回"，也不会把断言后新增的发现自动补进首次依据。
+- 记分卡分列"曾通过"与"当前证据足以支持"；旧档归属未知保留历史结果，但不计入当前支持（A4）。收集口径的资产必须在目标级闸里具体声明，`assets:["*"]` 被拒绝，等价需求走 `scope:"task"`。
 
 **提交顺序（A3）**：findings 查询与首次通过写在同一个 `BEGIN IMMEDIATE` 事务里。撤回先提交 → 本次断言看不到该发现；断言先提交 → 历史通过保留，当前核对按最新状态重算。
 

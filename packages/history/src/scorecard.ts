@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CoverageStatus, FindingStatus, GoalState } from "@gongyuai/contracts";
-import { FINDING_SEVERITY_RANK, findingSatisfiesGate } from "@gongyuai/contracts";
+import { FINDING_SEVERITY_RANK, findingAssetInScope, findingSatisfiesGate } from "@gongyuai/contracts";
 
 /**
  * F1 / A4 / A5 — 交付记分卡与可复算快照。
@@ -154,7 +154,11 @@ export function computeScorecard(snapshot: DeliverySnapshot): Scorecard {
         retractedSupportFindingIds.push(support.findingId);
         continue;
       }
-      if (finding && LIVE_FINDING_STATUSES.has(finding.status) &&
+      const declaredAssets = goal.findingsGate && goal.findingsGate.scope !== "task"
+        ? (goal.findingsGate.assets?.length ? goal.findingsGate.assets : goal.assets ?? [])
+        : null;
+      const assetStillInScope = !declaredAssets || findingAssetInScope(finding?.asset ?? "", declaredAssets);
+      if (finding && assetStillInScope && LIVE_FINDING_STATUSES.has(finding.status) &&
           (!goal.findingsGate ||
             findingSatisfiesGate(
               { status: finding.status as FindingStatus, severity: finding.severity, vulnClass: finding.vulnClass },
@@ -183,8 +187,11 @@ export function computeScorecard(snapshot: DeliverySnapshot): Scorecard {
         currentSupported = false;
       }
     } else if (missingAttribution) {
+      // A4: a legacy pass with no sealed proof and no finding attribution keeps
+      // its historical result, but it is *not* counted as currently supported:
+      // there is no re-computable basis for "today".
       verdict = "unknown-attribution";
-      currentSupported = true;
+      currentSupported = false;
     } else {
       verdict = "supported";
       currentSupported = true;

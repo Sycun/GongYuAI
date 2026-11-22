@@ -140,6 +140,30 @@ test("A1+ 目标级发现闸未声明资产时拒绝，而不是退化为全任�
   }
 });
 
+test("A1++ 目标级发现闸拒绝通配资产（避免静默退化为任务级）", () => {
+  const { root, evidenceDir, store } = setup("gy-a1c-");
+  const taskId = randomUUID();
+  try {
+    store.seedGoals(taskId, [{
+      id: "wildcard",
+      title: "通配资产",
+      description: "assets:[*] 等于任务级，必须显式 scope=task",
+      assets: ["*"],
+      evidencePatterns: ["x.md"],
+      findingsGate: { minVerified: 1, scope: "goal", assets: ["*"] },
+      passes: false, evidencePaths: [], assertedAt: null,
+    }]);
+    writeEvidence(evidenceDir, "x.md", "x\n");
+    verifiedFinding(store, taskId, evidenceDir, "any.example.com");
+    const result = store.assertGoal(taskId, "wildcard", ["x.md"]);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.match(result.reason, /concrete assets/);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("A2 覆盖型目标：完整/部分/缺失可区分，零发现不证明覆盖", () => {
   const { root, evidenceDir, store } = setup("gy-a2-");
   const taskId = randomUUID();
@@ -307,6 +331,7 @@ test("A4 旧档只读：归属未知保留历史结果，两次记分卡一致�
     assert.equal(cardA.historicallyPassed, 1);
     assert.equal(cardA.unknownAttribution, 1);
     assert.equal(cardA.goals[0]!.verdict, "unknown-attribution");
+    assert.equal(cardA.currentlySupported, 0, "归属未知不得计入当前支持（A4）");
     assert.equal(cardA.historicallyPassed, cardB.historicallyPassed);
     assert.equal(cardA.currentlySupported, cardB.currentlySupported);
     assert.deepEqual(cardA.goals, cardB.goals);

@@ -59,7 +59,7 @@ import {
 } from "./scorecard.js";
 import { CoverageReviewSchema, type CoverageReview, type CoverageReviewInput, CreateFactReviewSchema, type CreateFactReview } from "@gongyuai/contracts";
 
-export { collectGoalEvidence, validateAllCompleteEvidence } from "./goal-evidence.js";
+export { collectGoalEvidence } from "./goal-evidence.js";
 export type FactReview = CreateFactReview & { id: string; sha256: string; createdAt: string };
 export type GoalProof = { goalId: string; path: string; sha256: string };
 export type GoalFindingSupport = SnapshotGoalFinding;
@@ -88,7 +88,7 @@ export type DeliveryCorrection = {
   createdAt: string;
 };
 export type { DeliverySnapshot, Scorecard, ScorecardGoal } from "./scorecard.js";
-export { computeScorecard as computeScorecardFromSnapshotData, scorecardFromSnapshot } from "./scorecard.js";
+export { computeScorecard, scorecardFromSnapshot } from "./scorecard.js";
 
 export { describeGoalEvidence, formatAccounting, formatCorrections, type GoalEvidenceSupport } from "./delivery.js";
 export { minimatch } from "./minimatch.js";

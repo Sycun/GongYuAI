@@ -26,6 +26,7 @@ function manifest(workspaceDir: string): WorkerManifest {
       outOfScope: [],
       capability: "full",
     },
+    scopeVersion: 1,
     goals: [],
     budget: {
       maxTokens: 1000,

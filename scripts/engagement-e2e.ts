@@ -280,14 +280,14 @@ async function main() {
   const notified = await json<any>(base, `/tasks/${taskId}/corrections/${correctionId}/notice`, body({ status: "notified" }));
   assert(notified.status === 200 && notified.body.correction.noticeStatus === "notified", "阶段5 通知状态", notified.body.correction?.noticeStatus);
 
-  const card2 = await json<any>(base, `/tasks/${taskId}/scorecard`);
+  // One snapshot, one published scorecard: the hash in the record is the hash
+  // of the snapshot file that ships with it (no second capturedAt).
+  const card2 = await json<any>(base, `/tasks/${taskId}/snapshot`);
+  const snapshotPath = join(ROOT, "delivery-snapshot.json");
+  writeFileSync(snapshotPath, JSON.stringify(card2.body.snapshot, null, 2) + "\n");
   assert(card2.body.scorecard.historicallyPassed === 4, "阶段3 历史通过保留", `${card2.body.scorecard.historicallyPassed}/4`);
   assert(card2.body.scorecard.currentlySupported === 2, "阶段3 当前支持下降", `${card2.body.scorecard.currentlySupported}/4`);
   assert(card2.body.scorecard.retractedReferences === 2, "阶段3 撤回引用计数", String(card2.body.scorecard.retractedReferences));
-
-  const snapshot = await json<any>(base, `/tasks/${taskId}/snapshot`);
-  const snapshotPath = join(ROOT, "delivery-snapshot.json");
-  writeFileSync(snapshotPath, JSON.stringify(snapshot.body.snapshot, null, 2) + "\n");
   const recompute = scorecardFromSnapshot(JSON.parse(readFileSync(snapshotPath, "utf8")));
   assert(recompute.ok && recompute.sealValid, "阶段3 快照可复算", "seal valid");
   if (recompute.ok) {

@@ -13,6 +13,7 @@ function baseManifest(
     durableDb: "/tmp/d.sqlite",
     evidenceDir: "/tmp/e",
     workspaceDir: "/tmp/w",
+  scopeVersion: 1,
     auth: {
       authorizationNote: "test auth note",
       targets: ["127.0.0.1"],

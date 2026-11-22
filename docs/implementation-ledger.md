@@ -27,7 +27,7 @@
 | P6-E2/E3/E4 | 凭据结构、HTTP 事务证据、覆盖矩阵 | — | — | — | 📐 |
 | P7 | 三层模型路由 / 偏航审计者 | —（仅设计） | — | — | 📐 |
 | P8 | 项目记忆 ✅ / 全局记忆与隔离 | 项目记忆=`history`+Relay+证据；全局记忆无 | — | — | 📐（仅项目层） |
-| P9-F1 | **交付记分卡 + 可复算快照** | `packages/history/src/scorecard.ts` | `GET /tasks/:id/scorecard|snapshot`、`gy scorecard --out/--recompute` | A4/A5；贯穿样例 `4/4 · 2/4` 两次一致 | ✅ |
+| P9-F1 | **交付记分卡 + 可复算快照** | `packages/history/src/scorecard.ts` | `GET /tasks/:id/scorecard|snapshot`、`gy scorecard --out/--recompute` | A4/A5；贯穿样例 `4/4 · 2/4` 两次一致；发布 hash 与快照文件同源 | ✅ |
 | P9-F2/F3 | 趋势看板 / 提案收件箱 / 自动化 | — | — | — | 📐 |
 | P10 | DAG 控制台 ✅；资产/攻击面/执行/记忆四图 | `apps/console` DAG、assets Tab | 控制台任务详情 | 控制台构建 + 浏览器验收（见发布记录） | 🔨（仅 DAG+资产） |
 | P11-S1/S2 | 会话保活、后台作业异步回流、`operator_consult` | 无作业/咨询；暂停恢复已实现 | — | — | 🔨（仅暂停/恢复/范围版本） |
@@ -42,7 +42,7 @@
 | 阶段 | 状态 | 已验证内容 | 仍缺 |
 | --- | --- | --- | --- |
 | 1 生产委托与实际作业 | ✅ | 建档、两套系统清单导入、配置基线内容判据、缺件、零发现覆盖目标、显式汇总目标 | 客户真实材料（盲评） |
-| 2 跨日/并发/接手 | 🔨 | 控制面中断恢复、暂停确认、范围 v2、恢复读最新授权、无重复记账、3–10 并发配置 | 后台作业异步回流、24h 咨询转非阻塞、外部状态“未知”的真实供应商故障演练 |
+| 2 跨日/并发/接手 | 🔨 | 控制面中断恢复、暂停确认、范围 v2、恢复读最新授权、无重复记账、3–10 并发；`pause-scope.test.ts` 覆盖状态语义/看门狗/范围门禁 | 后台作业异步回流、24h 咨询转非阻塞、外部状态“未知”的真实供应商故障演练 |
 | 3 证据/发现/复核 | ✅ | A1–A5、同名附件、基准兼容、撤回顺序、旧档只读、快照复算 | 真实委托盲评 |
 | 4 日常控制台与图 | 🔨 | 任务页、资产 Tab、漏洞 Tab、目标/历史、暂停/恢复、交付记分卡 | “今天要做什么”首页、四图（资产/攻击面/执行/记忆）、因果链下钻 |
 | 5 整改/复测/交付 | ✅ | 多轮复测记录结构、客户风险处置、更正编号/影响/通知、报告版本留存、归档关闭 | 客户自助发起复测申请入口、跨任务署名 |
@@ -54,7 +54,7 @@
 | 项 | 命令 | 结果 |
 | --- | --- | --- |
 | 构建 | `pnpm -r run build` | exit 0（7 个 workspace 项目） |
-| 单测 | `pnpm -r run test` | contracts 22、history 30、control-plane 20、worker 35，共 107，0 失败 |
+| 单测 | `pnpm -r run test` | contracts 22、history 31、control-plane 23、worker 35，共 111，0 失败 |
 | 冒烟 | `pnpm smoke` | PASS（含 findings gate 失败臂、墙钟收卷、证据边界） |
 | 贯穿样例 | `GY_MOCK_HOLD_MS=9000 pnpm tsx scripts/engagement-e2e.ts` | 53 项全过；记录见 `.gongyuai/acceptance/<run>/acceptance-record.md` |
 | 恢复演练 | `pnpm tsx scripts/restore-drill.ts <数据目录>` | 委托/目标/证据/发现/报告/记分卡全部可读；证据原文可读 |

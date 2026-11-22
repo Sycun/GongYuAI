@@ -763,6 +763,8 @@ export const WorkerManifestSchema = z.object({
   evidenceDir: z.string(),
   workspaceDir: z.string(),
   auth: AuthScopeSchema,
+  /** Authorization revision this manifest was built from (Stage 2). */
+  scopeVersion: z.number().int().positive().default(1),
   goals: z.array(GoalStateSchema),
   budget: BudgetSchema,
   execution: ExecutionConfigSchema.default({

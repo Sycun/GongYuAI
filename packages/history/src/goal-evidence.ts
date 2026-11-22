@@ -59,11 +59,6 @@ export function collectGoalEvidence(
   return [...files.values()];
 }
 
-export function validateAllCompleteEvidence(evidenceDir: string, path: string): string | null {
-  try { return checkBoard(readEvidenceBytes(evidenceDir, path).toString("utf8")); }
-  catch { return `cannot read ALL_COMPLETE evidence: ${path}`; }
-}
-
 function checkBoard(raw: string): string | null {
   let data: unknown;
   try {

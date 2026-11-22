@@ -22,6 +22,7 @@ import {
   UpdateSettingsPatchSchema,
 } from "@gongyuai/contracts";
 import {
+  computeScorecard,
   describeGoalEvidence,
   listEvidenceFiles,
   listExecutionSteps,
@@ -511,7 +512,13 @@ export function startControlServer(opts: ServerOptions) {
           const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
           try {
             const snapshot = history.deliverySnapshot(task.id);
-            return send(res, 200, { snapshot, scorecard: history.scorecard(task.id) });
+            // The published scorecard must be the pure recomputation of the
+            // snapshot that is actually returned, not a second snapshot taken
+            // a millisecond later (different capturedAt → different sha256).
+            return send(res, 200, {
+              snapshot,
+              scorecard: computeScorecard(snapshot),
+            });
           } finally {
             history.close();
           }
