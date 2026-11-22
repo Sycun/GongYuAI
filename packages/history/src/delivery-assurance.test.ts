@@ -204,7 +204,15 @@ test("A2 覆盖型目标：完整/部分/缺失可区分，零发现不证明覆
     const card = store.scorecard(taskId);
     assert.equal(card.coverage.tested, 1);
     assert.equal(card.coverage.partial, 1);
-    assert.equal(card.coverage.unknown, 1, "缺失材料的目标覆盖必须仍是未知");
+    // 验收项 3：没有覆盖记录单列为“未登记”，不混进任何已登记状态。
+    assert.equal(card.coverage.unregistered, 1, "缺失材料的目标覆盖仍是未登记");
+    assert.equal(card.denominator, 3, "分母是本次约定目标总数");
+    assert.equal(
+      card.coverage.tested + card.coverage.partial + card.coverage.blocked +
+        card.coverage.untested + card.coverage.unregistered,
+      card.denominator,
+      "五类互斥且合计等于分母",
+    );
     assert.equal(card.findings.verified, 0, "零发现本身不构成覆盖证明");
 
     const goals = store.listGoals(taskId);

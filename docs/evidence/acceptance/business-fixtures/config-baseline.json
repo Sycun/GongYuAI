@@ -1,0 +1,5 @@
+{
+  "tls.minVersion": { "value": "1.2", "owner": "platform" },
+  "session.timeout": { "value": "30", "owner": "app" },
+  "audit.retention": { "value": "90", "owner": "platform" }
+}

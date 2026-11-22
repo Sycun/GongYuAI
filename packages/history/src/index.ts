@@ -58,6 +58,15 @@ import {
   type SnapshotCoverage,
 } from "./scorecard.js";
 import { CoverageReviewSchema, type CoverageReview, type CoverageReviewInput, CreateFactReviewSchema, type CreateFactReview } from "@gongyuai/contracts";
+import {
+  PeerReviewSchema,
+  RetestRequestSchema,
+  type PeerReview,
+  type PeerReviewInput,
+  type RetestRequest,
+  type RetestRequestInput,
+  type RetestRequestStatus,
+} from "@gongyuai/contracts";
 
 export { collectGoalEvidence } from "./goal-evidence.js";
 export type FactReview = CreateFactReview & { id: string; sha256: string; createdAt: string };
@@ -88,12 +97,12 @@ export type DeliveryCorrection = {
   createdAt: string;
 };
 export type { DeliverySnapshot, Scorecard, ScorecardGoal } from "./scorecard.js";
-export { computeScorecard, scorecardFromSnapshot } from "./scorecard.js";
+export { computeScorecard, finalizeSnapshot, scorecardFromSnapshot, snapshotSha256 } from "./scorecard.js";
 
 export { describeGoalEvidence, formatAccounting, formatCorrections, type GoalEvidenceSupport } from "./delivery.js";
 export { minimatch } from "./minimatch.js";
 export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
-export { listEvidenceFiles, readEvidenceFile, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
+export { listEvidenceFiles, readEvidenceBytes, readEvidenceFile, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
 export { writeTaskReport, type TerminalReportStatus } from "./report.js";
 
 export type FanoutPolicy = {
@@ -128,6 +137,7 @@ export class HistoryStore {
     if (opts.readOnly) {
       this.db = new DatabaseSync(opts.dbPath, { readOnly: true });
       try {
+        this.db.exec("PRAGMA busy_timeout = 10000;");
         this.archiveTables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
           .all().map((row) => String(row.name)));
       } catch (err) {
@@ -139,9 +149,12 @@ export class HistoryStore {
     mkdirSync(dirname(opts.dbPath), { recursive: true });
     mkdirSync(opts.evidenceDir, { recursive: true });
     this.db = new DatabaseSync(opts.dbPath);
+    // busy_timeout MUST be set before any statement that can take a lock:
+    // switching the journal mode needs an exclusive moment, and a worker that
+    // starts while the control plane is still writing used to die with
+    // "database is locked" instead of waiting a few milliseconds.
+    this.db.exec("PRAGMA busy_timeout = 10000;");
     this.db.exec("PRAGMA journal_mode = WAL;");
-    // Multi-Explore workers share history.sqlite; wait briefly on lock contention.
-    this.db.exec("PRAGMA busy_timeout = 5000;");
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.migrate();
   }
@@ -331,6 +344,44 @@ export class HistoryStore {
         UNIQUE(task_id, number),
         UNIQUE(task_id, dedup_key)
       );
+
+      -- 阶段 5：客户从正常入口发起的复测申请。请求本身 append-only；
+      -- 操作员完成复测后只追加 fulfilled_at/result，不改写原始请求。
+      CREATE TABLE IF NOT EXISTS retest_requests (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        requester TEXT NOT NULL,
+        role TEXT,
+        finding_ids_json TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        path TEXT,
+        sha256 TEXT REFERENCES evidence_versions(sha256),
+        status TEXT NOT NULL DEFAULT 'pending',
+        fulfilled_at TEXT,
+        fulfilled_result TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_retest_requests_task ON retest_requests(task_id, created_at);
+
+      -- 阶段 5：同一委托内的跨任务署名复核。source_task_id 必须是同
+      -- engagement 的任务；跨委托由控制面拒绝，这里只存已校验的记录。
+      CREATE TABLE IF NOT EXISTS peer_reviews (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        engagement_id TEXT NOT NULL,
+        reviewer TEXT NOT NULL,
+        role TEXT NOT NULL,
+        source_task_id TEXT NOT NULL,
+        finding_id TEXT,
+        fact_id TEXT,
+        decision TEXT NOT NULL,
+        basis TEXT NOT NULL,
+        path TEXT,
+        sha256 TEXT REFERENCES evidence_versions(sha256),
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_peer_reviews_task ON peer_reviews(task_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_peer_reviews_engagement ON peer_reviews(engagement_id, created_at);
     `);
     this.ensureIntentSourceFactIdsColumn();
     this.ensureGoalColumns();
@@ -1493,15 +1544,30 @@ export class HistoryStore {
   }
 
   readProofVersion(taskId: string, sha256: string): Buffer | undefined {
-    const findingClause = this.archiveTables && !this.archiveTables.has("finding_proofs")
-      ? ""
-      : ` OR EXISTS (SELECT 1 FROM finding_proofs WHERE task_id = ? AND sha256 = ?)`;
-    const row = this.db.prepare(`SELECT content FROM evidence_versions WHERE sha256 = ? AND (
-      EXISTS (SELECT 1 FROM goal_proofs WHERE task_id = ? AND sha256 = ?) OR
-      EXISTS (SELECT 1 FROM fact_reviews WHERE task_id = ? AND sha256 = ?) OR
-      EXISTS (SELECT 1 FROM coverage_reviews WHERE task_id = ? AND sha256 = ?)${findingClause})`)
-      .get(sha256, taskId, sha256, taskId, sha256, taskId, sha256,
-        ...(findingClause ? [taskId, sha256] : [])) as { content: Uint8Array } | undefined;
+    // 证据版本可回读的条件：它确实被本任务的某条密封记录引用过。新增的
+    // 记录类型（复测/受理/复测申请/署名复核/更正通知）都必须列进来，否则
+    // 报告重新渲染时会把“有引用但读不到”的证据判成错误。
+    const sites: Array<[string, string]> = [
+      ["goal_proofs", "task_id"],
+      ["fact_reviews", "task_id"],
+      ["coverage_reviews", "task_id"],
+      ["finding_proofs", "task_id"],
+      ["finding_actions", "task_id"],
+      ["retest_requests", "task_id"],
+      ["peer_reviews", "task_id"],
+      ["delivery_corrections", "task_id"],
+    ];
+    const clauses: string[] = [];
+    const params: Array<string> = [sha256];
+    for (const [table, column] of sites) {
+      if (this.archiveTables && !this.archiveTables.has(table)) continue;
+      clauses.push(`EXISTS (SELECT 1 FROM ${table} WHERE ${column} = ? AND sha256 = ?)`);
+      params.push(taskId, sha256);
+    }
+    if (!clauses.length) return undefined;
+    const row = this.db
+      .prepare(`SELECT content FROM evidence_versions WHERE sha256 = ? AND (${clauses.join(" OR ")})`)
+      .get(...params) as { content: Uint8Array } | undefined;
     return row && Buffer.from(row.content);
   }
 
@@ -1549,6 +1615,180 @@ export class HistoryStore {
       this.db.exec("ROLLBACK");
       throw err;
     }
+  }
+
+  /**
+   * 阶段 5 — 客户从正常入口发起的复测申请。append-only：原始请求不改写，
+   * 操作员完成复测时只追加 completed 标记。
+   */
+  recordRetestRequest(taskId: string, input: RetestRequestInput): RetestRequest {
+    const entry = RetestRequestSchema.parse(input);
+    const file = entry.evidencePath ? captureEvidence(this.evidenceDir, entry.evidencePath) : undefined;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const findings = new Map(this.listFindings(taskId).map((f) => [f.id, f]));
+      for (const id of entry.findingIds) {
+        const finding = findings.get(id);
+        if (!finding) throw new Error(`retest request references unknown finding: ${id}`);
+        if (finding.status === "retracted") throw new Error(`cannot request retest for retracted finding: ${id}`);
+      }
+      const request: RetestRequest = {
+        ...entry,
+        id: randomUUID(),
+        status: "pending" as RetestRequestStatus,
+        createdAt: this.now(),
+        ...(file ? { evidencePath: file.path, sha256: file.sha256 } : {}),
+      };
+      if (file) this.saveVersion(file);
+      this.db
+        .prepare(
+          `INSERT INTO retest_requests (id, task_id, requester, role, finding_ids_json, reason, path, sha256, status, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          request.id, taskId, request.requester, request.role ?? null,
+          JSON.stringify(request.findingIds), request.reason,
+          file?.path ?? null, file?.sha256 ?? null, request.status, request.createdAt,
+        );
+      this.emit(taskId, "retest_requested", {
+        requestId: request.id,
+        requester: request.requester,
+        findingIds: request.findingIds,
+      });
+      this.db.exec("COMMIT");
+      return request;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  listRetestRequests(taskId: string): RetestRequest[] {
+    if (this.archiveTables && !this.archiveTables.has("retest_requests")) return [];
+    return this.db
+      .prepare(
+        `SELECT id, requester, role, finding_ids_json AS findingIdsJson, reason, path AS evidencePath,
+                sha256, status, fulfilled_at AS fulfilledAt, fulfilled_result AS fulfilledResult,
+                created_at AS createdAt
+         FROM retest_requests WHERE task_id = ? ORDER BY rowid`,
+      )
+      .all(taskId)
+      .map((row) => {
+        const r = row as {
+          id: string; requester: string; role: string | null; findingIdsJson: string; reason: string;
+          evidencePath: string | null; sha256: string | null; status: string;
+          fulfilledAt: string | null; fulfilledResult: string | null; createdAt: string;
+        };
+        return {
+          id: r.id,
+          requester: r.requester,
+          ...(r.role ? { role: r.role } : {}),
+          findingIds: JSON.parse(r.findingIdsJson) as string[],
+          reason: r.reason,
+          ...(r.evidencePath ? { evidencePath: r.evidencePath } : {}),
+          ...(r.sha256 ? { sha256: r.sha256 } : {}),
+          status: r.status as RetestRequestStatus,
+          ...(r.fulfilledAt ? { fulfilledAt: r.fulfilledAt } : {}),
+          ...(r.fulfilledResult ? { fulfilledResult: r.fulfilledResult } : {}),
+          createdAt: r.createdAt,
+        };
+      });
+  }
+
+  /** Called right after a retest is recorded; returns the requests it closed. */
+  fulfillRetestRequests(taskId: string, findingId: string, result: string): RetestRequest[] {
+    if (this.archiveTables && !this.archiveTables.has("retest_requests")) return [];
+    const due = this.listRetestRequests(taskId).filter(
+      (request) => request.status === "pending" && request.findingIds.includes(findingId),
+    );
+    if (!due.length) return [];
+    const at = this.now();
+    const update = this.db.prepare(
+      `UPDATE retest_requests SET status = 'fulfilled', fulfilled_at = ?, fulfilled_result = ? WHERE id = ?`,
+    );
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const request of due) update.run(at, result, request.id);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    return this.listRetestRequests(taskId).filter((request) => due.some((d) => d.id === request.id));
+  }
+
+  /**
+   * 阶段 5 — 同一委托内的跨任务署名复核。engagementId 由控制面按两端任务
+   * 记录核对后传入；这里只做结构校验与留痕，不改写被复核的任务。
+   */
+  recordPeerReview(taskId: string, engagementId: string, input: PeerReviewInput): PeerReview {
+    const entry = PeerReviewSchema.parse(input);
+    if (!engagementId.trim()) throw new Error("peer review requires an engagement");
+    const file = entry.evidencePath ? captureEvidence(this.evidenceDir, entry.evidencePath) : undefined;
+    const review: PeerReview = {
+      ...entry,
+      id: randomUUID(),
+      engagementId,
+      taskId,
+      createdAt: this.now(),
+      ...(file ? { evidencePath: file.path, sha256: file.sha256 } : {}),
+    };
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (file) this.saveVersion(file);
+      this.db
+        .prepare(
+          `INSERT INTO peer_reviews (id, task_id, engagement_id, reviewer, role, source_task_id,
+             finding_id, fact_id, decision, basis, path, sha256, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          review.id, taskId, engagementId, review.reviewer, review.role, review.sourceTaskId,
+          review.findingId ?? null, review.factId ?? null, review.decision, review.basis,
+          file?.path ?? null, file?.sha256 ?? null, review.createdAt,
+        );
+      this.emit(taskId, "peer_review_recorded", {
+        reviewId: review.id,
+        reviewer: review.reviewer,
+        sourceTaskId: review.sourceTaskId,
+        decision: review.decision,
+      });
+      this.db.exec("COMMIT");
+      return review;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  listPeerReviews(taskId: string): PeerReview[] {
+    if (this.archiveTables && !this.archiveTables.has("peer_reviews")) return [];
+    return this.db
+      .prepare(
+        `SELECT id, task_id AS taskId, engagement_id AS engagementId, reviewer, role,
+                source_task_id AS sourceTaskId, finding_id AS findingId, fact_id AS factId,
+                decision, basis, path AS evidencePath, sha256, created_at AS createdAt
+         FROM peer_reviews WHERE task_id = ? ORDER BY rowid`,
+      )
+      .all(taskId)
+      .map((row) => {
+        const r = row as Record<string, string | null>;
+        return {
+          id: String(r.id),
+          taskId: String(r.taskId),
+          engagementId: String(r.engagementId),
+          reviewer: String(r.reviewer),
+          role: String(r.role),
+          sourceTaskId: String(r.sourceTaskId),
+          ...(r.findingId ? { findingId: r.findingId } : {}),
+          ...(r.factId ? { factId: r.factId } : {}),
+          decision: r.decision as PeerReview["decision"],
+          basis: String(r.basis),
+          ...(r.evidencePath ? { evidencePath: r.evidencePath } : {}),
+          ...(r.sha256 ? { sha256: r.sha256 } : {}),
+          createdAt: String(r.createdAt),
+        } as PeerReview;
+      });
   }
 
   appendReview(taskId: string, input: CreateFactReview): FactReview {

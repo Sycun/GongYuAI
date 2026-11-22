@@ -45,6 +45,8 @@ import {
 } from "../labels";
 import { StatusTag } from "../components/StatusTag";
 import { GoalCoverage } from "../components/GoalCoverage";
+import { DeliveryScorecard } from "../components/DeliveryScorecard";
+import { ReconcilePanel } from "../components/ReconcilePanel";
 import { ExecutionTrace } from "../components/ExecutionTrace";
 import { IntegrationUsage } from "../components/IntegrationUsage";
 import { formatDateTime } from "../time";
@@ -1072,7 +1074,23 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           </Row>
         )}
 
-        {(tab === "report" || tab === "logs") && (
+        {tab === "report" && (
+          <Row gutter={[16, 16]}>
+            <Col span={24}>
+              <DeliveryScorecard taskId={task.id} refreshKey={history ? 1 : 0} />
+            </Col>
+            <Col span={24}>
+              <ReconcilePanel taskId={task.id} onDone={() => void onRefresh()} />
+            </Col>
+            <Col span={24}>
+              <Card style={{ background: "var(--semi-color-bg-1)" }}>
+                <pre className="gy-mono">{paneText || "加载中…"}</pre>
+              </Card>
+            </Col>
+          </Row>
+        )}
+
+        {tab === "logs" && (
           <Card style={{ background: "var(--semi-color-bg-1)" }}>
             <pre className="gy-mono">{paneText || "加载中…"}</pre>
           </Card>

@@ -77,14 +77,39 @@ export function deliverySummary(task: TaskRecord, hasReport: boolean): string {
         }
         lines.push(
           "", "## 记分卡", "",
-          `- 曾通过目标数 / 本次约定目标总数　${scorecard.historicallyPassed} / ${scorecard.totalGoals}` +
+          `- 统计时点　${scorecard.capturedAt}（实时读数；不可变凭据见快照 SHA-256）`,
+          `- 分母　本次约定目标总数 ${scorecard.denominator}${scorecard.applicable ? "" : "（不适用：无目标）"}`,
+          `- 曾通过目标数 / 本次约定目标总数　${scorecard.historicallyPassed} / ${scorecard.denominator}` +
             (scorecard.applicable ? "" : "（不适用：无目标）"),
-          `- 当前证据足以支持的目标数　${scorecard.currentlySupported} / ${scorecard.totalGoals}`,
-          `- 原依据归属未知　${scorecard.unknownAttribution}；已撤回依据引用　${scorecard.retractedReferences}`,
-          `- 覆盖　已测 ${scorecard.coverage.tested}、部分覆盖 ${scorecard.coverage.partial}、受阻 ${scorecard.coverage.blocked}、未测 ${scorecard.coverage.untested}、未知 ${scorecard.coverage.unknown}`,
+          `- 当前证据足以支持的目标数　${scorecard.currentlySupported} / ${scorecard.denominator}`,
+          `- 原依据归属未知　${scorecard.unknownAttribution} / ${scorecard.denominator}；已撤回依据引用 ${scorecard.retractedReferences} 条`,
+          `- 人工覆盖（五类互斥，合计 = 分母）　已测 ${scorecard.coverage.tested}、部分覆盖 ${scorecard.coverage.partial}、` +
+            `受阻 ${scorecard.coverage.blocked}、未测 ${scorecard.coverage.untested}、未登记 ${scorecard.coverage.unregistered}`,
           `- 发现　已验证 ${scorecard.findings.verified}、线索 ${scorecard.findings.tentative}、已撤回 ${scorecard.findings.retracted}`,
           `- 快照 SHA-256　${scorecard.snapshotSha256}`,
+          "- 说明：当前证据支持与人工覆盖是两个维度；覆盖充分不代表有发现，零发现也不证明覆盖。",
         );
+        const retests = history.listRetestRequests(task.id);
+        if (retests.length) {
+          lines.push("", "## 客户复测申请", "");
+          for (const request of retests) {
+            lines.push(
+              `- ${request.status === "fulfilled" ? "已完成" : "待处理"}（${singleLine(request.requester)}，${request.createdAt}）` +
+                `　${singleLine(request.reason)}　涉及 ${request.findingIds.join("、")}` +
+                (request.fulfilledResult ? `　复测结果 ${request.fulfilledResult}` : ""),
+            );
+          }
+        }
+        const peers = history.listPeerReviews(task.id);
+        if (peers.length) {
+          lines.push("", "## 同一委托内跨任务署名复核", "");
+          for (const review of peers) {
+            lines.push(
+              `- ${singleLine(review.reviewer)}（${singleLine(review.role)}）复核 ${singleLine(review.sourceTaskId)}` +
+                ` · ${review.decision} · ${review.createdAt}　${singleLine(review.basis)}`,
+            );
+          }
+        }
         lines.push("", ...formatCorrections(history.listDeliveryCorrections(task.id)).slice(0, -1));
       });
     } finally {

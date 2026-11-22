@@ -57,6 +57,7 @@ export class ControlStore {
       id,
       tenantId: req.tenantId ?? "default",
       name: req.name,
+      engagementId: req.engagementId ?? id,
       status: "queued",
       auth: req.auth,
       goals: goalsFromSpecs(req.goals),
@@ -106,6 +107,9 @@ export class ControlStore {
     if (record.pauseRequestedAt === undefined) record.pauseRequestedAt = null;
     if (record.pausedAt === undefined) record.pausedAt = null;
     if (record.lastHeartbeatAt === undefined) record.lastHeartbeatAt = null;
+    // Legacy tasks predate engagements: a task with no engagement is its own
+    // engagement (it can still hold peer reviews of its own conclusions).
+    if (!record.engagementId) record.engagementId = record.id;
     return record;
   }
 

@@ -47,7 +47,7 @@ test("an unverified completion is published as incomplete with the final usage a
   const report = readFileSync(paths.reportPath, "utf8");
   assert.match(report, /Status: incomplete/);
   assert.match(report, /超额 3/);
-  assert.match(report, /人工覆盖记录　未知/);
+  assert.match(report, /人工覆盖记录　未登记/);
   assert.equal(await (await fetch(url + "/report")).text(), report);
 });
 

@@ -15,6 +15,8 @@ import {
   isTerminalTaskStatus,
   ImportSkillSchema,
   ModelSettingsPatchSchema,
+  PeerReviewSchema,
+  RetestRequestSchema,
   ToggleToolsItemSchema,
   type TaskIntegrationUsage,
   ToolsSettingsPatchSchema,
@@ -35,6 +37,7 @@ import {
 } from "@gongyuai/history";
 import { deliverySummary } from "./delivery.js";
 import { projectIntegrationUsage } from "./integration-usage.js";
+import { runReconcile } from "./reconcile.js";
 import { taskPaths } from "./paths.js";
 import { readCheckpointGraph, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
@@ -491,8 +494,10 @@ export function startControlServer(opts: ServerOptions) {
                 repro: typeof body.repro === "string" ? body.repro : "",
                 note: typeof body.note === "string" ? body.note : undefined,
               });
+              // 客户发起的复测申请在复测落库后关闭（只追加，不改写申请）。
+              const fulfilled = history.fulfillRetestRequests(task.id, findingId, result);
               refreshTerminalReport(history);
-              return send(res, 201, outcome);
+              return send(res, 201, { ...outcome, fulfilledRequests: fulfilled });
             }
             const outcome = history.acceptFinding(task.id, findingId, {
               note: typeof body.note === "string" ? body.note : "",
@@ -607,6 +612,115 @@ export function startControlServer(opts: ServerOptions) {
             history.close();
           }
         }
+        if (method === "POST" && rest === "/reconcile") {
+          try {
+            const outcome = runReconcile(task.id, task.dataDir, await readJson(req));
+            return send(res, 201, outcome);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            const missing = /ENOENT|no such file/i.test(message);
+            return send(res, missing ? 422 : 400, { error: message });
+          }
+        }
+        if (method === "GET" && rest === "/reconcile") {
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 200, { results: [] });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+          try {
+            const results = history
+              .listFacts(task.id)
+              .filter((fact) => fact.tags.includes("reconcile"))
+              .map((fact) => ({
+                factId: fact.id,
+                title: fact.title,
+                summary: fact.summary,
+                evidencePath: fact.evidencePath,
+                createdAt: fact.createdAt,
+              }));
+            return send(res, 200, { results });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "POST" && rest === "/retest-requests") {
+          const input = RetestRequestSchema.safeParse(await readJson(req));
+          if (!input.success) return send(res, 400, { error: input.error.message });
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            const request = history.recordRetestRequest(task.id, input.data);
+            refreshTerminalReport(history);
+            return send(res, 201, { request });
+          } catch (err) {
+            return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "GET" && rest === "/retest-requests") {
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 200, { requests: [] });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+          try {
+            return send(res, 200, { requests: history.listRetestRequests(task.id) });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "POST" && rest === "/peer-reviews") {
+          const input = PeerReviewSchema.safeParse(await readJson(req));
+          if (!input.success) return send(res, 400, { error: input.error.message });
+          if (input.data.sourceTaskId === task.id) {
+            return send(res, 400, { error: "跨任务署名复核要求 sourceTaskId 与当前任务不同；本任务内复核用 /reviews" });
+          }
+          const source = store.get(input.data.sourceTaskId);
+          if (!source) return send(res, 404, { error: "源任务不存在" });
+          // 委托隔离：只有同一 engagementId 的任务之间允许署名复核。
+          if (source.engagementId !== task.engagementId) {
+            return send(res, 409, {
+              error: `跨委托复核被拒绝：源任务委托 ${source.engagementId} ≠ 当前委托 ${task.engagementId}`,
+            });
+          }
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            if (input.data.findingId) {
+              const sourcePaths = taskPaths(source.dataDir);
+              if (!existsSync(sourcePaths.historyDb)) return send(res, 409, { error: "源任务缺少历史" });
+              const sourceHistory = openHistory({
+                dbPath: sourcePaths.historyDb,
+                evidenceDir: sourcePaths.evidenceDir,
+                readOnly: true,
+              });
+              try {
+                if (!sourceHistory.getFinding(source.id, input.data.findingId)) {
+                  return send(res, 400, { error: `源任务中不存在该结论：${input.data.findingId}` });
+                }
+              } finally {
+                sourceHistory.close();
+              }
+            }
+            const review = history.recordPeerReview(task.id, task.engagementId, input.data);
+            refreshTerminalReport(history);
+            return send(res, 201, { review });
+          } catch (err) {
+            return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          } finally {
+            history.close();
+          }
+        }
+        if (method === "GET" && rest === "/peer-reviews") {
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 200, { reviews: [] });
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
+          try {
+            return send(res, 200, { reviews: history.listPeerReviews(task.id) });
+          } finally {
+            history.close();
+          }
+        }
         if (method === "POST" && rest === "/archive") {
           try {
             const archived = store.setArchived(taskId, true);
@@ -660,6 +774,8 @@ export function startControlServer(opts: ServerOptions) {
           const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
           try {
             const coverage = history.recordCoverage(task.id, input.data);
+            // 覆盖意见属于交付材料：终态任务要重新渲染报告，否则报告与记分卡读数会分叉。
+            refreshTerminalReport(history);
             return send(res, 201, { coverage });
           } catch (err) {
             return send(res, 400, { error: String(err) });
@@ -700,6 +816,8 @@ export function startControlServer(opts: ServerOptions) {
               assets: [],
               hints: [],
               findings: [],
+              retestRequests: [],
+              peerReviews: [],
             });
           }
           const history = openHistory({
@@ -723,6 +841,8 @@ export function startControlServer(opts: ServerOptions) {
               assets: history.listAssets(task.id),
               hints: history.listHints(task.id, 50),
               findings: history.listFindings(task.id),
+              retestRequests: history.listRetestRequests(task.id),
+              peerReviews: history.listPeerReviews(task.id),
             });
           } finally {
             history.close();

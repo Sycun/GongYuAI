@@ -83,22 +83,44 @@ export type ScorecardGoal = {
   proofCount: number;
   supportFindingIds: string[];
   retractedSupportFindingIds: string[];
-  coverage: CoverageStatus | "unknown";
+  /**
+   * 人工登记的最新覆盖意见。`unregistered` = 从未登记任何覆盖意见——附件在
+   * 也不代表覆盖已知。登记为未测（untested）与从未登记是两件事。
+   */
+  coverage: CoverageStatus | "unregistered";
   missingAttribution: boolean;
+};
+
+export type CoverageCounts = {
+  tested: number;
+  partial: number;
+  blocked: number;
+  untested: number;
+  /** 从未登记覆盖意见的目标（附件存在也算未登记）。 */
+  unregistered: number;
 };
 
 export type Scorecard = {
   taskId: string;
+  /** 采集时点：同一快照永远是同一个时点；不同请求的快照不保证相同。 */
   capturedAt: string;
   snapshotSha256: string;
+  /** 共同分母：本次约定目标总数。 */
+  denominator: number;
   totalGoals: number;
-  /** denominator zero → 不适用 */
+  /** denominator 为 0 → 不适用 */
   applicable: boolean;
+  /** 历史通过数（分子），分母为 denominator。 */
   historicallyPassed: number;
+  /** 当前证据足以支持数（分子），分母为 denominator。 */
   currentlySupported: number;
+  /** 原依据归属未知（分子），分母为 denominator。 */
   unknownAttribution: number;
+  /** 当前被撤回依据引用的数量（不是目标数）。 */
   retractedReferences: number;
-  coverage: Record<CoverageStatus | "unknown", number>;
+  /** 人工覆盖：六类互斥，合计等于 denominator。 */
+  /** 人工覆盖：五类互斥，合计等于 denominator。 */
+  coverage: CoverageCounts;
   findings: { verified: number; tentative: number; retracted: number; other: number };
   goals: ScorecardGoal[];
 };
@@ -124,9 +146,11 @@ export function finalizeSnapshot(snapshot: DeliverySnapshot): DeliverySnapshot {
  */
 export function computeScorecard(snapshot: DeliverySnapshot): Scorecard {
   const findings = new Map(snapshot.findings.map((f) => [f.id, f]));
-  const coverage = new Map(snapshot.coverage.map((c) => [c.goalId, c.status]));
-  const counts: Scorecard["coverage"] = {
-    untested: 0, partial: 0, tested: 0, blocked: 0, unknown: 0,
+  // Snapshot coverage is row-ordered: the last entry per goal is the current one.
+  const coverage = new Map<string, CoverageStatus>();
+  for (const entry of snapshot.coverage) coverage.set(entry.goalId, entry.status);
+  const counts: CoverageCounts = {
+    untested: 0, partial: 0, tested: 0, blocked: 0, unregistered: 0,
   };
   const findingCounts = { verified: 0, tentative: 0, retracted: 0, other: 0 };
   for (const finding of snapshot.findings) {
@@ -140,8 +164,10 @@ export function computeScorecard(snapshot: DeliverySnapshot): Scorecard {
   const goals: ScorecardGoal[] = snapshot.goals.map((goal) => {
     const supports = snapshot.goalFindings.filter((s) => s.goalId === goal.id);
     const proofs = snapshot.proofs.filter((p) => p.goalId === goal.id);
-    const coverageStatus = coverage.get(goal.id) ?? "unknown";
-    counts[coverageStatus] += 1;
+    const registered = coverage.get(goal.id);
+    const coverageStatus: CoverageStatus | "unregistered" = registered ?? "unregistered";
+    if (registered) counts[registered] += 1;
+    else counts.unregistered += 1;
 
     const supportFindingIds: string[] = [];
     const retractedSupportFindingIds: string[] = [];
@@ -216,6 +242,7 @@ export function computeScorecard(snapshot: DeliverySnapshot): Scorecard {
     taskId: snapshot.taskId,
     capturedAt: snapshot.capturedAt,
     snapshotSha256: snapshot.sha256 ?? snapshotSha256(snapshot),
+    denominator: goals.length,
     totalGoals: goals.length,
     applicable: goals.length > 0,
     historicallyPassed,

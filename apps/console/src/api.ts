@@ -122,6 +122,8 @@ export type HistoryPayload = {
   events: unknown[];
   assets?: AssetRecord[];
   findings?: FindingRecord[];
+  retestRequests?: RetestRequestRecord[];
+  peerReviews?: PeerReviewRecord[];
   hints?: Array<{
     id: string;
     text: string;
@@ -129,6 +131,97 @@ export type HistoryPayload = {
     tags?: string[];
     createdAt: string;
   }>;
+};
+
+export type RetestRequestRecord = {
+  id: string;
+  requester: string;
+  role?: string;
+  findingIds: string[];
+  reason: string;
+  evidencePath?: string;
+  sha256?: string;
+  status: "pending" | "fulfilled";
+  fulfilledAt?: string;
+  fulfilledResult?: string;
+  createdAt: string;
+};
+
+export type PeerReviewRecord = {
+  id: string;
+  taskId: string;
+  engagementId: string;
+  reviewer: string;
+  role: string;
+  sourceTaskId: string;
+  findingId?: string;
+  factId?: string;
+  decision: "confirm" | "challenge" | "retest-requested";
+  basis: string;
+  evidencePath?: string;
+  sha256?: string;
+  createdAt: string;
+};
+
+export type ScorecardPayload = {
+  taskId: string;
+  capturedAt: string;
+  snapshotSha256: string;
+  denominator: number;
+  totalGoals: number;
+  applicable: boolean;
+  historicallyPassed: number;
+  currentlySupported: number;
+  unknownAttribution: number;
+  retractedReferences: number;
+  coverage: {
+    tested: number;
+    partial: number;
+    blocked: number;
+    untested: number;
+    unregistered: number;
+  };
+  findings: { verified: number; tentative: number; retracted: number; other: number };
+  goals: Array<{
+    goalId: string;
+    title: string;
+    historicalPass: boolean;
+    currentSupported: boolean;
+    verdict: string;
+    coverage: string;
+    missingAttribution: boolean;
+  }>;
+};
+
+export type ReconcileResultPayload = {
+  result: {
+    version: 1;
+    name: string;
+    keyField: string;
+    compareFields: string[];
+    baseline: { path: string; format: string | null; rows: number; sha256: string | null };
+    current: { path: string; format: string | null; rows: number; sha256: string | null };
+    missingMaterials: string[];
+    counts: {
+      added: number; removed: number; changed: number; unchanged: number;
+      missing: number; unknown: number; totalKeys: number;
+    };
+    items: Array<{
+      key: string;
+      status: string;
+      baselineLine: number | null;
+      currentLine: number | null;
+      changes: Array<{ field: string; before: string | null; after: string | null }>;
+      reason?: string;
+    }>;
+  };
+  evidencePath: string;
+  evidenceSha256: string;
+  factId: string | null;
+  materials: {
+    baseline: { path: string; present: boolean; sha256: string | null };
+    current: { path: string; present: boolean; sha256: string | null };
+  };
 };
 
 export type HintRecord = {
@@ -355,6 +448,22 @@ export const api = {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
     }),
   delivery: (id: string) => request<{ summary: string; hasReport: boolean }>(`/tasks/${id}/delivery`),
+  scorecard: (id: string) => request<{ scorecard: ScorecardPayload }>(`/tasks/${id}/scorecard`),
+  reconcile: (id: string, body: {
+    name?: string;
+    baseline: { path: string; format?: "csv" | "json"; keyField?: string };
+    current: { path: string; format?: "csv" | "json"; keyField?: string };
+    keyField?: string;
+    compareFields?: string[];
+    requiredKeys?: string[];
+  }) =>
+    request<ReconcileResultPayload>(`/tasks/${id}/reconcile`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    }),
+  reconcileResults: (id: string) =>
+    request<{ results: Array<{ factId: string; title: string; summary: string; evidencePath: string | null; createdAt: string }> }>(`/tasks/${id}/reconcile`),
+  retestRequests: (id: string) => request<{ requests: RetestRequestRecord[] }>(`/tasks/${id}/retest-requests`),
+  peerReviews: (id: string) => request<{ reviews: PeerReviewRecord[] }>(`/tasks/${id}/peer-reviews`),
   report: (id: string) => request<string>(`/tasks/${id}/report`),
   logs: (id: string) => request<string>(`/tasks/${id}/logs`),
   settings: () => request<PublicSettings>("/settings"),

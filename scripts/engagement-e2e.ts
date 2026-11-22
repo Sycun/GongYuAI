@@ -1,20 +1,29 @@
 /**
- * 贯穿样例验收（阶段 1/2/3/5）—— 两套业务系统的资产与配置基线评估及整改复核。
+ * 普通 API 的模拟跨日流程（阶段 1/2/3/5）—— 两套业务系统的资产与配置基线
+ * 评估及整改复核。
+ *
+ * 说明：本流程使用 **mock worker**，材料由模拟 Worker 按目标判据生成，因此它
+ * 验证的是建档、暂停、恢复、交接、撤回、更正这些流程语义，**不是**业务核算
+ * 能力。真实业务核算另有 scripts/business-acceptance.ts（从原始材料算差异）。
  *
  * 全部动作都走普通操作员入口：控制面 HTTP API（`gy serve` 同一实现）+ 材料导入 +
- * 复核/撤回/更正接口。首日材料不齐，次日补交；中途暂停换班并把乙系统移出授权；
- * 期间发生一次控制面中断恢复、一次整改复测、一条客户风险处置、一条结论撤回与更正。
+ * 覆盖登记 + 复核/撤回/更正接口。首日材料不齐，次日补交；中途暂停换班并把乙系统
+ * 移出授权；期间发生一次控制面中断恢复、一次整改复测、一条客户风险处置、一条结论
+ * 撤回与更正，最后登记四类覆盖意见。
  *
  * 运行：
  *   GY_SMOKE_PAUSE_MS=600 pnpm tsx scripts/engagement-e2e.ts
  *
- * 产物：<dataRoot>/acceptance-record.{json,md}，以及控制面正常入口下的任务数据。
+ * 产物（同一目录）：acceptance-record.{json,md}、delivery-snapshot.json、
+ * acceptance-manifest.json（运行 ID / 任务 ID / 代码提交 / 记录 / 快照 / 两种哈希）。
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { bootControlPlane } from "@gongyuai/control-plane";
 import { scorecardFromSnapshot } from "@gongyuai/history";
+import { gitCodeInfo, writeAcceptanceManifest } from "./acceptance-manifest.js";
 
+const startedAt = new Date().toISOString();
 const ROOT = join(process.cwd(), ".gongyuai", "acceptance", `engagement-${Date.now()}`);
 mkdirSync(ROOT, { recursive: true });
 
@@ -163,7 +172,12 @@ async function main() {
     await new Promise((r) => setTimeout(r, 300));
   }
   assert(day1.status === "running", "阶段1 首日运行中交接", `status=${day1.status}`);
-  assert(day1History.goals.filter((g: any) => g.passes).length === 3, "阶段1 首日缺件", "3/4 目标已过，整改材料待补");
+  assert(
+    day1History.goals.filter((g: any) => g.passes).length === 3,
+    "阶段1 首日缺件",
+    `${day1History.goals.filter((g: any) => g.passes).length}/4 目标已过（应 3/4：整改材料待补）；` +
+      day1History.goals.map((g: any) => `${g.id}=${g.passes}`).join("、"),
+  );
   const goalsAfterDay1 = new Map((day1History.goals ?? []).map((g: any) => [g.id, g]));
   assert((goalsAfterDay1.get("sys-a-baseline") as any).passes === true, "阶段3 甲专项通过", "有本资产已验证发现");
   assert((goalsAfterDay1.get("sys-b-diff") as any).passes === true, "阶段3 覆盖型目标通过", "零发现可交付");
@@ -258,6 +272,31 @@ async function main() {
   }));
   assert(verifyLead.status === 200, "阶段5 技术确认线索", verifyLead.body.finding?.status);
 
+  // 阶段 5 入口：客户从正常入口发起复测申请（署名 + 依据），操作员复测后关闭。
+  const retestRequest = await json<any>(base, `/tasks/${taskId}/retest-requests`, body({
+    requester: "客户安全负责人",
+    role: "客户方",
+    findingIds: [lead.id],
+    reason: "整改窗口已到，请复测该越权结论",
+    evidencePath: "client/decision.md",
+  }));
+  assert(retestRequest.status === 201, "阶段5 客户发起复测申请", `${retestRequest.status} ${JSON.stringify(retestRequest.body).slice(0, 300)}`);
+  assert(Boolean(retestRequest.body.request?.sha256), "阶段5 申请依据留存哈希", retestRequest.body.request?.sha256?.slice(0, 12) ?? "无");
+
+  const leadRetest = await json<any>(base, `/tasks/${taskId}/findings/${lead.id}/retest`, body({
+    result: "partially-fixed",
+    evidencePaths: ["remediation/retest.txt"],
+    repro: "复测：部分接口仍返回 200，其余已收紧",
+    note: "按客户申请复测，仅部分修复",
+  }));
+  assert(leadRetest.status === 201, "阶段5 按申请复测", leadRetest.body.finding?.status);
+  assert(
+    (leadRetest.body.fulfilledRequests ?? []).length === 1 &&
+      leadRetest.body.fulfilledRequests[0].status === "fulfilled",
+    "阶段5 申请转为已完成",
+    JSON.stringify(leadRetest.body.fulfilledRequests ?? []),
+  );
+
   const accepted = await json<any>(base, `/tasks/${taskId}/findings/${lead.id}/accept`, body({
     note: "客户安全负责人确认接受该剩余风险，列入遗留事项",
     evidencePath: "client/decision.md",
@@ -280,6 +319,21 @@ async function main() {
   const notified = await json<any>(base, `/tasks/${taskId}/corrections/${correctionId}/notice`, body({ status: "notified" }));
   assert(notified.status === 200 && notified.body.correction.noticeStatus === "notified", "阶段5 通知状态", notified.body.correction?.noticeStatus);
 
+  // ---- 验收项 3：四类覆盖意见（已测 / 部分覆盖 / 受阻 / 未登记） ----
+  // 甲系统目标故意留空：它已有附件（配置基线 + 发现证据），但从未登记覆盖意见，
+  // 用来证明“有附件 ≠ 覆盖已知”。
+  const coverageInputs = [
+    { goalId: "sys-b-diff", status: "tested", reviewer: "复核甲", reason: "乙系统约定检查项全部完成（零发现）", evidencePath: "baseline/sys-b/diff.json" },
+    { goalId: "remediation-a", status: "partial", reviewer: "复核甲", reason: "只复核了整改单中的一部分检查项", evidencePath: "remediation/retest.txt" },
+    { goalId: "engagement-summary", status: "blocked", reviewer: "复核乙", reason: "汇总核查依赖客户确认，当前受阻" },
+  ] as const;
+  for (const input of coverageInputs) {
+    const covered = await json<any>(base, `/tasks/${taskId}/coverage`, body(input));
+    assert(covered.status === 201, "验收3 覆盖登记", `${input.goalId} → ${covered.status}`);
+  }
+  const coverageList = await json<any>(base, `/tasks/${taskId}/history`);
+  assert((coverageList.body.coverage ?? []).length === 3, "验收3 覆盖意见留痕", `${(coverageList.body.coverage ?? []).length} 条`);
+
   // One snapshot, one published scorecard: the hash in the record is the hash
   // of the snapshot file that ships with it (no second capturedAt).
   const card2 = await json<any>(base, `/tasks/${taskId}/snapshot`);
@@ -288,6 +342,15 @@ async function main() {
   assert(card2.body.scorecard.historicallyPassed === 4, "阶段3 历史通过保留", `${card2.body.scorecard.historicallyPassed}/4`);
   assert(card2.body.scorecard.currentlySupported === 2, "阶段3 当前支持下降", `${card2.body.scorecard.currentlySupported}/4`);
   assert(card2.body.scorecard.retractedReferences === 2, "阶段3 撤回引用计数", String(card2.body.scorecard.retractedReferences));
+  assert(card2.body.scorecard.denominator === 4, "验收3 分母为约定目标总数", String(card2.body.scorecard.denominator));
+  assert(
+    card2.body.scorecard.coverage.tested === 1 &&
+      card2.body.scorecard.coverage.partial === 1 &&
+      card2.body.scorecard.coverage.blocked === 1 &&
+      card2.body.scorecard.coverage.unregistered === 1,
+    "验收3 覆盖五类互斥",
+    JSON.stringify(card2.body.scorecard.coverage),
+  );
   const recompute = scorecardFromSnapshot(JSON.parse(readFileSync(snapshotPath, "utf8")));
   assert(recompute.ok && recompute.sealValid, "阶段3 快照可复算", "seal valid");
   if (recompute.ok) {
@@ -297,6 +360,12 @@ async function main() {
       recompute.scorecard.retractedReferences === card2.body.scorecard.retractedReferences,
       "阶段3 独立复算一致",
       `${recompute.scorecard.historicallyPassed}/${recompute.scorecard.totalGoals} · ${recompute.scorecard.currentlySupported}/${recompute.scorecard.totalGoals}`,
+    );
+    const again = scorecardFromSnapshot(JSON.parse(readFileSync(snapshotPath, "utf8")));
+    assert(
+      again.ok && JSON.stringify(again.scorecard) === JSON.stringify(recompute.scorecard),
+      "验收3 同一快照重复复算一致",
+      "两次逐字节相同",
     );
   }
 
@@ -310,31 +379,129 @@ async function main() {
   const reportText = typeof report.body === "string" ? report.body : JSON.stringify(report.body);
   assert(reportText.includes("## Findings") && reportText.includes("客户接受风险"), "阶段5 报告分列处置", "accepted 可见");
   assert(reportText.includes("交付更正"), "阶段5 报告含更正", "#1");
+  assert(reportText.includes("## 覆盖与当前支持"), "验收3 报告含覆盖与支持", "分子/分母同段");
+  assert(reportText.includes("当前证据足以支持　2 / 4"), "验收3 报告当前支持 2/4", "2 / 4");
+  assert(reportText.includes("未登记 1"), "验收3 报告含未登记", "未登记 1");
+  assert(reportText.includes("在本次检查范围内未检出"), "验收3 零发现写成未检出", "sys-b-diff");
+  assert(summary.includes("未登记 1") && summary.includes("统计时点"), "验收3 交付摘要含未登记与统计时点", "一致");
+  assert(reportText.includes("## 客户复测申请") && reportText.includes("已完成"), "阶段5 报告含客户复测申请", "fulfilled");
+  assert(summary.includes("客户复测申请"), "阶段5 交付摘要含客户复测申请", "一致");
+
+  // 阶段 5 入口：同一委托内跨任务署名复核 + 委托隔离。
+  const sibling = await json<any>(base, "/tasks", body({
+    name: "同委托第二个任务（跨任务复核用例）",
+    engagementId: taskId,
+    mock: true,
+    auth: {
+      authorizationNote: "客户书面授权：同委托第二个任务（虚构样例）",
+      targets: [A],
+      outOfScope: [],
+      capability: "scan",
+    },
+    goals: [{
+      id: "sibling-check",
+      title: "同委托第二个任务的核查",
+      description: "用于跨任务署名复核",
+      assets: [A],
+      evidencePatterns: ["sibling/proof.txt"],
+    }],
+  }));
+  assert(sibling.status === 201, "阶段5 同委托第二任务建档", `engagementId=${sibling.body.task?.engagementId}`);
+  const siblingId = sibling.body.task.id as string;
+  assert(sibling.body.task.engagementId === taskId, "阶段5 委托标识一致", siblingId.slice(0, 8));
+
+  const foreign = await json<any>(base, "/tasks", body({
+    name: "另一个委托的任务（隔离反例）",
+    engagementId: `engagement-foreign-${Date.now()}`,
+    mock: true,
+    auth: {
+      authorizationNote: "另一个客户的虚构委托，仅用于隔离反例",
+      targets: [A],
+      outOfScope: [],
+      capability: "scan",
+    },
+    goals: [{
+      id: "foreign-check",
+      title: "另一个委托的核查",
+      description: "用于跨委托拒绝",
+      assets: [A],
+      evidencePatterns: ["foreign/proof.txt"],
+    }],
+  }));
+  assert(foreign.status === 201, "阶段5 另一委托建档", `engagementId=${foreign.body.task?.engagementId}`);
+
+  const peer = await json<any>(base, `/tasks/${taskId}/peer-reviews`, body({
+    reviewer: "复核丙",
+    role: "second reviewer",
+    sourceTaskId: siblingId,
+    factId: "origin",
+    decision: "confirm",
+    basis: "同委托另一任务的结论与本次材料一致",
+  }));
+  assert(peer.status === 201, "阶段5 跨任务署名复核", `${peer.body.review?.reviewer} → ${peer.body.review?.decision}`);
+
+  const isolated = await json<any>(base, `/tasks/${taskId}/peer-reviews`, body({
+    reviewer: "复核丙",
+    role: "second reviewer",
+    sourceTaskId: foreign.body.task.id,
+    factId: "origin",
+    decision: "confirm",
+    basis: "跨委托反例",
+  }));
+  assert(isolated.status === 409, "阶段5 跨委托复核被拒绝", `status=${isolated.status}`);
+  const peerList = await json<any>(base, `/tasks/${taskId}/peer-reviews`);
+  assert((peerList.body.reviews ?? []).length === 1, "阶段5 被拒绝的复核未写入", "1 条");
+
+  // 署名复核属于交付材料：终态任务会重新渲染报告与摘要，这里读刷新后的版本。
+  const reportAfterPeer = await json<any>(base, `/tasks/${taskId}/report`);
+  const reportAfterPeerText = typeof reportAfterPeer.body === "string" ? reportAfterPeer.body : JSON.stringify(reportAfterPeer.body);
+  assert(reportAfterPeerText.includes("## 同一委托内跨任务署名复核"), "阶段5 报告含跨任务署名复核", "复核丙");
+  assert(reportAfterPeerText.includes(siblingId), "阶段5 报告写出源任务", siblingId.slice(0, 8));
+  const summaryAfterPeer = await json<any>(base, `/tasks/${taskId}/delivery`);
+  assert(
+    String(summaryAfterPeer.body.summary ?? "").includes("跨任务署名复核") &&
+      String(summaryAfterPeer.body.summary ?? "").includes("客户复测申请"),
+    "阶段5 交付摘要含两个新入口",
+    "一致",
+  );
 
   // 工作项关闭：归档（仅终态）
   const archived = await json<any>(base, `/tasks/${taskId}/archive`, { method: "POST" });
   assert(archived.status === 200, "阶段5 工作项关闭", "archived");
 
+  const runId = basename(ROOT);
+  const code = gitCodeInfo();
   const runRecord = {
+    runId,
+    kind: "engagement-e2e-mock",
     taskId,
     dataRoot: ROOT,
     finishedAt: new Date().toISOString(),
     scopeVersion: finished.scopeVersion,
+    code,
     steps,
     scorecard: card2.body.scorecard,
     snapshotPath,
+    manifest: "acceptance-manifest.json",
   };
   writeFileSync(join(ROOT, "acceptance-record.json"), JSON.stringify(runRecord, null, 2) + "\n");
   writeFileSync(
     join(ROOT, "acceptance-record.md"),
     [
-      `# 贯穿样例验收记录`,
+      `# 普通 API 的模拟跨日流程 — 验收记录`,
       "",
+      "> 本记录来自 mock worker：材料由模拟 Worker 按目标判据生成，用来验证建档、暂停、",
+      "> 恢复、交接、撤回、更正与覆盖登记这些流程语义。业务核算能力另见",
+      "> `scripts/business-acceptance.ts` 的原始材料差异验收。",
+      "",
+      `运行　${runId}`,
       `任务　${taskId}`,
       `委托　${TASK_NAME}`,
+      `代码提交　${code.commit ?? "未记录"}${code.dirty ? "（工作区有未提交改动）" : ""}`,
       `数据目录　${ROOT}`,
       `完成时间　${runRecord.finishedAt}`,
       `授权版本　v${runRecord.scopeVersion}`,
+      `校验清单　acceptance-manifest.json（记录/快照/两种哈希/运行 ID/任务 ID/代码提交）`,
       "",
       "| 步骤 | 结果 | 证据 |",
       "| --- | --- | --- |",
@@ -342,9 +509,35 @@ async function main() {
       "",
       `记分卡：曾通过 ${runRecord.scorecard.historicallyPassed}/${runRecord.scorecard.totalGoals}；` +
         `当前证据足以支持 ${runRecord.scorecard.currentlySupported}/${runRecord.scorecard.totalGoals}；` +
-        `撤回引用 ${runRecord.scorecard.retractedReferences}；快照 ${runRecord.scorecard.snapshotSha256}`,
+        `撤回引用 ${runRecord.scorecard.retractedReferences}；归属未知 ${runRecord.scorecard.unknownAttribution}；` +
+        `人工覆盖 已测 ${runRecord.scorecard.coverage.tested}、部分覆盖 ${runRecord.scorecard.coverage.partial}、` +
+        `受阻 ${runRecord.scorecard.coverage.blocked}、未测 ${runRecord.scorecard.coverage.untested}、` +
+        `未登记 ${runRecord.scorecard.coverage.unregistered}`,
+      "",
+      `快照内容封印　${runRecord.scorecard.snapshotSha256}（canonical payload 的 sha256；文件字节哈希见清单 files.snapshot.bytesSha256）`,
+      `快照采集时点　${runRecord.scorecard.capturedAt}`,
       "",
     ].join("\n"),
+  );
+
+  const manifest = writeAcceptanceManifest({
+    dir: ROOT,
+    kind: "engagement-e2e-mock",
+    runId,
+    taskId,
+    dataRoot: ROOT,
+    startedAt: startedAt,
+    finishedAt: runRecord.finishedAt,
+    steps,
+    code,
+    notes: [
+      "kind=engagement-e2e-mock：材料由 mock worker 生成，只证明流程语义。",
+      "同一份清单里的快照封印与文件字节哈希必须分别校验。",
+    ],
+  });
+  console.log(
+    `清单：${join(ROOT, "acceptance-manifest.json")} · 步骤 ${manifest.steps.total}（失败 ${manifest.steps.failed}）· ` +
+      `快照封印 ${manifest.files.snapshot.sealSha256.slice(0, 12)}… · 文件字节 ${manifest.files.snapshot.bytesSha256.slice(0, 12)}…`,
   );
 
   await closePlane();

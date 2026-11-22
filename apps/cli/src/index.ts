@@ -43,6 +43,15 @@ Usage:
   gy scope <taskId> --file SCOPE.json   # { "auth": {...}, "reason": "..." }
   gy scorecard <taskId> [--out FILE]    # 交付记分卡；--out 导出可复算快照
   gy scorecard --recompute FILE         # 只读快照，离线复算分子/分母
+  gy reconcile <taskId> --baseline PATH --current PATH [--key host] [--required a,b]
+       [--name NAME] [--out FILE]       # 从原始材料算差异（新增/移除/变更/未变/缺件）
+  gy retest-request <taskId> --requester NAME --finding ID[,ID] --reason TEXT
+       [--role R] [--evidence PATH]     # 客户从正常入口发起复测申请
+  gy retest-requests <taskId>
+  gy peer-review <taskId> --reviewer NAME --role ROLE --source TASKID --basis TEXT
+       [--decision confirm|challenge|retest-requested] [--finding ID | --fact ID]
+       [--evidence PATH]                # 同一委托内跨任务署名复核
+  gy peer-reviews <taskId>
   gy evidence <taskId> --path P --file LOCAL   # 导入材料（utf8 文本）
   gy finding-verify <taskId> --finding ID --evidence FILE[,FILE] --repro TEXT
   gy finding-retract <taskId> --finding ID --reason TEXT
@@ -563,6 +572,121 @@ async function main(): Promise<void> {
     try {
       const r = await api(opts, "POST", `/tasks/${id}/${cmd}`);
       if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "reconcile") {
+    const id = rest[0];
+    const baseline = flag(rest, "--baseline");
+    const current = flag(rest, "--current");
+    if (!id || !baseline || !current) {
+      throw new Error("gy reconcile <taskId> --baseline PATH --current PATH [--key host] [--required a,b] [--name NAME] [--out FILE]");
+    }
+    const required = flag(rest, "--required");
+    const body = {
+      name: flag(rest, "--name") ?? "baseline-diff",
+      baseline: { path: baseline },
+      current: { path: current },
+      keyField: flag(rest, "--key") ?? "host",
+      ...(required ? { requiredKeys: required.split(",").map((v) => v.trim()).filter(Boolean) } : {}),
+    };
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/reconcile`, body);
+      if (r.status >= 400) throw new Error(r.text);
+      const out = flag(rest, "--out");
+      if (out) writeFileSync(resolve(out), JSON.stringify(r.json, null, 2) + "\n");
+      console.log(JSON.stringify(r.json, null, 2));
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "retest-request") {
+    const id = rest[0];
+    const requester = flag(rest, "--requester");
+    const finding = flag(rest, "--finding");
+    const reason = flag(rest, "--reason");
+    if (!id || !requester || !finding || !reason) {
+      throw new Error("gy retest-request <taskId> --requester NAME --finding ID[,ID] --reason TEXT [--role R] [--evidence PATH]");
+    }
+    const role = flag(rest, "--role");
+    const evidence = flag(rest, "--evidence");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/retest-requests`, {
+        requester,
+        findingIds: finding.split(",").map((v) => v.trim()).filter(Boolean),
+        reason,
+        ...(role ? { role } : {}),
+        ...(evidence ? { evidencePath: evidence } : {}),
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "retest-requests") {
+    const id = rest[0];
+    if (!id) throw new Error("gy retest-requests <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/retest-requests`);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "peer-review") {
+    const id = rest[0];
+    const reviewer = flag(rest, "--reviewer");
+    const role = flag(rest, "--role");
+    const source = flag(rest, "--source");
+    const basis = flag(rest, "--basis");
+    if (!id || !reviewer || !role || !source || !basis) {
+      throw new Error(
+        "gy peer-review <taskId> --reviewer NAME --role ROLE --source TASKID --basis TEXT [--decision confirm|challenge|retest-requested] [--finding ID] [--fact ID] [--evidence PATH]",
+      );
+    }
+    const finding = flag(rest, "--finding");
+    const fact = flag(rest, "--fact");
+    const evidence = flag(rest, "--evidence");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/peer-reviews`, {
+        reviewer,
+        role,
+        sourceTaskId: source,
+        decision: flag(rest, "--decision") ?? "confirm",
+        basis,
+        ...(finding ? { findingId: finding } : {}),
+        ...(fact ? { factId: fact } : {}),
+        ...(evidence ? { evidencePath: evidence } : {}),
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "peer-reviews") {
+    const id = rest[0];
+    if (!id) throw new Error("gy peer-reviews <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/peer-reviews`);
       console.log(r.text);
     } finally {
       if (owned.close) await owned.close();

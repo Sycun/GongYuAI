@@ -1,0 +1,98 @@
+{
+  "note": "验收端预先封存的预期差异。平台的核查实现从不读取本文件；脚本只在运行结束后逐项比对。",
+  "asset-diff": {
+    "keyField": "host",
+    "counts": { "added": 1, "removed": 1, "changed": 2, "unchanged": 1, "missing": 1, "unknown": 0, "totalKeys": 6 },
+    "items": [
+      {
+        "key": "app-a-1",
+        "status": "changed",
+        "baselineLine": 2,
+        "currentLine": 2,
+        "changes": [{ "field": "version", "before": "1.4", "after": "1.5" }]
+      },
+      { "key": "app-a-2", "status": "unchanged", "baselineLine": 3, "currentLine": 3, "changes": [] },
+      { "key": "app-a-3", "status": "removed", "baselineLine": 4, "currentLine": null, "changes": [] },
+      {
+        "key": "app-a-5",
+        "status": "changed",
+        "baselineLine": 5,
+        "currentLine": 5,
+        "changes": [{ "field": "tls", "before": "required", "after": "optional" }]
+      },
+      { "key": "app-a-4", "status": "added", "baselineLine": null, "currentLine": 4, "changes": [] },
+      {
+        "key": "app-a-6",
+        "status": "missing",
+        "baselineLine": null,
+        "currentLine": null,
+        "changes": [],
+        "reason": "required-key-absent-in-both"
+      }
+    ]
+  },
+  "asset-diff-mutated": {
+    "keyField": "host",
+    "counts": { "added": 1, "removed": 1, "changed": 3, "unchanged": 0, "missing": 1, "unknown": 0, "totalKeys": 6 },
+    "items": [
+      {
+        "key": "app-a-1",
+        "status": "changed",
+        "baselineLine": 2,
+        "currentLine": 2,
+        "changes": [{ "field": "version", "before": "1.4", "after": "1.5" }]
+      },
+      {
+        "key": "app-a-2",
+        "status": "changed",
+        "baselineLine": 3,
+        "currentLine": 3,
+        "changes": [{ "field": "version", "before": "2.1", "after": "2.2" }]
+      },
+      { "key": "app-a-3", "status": "removed", "baselineLine": 4, "currentLine": null, "changes": [] },
+      {
+        "key": "app-a-5",
+        "status": "changed",
+        "baselineLine": 5,
+        "currentLine": 5,
+        "changes": [{ "field": "tls", "before": "required", "after": "optional" }]
+      },
+      { "key": "app-a-4", "status": "added", "baselineLine": null, "currentLine": 4, "changes": [] },
+      {
+        "key": "app-a-6",
+        "status": "missing",
+        "baselineLine": null,
+        "currentLine": null,
+        "changes": [],
+        "reason": "required-key-absent-in-both"
+      }
+    ]
+  },
+  "asset-diff-missing": {
+    "keyField": "host",
+    "missingMaterials": ["assets/baseline.csv"],
+    "counts": { "added": 0, "removed": 0, "changed": 0, "unchanged": 0, "missing": 0, "unknown": 5, "totalKeys": 5 },
+    "itemStatuses": ["unknown", "unknown", "unknown", "unknown", "unknown"]
+  },
+  "config-diff": {
+    "keyField": "id",
+    "counts": { "added": 0, "removed": 0, "changed": 2, "unchanged": 1, "missing": 0, "unknown": 0, "totalKeys": 3 },
+    "items": [
+      {
+        "key": "tls.minVersion",
+        "status": "changed",
+        "baselineLine": 2,
+        "currentLine": 2,
+        "changes": [{ "field": "value", "before": "1.2", "after": "1.3" }]
+      },
+      { "key": "session.timeout", "status": "unchanged", "baselineLine": 3, "currentLine": 3, "changes": [] },
+      {
+        "key": "audit.retention",
+        "status": "changed",
+        "baselineLine": 4,
+        "currentLine": 4,
+        "changes": [{ "field": "value", "before": "90", "after": "180" }]
+      }
+    ]
+  }
+}

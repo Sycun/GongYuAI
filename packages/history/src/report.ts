@@ -142,8 +142,66 @@ export function writeTaskReport(
       lines.push(`已撤回 ${retractedCount} 条误报（保留可查，不进交付）。`);
     }
 
-    lines.push("", "## 逐项目标复核", "");
+    lines.push("", "");
     const factLabel = (f: Fact) => `${label(f.title)}（${f.id}）`;
+
+    // 覆盖与当前支持是两件事，分子/分母与统计时点都写在同一段里（验收项 3）。
+    const card = history.scorecard(id);
+    lines.push(
+      "## 覆盖与当前支持", "",
+      `统计时点　${card.capturedAt}（实时读数；不可变凭据以交付快照 SHA-256 为准）`,
+      `分母　本次约定目标总数 ${card.denominator}${card.applicable ? "" : "（不适用：无目标）"}`,
+      "",
+      `- 历史通过　${card.historicallyPassed} / ${card.denominator}`,
+      `- 当前证据足以支持　${card.currentlySupported} / ${card.denominator}`,
+      `- 原依据归属未知　${card.unknownAttribution} / ${card.denominator}`,
+      `- 已撤回依据引用（条数，非目标数）　${card.retractedReferences}`,
+      "",
+      "人工覆盖（五类互斥，合计等于分母）", "",
+      `- 已测 ${card.coverage.tested}、部分覆盖 ${card.coverage.partial}、受阻 ${card.coverage.blocked}、` +
+        `未测 ${card.coverage.untested}、未登记 ${card.coverage.unregistered}`,
+      "",
+      "说明：当前证据支持与人工覆盖是两个维度；覆盖充分不代表有发现，零发现也不证明覆盖。",
+      "",
+    );
+
+    const reconciles = facts.filter((f) => (f.tags ?? []).includes("reconcile"));
+    if (reconciles.length) {
+      lines.push("## 原始材料差异核算", "");
+      for (const entry of reconciles) {
+        lines.push(`- ${factLabel(entry)}　${label(entry.summary)}`);
+        if (entry.evidencePath) lines.push(`  核算结果　${label(entry.evidencePath)}`);
+      }
+      lines.push("");
+    }
+
+    const retests = history.listRetestRequests(id);
+    if (retests.length) {
+      lines.push("## 客户复测申请", "");
+      for (const request of retests) {
+        lines.push(
+          `- ${request.status === "fulfilled" ? "已完成" : "待处理"}（${request.requester}` +
+            `${request.role ? ` · ${label(request.role)}` : ""}，${request.createdAt}）　${label(request.reason)}`,
+          `  涉及结论　${request.findingIds.join("、")}` +
+            (request.fulfilledResult ? `　复测结果 ${request.fulfilledResult}（${request.fulfilledAt}）` : ""),
+        );
+        if (request.evidencePath && request.sha256) lines.push(`  申请依据　${link(request.evidencePath, request.sha256)}`);
+      }
+      lines.push("");
+    }
+    const peerReviews = history.listPeerReviews(id);
+    if (peerReviews.length) {
+      lines.push("## 同一委托内跨任务署名复核", "");
+      for (const review of peerReviews) {
+        lines.push(
+          `- ${label(review.reviewer)}（${label(review.role)}）复核任务 ${label(review.sourceTaskId)} · ${review.decision}　${review.createdAt}`,
+          `  对象　${review.findingId ?? review.factId ?? "未指定"}　依据　${label(review.basis)}`,
+        );
+        if (review.evidencePath && review.sha256) lines.push(`  复核依据　${link(review.evidencePath, review.sha256)}`);
+      }
+      lines.push("");
+    }
+    lines.push("", "## 逐项目标复核", "");
     for (const goal of goals) {
       const versions = proofs.filter((p) => p.goalId === goal.id);
       const audit = reviews.filter((r) => r.goalId === goal.id);
@@ -152,7 +210,20 @@ export function writeTaskReport(
       const status = describeGoalEvidence(goal, versions, audit, { goalFindings, findings });
       lines.push(`### ${label(goal.title)}（${label(goal.id)}）· ${status}`, "", label(goal.description), "");
       const entries = coverage.filter((entry) => entry.goalId === goal.id);
-      if (!entries.length) lines.push("- 人工覆盖记录　未知");
+      if (!entries.length) lines.push("- 人工覆盖记录　未登记（没有覆盖意见，不等于已验证覆盖）");
+      const latestCoverage = entries.at(-1);
+      if (latestCoverage?.status === "tested" && !goal.findingsGate) {
+        const goalAssets = goal.assets ?? [];
+        const related = findings.filter(
+          (finding) =>
+            finding.status !== "retracted" &&
+            (goalAssets.length ? goalAssets.includes(finding.asset) : true),
+        );
+        lines.push(
+          `- 结论　在本次检查范围内未检出（人工覆盖：已测；关联发现 ${related.length} 条。` +
+            "零发现不等于无风险，范围与时间见上方覆盖记录）",
+        );
+      }
       for (const entry of entries) {
         const when = entry === entries.at(-1) ? "当前覆盖" : "历次覆盖";
         const evidence = entry.evidencePath && entry.sha256 ? " · " + link(entry.evidencePath, entry.sha256) : "";

@@ -6,6 +6,33 @@ export {
   type CoverageSnapshot,
   type CoverageStatus,
 } from "./coverage-audit.js";
+export {
+  ReconcileMaterialSchema,
+  ReconcileRequestSchema,
+  type ReconcileCounts,
+  type ReconcileFieldChange,
+  type ReconcileItem,
+  type ReconcileItemStatus,
+  type ReconcileMaterial,
+  type ReconcileRequest,
+  type ReconcileResult,
+  type ParsedMaterial,
+  type MaterialRow,
+  parseMaterial,
+  reconcileMaterials,
+  summarizeReconcile,
+} from "./reconcile.js";
+export {
+  PeerReviewDecisionSchema,
+  PeerReviewSchema,
+  RetestRequestSchema,
+  type PeerReview,
+  type PeerReviewDecision,
+  type PeerReviewInput,
+  type RetestRequest,
+  type RetestRequestInput,
+  type RetestRequestStatus,
+} from "./collaboration.js";
 export type { ExecutionStep, ExecutionTracePage, ShellTraceCall } from "./execution-trace.js";
 export * from "./integration-usage.js";
 import {
@@ -331,6 +358,11 @@ export function resolveExploreWorkerCount(opts: {
 export const CreateTaskRequestSchema = z.object({
   tenantId: z.string().min(1).default("default"),
   name: z.string().min(1).default("untitled"),
+  /**
+   * 委托标识。同一业务委托下的多个任务共享该值，跨任务署名复核只在同
+   * engagementId 内成立；省略时该任务自成一委托。
+   */
+  engagementId: z.string().trim().min(1).max(128).optional(),
   auth: AuthScopeSchema,
   goals: z.array(GoalSpecSchema).min(1).refine(
     (goals) => new Set(goals.map((goal) => goal.id)).size === goals.length,
@@ -382,6 +414,8 @@ export const TaskRecordSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string(),
   name: z.string(),
+  /** 委托标识；旧任务缺失时由控制面归一化为任务自身的 id。 */
+  engagementId: z.string().default(""),
   status: TaskStatusSchema,
   auth: AuthScopeSchema,
   goals: z.array(GoalStateSchema),
@@ -520,6 +554,8 @@ export const HistoryEventKindSchema = z.enum([
   "task_resumed",
   "delivery_corrected",
   "delivery_correction_notice",
+  "retest_requested",
+  "peer_review_recorded",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 

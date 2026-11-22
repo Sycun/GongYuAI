@@ -1,0 +1,5 @@
+host,role,version,tls
+app-a-1,web,1.5,required
+app-a-2,db,2.1,required
+app-a-4,worker,1.0,required
+app-a-5,worker,0.9,optional

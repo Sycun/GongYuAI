@@ -25,7 +25,10 @@
     "smoke:tools": "tsx scripts/smoke-tools.ts",
     "smoke:unlock": "tsx scripts/smoke-tools-unlock.ts",
     "e2e:engagement": "tsx scripts/engagement-e2e.ts",
-    "drill:restore": "tsx scripts/restore-drill.ts"
+    "drill:restore": "tsx scripts/restore-drill.ts",
+    "verify:acceptance": "tsx scripts/acceptance-verify.ts",
+    "test:acceptance": "node --import tsx --test scripts/verify-acceptance.test.ts",
+    "acceptance:business": "tsx scripts/business-acceptance.ts"
   },
   "dependencies": {
     "@gongyuai/contracts": "workspace:*",
