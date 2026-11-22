@@ -7,9 +7,12 @@ const root = resolve(".gongyuai", "offline-diff", randomUUID());
 const summary = runOfflineDifferential(root);
 writeFileSync(join(root, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`, { mode: 0o600 });
 
-console.log("| Mode | Status | Goals | Model turns | Tool attempts | Tool calls | Relay handoffs |");
-console.log("| --- | --- | ---: | ---: | ---: | ---: | ---: |");
-for (const row of summary.rows) {
-  console.log(`| ${row.mode} | ${row.status} | ${row.goalsPassed}/${row.goalsTotal} | ${row.modelTurns} | ${row.toolAttempts} | ${row.toolCalls} | ${row.relayHandoffs} |`);
+console.log("| Scenario | Bare goals | History goals | History + Relay goals | History gain | Relay gain | Relay written / restored / missing |");
+console.log("| --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+for (const scenario of summary.scenarios) {
+  const scores = scenario.rows.map((row) => `${row.goalsPassed}/${row.goalsTotal}`).join(" | ");
+  const relay = scenario.rows[2];
+  const handoffs = `${relay.relayHandoffs} / ${relay.relayRestores} / ${relay.relayMisses}`;
+  console.log(`| ${scenario.label} | ${scores} | ${scenario.historyGain} | ${scenario.relayGain} | ${handoffs} |`);
 }
-console.log(`Summary and per-mode traces: ${root}`);
+console.log(`Per-arm counters and traces: ${root}`);
