@@ -489,9 +489,10 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                 bodyStyle={{ maxHeight: 640, overflow: "auto" }}
               >
                 <ExecutionTrace
-                  resetKey={task.id}
+                  taskId={task.id}
                   progress={runtime?.progress}
                   facts={runtime?.recentFacts}
+                  trace={runtime?.trace}
                   active={active}
                   emptyHint={active ? "等待执行节点上报步骤…" : "暂无执行步骤"}
                 />

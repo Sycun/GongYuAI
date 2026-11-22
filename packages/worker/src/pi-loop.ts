@@ -5,8 +5,11 @@ import {
   isBudgetHit,
   isExploreLeader,
   isWallHit,
+  type ShellTraceCall,
   type WorkerManifest,
 } from "@gongyuai/contracts";
+import type { Context } from "@earendil-works/chord/context";
+import type { EntryId, HookApi } from "@earendil-works/pi-durable";
 import { openHistory } from "@gongyuai/history";
 import { CheckpointStore, type CheckpointState } from "./checkpoint.js";
 import {
@@ -40,6 +43,7 @@ import {
   syncGraphPhase,
 } from "./graph-phase.js";
 import { maybeForceExploreTimeout } from "./explore-timeout.js";
+import { formatShellResult, recordExecutionStep } from "./execution-trace.js";
 
 function phaseToolDenial(
   ctx: ToolContext,
@@ -386,6 +390,7 @@ async function tryPiDurable(
       createRegistry,
       Harness,
       AssistantEntry,
+      ToolResultEntry,
       section,
       hook,
       ToolTask,
@@ -431,8 +436,6 @@ async function tryPiDurable(
       }
     };
 
-    const roundToolNames: string[] = [];
-
     const shell = defineTool({
       name: "shell",
       description: "Run a bash command inside the authorized workspace",
@@ -451,10 +454,15 @@ async function tryPiDurable(
           /* best-effort; usage already on disk */
         }
         return {
+          details: { shellResult: formatShellResult(r) },
           output: [
             {
               type: "text",
-              text: `exit=${r.exitCode}\nstdout:\n${r.stdout.slice(0, 8000)}\nstderr:\n${r.stderr.slice(0, 4000)}`,
+              text: formatShellResult({
+                ...r,
+                stdout: r.stdout.slice(0, 8000),
+                stderr: r.stderr.slice(0, 4000),
+              }),
             },
           ],
         };
@@ -774,10 +782,6 @@ async function tryPiDurable(
               const block = phaseToolDenial(ctx, state, call.name, mcpHub);
               return block ? { block } : undefined;
             },
-            afterTool: (call: { name: string; parent?: unknown }) => {
-              if (!call.parent) roundToolNames.push(call.name);
-              return undefined;
-            },
           }),
           hook(GenerationTask, {
             afterResponse: async (
@@ -796,12 +800,31 @@ async function tryPiDurable(
               }
             },
             afterTools: async (
-              _assistant: unknown,
-              _results: unknown,
-              api: { usage: (c: unknown) => Promise<unknown> },
-              hookCtx: unknown,
+              assistant: EntryId,
+              results: readonly EntryId[],
+              api: HookApi & { usage: (c: Context) => Promise<unknown> },
+              hookCtx: Context,
             ) => {
-              const names = roundToolNames.splice(0, roundToolNames.length);
+              const message = (await api.entry(AssistantEntry, assistant, hookCtx))?.model?.[0];
+              const calls = message?.role === "assistant"
+                ? message.content.filter((part) => part.type === "toolCall")
+                : [];
+              const shellCalls = calls.filter((call) => call.name === "shell");
+              const resultsByCall = new Map<string, string>();
+              if (shellCalls.length) {
+                for (const id of results) {
+                  const result = (await api.entry(ToolResultEntry, id, hookCtx))?.model?.[0];
+                  if (result?.role !== "toolResult" || result.toolName !== "shell") continue;
+                  const details = result.details;
+                  const shellResult = details && typeof details === "object" && "shellResult" in details
+                    ? details.shellResult
+                    : undefined;
+                  const resultText = typeof shellResult === "string" ? shellResult : result.content
+                    .flatMap((part) => part.type === "text" ? [part.text] : [])
+                    .join("\n");
+                  resultsByCall.set(result.toolCallId, resultText);
+                }
+              }
               try {
                 const usage = (await api.usage(hookCtx)) as {
                   models?: Record<string, { totalTokens?: number }>;
@@ -811,12 +834,20 @@ async function tryPiDurable(
               } catch {
                 syncLiveUsage();
               }
-              state.step += 1;
+              const step = recordExecutionStep(manifest, {
+                id: `pi-w${manifest.workerSlot ?? 0}-${assistant}`,
+                number: state.step + 1,
+                tools: calls.map((call) => call.name),
+                tokens: state.tokens,
+                phase: state.phase,
+                calls: shellCalls.map((call) => ({
+                  id: call.id,
+                  command: typeof call.arguments.command === "string" ? call.arguments.command : null,
+                  result: resultsByCall.get(call.id) ?? null,
+                })),
+              });
+              state.step = Math.max(state.step, step);
               ckpt.save(state);
-              appendProgress(
-                manifest.workspaceDir,
-                `第 ${state.step} 步 · 工具 ${names.join("、") || "无"} · Token ${state.tokens} · phase=${state.phase}`,
-              );
               return undefined;
             },
           }),
@@ -1742,13 +1773,16 @@ async function runOpenAiToolLoop(
     }
 
     const toolNames: string[] = [];
+    const shellCalls: ShellTraceCall[] = [];
     for (const call of msg.tool_calls) {
       const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
       let result = "";
+      let shellResult: string | undefined;
       toolNames.push(call.function.name);
       try {
         const denied = phaseToolDenial(ctx, state, call.function.name, mcpHub);
         if (denied) {
+          result = denied;
           messages.push({
             role: "tool",
             tool_call_id: call.id,
@@ -1769,6 +1803,7 @@ async function runOpenAiToolLoop(
         switch (call.function.name) {
           case "shell": {
             const r = runShell(ctx, args.command ?? "");
+            shellResult = formatShellResult(r);
             result = JSON.stringify(r);
             ctx.history.appendFact({
               taskId: manifest.taskId,
@@ -1949,6 +1984,14 @@ async function runOpenAiToolLoop(
         }
       } catch (err) {
         result = `错误: ${err instanceof Error ? err.message : String(err)}`;
+      } finally {
+        if (call.function.name === "shell") {
+          shellCalls.push({
+            id: call.id,
+            command: typeof args?.command === "string" ? args.command : null,
+            result: shellResult ?? result,
+          });
+        }
       }
       messages.push({
         role: "tool",
@@ -1966,9 +2009,12 @@ async function runOpenAiToolLoop(
     ckpt.save(state);
     flushUsage(manifest, ctx, state);
     writeFileSync(join(manifest.workspaceDir, "openai-transcript.json"), JSON.stringify(messages, null, 2));
-    appendProgress(
-      manifest.workspaceDir,
-      `第 ${i + 1} 步 · 工具 ${toolNames.join("、") || "无"} · Token ${state.tokens} · phase=${state.phase}`,
-    );
+    recordExecutionStep(manifest, {
+      number: state.step,
+      tools: toolNames,
+      tokens: state.tokens,
+      phase: state.phase,
+      calls: shellCalls,
+    });
   }
 }

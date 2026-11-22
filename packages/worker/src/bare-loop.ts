@@ -11,6 +11,7 @@ import {
   isBudgetHit,
   isWallHit,
   type GoalSpec,
+  type ShellTraceCall,
   type WorkerManifest,
 } from "@gongyuai/contracts";
 import { listEvidenceFiles, minimatch, openHistory, resolveEvidenceFile, validateAllCompleteEvidence } from "@gongyuai/history";
@@ -18,6 +19,7 @@ import { CheckpointStore } from "./checkpoint.js";
 import { assertMockGoals, collectMockBanner, dispatchMockTool } from "./mock-fixture.js";
 import { appendProgress, runShell, writeEvidence, type ToolContext } from "./tools.js";
 import { writeWorkerStatus } from "./status.js";
+import { formatShellResult, recordExecutionStep } from "./execution-trace.js";
 
 function goalSatisfied(evidenceDir: string, goal: GoalSpec): boolean {
   const files = listEvidenceFiles(evidenceDir);
@@ -263,12 +265,16 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
         continue;
       }
 
+      const shellCalls: ShellTraceCall[] = [];
       for (const call of msg.tool_calls) {
         const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
         let result = "";
+        let shellResult: string | undefined;
         try {
           if (call.function.name === "shell") {
-            result = JSON.stringify(runShell(ctx, args.command ?? ""));
+            const output = runShell(ctx, args.command ?? "");
+            result = JSON.stringify(output);
+            shellResult = formatShellResult(output);
           } else if (call.function.name === "write_evidence") {
             result = writeEvidence(
               ctx,
@@ -292,12 +298,26 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
         } catch (err) {
           result = `error: ${err instanceof Error ? err.message : String(err)}`;
         }
+        if (call.function.name === "shell") {
+          shellCalls.push({
+            id: call.id,
+            command: typeof args?.command === "string" ? args.command : null,
+            result: shellResult ?? result,
+          });
+        }
         messages.push({
           role: "tool",
           tool_call_id: call.id,
           content: result.slice(0, 4_000),
         });
       }
+      recordExecutionStep(manifest, {
+        number: i + 1,
+        tools: msg.tool_calls.map((call) => call.function.name),
+        tokens: state.tokens,
+        phase: "bare",
+        calls: shellCalls,
+      });
       state.toolCalls = ctx.usage.toolCalls;
       ckpt.save(state);
       writeWorkerStatus(manifest.dataDir, {

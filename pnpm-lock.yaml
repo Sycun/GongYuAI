@@ -52,6 +52,9 @@ importers:
       '@douyinfe/semi-ui':
         specifier: ^2.89.1
         version: 2.105.0(@floating-ui/dom@1.8.0)(@tiptap/suggestion@3.35.0(@floating-ui/dom@1.8.0)(@tiptap/core@3.35.0(@tiptap/pm@3.35.0))(@tiptap/pm@3.35.0))(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@gongyuai/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       react:
         specifier: ^18.3.1
         version: 18.3.1

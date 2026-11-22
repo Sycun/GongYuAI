@@ -12,6 +12,7 @@
   "dependencies": {
     "@douyinfe/semi-icons": "^2.89.1",
     "@douyinfe/semi-ui": "^2.89.1",
+    "@gongyuai/contracts": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

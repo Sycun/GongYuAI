@@ -1,6 +1,6 @@
 /** 控制台时间展示统一为北京时间（UTC+8）。 */
 
-const LOCAL_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/;
+const LOCAL_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/;
 const BEIJING_OFFSET_MS = 8 * 3600_000;
 
 export function parseTime(s: string): number {

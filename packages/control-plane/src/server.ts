@@ -16,7 +16,14 @@ import {
   ToolsSettingsPatchSchema,
   UpdateSettingsPatchSchema,
 } from "@gongyuai/contracts";
-import { listEvidenceFiles, openHistory, readEvidenceFile, resolveEvidenceFile } from "@gongyuai/history";
+import {
+  listEvidenceFiles,
+  listExecutionSteps,
+  openHistory,
+  readEvidenceFile,
+  readExecutionStepCalls,
+  resolveEvidenceFile,
+} from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
 import { readCheckpointGraph, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
@@ -484,6 +491,22 @@ export function startControlServer(opts: ServerOptions) {
           res.end(content);
           return;
         }
+        if (method === "GET" && rest === "/trace") {
+          const cursor = url.searchParams.get("before");
+          const before = cursor === null ? undefined : Number(cursor);
+          if (before !== undefined && (!Number.isSafeInteger(before) || before <= 0)) {
+            return send(res, 400, { error: "invalid trace cursor" });
+          }
+          return send(res, 200, listExecutionSteps(task.dataDir, before));
+        }
+        const traceMatch = rest.match(/^\/trace\/([^/]+)$/);
+        if (method === "GET" && traceMatch) {
+          const calls = readExecutionStepCalls(task.dataDir, decodeURIComponent(traceMatch[1]!));
+          res.setHeader("cache-control", "no-store");
+          return calls === null
+            ? send(res, 404, { error: "step not found" })
+            : send(res, 200, { calls });
+        }
         if (method === "GET" && rest === "/runtime") {
           const paths = taskPaths(task.dataDir);
           const statusPath = join(task.dataDir, "worker-status.json");
@@ -500,6 +523,7 @@ export function startControlServer(opts: ServerOptions) {
           }
           const checkpointGraph = readCheckpointGraph(task.dataDir);
           let recentFacts: Array<{
+            id: string;
             title: string;
             summary: string;
             layer: string;
@@ -517,6 +541,7 @@ export function startControlServer(opts: ServerOptions) {
                 .slice(-30)
                 .reverse()
                 .map((f) => ({
+                  id: f.id,
                   title: f.title,
                   summary: f.summary,
                   layer: f.layer,
@@ -579,6 +604,7 @@ export function startControlServer(opts: ServerOptions) {
             hasCheckpoint: existsSync(ckptPath),
             dataDir: task.dataDir,
             progress,
+            trace: listExecutionSteps(task.dataDir),
             recentFacts,
             recentIntents,
             usage: mergedUsage,

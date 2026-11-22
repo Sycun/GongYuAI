@@ -1,3 +1,5 @@
+import type { ExecutionTracePage, ShellTraceCall } from "@gongyuai/contracts";
+
 export type TaskRecord = {
   id: string;
   name: string;
@@ -125,7 +127,9 @@ export type RuntimePayload = {
   hasCheckpoint: boolean;
   dataDir: string;
   progress?: string[];
+  trace?: ExecutionTracePage;
   recentFacts?: Array<{
+    id?: string;
     title: string;
     summary: string;
     layer: string;
@@ -302,6 +306,10 @@ export const api = {
       body: JSON.stringify(body),
     }),
   runtime: (id: string) => request<RuntimePayload>(`/tasks/${id}/runtime`),
+  executionTrace: (id: string, before: number) =>
+    request<ExecutionTracePage>(`/tasks/${id}/trace?before=${before}`),
+  executionStepCalls: (id: string, stepId: string, signal: AbortSignal) =>
+    request<{ calls: ShellTraceCall[] }>(`/tasks/${id}/trace/${encodeURIComponent(stepId)}`, { signal }),
   evidence: (id: string) => request<EvidenceList>(`/tasks/${id}/evidence`),
   evidenceFile: (id: string, path: string) =>
     request<string>(`/tasks/${id}/evidence/file?path=${encodeURIComponent(path)}`),

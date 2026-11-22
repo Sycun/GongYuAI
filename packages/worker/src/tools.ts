@@ -286,10 +286,9 @@ export function installTool(
 }
 
 /** 北京时间戳 */
-export function beijingStamp(d = new Date()): string {
+export function beijingStamp(d = new Date(), withMilliseconds = false): string {
   const t = new Date(d.getTime() + 8 * 3600_000);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())} ${p(t.getUTCHours())}:${p(t.getUTCMinutes())}`;
+  return t.toISOString().slice(0, withMilliseconds ? 23 : 16).replace("T", " ");
 }
 
 /** Mirror progress into dataDir/worker.log so the Logs tab matches Live. */
@@ -302,7 +301,7 @@ function mirrorProgressToWorkerLog(workspaceDir: string, stampedLine: string): v
 }
 
 export function appendProgress(workspaceDir: string, line: string): void {
-  const stamp = beijingStamp();
+  const stamp = beijingStamp(new Date(), true);
   const stamped = `${stamp} ${line}`;
   const path = join(workspaceDir, "PROGRESS.md");
   if (!existsSync(path)) {

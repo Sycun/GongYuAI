@@ -243,6 +243,7 @@ export function App() {
           )}
           {isDetailRoute(route) && (
             <TaskDetailPage
+              key={selectedTask?.id}
               task={selectedTask}
               tab={route as DetailTab}
               onTabChange={(t) => navigate(t, taskId)}

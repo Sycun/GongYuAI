@@ -1,4 +1,5 @@
 import { z } from "zod";
+export type { ExecutionStep, ExecutionTracePage, ShellTraceCall } from "./execution-trace.js";
 import {
   DEFAULT_EXPLORE_TIMEOUT_MS,
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,

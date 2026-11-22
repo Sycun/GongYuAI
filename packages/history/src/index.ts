@@ -37,6 +37,7 @@ import { minimatch } from "./minimatch.js";
 import { readEvidenceFile, resolveEvidenceFile } from "./evidence.js";
 
 export { minimatch } from "./minimatch.js";
+export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
 export { listEvidenceFiles, readEvidenceFile, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
 export { writeTaskReport, type TerminalReportStatus } from "./report.js";
 

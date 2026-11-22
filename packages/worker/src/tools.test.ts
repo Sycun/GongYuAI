@@ -107,7 +107,7 @@ test("appendProgress mirrors into worker.log for Logs tab", () => {
     appendProgress(workspaceDir, "phase=bootstrap");
     const progress = readFileSync(join(workspaceDir, "PROGRESS.md"), "utf8");
     const log = readFileSync(join(root, "worker.log"), "utf8");
-    assert.match(progress, /phase=bootstrap/);
+    assert.match(progress, /- \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} phase=bootstrap/);
     assert.match(log, /\[progress\].*phase=bootstrap/);
   } finally {
     rmSync(root, { recursive: true, force: true });
