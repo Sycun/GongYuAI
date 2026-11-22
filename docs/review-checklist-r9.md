@@ -88,10 +88,10 @@ curl -s localhost:18999/tasks/<id>/jobs/<job>            # 期望 succeeded + ar
 
 | 项 | 读数 |
 | --- | --- |
-| 受验代码提交 | 见 [delivery-record.md](./delivery-record.md) §0.1（本文件随文档提交更新） |
-| GitHub `main` | `git ls-remote origin refs/heads/main` → 见 §0.1 |
-| Kali 检出 / 运行 | `/home/parallels/GongYuAI`；`git rev-parse HEAD`、`systemctl show -p MainPID`、`readlink /proc/<pid>/cwd` 见 §0.5 |
-| 本轮新增验收运行 | `r9-ops-…`（67/67）、`r9-flywheel-…`（57/57），目录 `docs/evidence/r9/` |
+| 受验代码提交 | `e93c159ad8b3c8de467ba39051ddb6fe7d9b4e66`（[GitHub](https://github.com/Sycun/GongYuAI/commit/e93c159ad8b3c8de467ba39051ddb6fe7d9b4e66)） |
+| GitHub `main` | `43898a10d65904d59e6e138d0bd6a93b7c671325`（证据/文档提交；受验代码是其祖先） |
+| Kali 检出 / 运行 | `/home/parallels/GongYuAI-f2719556`（unit 的 WorkingDirectory，原地升级）；HEAD = `e93c159`；`MainPID=1860126`、监听进程 `cgroup=0::/system.slice/gongyuai.service`；`NRestarts=2` |
+| 本轮新增验收运行 | `r9-ops-1795364124610`（67/67）、`r9-flywheel-1795364131957`（57/57），目录 `docs/evidence/r9/` |
 
 ## 6. 本轮自查发现并修掉的问题（复核时可重点反打）
 

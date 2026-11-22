@@ -3,7 +3,103 @@
 累计记录：每轮复核整改都在同一份文件里留下可复核读数，历史章节保留备查。
 本轮（第八轮 / 第四轮独立复核整改）的读数在 §0；上一轮的第七轮记录在 §0A；第六轮的章节从 §1 开始。
 
-## 0. 本轮（第八轮）关键读数
+
+## 0. 本轮（第九轮）关键读数
+
+日期：2026-11-22/23（Asia/Shanghai）　实施：DSH 实施会话（lead）
+状态口径见 [implementation-ledger.md](./implementation-ledger.md) §0；复核最短路径见 [review-checklist-r9.md](./review-checklist-r9.md)。
+
+### 0.1 三端读数（同一受验提交）
+
+| 项 | 值 |
+| --- | --- |
+| 受验代码 | `e93c159ad8b3c8de467ba39051ddb6fe7d9b4e66`（tree `223c131012f2baa65d4f2c27bf170eac30d55ad1`） |
+| 本轮起点 | `298440a62ad1391759a0b0fd57e07018ff7c8d2d`（origin/main） |
+| 开发分支 | `backend/r9-boundary-jobs` |
+| GitHub `main` | 本文件所在提交（受验代码之后只有 `docs/`、`docs/evidence/r9/` 差异；`git diff --stat e93c159 HEAD -- packages apps scripts package.json pnpm-lock.yaml` 为空） |
+| 干净副本 | `/tmp/gy-clean-r9f`（clone 自本地仓库，checkout 受验提交，0 条未提交改动） |
+| Kali 检出 | `/home/parallels/GongYuAI-f2719556`（`gongyuai.service` 的 WorkingDirectory；原地升级） |
+| Kali 实际运行 | 同一受验提交；`MainPID=1860126`，监听进程 `cgroup=0::/system.slice/gongyuai.service`，`NRestarts=2`，`ActiveState=active` |
+
+### 0.2 干净副本回归读数（受验提交）
+
+| 步骤 | 读数 |
+| --- | --- |
+| 冻结依赖安装 + 构建 | `pnpm install --frozen-lockfile` / `pnpm -r run build` 均 exit 0 |
+| 全量单测 | **195 通过 / 0 失败**（contracts 51、history 57、control-plane 52、worker 35） |
+| 校验器自测 | `pnpm test:acceptance` exit 0（8 项） |
+| smoke | PASS |
+| 新增验收 P1/P2 | `r9-ops-1795364124610`：**67/67**；记录 SHA-256 `c3d725fc…`；快照封印 `4e1b37bd6d56…` |
+| 新增验收 P3/P4 | `r9-flywheel-1795364131957`：**57/57**；记录 SHA-256 `1b7d682b…` |
+| 业务差异回归 | `business-1795364136352`：77 项，0 失败；快照封印 `4bd6aee7f975…` |
+| 首次通过绑定回归 | `firstpass-1795364138442`：69 项，0 失败 |
+| 跨日模拟流程 | `engagement-1795364141637`：80 项，0 失败 |
+| 恢复隔离自测 | `pnpm restore:selftest` exit 0 |
+
+逐文件哈希与命令见 `docs/evidence/r9/clean-regression.txt` 与两份运行的 `manifest.json`。
+
+### 0.3 本轮新增验收覆盖（证据在 `docs/evidence/r9/`）
+
+| 运行 | 覆盖 |
+| --- | --- |
+| `r9-ops-1795364124610` | A 客户建档与两份清单导入 → 作业提交 → SIGKILL 控制面 → 重启后 `unknown` → CLI `job-retry` → 成功 + 目标首次通过 + 产物哈希核对；范围收缩后的 `lateResult`；回执幂等；24h 求助（23h/24h+1s）与 CLI 答复→human Hint；CLI 交接包；四类材料 + unsupported/unknown-owner/expired + 明文凭据 422/受控引用；覆盖矩阵六态；撤回一份被多处引用的证据后矩阵/图/报告一致；事实时效；两客户同名资产不串 + 越界 403；交付快照与记分卡同源 |
+| `r9-flywheel-1795364131957` | 记忆 draft→confirm→retract/supersede/反例；无源拒绝；注入 5+2 与 Hint-only；客户 B 的注入/档案/模型请求均无 A 的专属标记；经验撤回后仍能列出引用任务；冻结评测（组顺序/隔离/冻结替换/指标分母）；提案无证据拒绝、批准、晋升需评测、回退可复算；趋势；规划者/复核者/辅助者（模拟）与辅助者 pause→操作员 resume；供应商 429/余额/外发/超时/成本可见/重复记账；无进展告警与等待人工抑制 |
+
+两次运行的关键哈希：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `r9-ops-1795364124610/manifest.json` | `f57dc9384e284bfc622d35e4b635cb742ef3f133700b7733f288cf2efd168f7e` |
+| `r9-ops-1795364124610/acceptance-record.md` | `2090933f010b0a39ed3127477efcb79936539687eb47e43c6e39b85c2f4c32d5` |
+| `r9-flywheel-1795364131957/manifest.json` | `ef8f0313f56cab393f7b0bda90fe4a314ef6995a397bc8b7effae6538a130d95` |
+| `r9-flywheel-1795364131957/acceptance-record.md` | `9384305c2d65147f7240c01085949794f47010eda164f8447f5aae81dd4d0232` |
+
+> 记录里的 `code` 字段：`commit=e93c159…`、`dirty=false`、`evidenceOnlyDirty=true`（只有 `docs/evidence/r9` 产物未跟踪，源码零改动）。
+
+### 0.4 本轮修掉的自查缺陷（复核请直接反打）
+
+1. 证据撤回只按 sha 判失效 → 改为**路径为主、sha 为辅**，矩阵优先级改为 `retracted > material`。
+2. 作业在终态后改 History，`GET /tasks/:id` 仍读建档副本 → 任务视图合并 History 目标（`withLiveGoals`）。
+3. 记忆图只取 confirmed，draft 反例的 `contradicts` 边不可见 → 记忆图展示全部状态（带徽章），注入仍只认 confirmed。
+4. 无进展窗口按事件数组顺序取，倒序时窗口错位 → 按 `createdAt` 取最新 Fact。
+5. `recall` 分母把待裁决算成漏项 → 改为 `tp/(tp+fn)`，`pending` 单列。
+6. 仅命中 `asset-class` 软键的经验进不了候选 → 独立收集资产命中并受 `+2` 上限。
+7. 无证据引用的人工覆盖被误判为 `retracted` → 改为 `manual`（只有所附证据全被撤回才降级）。Kali 正式入口复验时发现并修复。
+
+### 0.5 Kali 部署与托管核对（原地升级，unit 未改）
+
+| 项 | 读数 |
+| --- | --- |
+| 保护备份 | `/home/parallels/gongyuai-data-backup-20261123-001357.tar.gz`，21,600,103 字节，SHA-256 `9637a27e9f3a01c24eb7846745e867bbe72377d108664de3676daab42480a0b4`，权限 0600（含 `.gongyuai` 与 `.env`） |
+| 部署方式 | 在 `gongyuai.service` 的 WorkingDirectory（`/home/parallels/GongYuAI-f2719556`）内 `git fetch` + `checkout e93c159` + 本机 `pnpm install --frozen-lockfile` + `pnpm -r run build`；**未改 unit 文件**（ExecStart/WorkingDirectory/Environment 原样） |
+| 切换 | 记录现场后 `kill -9 MainPID`，由 `Restart=on-failure` 拉起新进程（`NRestarts=2`）；无 sudo、无 drop-in、无目录搬迁 |
+| 单元状态 | `ActiveState=active`、`SubState=running`、WorkingDirectory=/home/parallels/GongYuAI-f2719556 |
+| 监听与归属 | `0.0.0.0:8877`；父 `MainPID=1860126`（pnpm），监听 PID 在 `system.slice/gongyuai.service`；`/proc/<pid>/cwd` = 上述目录 |
+| 构建产物 | 与本机干净副本逐字节一致：`control-plane/dist/routes-ops.js` = `f4aa0717…`、`jobs.js` = `200f6159…`、`history/dist/ops.js` = `3bd5fd86…`、`contracts/dist/ops.js` = `a5065690…` |
+| 数据保留 | 切换前 27 个任务 → 首次复验后 28 → 最终复验后 29；`.gongyuai` 未重建，历史任务与证据未动 |
+| 回退 | 代码：`git checkout f2719556 && pnpm install --frozen-lockfile && pnpm -r run build && kill -9 $(systemctl show -p MainPID --value gongyuai.service)`；数据：`tar xzf /home/parallels/gongyuai-data-backup-20261123-001357.tar.gz -C /home/parallels/GongYuAI-f2719556` |
+
+### 0.6 Kali 正式入口复验（虚构委托）
+
+| 项 | 值 |
+| --- | --- |
+| 任务 ID | `b93d3172-76e0-4e68-8aa5-9cf4facbf38a`（`Kali 正式入口最终复验`，tenant `customer-kali`，委托 `eng-kali-final-*`） |
+| 建档与材料 | `POST /tasks` 201；两份 CSV 经 `POST /tasks/:id/materials` accepted |
+| 作业 | `c5179b3d-bd19-420d-bf4a-b27b1e074d79`，`material-check` → `succeeded`；产物 `reconcile/asset-diff-r1795364223185-0001.json`，SHA-256 `5d06e81e183784d67067badcf73c62823fdfc003b95b62b7c2db7121d60ae3e4` |
+| 完成回流 | `assertions[0].ok=true`；目标 `g-final` `passes=true`；记分卡 1/1（历史=当前=1） |
+| 覆盖矩阵 | 人工覆盖登记后状态集合 `["manual","unknown"]`（修复前误报 `retracted`） |
+| 交接包 | `scopeVersion=1`、作业 1、待答 0 |
+| 报告 / 快照 | 报告 SHA-256 `71032a75a51de8ba26ae0d04d8336e02f138ac73efd78cb1a9a7830c12a0f4d1`；快照封印 `3eb11b5746f2276f7f1066919f8bf83c4eb4bea11693710e2fcbe26a675df47f` |
+| 今日工作 | `GET /today?tenantId=customer-kali` 含该任务 |
+
+### 0.7 仍然未验证的（工程验收 ≠ 生产效果）
+
+- **真实生产效果待验证**：缺获准使用的脱敏真实委托、客户书面许可、平台结果产生前独立封存的人工底稿（见 [owner-unverified-r9.md](./owner-unverified-r9.md) C）。
+- **真实供应商表现待验证**：角色分层与供应商故障均为契约级模拟（`authenticity:"simulated"`、`billing:"none"`）；无真实 key 池、无真实 429/余额不足演练、无真实账单（见同文 B）。
+- 控制台未接新 API；Worker 尚未自动发起 `operator_consult`/记忆注入/作业唤醒（见同文 A）。
+- Kali 用“原地升级 + kill 触发 systemd 重启”完成；unit 文件未改，`NRestarts=2` 是本次切换留下的计数。未执行 `systemctl restart`（sudo 需要密码），也没有搬迁目录。
+
+## 0B. 上一轮（第八轮）关键读数（保留备查）
 
 日期：2026-11-22（Asia/Shanghai）　实施：DSH 实施会话（lead）
 状态口径见 [implementation-ledger.md](./implementation-ledger.md) §0；复核最短路径见 [review-checklist.md](./review-checklist.md) §0。
