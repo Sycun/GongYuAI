@@ -1,0 +1,12 @@
+{
+  "tag": "c7643e9ab58a5a75dd0f2ba2e849a05cf952e8c8eba0919e2f94bd2bdb87ead5",
+  "fixtureSha256": "239d50ba929a49ae00607b414e6dbc04389fea15f3ae40ffce9a0dee5a5141f7",
+  "model": "deepseek-flash",
+  "provider": "https://api.deepseek.com",
+  "limits": {
+    "total": 16384,
+    "interim": 384,
+    "final": 256
+  },
+  "repetitions": 2
+}

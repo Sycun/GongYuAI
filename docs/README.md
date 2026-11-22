@@ -38,6 +38,8 @@
 
 [女娲、DAG 与证据复核](./evidence-review.md)说明复核入口、证据版本、报告判读和离线验收用例。
 
+[三组真模型对照](./experiments/2026-11-22-offline-review/README.md)记录同一批台账的字段准确率、实际 Token、逐题错答和复算方法。
+
 ## 北极星
 
 > Harness 让任务活着；History 让路径可信；Evidence 让完成可复核；Relay 让上下文可换班。
