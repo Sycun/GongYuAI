@@ -1,10 +1,10 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { linkSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ORIGIN_FACT_ID } from "@gongyuai/contracts";
-import { openHistory } from "./index.js";
+import { openHistory, readEvidenceFile, writeEvidenceFile } from "./index.js";
 
 test("evidence gate blocks pass without files", () => {
   const root = mkdtempSync(join(tmpdir(), "gy-hist-"));
@@ -15,7 +15,7 @@ test("evidence gate blocks pass without files", () => {
     evidenceDir,
   });
   const taskId = "11111111-1111-4111-8111-111111111111";
-  store.seedGoals(taskId, [
+  const initial = [
     {
       id: "recon",
       title: "Recon",
@@ -25,7 +25,8 @@ test("evidence gate blocks pass without files", () => {
       evidencePaths: [],
       assertedAt: null,
     },
-  ]);
+  ];
+  store.seedGoals(taskId, initial);
 
   const blocked = store.assertGoal(taskId, "recon", ["recon/banner.txt"]);
   assert.equal(blocked.ok, false);
@@ -37,6 +38,13 @@ test("evidence gate blocks pass without files", () => {
   assert.equal(ok.ok, true);
   if (ok.ok) assert.equal(ok.goal.passes, true);
   assert.equal(store.allGoalsPass(taskId), true);
+  assert.ok(ok.ok);
+
+  // The control plane can re-seed from a stale task snapshot during shutdown.
+  store.seedGoals(taskId, initial);
+  const repeated = store.assertGoal(taskId, "recon", ["recon/different.txt"]);
+  assert.deepEqual(repeated, ok);
+  assert.equal(store.listEvents(taskId).filter((event) => event.kind === "goal_asserted").length, 1);
 
   store.close();
   rmSync(root, { recursive: true, force: true });
@@ -85,6 +93,57 @@ test("ALL_COMPLETE.json requires every is_completed=true", () => {
 
   store.close();
   rmSync(root, { recursive: true, force: true });
+});
+
+test("Goal and evidence readers reject paths and links outside evidence", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-boundary-"));
+  const evidenceDir = join(root, "evidence");
+  const store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
+  t.after(() => {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const taskId = "33333333-3333-4333-8333-333333333333";
+  store.seedGoals(taskId, [{
+    id: "board",
+    title: "Board",
+    description: "",
+    evidencePatterns: ["**/ALL_COMPLETE.json"],
+    passes: false,
+    evidencePaths: [],
+    assertedAt: null,
+  }]);
+  const proof = '[{"is_completed":true}]';
+  const outsideDir = join(root, "evidence-other");
+  const outsideFile = join(outsideDir, "ALL_COMPLETE.json");
+  mkdirSync(outsideDir);
+  writeFileSync(outsideFile, proof);
+  symlinkSync(outsideDir, join(evidenceDir, "alias"), "dir");
+  mkdirSync(join(evidenceDir, "links"));
+  symlinkSync(outsideFile, join(evidenceDir, "links", "ALL_COMPLETE.json"));
+  mkdirSync(join(evidenceDir, "hard"));
+  linkSync(outsideFile, join(evidenceDir, "hard", "ALL_COMPLETE.json"));
+  mkdirSync(join(evidenceDir, "dir", "ALL_COMPLETE.json"), { recursive: true });
+
+  for (const path of [
+    outsideFile,
+    "../evidence-other/ALL_COMPLETE.json",
+    "alias/ALL_COMPLETE.json",
+    "links/ALL_COMPLETE.json",
+    "hard/ALL_COMPLETE.json",
+    "dir/ALL_COMPLETE.json",
+  ]) {
+    assert.equal(store.assertGoal(taskId, "board", [path]).ok, false, path);
+    assert.throws(() => readEvidenceFile(evidenceDir, path), path);
+    assert.throws(() => writeEvidenceFile(evidenceDir, path, "blocked"), path);
+  }
+  assert.equal(readFileSync(outsideFile, "utf8"), proof);
+  const path = "./valid/ALL_COMPLETE.json";
+  writeEvidenceFile(evidenceDir, path, "longer content to be replaced");
+  assert.equal(writeEvidenceFile(evidenceDir, path, proof), "valid/ALL_COMPLETE.json");
+  assert.equal(readEvidenceFile(evidenceDir, path), proof);
+  assert.equal(store.assertGoal(taskId, "board", [path]).ok, true);
 });
 
 test("proposeIntent rejects empty sourceFactIds; origin allowed", () => {

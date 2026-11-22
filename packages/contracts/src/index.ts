@@ -10,19 +10,30 @@ import {
 export const TenantIdSchema = z.string().min(1).default("default");
 export type TenantId = z.infer<typeof TenantIdSchema>;
 
-export const TaskStatusSchema = z.enum([
-  "queued",
-  "initializing",
-  "running",
-  "recovering",
+const ACTIVE_TASK_STATUSES = ["queued", "initializing", "running", "recovering"] as const;
+const TERMINAL_TASK_STATUSES = [
   "completed",
   "failed",
   "budget_exhausted",
   /** Loop ended without all goals and without hitting a hard budget gate. */
   "incomplete",
   "stopped",
-]);
+] as const;
+
+export const TaskStatusSchema = z.enum([...ACTIVE_TASK_STATUSES, ...TERMINAL_TASK_STATUSES]);
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+export type TerminalTaskStatus = (typeof TERMINAL_TASK_STATUSES)[number];
+
+const activeTaskStatuses = new Set<string>(ACTIVE_TASK_STATUSES);
+const terminalTaskStatuses = new Set<string>(TERMINAL_TASK_STATUSES);
+
+export function isActiveTaskStatus(status: TaskStatus): boolean {
+  return activeTaskStatuses.has(status);
+}
+
+export function isTerminalTaskStatus(status: unknown): status is TerminalTaskStatus {
+  return typeof status === "string" && terminalTaskStatuses.has(status);
+}
 
 /**
  * Budget hard gates. **0 = unlimited** (default): no wall/tool/token/install ceiling;

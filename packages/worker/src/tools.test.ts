@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -8,11 +8,13 @@ import {
   appendProgress,
   assertCommandAllowed,
   extractHosts,
-  gateCommand,
   hostInTargets,
+  runShell,
   type ToolContext,
 } from "./tools.js";
 import { writeTerminalReport } from "./report.js";
+import { openMcpHub } from "./mcp/client.js";
+import { runAssetSearch } from "./asset-collectors.js";
 import type { WorkerManifest } from "@gongyuai/contracts";
 
 function manifest(targets: string[]): WorkerManifest {
@@ -112,7 +114,7 @@ test("appendProgress mirrors into worker.log for Logs tab", () => {
   }
 });
 
-test("gateCommand audits deny and allow on History", () => {
+test("shell authorization and budget decisions are each audited once", (t) => {
   const root = mkdtempSync(join(tmpdir(), "gy-gate-"));
   const evidenceDir = join(root, "evidence");
   const workspaceDir = join(root, "workspace");
@@ -122,6 +124,10 @@ test("gateCommand audits deny and allow on History", () => {
     dbPath: join(root, "history.sqlite"),
     evidenceDir,
   });
+  t.after(() => {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
   const m = manifest(["example.com"]);
   m.taskId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   m.dataDir = root;
@@ -129,26 +135,19 @@ test("gateCommand audits deny and allow on History", () => {
   m.evidenceDir = evidenceDir;
   m.auth.capability = "observe";
   const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
-  assert.throws(
-    () =>
-      gateCommand(ctx, "shell", "curl -s http://example.com", () =>
-        assertCommandAllowed(m, "curl -s http://example.com"),
-      ),
-    /observe/,
-  );
+  assert.throws(() => runShell(ctx, "printf allowed"), /observe/);
   const denied = history.listEvents(m.taskId).filter((e) => e.kind === "tool_gate");
   assert.equal(denied.length, 1);
   assert.equal(denied[0]!.payload.ok, false);
 
   m.auth.capability = "scan";
-  gateCommand(ctx, "shell", "curl -s http://example.com", () =>
-    assertCommandAllowed(m, "curl -s http://example.com"),
-  );
+  assert.equal(runShell(ctx, "printf allowed").stdout, "allowed");
+  m.budget.maxToolCalls = 2;
+  assert.throws(() => runShell(ctx, "printf blocked"), /maxToolCalls/);
   const gates = history.listEvents(m.taskId).filter((e) => e.kind === "tool_gate");
-  assert.equal(gates.length, 2);
-  // listEvents is newest-first
-  assert.equal(gates[0]!.payload.ok, true);
-  assert.equal(gates[1]!.payload.ok, false);
+  assert.equal(gates.length, 3);
+  assert.equal(gates.filter((g) => g.payload.ok).length, 1);
+  assert.ok(gates.some((g) => g.payload.reason === "maxToolCalls exceeded"));
 
   writeTerminalReport(m, history, {
     status: "budget_exhausted",
@@ -158,6 +157,53 @@ test("gateCommand audits deny and allow on History", () => {
   assert.match(report, /Status: budget_exhausted/);
   assert.match(report, /maxToolCalls exceeded/);
 
-  history.close();
-  rmSync(root, { recursive: true, force: true });
+});
+
+test("MCP aliases share authorization, scope and budget auditing with a local fixture", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-mcp-gate-"));
+  const m = manifest(["safe.invalid"]);
+  m.dataDir = root;
+  m.workspaceDir = join(root, "workspace");
+  m.evidenceDir = join(root, "evidence");
+  m.auth.capability = "observe";
+  m.budget.maxToolCalls = 3;
+  mkdirSync(m.workspaceDir);
+  const history = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir: m.evidenceDir });
+  t.after(() => {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeFileSync(join(root, "mcp.json"), JSON.stringify({ binary: "/usr/bin/printf" }));
+  m.mcpServers = [{
+    id: "nmap",
+    name: "Local fixture",
+    transport: "builtin",
+    rootDir: root,
+    args: [],
+    env: {},
+  }];
+  const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+  const hub = await openMcpHub(m, ctx);
+  try {
+    assert.deepEqual(hub.enabledIds(), []);
+    await assert.rejects(hub.enable("nmap", "test"), /observe/);
+    await assert.rejects(runAssetSearch(ctx, { collectorId: "fixture", query: "test" }), /observe/);
+    await assert.rejects(hub.call("mcp__nmap__run", { target: "safe.invalid" }), /observe/);
+    m.auth.capability = "scan";
+    await assert.rejects(hub.invoke("nmap", "run", { target: "safe.invalid" }), /未启用/);
+    await hub.enable("nmap", "local fixture");
+    await assert.rejects(hub.invoke("nmap", "run", { target: "outside.invalid" }), /scope/);
+    assert.match(await hub.call("mcp__nmap__run", { target: "safe.invalid" }), /safe\.invalid/);
+    assert.match(await hub.invoke("nmap", "run", { target: "safe.invalid" }), /safe\.invalid/);
+    await assert.rejects(hub.call("mcp__nmap__run", { target: "safe.invalid" }), /maxToolCalls/);
+
+    const events = history.listEvents(m.taskId).filter((e) => e.kind === "tool_gate");
+    const calls = events.filter((e) => e.payload.tool === "mcp");
+    assert.equal(calls.length, 6);
+    assert.equal(calls.filter((e) => e.payload.ok).length, 2);
+    assert.ok(events.some((e) => e.payload.tool === "asset_search" && e.payload.ok === false));
+    assert.ok(calls.every((e) => e.payload.serverId === "nmap" && e.payload.toolName === "run"));
+  } finally {
+    await hub.close();
+  }
 });

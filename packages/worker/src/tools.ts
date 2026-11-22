@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { AuthCapability, WorkerManifest } from "@gongyuai/contracts";
 import { isBudgetHit, targetAllows } from "@gongyuai/contracts";
-import type { HistoryStore } from "@gongyuai/history";
+import { writeEvidenceFile, type HistoryStore } from "@gongyuai/history";
 
 const CAPABILITY_RANK: Record<AuthCapability, number> = {
   observe: 0,
@@ -27,7 +27,7 @@ export function capabilityAtLeast(
  */
 export function assertCapabilityAllows(
   manifest: WorkerManifest,
-  action: "shell" | "install" | "mcp-scan" | "mcp-active",
+  action: "shell" | "install" | "asset_search" | "mcp-scan" | "mcp-active",
 ): void {
   // New tasks default to observe via schema; legacy manifests without the field keep full.
   const cap = manifest.auth.capability ?? "full";
@@ -38,6 +38,9 @@ export function assertCapabilityAllows(
   }
   if (action === "install" && !capabilityAtLeast(cap, "scan")) {
     throw new Error(`denied: install_tool requires auth.capability≥scan (have ${cap})`);
+  }
+  if (action === "asset_search" && !capabilityAtLeast(cap, "scan")) {
+    throw new Error(`denied: asset_search requires auth.capability≥scan (have ${cap})`);
   }
   if (action === "mcp-scan" && !capabilityAtLeast(cap, "scan")) {
     throw new Error(`denied: scan MCP requires auth.capability≥scan (have ${cap})`);
@@ -53,9 +56,7 @@ export function assertCapabilityAllows(
 const SCAN_MCP_IDS = new Set(["nmap", "httpx", "gobuster", "ffuf"]);
 
 export function mcpActionForServer(serverId: string): "mcp-scan" | "mcp-active" {
-  const id = serverId.replace(/^mcp__/, "").split("__")[0] ?? serverId;
-  if (SCAN_MCP_IDS.has(id) || SCAN_MCP_IDS.has(serverId)) return "mcp-scan";
-  return "mcp-active";
+  return SCAN_MCP_IDS.has(serverId) ? "mcp-scan" : "mcp-active";
 }
 
 export type ToolContext = {
@@ -124,31 +125,36 @@ export function assertCommandAllowed(manifest: WorkerManifest, command: string):
 }
 
 /**
- * P5 single gate: run policy checks and always audit allow/deny on History.
- * Callers that already hold ToolContext should prefer this over bare assert*.
+ * Record one authorization decision before dispatch. Keep arguments and
+ * credentials out of the audit metadata.
  */
-export function gateCommand(
+export function gateTool<T>(
   ctx: ToolContext,
   tool: string,
-  command: string,
-  check: () => void,
-): void {
+  check: () => T,
+  detail?: Record<string, unknown>,
+): T {
+  let authorized: T;
   try {
-    check();
-    ctx.history.recordToolGate(ctx.manifest.taskId, {
-      tool,
-      ok: true,
-      detail: { commandPreview: command.slice(0, 200) },
-    });
+    authorized = check();
   } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
     ctx.history.recordToolGate(ctx.manifest.taskId, {
       tool,
       ok: false,
-      reason,
-      detail: { commandPreview: command.slice(0, 200) },
+      reason: err instanceof Error ? err.message : String(err),
+      detail,
     });
     throw err;
+  }
+  ctx.history.recordToolGate(ctx.manifest.taskId, { tool, ok: true, detail });
+  return authorized;
+}
+
+/** Preserve the worker's existing tool-call limit and accounting semantics. */
+export function chargeToolCall(ctx: ToolContext): void {
+  ctx.usage.toolCalls += 1;
+  if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
+    throw new Error("maxToolCalls exceeded");
   }
 }
 
@@ -161,16 +167,10 @@ export function runShell(
   stdout: string;
   stderr: string;
 } {
-  gateCommand(ctx, "shell", command, () => assertCommandAllowed(ctx.manifest, command));
-  ctx.usage.toolCalls += 1;
-  if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
-    ctx.history.recordToolGate(ctx.manifest.taskId, {
-      tool: "shell",
-      ok: false,
-      reason: "maxToolCalls exceeded",
-    });
-    throw new Error("maxToolCalls exceeded");
-  }
+  gateTool(ctx, "shell", () => {
+    assertCommandAllowed(ctx.manifest, command);
+    chargeToolCall(ctx);
+  });
   const result = spawnSync("bash", ["-lc", command], {
     cwd: ctx.manifest.workspaceDir,
     encoding: "utf8",
@@ -189,36 +189,32 @@ export function writeEvidence(
   relativePath: string,
   content: string,
 ): string {
-  const abs = join(ctx.manifest.evidenceDir, relativePath);
-  mkdirSync(dirname(abs), { recursive: true });
-  writeFileSync(abs, content);
-  return relativePath.replace(/\\/g, "/");
+  return writeEvidenceFile(ctx.manifest.evidenceDir, relativePath, content);
 }
 
 export function installTool(
   ctx: ToolContext,
   spec: { name: string; method?: "apt" | "which"; package?: string },
 ): { ok: boolean; detail: string } {
+  const name = spec.name;
+  const pkg = spec.package ?? name;
+  const method = spec.method ?? "apt";
   try {
-    gateCommand(ctx, "install", spec.name, () =>
-      assertCapabilityAllows(ctx.manifest, "install"),
-    );
+    gateTool(ctx, "install", () => {
+      assertCapabilityAllows(ctx.manifest, "install");
+      if (!/^[\w][\w.+-]*$/.test(name) || !/^[\w][\w.+:~=-]*$/.test(pkg)) {
+        throw new Error("invalid tool or package name");
+      }
+      if (isBudgetHit(ctx.usage.installs + 1, ctx.manifest.budget.maxInstalls)) {
+        throw new Error("maxInstalls exceeded");
+      }
+    }, { name: name.slice(0, 80) });
   } catch (err) {
     return {
       ok: false,
       detail: err instanceof Error ? err.message : String(err),
     };
   }
-  if (isBudgetHit(ctx.usage.installs + 1, ctx.manifest.budget.maxInstalls)) {
-    ctx.history.recordToolGate(ctx.manifest.taskId, {
-      tool: "install",
-      ok: false,
-      reason: "maxInstalls exceeded",
-      detail: { name: spec.name },
-    });
-    return { ok: false, detail: "maxInstalls exceeded" };
-  }
-  const name = spec.name;
   const which = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(name)}`], {
     encoding: "utf8",
   });
@@ -228,8 +224,6 @@ export function installTool(
   }
 
   ctx.usage.installs += 1;
-  const pkg = spec.package ?? name;
-  const method = spec.method ?? "apt";
   let cmd: string;
   if (method === "apt") {
     cmd = `sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ${pkg}`;
@@ -238,7 +232,7 @@ export function installTool(
   }
 
   // Local/dev fallback: create a stub shim so smoke can proceed without root/apt
-  if (process.env.GY_ALLOW_STUB_INSTALL === "1" || process.platform === "darwin") {
+  if (ctx.manifest.mock || process.env.GY_ALLOW_STUB_INSTALL === "1" || process.platform === "darwin") {
     const binDir = join(ctx.manifest.workspaceDir, ".bin");
     mkdirSync(binDir, { recursive: true });
     const stub = join(binDir, name);

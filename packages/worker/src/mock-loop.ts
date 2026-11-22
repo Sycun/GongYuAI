@@ -307,7 +307,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           const intent = history.proposeIntent({
             taskId: manifest.taskId,
             title: "Collect recon banner",
-            summary: `Probe ${target}`,
+            summary: `Generate synthetic response for ${target}`,
             sourceFactIds: sourceFromHistory(),
           });
           const claimed = history.claimIntent(
@@ -321,10 +321,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
 
           let banner = "";
           try {
-            const probe = runShell(
-              ctx,
-              `curl -sI --max-time 5 ${JSON.stringify(target)} | head -n 20 || true`,
-            );
+            const probe = runShell(ctx, "printf 'HTTP/1.1 200 OK\nServer: gongyuai-mock\n'");
             banner = probe.stdout || probe.stderr || "no response";
           } catch (err) {
             banner = `probe error: ${err instanceof Error ? err.message : String(err)}`;

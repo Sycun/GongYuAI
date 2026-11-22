@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { mkdirSync } from "node:fs";
+import { dirname, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   AssetKind,
@@ -34,8 +34,11 @@ import {
   suggestFamilyKey,
 } from "@gongyuai/contracts";
 import { minimatch } from "./minimatch.js";
+import { readEvidenceFile, resolveEvidenceFile } from "./evidence.js";
 
 export { minimatch } from "./minimatch.js";
+export { listEvidenceFiles, readEvidenceFile, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
+export { writeTaskReport, type TerminalReportStatus } from "./report.js";
 
 export type FanoutPolicy = {
   maxIntentsPerReason: number;
@@ -186,10 +189,12 @@ export class HistoryStore {
   }
 
   seedGoals(taskId: string, goals: GoalState[]): void {
+    // Control-plane snapshots can be older than the worker's evidence assertions.
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO goals
+      INSERT INTO goals
         (id, task_id, title, description, evidence_patterns_json, passes, evidence_paths_json, asserted_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(task_id, id) DO NOTHING
     `);
     this.db.exec("BEGIN");
     try {
@@ -944,13 +949,16 @@ export class HistoryStore {
     if (!goal) return { ok: false, reason: `unknown goal: ${goalId}` };
     if (goal.passes) return { ok: true, goal };
 
-    const normalized = evidencePaths.map((p) => p.replace(/^\.?\/+/, ""));
+    const normalized: string[] = [];
+    for (const path of evidencePaths) {
+      try {
+        normalized.push(resolveEvidenceFile(this.evidenceDir, path).relativePath);
+      } catch {
+        return { ok: false, reason: `missing or invalid evidence file: ${path}` };
+      }
+    }
     for (const pattern of goal.evidencePatterns) {
-      const hit = normalized.find((p) => {
-        const abs = join(this.evidenceDir, p);
-        return existsSync(abs) && minimatch(p, pattern);
-      });
-      if (!hit) {
+      if (!normalized.some((p) => minimatch(p, pattern))) {
         return {
           ok: false,
           reason: `missing evidence for pattern "${pattern}" (provided: ${normalized.join(", ") || "none"})`,
@@ -958,31 +966,32 @@ export class HistoryStore {
       }
     }
 
-    for (const p of normalized) {
-      if (!existsSync(join(this.evidenceDir, p))) {
-        return { ok: false, reason: `evidence file missing: ${p}` };
-      }
-    }
-
     // Semantic gate: ALL_COMPLETE.json must prove every challenge is_completed.
     for (const p of normalized) {
       if (!/(^|\/)ALL_COMPLETE\.json$/i.test(p)) continue;
-      const verdict = validateAllCompleteEvidence(join(this.evidenceDir, p));
+      const verdict = validateAllCompleteEvidence(this.evidenceDir, p);
       if (verdict) return { ok: false, reason: verdict };
     }
 
-    const assertedAt = this.now();
-    this.db
-      .prepare(
-        `UPDATE goals
-         SET passes = 1, evidence_paths_json = ?, asserted_at = ?
-         WHERE task_id = ? AND id = ?`,
-      )
-      .run(JSON.stringify(normalized), assertedAt, taskId, goalId);
-
-    const updated = this.listGoals(taskId).find((g) => g.id === goalId)!;
-    this.emit(taskId, "goal_asserted", { goalId, evidencePaths: normalized });
-    return { ok: true, goal: updated };
+    this.db.exec("BEGIN");
+    try {
+      const result = this.db
+        .prepare(
+          `UPDATE goals
+           SET passes = 1, evidence_paths_json = ?, asserted_at = ?
+           WHERE task_id = ? AND id = ? AND passes = 0`,
+        )
+        .run(JSON.stringify(normalized), this.now(), taskId, goalId);
+      if (result.changes) {
+        this.emit(taskId, "goal_asserted", { goalId, evidencePaths: normalized });
+      }
+      const updated = this.listGoals(taskId).find((g) => g.id === goalId);
+      this.db.exec("COMMIT");
+      return updated ? { ok: true, goal: updated } : { ok: false, reason: `unknown goal: ${goalId}` };
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   allGoalsPass(taskId: string): boolean {
@@ -1333,12 +1342,12 @@ export class HistoryStore {
 }
 
 /** Validate board-clearance evidence used by autonomous TSecBench goals. */
-export function validateAllCompleteEvidence(absPath: string): string | null {
+export function validateAllCompleteEvidence(evidenceDir: string, path: string): string | null {
   let raw: string;
   try {
-    raw = readFileSync(absPath, "utf8");
+    raw = readEvidenceFile(evidenceDir, path);
   } catch {
-    return `cannot read ALL_COMPLETE evidence: ${absPath}`;
+    return `cannot read ALL_COMPLETE evidence: ${path}`;
   }
   let data: unknown;
   try {

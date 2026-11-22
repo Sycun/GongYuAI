@@ -13,7 +13,7 @@ export function runCliTool(
 ): { exitCode: number; stdout: string; stderr: string; evidencePath: string } {
   const quoted = opts.args.map((a) => JSON.stringify(a)).join(" ");
   const cmd = `${opts.binary} ${quoted}`;
-  const result = spawnSync("bash", ["-lc", cmd], {
+  const result = spawnSync(opts.binary, opts.args, {
     cwd: ctx.manifest.workspaceDir,
     encoding: "utf8",
     timeout: opts.timeoutMs ?? 180_000,

@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   AddAssetCollectorSchema,
@@ -8,13 +8,15 @@ import {
   AssetCollectorPatchSchema,
   CreateHintRequestSchema,
   CreateTaskRequestSchema,
+  isActiveTaskStatus,
+  isTerminalTaskStatus,
   ImportSkillSchema,
   ModelSettingsPatchSchema,
   ToggleToolsItemSchema,
   ToolsSettingsPatchSchema,
   UpdateSettingsPatchSchema,
 } from "@gongyuai/contracts";
-import { openHistory } from "@gongyuai/history";
+import { listEvidenceFiles, openHistory, readEvidenceFile, resolveEvidenceFile } from "@gongyuai/history";
 import { taskPaths } from "./paths.js";
 import { readCheckpointGraph, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
@@ -458,37 +460,28 @@ export function startControlServer(opts: ServerOptions) {
           }
         }
         if (method === "GET" && rest === "/evidence") {
-          const paths = taskPaths(task.dataDir);
-          const files: Array<{ path: string; size: number; mtime: string }> = [];
-          const walk = (dir: string) => {
-            if (!existsSync(dir)) return;
-            for (const name of readdirSync(dir)) {
-              const abs = join(dir, name);
-              const st = statSync(abs);
-              if (st.isDirectory()) walk(abs);
-              else {
-                files.push({
-                  path: relative(paths.evidenceDir, abs).replace(/\\/g, "/"),
-                  size: st.size,
-                  mtime: st.mtime.toISOString(),
-                });
-              }
+          const { evidenceDir } = taskPaths(task.dataDir);
+          const files = listEvidenceFiles(evidenceDir).flatMap((path) => {
+            try {
+              const { stat } = resolveEvidenceFile(evidenceDir, path);
+              return [{ path, size: stat.size, mtime: stat.mtime.toISOString() }];
+            } catch {
+              return [];
             }
-          };
-          walk(paths.evidenceDir);
+          });
           return send(res, 200, { files });
         }
         if (method === "GET" && rest.startsWith("/evidence/file")) {
-          const rel = url.searchParams.get("path") ?? "";
-          if (!rel || rel.includes("..")) return send(res, 400, { error: "bad path" });
-          const paths = taskPaths(task.dataDir);
-          const abs = join(paths.evidenceDir, rel);
-          if (!abs.startsWith(paths.evidenceDir) || !existsSync(abs)) {
+          const rel = url.searchParams.get("path");
+          if (!rel) return send(res, 400, { error: "bad path" });
+          let content: string;
+          try {
+            content = readEvidenceFile(taskPaths(task.dataDir).evidenceDir, rel);
+          } catch {
             return send(res, 404, { error: "not found" });
           }
-          const text = readFileSync(abs, "utf8");
           res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-          res.end(text);
+          res.end(content);
           return;
         }
         if (method === "GET" && rest === "/runtime") {
@@ -549,38 +542,28 @@ export function startControlServer(opts: ServerOptions) {
           ) {
             store.save(task);
           }
-          let workerStatus: unknown = null;
+          let workerSnapshot: Record<string, unknown> = {};
           if (existsSync(statusPath)) {
             try {
-              workerStatus = JSON.parse(readFileSync(statusPath, "utf8"));
+              const parsed: unknown = JSON.parse(readFileSync(statusPath, "utf8"));
+              if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                workerSnapshot = parsed as Record<string, unknown>;
+              }
             } catch {
               /* ignore */
             }
           }
-          // Surface merged counters on workerStatus so Live pane matches Budget.
-          if (workerStatus && typeof workerStatus === "object") {
-            workerStatus = {
-              ...(workerStatus as Record<string, unknown>),
-              usage: mergedUsage,
-              phase:
-                (workerStatus as { phase?: string }).phase ??
-                checkpointGraph.phase,
-              activeIntentId:
-                (workerStatus as { activeIntentId?: string | null })
-                  .activeIntentId ?? checkpointGraph.activeIntentId,
-              updatedAt:
-                (workerStatus as { updatedAt?: string }).updatedAt ??
-                new Date().toISOString(),
-            };
-          } else {
-            workerStatus = {
-              status: task.status,
-              usage: mergedUsage,
-              phase: checkpointGraph.phase,
-              activeIntentId: checkpointGraph.activeIntentId,
-              updatedAt: new Date().toISOString(),
-            };
-          }
+          const terminal = isTerminalTaskStatus(task.status);
+          const workerStatus = {
+            ...workerSnapshot,
+            status: terminal ? task.status : workerSnapshot.status ?? task.status,
+            error: terminal ? task.error : workerSnapshot.error,
+            usage: mergedUsage,
+            phase: workerSnapshot.phase ?? checkpointGraph.phase,
+            activeIntentId: terminal ? null
+              : "activeIntentId" in workerSnapshot ? workerSnapshot.activeIntentId : checkpointGraph.activeIntentId,
+            updatedAt: (terminal ? task.finishedAt : workerSnapshot.updatedAt) ?? task.updatedAt,
+          };
           return send(res, 200, {
             leaseOwner: task.leaseOwner,
             leaseUntil: task.leaseUntil,
@@ -612,9 +595,7 @@ export function startControlServer(opts: ServerOptions) {
           total: visible.length,
           archived: tasks.length - visible.length,
           byStatus,
-          active: visible.filter((t) =>
-            ["queued", "initializing", "running", "recovering"].includes(t.status),
-          ).length,
+          active: visible.filter((task) => isActiveTaskStatus(task.status)).length,
           recent: visible.slice(-8).reverse(),
         });
       }

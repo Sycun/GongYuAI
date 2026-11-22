@@ -104,7 +104,7 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     server,
     url: server.url,
     async close() {
-      watchdog.stop();
+      await watchdog.stop();
       await server.close();
       store.close();
     },

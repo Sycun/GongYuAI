@@ -3,11 +3,10 @@
  * Results are written through History.recordAsset (same inventory as console).
  */
 import {
-  isBudgetHit,
   type WorkerAssetCollector,
   type WorkerManifest,
 } from "@gongyuai/contracts";
-import { writeEvidence, type ToolContext } from "./tools.js";
+import { assertCapabilityAllows, chargeToolCall, gateTool, writeEvidence, type ToolContext } from "./tools.js";
 
 export type AssetSearchHit = {
   address: string;
@@ -307,20 +306,20 @@ export async function runAssetSearch(
     intentId?: string | null;
   },
 ): Promise<AssetSearchResult> {
-  const collectors = listReadyCollectors(ctx.manifest);
-  const c = collectors.find((x) => x.id === args.collectorId);
-  if (!c) {
-    const available = collectors.map((x) => x.id).join(", ") || "（无）";
-    throw new Error(`收集器不可用: ${args.collectorId}；已启用: ${available}`);
-  }
   const query = (args.query ?? "").trim();
-  if (!query) throw new Error("query 不能为空");
   const size = args.size ?? 50;
-
-  ctx.usage.toolCalls += 1;
-  if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
-    throw new Error("maxToolCalls exceeded");
-  }
+  const c = gateTool(ctx, "asset_search", () => {
+    assertCapabilityAllows(ctx.manifest, "asset_search");
+    const collectors = listReadyCollectors(ctx.manifest);
+    const collector = collectors.find((x) => x.id === args.collectorId);
+    if (!collector) {
+      const available = collectors.map((x) => x.id).join(", ") || "（无）";
+      throw new Error(`收集器不可用: ${args.collectorId}；已启用: ${available}`);
+    }
+    if (!query) throw new Error("query 不能为空");
+    chargeToolCall(ctx);
+    return collector;
+  }, { collectorId: args.collectorId });
 
   let hits: AssetSearchHit[] = [];
   let totalHint: number | null = null;

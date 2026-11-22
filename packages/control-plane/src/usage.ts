@@ -10,50 +10,32 @@ export type UsageCounters = {
   installs: number;
 };
 
-type UsageSlice = {
-  tokens?: number;
-  toolCalls?: number;
-  installs?: number;
-};
+type UsageSlice = Partial<UsageCounters>;
+
+const emptyUsage: UsageCounters = { tokens: 0, toolCalls: 0, installs: 0 };
+
+function counter(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
 
 function maxUsage(a: UsageCounters, b: UsageSlice | null | undefined): UsageCounters {
   return {
-    tokens: Math.max(a.tokens, b?.tokens ?? 0),
-    toolCalls: Math.max(a.toolCalls, b?.toolCalls ?? 0),
-    installs: Math.max(a.installs, b?.installs ?? 0),
+    tokens: Math.max(counter(a.tokens), counter(b?.tokens)),
+    toolCalls: Math.max(counter(a.toolCalls), counter(b?.toolCalls)),
+    installs: Math.max(counter(a.installs), counter(b?.installs)),
   };
 }
 
-function readWorkerStatusUsage(dataDir: string): UsageSlice | null {
-  const files: string[] = [];
+function readWorkerStatusUsage(path: string): UsageSlice | null {
   try {
-    for (const name of readdirSync(dataDir)) {
-      if (/^worker-status(-w\d+)?\.json$/.test(name)) {
-        files.push(join(dataDir, name));
-      }
-    }
+    const raw = JSON.parse(readFileSync(path, "utf8")) as { usage?: UsageSlice };
+    return raw?.usage ?? null;
   } catch {
-    /* empty */
+    return null;
   }
-  const legacy = join(dataDir, "worker-status.json");
-  if (!files.length && existsSync(legacy)) files.push(legacy);
-  if (!files.length) return null;
-
-  let out: UsageCounters = { tokens: 0, toolCalls: 0, installs: 0 };
-  for (const path of files) {
-    try {
-      const raw = JSON.parse(readFileSync(path, "utf8")) as { usage?: UsageSlice };
-      out = maxUsage(out, raw.usage);
-    } catch {
-      /* ignore corrupt */
-    }
-  }
-  return out;
 }
 
-function readCheckpointJson(dataDir: string): Record<string, unknown> | null {
-  const paths = taskPaths(dataDir);
-  const ckptPath = `${paths.durableDb}.ckpt.sqlite`;
+function readCheckpointJson(ckptPath: string): Record<string, unknown> | null {
   if (!existsSync(ckptPath)) return null;
   try {
     const db = new DatabaseSync(ckptPath, { readOnly: true });
@@ -72,16 +54,12 @@ function readCheckpointJson(dataDir: string): Record<string, unknown> | null {
   }
 }
 
-function readCheckpointUsage(dataDir: string): UsageSlice | null {
-  return readCheckpointJson(dataDir) as UsageSlice | null;
-}
-
 /** Graph phase + active Intent from Durable checkpoint (Mission Control Live). */
 export function readCheckpointGraph(dataDir: string): {
   phase: string | null;
   activeIntentId: string | null;
 } {
-  const raw = readCheckpointJson(dataDir);
+  const raw = readCheckpointJson(`${taskPaths(dataDir).durableDb}.ckpt.sqlite`);
   if (!raw) return { phase: null, activeIntentId: null };
   return {
     phase: typeof raw.phase === "string" ? raw.phase : null,
@@ -90,15 +68,36 @@ export function readCheckpointGraph(dataDir: string): {
   };
 }
 
-/** Merge task.usage with on-disk worker-status + durable checkpoint. */
+/** Merge each slot's two snapshots, then add the independent slot totals. */
 export function mergeUsageFromDisk(
   dataDir: string,
   current: UsageCounters,
 ): UsageCounters {
-  let merged = { ...current };
-  merged = maxUsage(merged, readWorkerStatusUsage(dataDir));
-  merged = maxUsage(merged, readCheckpointUsage(dataDir));
-  return merged;
+  let files: string[];
+  try {
+    files = readdirSync(dataDir);
+  } catch {
+    return current;
+  }
+  const slots = new Map<number, UsageCounters>();
+  for (const name of files) {
+    const status = /^worker-status(?:-w(\d+))?\.json$/.exec(name);
+    const checkpoint = /^durable(?:-w(\d+))?\.sqlite\.ckpt\.sqlite$/.exec(name);
+    const match = status ?? checkpoint;
+    if (!match) continue;
+    const slot = Number(match[1] ?? 0);
+    const path = join(dataDir, name);
+    const usage = status ? readWorkerStatusUsage(path) : readCheckpointJson(path);
+    slots.set(slot, maxUsage(slots.get(slot) ?? emptyUsage, usage));
+  }
+
+  const total = { ...emptyUsage };
+  for (const slot of slots.values()) {
+    total.tokens += slot.tokens;
+    total.toolCalls += slot.toolCalls;
+    total.installs += slot.installs;
+  }
+  return maxUsage(current, total);
 }
 
 /** Refresh and persist usage on a task record when counters advanced. */

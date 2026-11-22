@@ -12,23 +12,17 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import {
   BUDGET_UNLIMITED,
+  isActiveTaskStatus,
+  isTerminalTaskStatus,
   resolveExploreWorkerCount,
   type TaskRecord,
+  type TerminalTaskStatus,
   type WorkerManifest,
 } from "@gongyuai/contracts";
-import { openHistory } from "@gongyuai/history";
+import { openHistory, writeTaskReport } from "@gongyuai/history";
 import { durableDbForSlot, manifestPathForSlot, taskPaths } from "./paths.js";
 import type { ControlStore } from "./store.js";
 import type { SettingsStore } from "./settings.js";
-
-const TERMINAL = new Set([
-  "stopped",
-  "failed",
-  "completed",
-  "budget_exhausted",
-  "incomplete",
-]);
-const ACTIVE = new Set(["queued", "initializing", "running", "recovering"]);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");
@@ -114,11 +108,11 @@ export class WorkerRunner {
     const task = this.store.get(taskId);
     if (!task) throw new Error(`task not found: ${taskId}`);
 
-    if (ACTIVE.has(task.status) && this.isAlive(task)) {
+    if (this.isAlive(task)) {
       throw new Error("任务已在运行中");
     }
 
-    if (TERMINAL.has(task.status) || !ACTIVE.has(task.status)) {
+    if (!isActiveTaskStatus(task.status)) {
       this.prepareRestart(task);
     }
 
@@ -237,13 +231,6 @@ export class WorkerRunner {
     slots.set(slot, child);
   }
 
-  private untrackChild(taskId: string, slot: number): void {
-    const slots = this.children.get(taskId);
-    if (!slots) return;
-    slots.delete(slot);
-    if (slots.size === 0) this.children.delete(taskId);
-  }
-
   private startLocal(task: TaskRecord, workerCount: number): TaskRecord {
     const entry = this.workerEntry();
     const pids: number[] = [];
@@ -279,12 +266,12 @@ export class WorkerRunner {
 
       const capturedSlot = slot;
       child.on("exit", (code) => {
-        this.untrackChild(task.id, capturedSlot);
+        const slots = this.children.get(task.id);
+        if (slots?.get(capturedSlot) !== child) return;
+        slots.delete(capturedSlot);
+        if (slots.size === 0) this.children.delete(task.id);
         const latest = this.store.get(task.id);
-        if (!latest) return;
-        if (["completed", "failed", "budget_exhausted", "stopped"].includes(latest.status)) {
-          return;
-        }
+        if (!latest || latest.fence !== task.fence || isTerminalTaskStatus(latest.status)) return;
         // Only mark recovering when the whole pool is dead; watchdog will restart.
         if (!this.isAlive(latest)) {
           latest.status = "recovering";
@@ -376,59 +363,83 @@ export class WorkerRunner {
     return task;
   }
 
-  async stop(taskId: string): Promise<TaskRecord | null> {
-    const task = this.store.get(taskId);
-    if (!task) return null;
-
-    if (TERMINAL.has(task.status)) {
-      return task;
-    }
-
+  private stopWorkers(task: TaskRecord): void {
+    const taskId = task.id;
     const locals = this.children.get(taskId);
-    if (locals) {
-      for (const child of locals.values()) {
-        if (!child.pid) continue;
+    const localPids = new Set(Array.from(locals?.values() ?? [], (child) => child.pid));
+    const pids = new Set(task.workerPids?.length
+      ? task.workerPids
+      : task.workerPid ? [task.workerPid] : []);
+    for (const pid of localPids) if (pid) pids.add(pid);
+    for (const pid of pids) {
+      // A tracked detached child owns its own process group.
+      if (localPids.has(pid)) {
         try {
-          process.kill(-child.pid, "SIGTERM");
-        } catch {
-          try {
-            process.kill(child.pid, "SIGTERM");
-          } catch {
-            /* ignore */
-          }
+          process.kill(-pid, "SIGTERM");
+          continue;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ESRCH") throw err;
         }
       }
-      this.children.delete(taskId);
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ESRCH") throw err;
+      }
     }
 
     const containers =
       task.containerIds?.length ? task.containerIds : task.containerId ? [task.containerId] : [];
     for (const id of containers) {
-      spawnSync("docker", ["rm", "-f", id], { encoding: "utf8" });
-    }
-
-    const pids = task.workerPids?.length
-      ? task.workerPids
-      : task.workerPid
-        ? [task.workerPid]
-        : [];
-    for (const pid of pids) {
-      try {
-        process.kill(pid, "SIGTERM");
-      } catch {
-        /* already gone */
+      const result = spawnSync("docker", ["rm", "-f", id], { encoding: "utf8" });
+      if (result.status !== 0 && !/no such container/i.test(result.stderr ?? "")) {
+        throw new Error(`failed to stop worker container ${id}: ${result.error?.message ?? result.stderr}`);
       }
     }
+    this.children.delete(taskId);
+  }
 
-    const stopped = this.store.setStatus(taskId, "stopped");
-    if (stopped) {
-      stopped.workerPid = null;
-      stopped.workerPids = [];
-      stopped.containerId = null;
-      stopped.containerIds = [];
-      this.store.save(stopped);
+  finishWorkerRun(task: TaskRecord, status: TerminalTaskStatus, error: string | null): TaskRecord {
+    this.stopWorkers(task);
+    return this.store.finishTask(task, status, error);
+  }
+
+  async stop(taskId: string, cause: "operator" | "wall-timeout" = "operator"): Promise<TaskRecord | null> {
+    const task = this.store.get(taskId);
+    if (!task) return null;
+    if (isTerminalTaskStatus(task.status)) {
+      if (task.workerPid || task.workerPids.length || task.containerId || task.containerIds.length) {
+        return this.finishWorkerRun(task, task.status, task.error);
+      }
+      return task;
     }
-    return stopped;
+    this.stopWorkers(task);
+
+    let status: "stopped" | "budget_exhausted" | "failed" = "stopped";
+    let error: string | null = null;
+    if (cause === "wall-timeout") {
+      const reason = "maxWallMs exceeded";
+      status = "budget_exhausted";
+      error = reason;
+      const paths = taskPaths(task.dataDir);
+      try {
+        const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+        try {
+          history.seedGoals(taskId, task.goals);
+          task.goals = history.listGoals(taskId);
+          writeTaskReport({ taskId, dataDir: task.dataDir, auth: task.auth }, history, {
+            status,
+            reason,
+          });
+        } finally {
+          history.close();
+        }
+      } catch (err) {
+        status = "failed";
+        error = `${reason}; report finalization failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+    return this.store.finishTask(task, status, error);
   }
 
   isAlive(task: TaskRecord): boolean {

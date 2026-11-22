@@ -1,10 +1,11 @@
 import {
-  isBudgetHit,
+  isIpv4Cidr,
+  targetAllows,
   type WorkerManifest,
   type WorkerMcpServer,
 } from "@gongyuai/contracts";
 import type { ToolContext } from "../tools.js";
-import { appendProgress } from "../tools.js";
+import { appendProgress, assertCapabilityAllows, chargeToolCall, gateTool, mcpActionForServer } from "../tools.js";
 import { loadToolsRuntime, saveToolsRuntime } from "../tools-runtime.js";
 import { createBuiltinFromRoot } from "./builtin/from-manifest.js";
 import { openHttpSession } from "./http-session.js";
@@ -53,7 +54,13 @@ export async function openMcpHub(
     ...(runtime?.mcpEnabledIds ?? []),
   ]);
 
-  async function attach(cfg: WorkerMcpServer): Promise<string> {
+  async function attach(id: string): Promise<string> {
+    const cfg = gateTool(ctx, "enable_mcp", () => {
+      const server = pool.get(id);
+      if (!server) throw new Error(`未知 MCP id：${id}（不在 mcpPool/目录中）`);
+      assertCapabilityAllows(manifest, mcpActionForServer(id));
+      return server;
+    }, { serverId: id });
     if (sessions.has(cfg.id)) {
       enabled.add(cfg.id);
       return `MCP ${cfg.id} 已启用`;
@@ -119,10 +126,8 @@ export async function openMcpHub(
   }
 
   for (const id of initialIds) {
-    const cfg = pool.get(id);
-    if (!cfg) continue;
     try {
-      const msg = await attach(cfg);
+      const msg = await attach(id);
       if (msg.includes("无法")) {
         appendProgress(manifest.workspaceDir, msg);
       }
@@ -135,18 +140,40 @@ export async function openMcpHub(
   }
   persist();
 
+  async function invoke(serverId: string, toolName: string, args: Record<string, unknown>) {
+    const session = gateTool(ctx, "mcp", () => {
+      assertCapabilityAllows(manifest, mcpActionForServer(serverId));
+      if (!enabled.has(serverId)) {
+        throw new Error(`MCP 未启用: ${serverId}。先调用 enable_mcp。`);
+      }
+      const active = sessions.get(serverId);
+      if (!active) throw new Error(`MCP 会话丢失: ${serverId}`);
+      if (!openaiTools.some((tool) => tool.function.name === mcpToolName(serverId, toolName))) {
+        throw new Error(`未知 MCP 工具: ${serverId}/${toolName}`);
+      }
+      const builtin = pool.get(serverId)?.transport === "builtin";
+      if (builtin || typeof args.target === "string") {
+        const target = typeof args.target === "string" ? args.target.trim() : "";
+        const { targets, outOfScope } = manifest.auth;
+        const allowed = isIpv4Cidr(target)
+          ? targets.includes(target) && !outOfScope?.length && targetAllows(targets, target)
+          : target && !/\s|\*/.test(target) && targetAllows(targets, target, outOfScope);
+        if (!allowed) throw new Error("denied: MCP target is outside the authorized scope");
+      }
+      chargeToolCall(ctx);
+      return active;
+    }, { serverId, toolName });
+    const result = await session.callTool(toolName, args);
+    return result.text.slice(0, 12_000);
+  }
+
   return {
     openaiTools,
     promptLines,
     catalogLines,
     enabledIds: () => [...enabled],
     async enable(id, reason) {
-      const cfg = pool.get(id);
-      if (!cfg) return `未知 MCP id：${id}（不在 mcpPool/目录中）`;
-      if (enabled.has(id) && sessions.has(id)) {
-        return `MCP ${id} 已处于启用状态`;
-      }
-      const msg = await attach(cfg);
+      const msg = await attach(id);
       persist();
       appendProgress(manifest.workspaceDir, `enable_mcp ${id} · ${reason.slice(0, 120)}`);
       ctx.history.appendFact({
@@ -190,32 +217,14 @@ export async function openMcpHub(
     },
     async call(fullName, args) {
       const parsed = parseMcpToolName(fullName);
-      if (!parsed) return `不是 MCP 工具: ${fullName}`;
-      if (!enabled.has(parsed.serverId)) {
-        return `MCP 未启用: ${parsed.serverId}。先调用 enable_mcp。`;
+      if (!parsed) {
+        return gateTool(ctx, "mcp", () => {
+          throw new Error(`不是 MCP 工具: ${fullName}`);
+        });
       }
-      const session = sessions.get(parsed.serverId);
-      if (!session) return `MCP 会话丢失: ${parsed.serverId}`;
-      ctx.usage.toolCalls += 1;
-      if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
-        throw new Error("maxToolCalls exceeded");
-      }
-      const r = await session.callTool(parsed.toolName, args);
-      return r.text.slice(0, 12_000);
+      return invoke(parsed.serverId, parsed.toolName, args);
     },
-    async invoke(serverId, toolName, args) {
-      if (!enabled.has(serverId)) {
-        return `MCP 未启用: ${serverId}。先调用 enable_mcp。`;
-      }
-      const session = sessions.get(serverId);
-      if (!session) return `MCP 会话丢失: ${serverId}`;
-      ctx.usage.toolCalls += 1;
-      if (isBudgetHit(ctx.usage.toolCalls, ctx.manifest.budget.maxToolCalls)) {
-        throw new Error("maxToolCalls exceeded");
-      }
-      const r = await session.callTool(toolName, args);
-      return r.text.slice(0, 12_000);
-    },
+    invoke,
     async close() {
       for (const s of sessions.values()) {
         try {

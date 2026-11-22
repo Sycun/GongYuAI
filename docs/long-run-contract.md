@@ -55,7 +55,7 @@ After crash, resume from last phase (`init → loop → report → done`)。
 幂等：
 
 - Intent claim = compare-and-swap on `proposed`。
-- Goal assert sticky（`passes` 永不回退）。
+- Goal assert sticky（`passes` 永不回退）。重新初始化目标只补缺失记录，首次通过时的证据路径和审计事件保留。
 - Facts append-only。
 
 ### 禁止无因探索
@@ -79,7 +79,7 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 `assertGoal(goalId, paths)` succeeds only when:
 
 1. Each `evidencePatterns` entry matches at least one provided relative path.
-2. Every provided path exists under `evidence/`.
+2. Every provided path is relative to `evidence/` and resolves to a regular file there. Parent traversal, symbolic links and hard-linked files are rejected. The same boundary applies to Worker evidence writes and console reads.
 3. If a path is `**/ALL_COMPLETE.json`, the JSON must be a non-empty challenge array and **every** `is_completed` must be `true`（TSecBench 清板）。
 
 No file ⇒ no pass. Model self-report / verbal DONE is insufficient.
@@ -169,14 +169,14 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 - `incomplete` when the loop ended without all goals **and** without hitting a gate; Pi path **re-kicks** while goals remain.
 - `failed` / `stopped` for errors / operator stop.
 - 重启任务必须重置 `startedAt`，并把预算恢复为 unlimited（避免旧墙钟秒杀）。
-- **预算尽仍出报告（P5）**：硬闸或 incomplete 收卷仍落盘 `report.md`，禁止静默退出无报告。
+- **预算尽仍出报告（P5）**：硬闸或 incomplete 收卷仍落盘 `report.md`。控制面墙钟截止时停止 Worker，用当前 History 写报告，再发布 `budget_exhausted`。如果收卷写盘失败，任务记为 `failed` 并保留错误原因。
 - Tool results are truncated for the chat buffer；权威细节在 evidence + History。
 - Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`.
 
 ## Tool single gate（P5）
 
-- Worker 侧工具执行经**统一入口**（现有 `runTool` / 等价分发）：能力阶梯、禁主机网络变更、预算计数、结果截断、History 审计事件同一路径完成。
-- 拒绝（缺权 / 策略 / 预算）也写审计事件，禁止旁路 `exec` 绕过入口。
+- Worker 的 shell、安装、资产收集和 MCP 通过 `gateTool` 记录调度前的 `tool_gate` 判定。判定覆盖能力阶梯、各工具的授权检查和适用的预算。相位拒绝也写同类事件。
+- MCP 初始化和启用应用同一能力策略。直接调用与别名调用共享启用状态、工具注册、显式目标及预算检查。外部适配器需要对其自身的网络动作落实隔离和授权。
 - 不引入第二套审批产品面；人工 `ask` 闸属后续可选，非本刀。
 
 ## Auth capability ladder
@@ -188,7 +188,7 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 | 级别 | 允许 |
 | --- | --- |
 | observe | History / evidence / assert / relay；无 shell / install / MCP |
-| scan | + shell、install、recon 类 MCP（nmap/httpx/…） |
+| scan | + shell、install、asset_search、recon 类 MCP（nmap/httpx/…） |
 | active-lab | + 主动利用类 MCP |
 | full | 全部 Worker 工具面（仍禁主机 VPN/代理变更） |
 

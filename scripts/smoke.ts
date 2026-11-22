@@ -1,13 +1,81 @@
 /**
  * End-to-end smoke: mock worker closed loop + crash recovery.
  */
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bootControlPlane } from "@gongyuai/control-plane";
 
 async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
+}
+
+async function checkWallTimeout(url: string, goals: unknown) {
+  const response = await fetch(`${url}/tasks`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      name: "smoke-wall-timeout",
+      mock: true,
+      auth: {
+        authorizationNote: "Local mock for deadline and evidence API",
+        targets: ["example.invalid"],
+        capability: "observe",
+      },
+      goals,
+      // Watchdog expires while the mock worker is in its scripted pause.
+      budget: { maxWallMs: 300 },
+    }),
+  });
+  if (!response.ok) throw new Error(await response.text());
+  const { task } = await response.json() as { task: { id: string; dataDir: string } };
+  const taskUrl = `${url}/tasks/${task.id}`;
+  const evidenceDir = join(task.dataDir, "evidence");
+  const fixture = join(task.dataDir, "outside-fixture.txt");
+  writeFileSync(fixture, "outside fixture");
+  symlinkSync(fixture, join(evidenceDir, "outside-link.txt"));
+  writeFileSync(join(evidenceDir, "inside.txt"), "inside fixture");
+  const inside = await fetch(`${taskUrl}/evidence/file?path=inside.txt`);
+  if (!inside.ok || await inside.text() !== "inside fixture") {
+    throw new Error("valid evidence unavailable from API");
+  }
+  const denied = await fetch(`${taskUrl}/evidence/file?path=outside-link.txt`);
+  if (denied.status !== 404) throw new Error("evidence API did not reject a symbolic link");
+  const listed = await (await fetch(`${taskUrl}/evidence`)).json() as {
+    files: Array<{ path: string }>;
+  };
+  if (listed.files.some((file) => file.path === "outside-link.txt")) {
+    throw new Error("evidence API listed a symbolic link");
+  }
+
+  for (let i = 0; i < 50; i++) {
+    const result = await (await fetch(taskUrl)).json() as { task: { status: string; error: string } };
+    if (result.task.status === "budget_exhausted") {
+      const report = await (await fetch(`${taskUrl}/report`)).text();
+      if (!report.includes("Status: budget_exhausted") ||
+          !report.includes("Reason: maxWallMs exceeded") ||
+          !report.includes("## History overview")) {
+        throw new Error("wall timeout did not publish the terminal report");
+      }
+      const history = await (await fetch(`${taskUrl}/history`)).json() as {
+        events: Array<{ kind: string }>;
+      };
+      if (history.events.filter((event) => event.kind === "report_written").length !== 1) {
+        throw new Error("wall timeout did not record exactly one report");
+      }
+      const runtime = await (await fetch(`${taskUrl}/runtime`)).json() as {
+        workerStatus: { status: string; activeIntentId: string | null };
+      };
+      if (runtime.workerStatus.status !== "budget_exhausted" || runtime.workerStatus.activeIntentId !== null) {
+        throw new Error("runtime exposes stale worker state after the wall timeout");
+      }
+      console.log("[smoke] wall timeout and evidence boundary PASS");
+      return;
+    }
+    if (result.task.status === "failed") throw new Error(result.task.error);
+    await sleep(200);
+  }
+  throw new Error("wall timeout task did not finish");
 }
 
 async function main() {
@@ -60,7 +128,7 @@ async function main() {
       mock: true,
       auth: {
         authorizationNote: "Written authorization: local smoke target owned by operator",
-        targets: ["https://example.com"],
+        targets: ["example.invalid"],
         outOfScope: [],
         capability: "full",
       },
@@ -124,6 +192,7 @@ async function main() {
       if (final !== "completed") {
         throw new Error(`expected completed, got ${final}`);
       }
+      await checkWallTimeout(plane.url, JSON.parse(readFileSync(goalsPath, "utf8")));
       console.log("[smoke] PASS");
       console.log(report.slice(0, 800));
       await plane.close();

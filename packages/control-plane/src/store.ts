@@ -5,9 +5,11 @@ import { DatabaseSync } from "node:sqlite";
 import {
   ExecutionConfigSchema,
   goalsFromSpecs,
+  isActiveTaskStatus,
+  isTerminalTaskStatus,
   type CreateTaskRequest,
   type TaskRecord,
-  type TaskStatus,
+  type TerminalTaskStatus,
 } from "@gongyuai/contracts";
 import { taskDataDir, taskPaths } from "./paths.js";
 
@@ -99,19 +101,11 @@ export class ControlStore {
     return record;
   }
 
-  private static readonly TERMINAL = new Set<TaskStatus>([
-    "completed",
-    "failed",
-    "budget_exhausted",
-    "incomplete",
-    "stopped",
-  ]);
-
   setArchived(taskId: string, archived: boolean): TaskRecord | null {
     const t = this.get(taskId);
     if (!t) return null;
     if (archived) {
-      if (!ControlStore.TERMINAL.has(t.status)) {
+      if (!isTerminalTaskStatus(t.status)) {
         throw new Error("仅终态任务可归档");
       }
       if (!t.archivedAt) t.archivedAt = this.now();
@@ -137,24 +131,18 @@ export class ControlStore {
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  setStatus(taskId: string, status: TaskStatus, error: string | null = null): TaskRecord | null {
-    const t = this.get(taskId);
-    if (!t) return null;
-    t.status = status;
-    t.error = error;
-    if (
-      status === "completed" ||
-      status === "failed" ||
-      status === "budget_exhausted" ||
-      status === "incomplete" ||
-      status === "stopped"
-    ) {
-      t.finishedAt = this.now();
-      t.leaseOwner = null;
-      t.leaseUntil = null;
-    }
-    this.save(t);
-    return t;
+  finishTask(task: TaskRecord, status: TerminalTaskStatus, error: string | null): TaskRecord {
+    task.status = status;
+    task.error = error;
+    task.finishedAt ??= this.now();
+    task.leaseOwner = null;
+    task.leaseUntil = null;
+    task.workerPid = null;
+    task.workerPids = [];
+    task.containerId = null;
+    task.containerIds = [];
+    this.save(task);
+    return task;
   }
 
   acquireLease(
@@ -186,8 +174,6 @@ export class ControlStore {
   }
 
   activeTasks(): TaskRecord[] {
-    return this.list().filter((t) =>
-      ["queued", "initializing", "running", "recovering"].includes(t.status),
-    );
+    return this.list().filter((task) => isActiveTaskStatus(task.status));
   }
 }

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import {
   BUDGET_UNLIMITED,
   CreateTaskRequestSchema,
+  isTerminalTaskStatus,
 } from "@gongyuai/contracts";
 import {
   bootControlPlane,
@@ -205,15 +206,7 @@ async function main(): Promise<void> {
           const st = await api(opts, "GET", `/tasks/${task.id}`);
           const t = (st.json as { task: { id: string; status: string } }).task;
           process.stderr.write(`\r[gy] status=${t.status}   `);
-          if (
-            [
-              "completed",
-              "failed",
-              "budget_exhausted",
-              "incomplete",
-              "stopped",
-            ].includes(t.status)
-          ) {
+          if (isTerminalTaskStatus(t.status)) {
             console.log();
             console.log(JSON.stringify(t, null, 2));
             break;

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -83,5 +83,33 @@ describe("mergeUsageFromDisk", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("merges each slot before summing the pool and preserves persisted totals", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "gy-usage-pool-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    for (const [name, usage] of [
+      ["worker-status.json", { tokens: 30, toolCalls: 4, installs: 1 }],
+      ["worker-status-w1.json", { tokens: 20, toolCalls: 4, installs: 0 }],
+    ] as const) {
+      writeFileSync(join(dir, name), JSON.stringify({ usage }));
+    }
+    const db = new DatabaseSync(join(dir, "durable-w1.sqlite.ckpt.sqlite"));
+    try {
+      db.exec("CREATE TABLE checkpoint (id INTEGER PRIMARY KEY, json TEXT NOT NULL)");
+      db.prepare("INSERT INTO checkpoint VALUES (1, ?)").run(
+        JSON.stringify({ tokens: 25, toolCalls: 1, installs: 1 }),
+      );
+    } finally {
+      db.close();
+    }
+    assert.deepEqual(
+      mergeUsageFromDisk(dir, { tokens: 0, toolCalls: 0, installs: 0 }),
+      { tokens: 55, toolCalls: 8, installs: 2 },
+    );
+    assert.deepEqual(
+      mergeUsageFromDisk(dir, { tokens: 70, toolCalls: 6, installs: 5 }),
+      { tokens: 70, toolCalls: 8, installs: 5 },
+    );
   });
 });

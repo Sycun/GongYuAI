@@ -3,11 +3,8 @@
  * Used by `pnpm diff-harness` as the harness-gain control (GY_HARNESS=bare).
  */
 import {
-  existsSync,
   mkdirSync,
-  readdirSync,
   writeFileSync,
-  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import {
@@ -16,38 +13,26 @@ import {
   type GoalSpec,
   type WorkerManifest,
 } from "@gongyuai/contracts";
-import { minimatch, validateAllCompleteEvidence } from "@gongyuai/history";
+import { listEvidenceFiles, minimatch, resolveEvidenceFile, validateAllCompleteEvidence } from "@gongyuai/history";
 import { CheckpointStore } from "./checkpoint.js";
 import { appendProgress, runShell, writeEvidence, type ToolContext } from "./tools.js";
 import { writeWorkerStatus } from "./status.js";
 
-function listEvidenceFiles(root: string, prefix = ""): string[] {
-  if (!existsSync(root)) return [];
-  const out: string[] = [];
-  for (const name of readdirSync(root)) {
-    const abs = join(root, name);
-    const rel = prefix ? `${prefix}/${name}` : name;
-    if (statSync(abs).isDirectory()) {
-      out.push(...listEvidenceFiles(abs, rel));
-    } else {
-      out.push(rel.replace(/\\/g, "/"));
-    }
-  }
-  return out;
-}
-
-function goalSatisfied(evidenceDir: string, goal: GoalSpec, provided?: string[]): boolean {
-  const files = provided?.length
-    ? provided.map((p) => p.replace(/^\.?\/+/, ""))
-    : listEvidenceFiles(evidenceDir);
+function goalSatisfied(evidenceDir: string, goal: GoalSpec): boolean {
+  const files = listEvidenceFiles(evidenceDir);
   for (const pattern of goal.evidencePatterns) {
     const hit = files.find((p) => {
-      const abs = join(evidenceDir, p);
-      return existsSync(abs) && minimatch(p, pattern);
+      if (!minimatch(p, pattern)) return false;
+      try {
+        resolveEvidenceFile(evidenceDir, p);
+        return true;
+      } catch {
+        return false;
+      }
     });
     if (!hit) return false;
     if (/(^|\/)ALL_COMPLETE\.json$/i.test(hit)) {
-      if (validateAllCompleteEvidence(join(evidenceDir, hit))) return false;
+      if (validateAllCompleteEvidence(evidenceDir, hit)) return false;
     }
   }
   return true;
@@ -114,13 +99,6 @@ async function runBareMock(manifest: WorkerManifest): Promise<void> {
         ctx.usage.toolCalls += 1;
         appendProgress(manifest.workspaceDir, `bare wrote ${rel}`);
       }
-    }
-
-    // Optional light probe (does not require History)
-    try {
-      runShell(ctx, `curl -sI --max-time 3 ${JSON.stringify(target)} | head -n 5 || true`);
-    } catch {
-      /* ignore */
     }
 
     const report = `# GongYuAI Bare Report\n\nTask: ${manifest.taskId}\nMode: bare (no History / no Relay)\nGoals satisfied: ${allGoalsSatisfied(manifest)}\n`;

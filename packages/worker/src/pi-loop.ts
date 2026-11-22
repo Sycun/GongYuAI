@@ -11,9 +11,7 @@ import { openHistory } from "@gongyuai/history";
 import { CheckpointStore, type CheckpointState } from "./checkpoint.js";
 import {
   appendProgress,
-  assertCapabilityAllows,
   installTool,
-  mcpActionForServer,
   runShell,
   writeEvidence,
   type ToolContext,
@@ -42,6 +40,23 @@ import {
   syncGraphPhase,
 } from "./graph-phase.js";
 import { maybeForceExploreTimeout } from "./explore-timeout.js";
+
+function phaseToolDenial(
+  ctx: ToolContext,
+  state: CheckpointState,
+  name: string,
+  mcpHub: McpHub,
+): string | undefined {
+  const taskId = ctx.manifest.taskId;
+  state.phase = syncGraphPhase(ctx.history, taskId, state.phase);
+  const phase = asGraphPhase(state.phase);
+  const mcpNames = mcpHub.openaiTools.map((tool) => tool.function.name);
+  if (allowedToolNames(phase, mcpNames).has(name)) return;
+  if (isMcpToolName(name) && (phase === "explore" || phase === "relay")) return;
+  const reason = `denied: tool ${name} not allowed in phase=${phase}`;
+  ctx.history.recordToolGate(taskId, { tool: name, ok: false, reason, detail: { phase } });
+  return reason;
+}
 
 /**
  * Pi Durable-backed worker. Falls back to OpenAI tool loop if durable harness
@@ -756,20 +771,8 @@ async function tryPiDurable(
           hook(ToolTask, {
             beforeTool: (call: { name: string; parent?: unknown }) => {
               if (call.parent) return undefined;
-              state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase);
-              const mcpNames = mcpHub.openaiTools.map((t) => t.function.name);
-              const allowed = allowedToolNames(state.phase, mcpNames);
-              if (allowed.has(call.name)) return undefined;
-              if (isMcpToolName(call.name)) {
-                const p = asGraphPhase(state.phase);
-                if (p === "explore" || p === "relay") return undefined;
-                return {
-                  block: `denied: MCP ${call.name} requires explore phase (have ${state.phase})`,
-                };
-              }
-              return {
-                block: `denied: tool ${call.name} not allowed in phase=${asGraphPhase(state.phase)}`,
-              };
+              const block = phaseToolDenial(ctx, state, call.name, mcpHub);
+              return block ? { block } : undefined;
             },
             afterTool: (call: { name: string; parent?: unknown }) => {
               if (!call.parent) roundToolNames.push(call.name);
@@ -1739,35 +1742,19 @@ async function runOpenAiToolLoop(
     }
 
     const toolNames: string[] = [];
-    const allowedNow = allowedToolNames(
-      syncGraphPhase(ctx.history, manifest.taskId, state.phase),
-      mcpHub.openaiTools.map((t) => t.function.name),
-    );
     for (const call of msg.tool_calls) {
       const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
       let result = "";
       toolNames.push(call.function.name);
       try {
-        if (!allowedNow.has(call.function.name) && !isMcpToolName(call.function.name)) {
-          result = `denied: tool ${call.function.name} not allowed in phase=${asGraphPhase(state.phase)}`;
+        const denied = phaseToolDenial(ctx, state, call.function.name, mcpHub);
+        if (denied) {
           messages.push({
             role: "tool",
             tool_call_id: call.id,
-            content: result.slice(0, 4_000),
+            content: denied,
           });
           continue;
-        }
-        if (isMcpToolName(call.function.name) && !allowedNow.has(call.function.name)) {
-          // MCP only in explore
-          if (asGraphPhase(state.phase) !== "explore" && asGraphPhase(state.phase) !== "relay") {
-            result = `denied: MCP ${call.function.name} requires explore phase (have ${state.phase})`;
-            messages.push({
-              role: "tool",
-              tool_call_id: call.id,
-              content: result.slice(0, 4_000),
-            });
-            continue;
-          }
         }
         const graphResult = handleGraphTool(call.function.name, args, graphCtx());
         if (graphResult != null) {
@@ -1946,9 +1933,6 @@ async function runOpenAiToolLoop(
           }
           default:
             if (isMcpToolName(call.function.name)) {
-              const serverId =
-                call.function.name.replace(/^mcp__/, "").split("__")[0] ?? "";
-              assertCapabilityAllows(manifest, mcpActionForServer(serverId));
               result = await mcpHub.call(
                 call.function.name,
                 args as Record<string, unknown>,
