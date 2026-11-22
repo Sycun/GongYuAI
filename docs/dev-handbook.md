@@ -97,6 +97,12 @@ MCP / Skill 是弹药，不是产品定义。
 2. `pnpm diff-harness --mock --goals …`：History vs +Relay 相对表。
 3. 主尺仍建议 TSecBench 子集；辅尺 DVWA smoke。只报差分。
 
+**纯离线对照**用 `pnpm diff-harness:offline`。三组用同一个确定性模型桩读取合成目录记录和复核回执，工具只返回固定数据。三组共享工具白名单、模型轮次上限、工具调用上限，以及对答案 JSON 的内容判据。
+
+三组在第二次工具调用后清空会话工作记忆。`bare` 使用新会话内的可见信息，`history` 可取回已持久化的目录编号，`relay` 同时从离线交接快照取回尚在工作记忆里的复核回执。预期 Goal 通过数分别是 0/2、1/2、2/2。该夹具验证两种状态保存机制在固定会话边界上的作用，既不产生真实模型用量，也不衡量靶场表现。
+
+运行输出保存在 `.gongyuai/offline-diff/<runId>/`。每组 `trace.jsonl` 包含模型的可见信息、工具判定、会话边界和终态，`summary.json` 汇总三个结果。系统工具、外部服务与 Worker 运行时均不参与该测试。
+
 ### P4 — 可选并行 ✅
 
 1. **Explore 并发**：新建任务 `execution.maxConcurrentExplores`（默认 1，硬顶 16）；有效并发 = min(配置, 靶标数)；共享 History + Intent CAS；slot 0 = Bootstrap/Reason/Report leader。  
