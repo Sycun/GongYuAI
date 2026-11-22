@@ -11,11 +11,12 @@
   "github": {
     "repo": "https://github.com/Sycun/GongYuAI",
     "branch": "main",
-    "mainAtReceipt": "493b23844b29143204a4328fe0b845c8e70c3fa9",
+    "mainAtReceipt": "7e377c94e6565f875cd6982626f4f80f43dfe66a",
     "verifiedBy": "git ls-remote origin refs/heads/main",
     "nonDocsDiffFromTestedCode": "scripts/kali/formal-acceptance.py（Kali 正式入口验收驱动，不参与运行时）",
     "note": "受验提交之后的提交只追加验收证据与驱动脚本；回执与三份文档在下一个 docs-only 提交里",
-    "noForcePush": true
+    "noForcePush": true,
+    "receiptCommitNote": "本回执与三份文档在 f34cc03 之后的第二个 docs-only 提交里；该提交推送后 main 前进到本提交本身"
   },
   "kali": {
     "host": "10.211.55.5",
@@ -44,45 +45,81 @@
       "bootEnableVerified": "systemctl is-enabled = enabled"
     },
     "tasks": 18,
-    "taskStatusCounts": { "completed": 10, "budget_exhausted": 2, "failed": 1, "stopped": 5 },
+    "taskStatusCounts": {
+      "completed": 10,
+      "budget_exhausted": 2,
+      "failed": 1,
+      "stopped": 5
+    },
     "consoleAsset": "assets/index-C5PF0Rth.js",
     "oldProgramDirs": [
       "/home/parallels/GongYuAI（上一轮正式目录，2026-11-22 22:10 删除，删除前 0 个进程 cwd、0 个单元引用、0 条数据记录指向）",
       "/home/parallels/GongYuAI-78ac4188（本轮中间目录，2026-11-22 22:13 删除，同上核对为 0）"
     ],
-    "untouched": ["/home/parallels/GongYuAI-hosted-build（uid 501，归属未确认）", "CyberStrikeAI"]
+    "untouched": [
+      "/home/parallels/GongYuAI-hosted-build（uid 501，归属未确认）",
+      "CyberStrikeAI"
+    ]
   },
   "acceptanceRuns": [
     {
       "runId": "engagement-1795356668890",
       "kind": "engagement-e2e-mock",
-      "steps": { "total": 80, "passed": 80, "failed": 0 },
+      "steps": {
+        "total": 80,
+        "passed": 80,
+        "failed": 0
+      },
       "codeCommit": "f34cc032cd9c4061a9212758595b34cf8d5fc2e0",
       "dirty": false,
       "snapshotSeal": "d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb",
       "snapshotBytes": "97ff33f3a14629ef27b0d6d286d2e94903aa7dd4fc35ea2843f734a2f5fc3986",
-      "scorecard": { "denominator": 4, "historicallyPassed": 4, "currentlySupported": 2 },
+      "scorecard": {
+        "denominator": 4,
+        "historicallyPassed": 4,
+        "currentlySupported": 2
+      },
       "verifiedChecks": 30
     },
     {
       "runId": "business-1795356691440",
       "kind": "business-acceptance",
-      "steps": { "total": 77, "passed": 77, "failed": 0 },
+      "steps": {
+        "total": 77,
+        "passed": 77,
+        "failed": 0
+      },
       "codeCommit": "f34cc032cd9c4061a9212758595b34cf8d5fc2e0",
       "dirty": false,
       "snapshotSeal": "0439db0cc1336a62645b5fba1fee9aab9a61f904f430212650f6ba1903ccef92",
       "snapshotBytes": "5ef79202a6d52a76606c0c80d592c100169b81f46e0cc464e605b24dd563d9fa",
-      "scorecard": { "denominator": 3, "historicallyPassed": 3, "currentlySupported": 3 },
+      "scorecard": {
+        "denominator": 3,
+        "historicallyPassed": 3,
+        "currentlySupported": 3
+      },
       "verifiedChecks": 30
     }
   ],
   "validatorNegatives": {
     "file": "docs/evidence/acceptance/validator-negatives.txt",
-    "cases": ["全零 SHA", "另一个存在但不匹配的提交", "dirty=true", "已测数改为 99", "记录中出现失败步骤"],
+    "cases": [
+      "全零 SHA",
+      "另一个存在但不匹配的提交",
+      "dirty=true",
+      "已测数改为 99",
+      "记录中出现失败步骤"
+    ],
     "allNonZeroExit": true,
     "originalStillPasses": true
   },
-  "unitTests": { "contracts": 35, "history": 38, "control-plane": 32, "worker": 35, "total": 140 },
+  "unitTests": {
+    "contracts": 35,
+    "history": 38,
+    "control-plane": 32,
+    "worker": 35,
+    "total": 140
+  },
   "validatorTests": 8,
   "kaliFormalAcceptance": {
     "taskId": "497126a0-93ac-4c9b-b293-acd380759f40",
@@ -94,7 +131,13 @@
     "firstPassAt": "2026-11-22T14:15:07.859Z",
     "snapshotSeal": "0c2e7f4ae7824b2fd40e58be790276b904cb5f4d0efc5611948049a41aa75f11",
     "snapshotBytesSha256": "72256e61f35db1ee434d207aed44514622b2e7a0cbba62c839e366cb60412389",
-    "scorecard": { "denominator": 1, "historicallyPassed": 1, "currentlySupported": 1, "unknownAttribution": 0, "coverageUnregistered": 1 }
+    "scorecard": {
+      "denominator": 1,
+      "historicallyPassed": 1,
+      "currentlySupported": 1,
+      "unknownAttribution": 0,
+      "coverageUnregistered": 1
+    }
   },
   "restoreDrills": {
     "oldBackup": {
@@ -102,8 +145,14 @@
       "bytes": 21217525,
       "sha256": "cef807d98dc0567b2ff8fa58764c9a295ae6965465bfc938c60d8e24a89d1925",
       "restoredTasks": 11,
-      "kaliDemoFactsEvents": [4, 14],
-      "formalInstanceAtSameTime": [5, 15],
+      "kaliDemoFactsEvents": [
+        4,
+        14
+      ],
+      "formalInstanceAtSameTime": [
+        5,
+        15
+      ],
       "reportSha256": "df3b63ad417f…",
       "sealChain": "evidence_versions=0、goal_proofs=0、goal_findings=0：封存链无法验证（上限保留）"
     },

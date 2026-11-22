@@ -13,7 +13,7 @@
 | 项 | 值 |
 | --- | --- |
 | 受验代码 | `f34cc032cd9c4061a9212758595b34cf8d5fc2e0`（tree `e9d564949804f8722de584e60d06cd4ad81331a3`） |
-| GitHub `main` | 见 [`docs/evidence/release/receipt.json`](./evidence/release/receipt.json) 的 `github.mainAtReceipt`；受验提交之后的提交只加证据与 Kali 驱动脚本 |
+| GitHub `main` | `7e377c94e6565f875cd6982626f4f80f43dfe66a`（采样时刻 2026-11-22T22:19+08:00，`git ls-remote origin refs/heads/main`；受验提交之后只有证据、驱动脚本与文档提交） |
 | Kali 检出 | `/home/parallels/GongYuAI-f34cc032`，HEAD = 同一受验提交，工作区 0 条改动 |
 | Kali 实际运行 | 同一提交（systemd `gongyuai.service`，MainPID 1675967，监听进程在 `/system.slice/gongyuai.service`） |
 | 跨日模拟运行 | `engagement-1795356668890`（80/80，快照封印 `d6f744c3356a…`，字节 `97ff33f3a146…`，历史 4/4、当前 2/4） |
