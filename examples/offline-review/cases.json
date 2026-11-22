@@ -1,0 +1,399 @@
+[
+  {
+    "id": "R017",
+    "title": "收件与签收",
+    "phase1": [
+      {
+        "id": "F1",
+        "text": "首次验收封存 archive/receipt.json，收件号 R-017，归属 B。",
+        "parents": []
+      },
+      {
+        "id": "F2",
+        "text": "初录抄件将归属登记为 A。",
+        "parents": []
+      },
+      {
+        "id": "F3",
+        "text": "部门汇总表仅按初录抄件填入 A。",
+        "parents": [
+          "F2"
+        ]
+      }
+    ],
+    "phase2": [
+      {
+        "id": "F4",
+        "text": "复核员撤回初录抄件。经核对原始封存内容，更正归属为 B。",
+        "parents": [
+          "F2",
+          "F1"
+        ]
+      },
+      {
+        "id": "F5",
+        "text": "同路径工作副本现为 C，编号为 later。",
+        "parents": []
+      },
+      {
+        "id": "F6",
+        "text": "签收目标要求 signed=true，送审文件为 {\"signed\":false}。",
+        "parents": []
+      }
+    ],
+    "noise": 78,
+    "questions": {
+      "receipt": "首次封存的收件号，填编号。",
+      "owner": "首次归属，填资产代码。",
+      "withdrawn": "被明确撤回的原记录，填 F 编号。",
+      "summary": "部门汇总表状态，填 valid 或 needs_review。",
+      "signature": "签收目标是否已通过，填 passed 或 unverified。"
+    },
+    "gold": {
+      "receipt": "R-017",
+      "owner": "B",
+      "withdrawn": "F2",
+      "summary": "needs_review",
+      "signature": "unverified"
+    }
+  },
+  {
+    "id": "LEGACY",
+    "title": "迁移旧账",
+    "phase1": [
+      {
+        "id": "F1",
+        "text": "迁移导入目标 G7。旧日志记载通过，只有路径 old.txt，没有原始字节、摘要值或附件。",
+        "parents": []
+      },
+      {
+        "id": "F2",
+        "text": "迁移日 old.txt 可读，写着批号 L-42、归属 D。",
+        "parents": []
+      },
+      {
+        "id": "F3",
+        "text": "旧抄录声称迁移日文件就是当年版本。",
+        "parents": [
+          "F2"
+        ]
+      }
+    ],
+    "phase2": [
+      {
+        "id": "F4",
+        "text": "复核撤回版本等同的抄录。未取得当年的字节或哈希。",
+        "parents": [
+          "F1",
+          "F3"
+        ]
+      },
+      {
+        "id": "F5",
+        "text": "今天单独核验工作文件归属 D，记录只适用于迁移日。",
+        "parents": [
+          "F2"
+        ]
+      },
+      {
+        "id": "F6",
+        "text": "归档人确认旧目标 G7 在历史表里的通过记录有效，未追认附件版本。",
+        "parents": [
+          "F1"
+        ]
+      }
+    ],
+    "noise": 16,
+    "questions": {
+      "old_goal": "旧日志中 G7 的历史状态，填 passed 或 unverified。",
+      "version": "当年凭据版本，填 known 或 unknown。",
+      "owner_then": "当年归属，填资产代码，无法确定填 unknown。",
+      "owner_now": "迁移日已核验归属，填资产代码。",
+      "withdrawn": "被撤回的抄录，填 F 编号。"
+    },
+    "gold": {
+      "old_goal": "passed",
+      "version": "unknown",
+      "owner_then": "unknown",
+      "owner_now": "D",
+      "withdrawn": "F3"
+    }
+  },
+  {
+    "id": "BYTES",
+    "title": "二进制附件",
+    "phase1": [
+      {
+        "id": "F1",
+        "text": "首次验收封存 item.bin，按十进制字节顺序为 0,255,128,10,23；登记 SHA-256 前 12 位 12018f03a8cb。",
+        "parents": []
+      },
+      {
+        "id": "F2",
+        "text": "导出清单引用首次封存附件。",
+        "parents": [
+          "F1"
+        ]
+      },
+      {
+        "id": "F3",
+        "text": "口头旁注称第三字节为 129。",
+        "parents": []
+      }
+    ],
+    "phase2": [
+      {
+        "id": "F4",
+        "text": "工作目录 item.bin 现为 0,255,129,10,23；SHA-256 前 12 位 26fbc67f62a5。",
+        "parents": []
+      },
+      {
+        "id": "F5",
+        "text": "复核员撤回口头旁注，同时重新校核导出清单的原封存引用。",
+        "parents": [
+          "F1",
+          "F2",
+          "F3"
+        ]
+      },
+      {
+        "id": "F6",
+        "text": "签收单为 {\"signed\":true}，与该批次登记一致，已确认。",
+        "parents": []
+      }
+    ],
+    "noise": 22,
+    "questions": {
+      "digest": "最初封存版本的 SHA-256 前 12 位，填小写十六进制。",
+      "third": "原版第三字节，从 1 开始计数，填十进制数字字符串。",
+      "withdrawn": "被撤回的口头旁注，填 F 编号。",
+      "export": "导出清单的原版引用是否仍成立，填 valid 或 needs_review。",
+      "signature": "签收目标状态，填 passed 或 unverified。"
+    },
+    "gold": {
+      "digest": "12018f03a8cb",
+      "third": "128",
+      "withdrawn": "F3",
+      "export": "valid",
+      "signature": "passed"
+    }
+  },
+  {
+    "id": "CHAIN",
+    "title": "多级汇总",
+    "phase1": [
+      {
+        "id": "F1",
+        "text": "箱号 K-19 原始封条封存量为 14。",
+        "parents": []
+      },
+      {
+        "id": "F2",
+        "text": "手抄清单误记封存量为 41。",
+        "parents": []
+      },
+      {
+        "id": "F3",
+        "text": "区域汇总只转录手抄清单。",
+        "parents": [
+          "F2"
+        ]
+      },
+      {
+        "id": "F4",
+        "text": "总表 S9 只依赖区域汇总。",
+        "parents": [
+          "F3"
+        ]
+      },
+      {
+        "id": "F5",
+        "text": "仓库台账 W2 独立清点 14 并留有双签。",
+        "parents": []
+      }
+    ],
+    "phase2": [
+      {
+        "id": "F6",
+        "text": "审阅员依据原始封条，撤回手抄清单；没有重新核验区域汇总和总表。",
+        "parents": [
+          "F1",
+          "F2"
+        ]
+      },
+      {
+        "id": "F7",
+        "text": "W2 的独立双签已另行核验。",
+        "parents": [
+          "F5"
+        ]
+      },
+      {
+        "id": "F8",
+        "text": "本轮要求双签。S9 仅提交草稿；W2 已有齐全材料。",
+        "parents": [
+          "F4",
+          "F7"
+        ]
+      }
+    ],
+    "noise": 34,
+    "questions": {
+      "quantity": "首次封存数量，填数字字符串。",
+      "withdrawn": "被明确撤回的记录，填 F 编号。",
+      "S9": "总表 S9 当前状态，填 valid 或 needs_review。",
+      "W2": "独立台账 W2 当前状态，填 valid 或 needs_review。",
+      "signed": "满足双签目标的台账，填 S9、W2 或 none。"
+    },
+    "gold": {
+      "quantity": "14",
+      "withdrawn": "F2",
+      "S9": "needs_review",
+      "W2": "valid",
+      "signed": "W2"
+    }
+  },
+  {
+    "id": "SCOPE",
+    "title": "分目标复核",
+    "phase1": [
+      {
+        "id": "F1",
+        "text": "收件批号 N-08 的原始凭据注明移交人林，数量 8。",
+        "parents": []
+      },
+      {
+        "id": "F2",
+        "text": "抄录记为移交人林、数量 80，同时关联署名目标 G-name 与数量目标 G-count。",
+        "parents": [
+          "F1"
+        ]
+      },
+      {
+        "id": "F3",
+        "text": "数量汇总只引用抄录的数量栏。",
+        "parents": [
+          "F2"
+        ]
+      }
+    ],
+    "phase2": [
+      {
+        "id": "F4",
+        "text": "署名复核员确认 F2 的姓名栏，意见仅用于 G-name。",
+        "parents": [
+          "F1",
+          "F2"
+        ]
+      },
+      {
+        "id": "F5",
+        "text": "数量复核员只在 G-count 下撤回 F2 的数量栏，更正为 8。",
+        "parents": [
+          "F1",
+          "F2"
+        ]
+      },
+      {
+        "id": "F6",
+        "text": "工作副本后来改为移交人吴。",
+        "parents": []
+      },
+      {
+        "id": "F7",
+        "text": "数量汇总尚未独立重核。",
+        "parents": [
+          "F3"
+        ]
+      }
+    ],
+    "noise": 20,
+    "questions": {
+      "receipt": "原始批号。",
+      "person": "已核验的原始移交人，填单字姓。",
+      "count": "已核验的原始数量，填数字字符串。",
+      "name_review": "F2 在署名目标下状态，填 confirmed 或 retracted。",
+      "rollup": "数量汇总状态，填 valid 或 needs_review。"
+    },
+    "gold": {
+      "receipt": "N-08",
+      "person": "林",
+      "count": "8",
+      "name_review": "confirmed",
+      "rollup": "needs_review"
+    }
+  },
+  {
+    "id": "RECHECK",
+    "title": "撤回后的独立复核",
+    "phase1": [
+      {
+        "id": "F1",
+        "text": "入库单 P-63 封存的区位为 Q。",
+        "parents": []
+      },
+      {
+        "id": "F2",
+        "text": "初检误记为 R。",
+        "parents": [
+          "F1"
+        ]
+      },
+      {
+        "id": "F3",
+        "text": "月报 M4 和抽查表 T7 均抄录初检区位。",
+        "parents": [
+          "F2"
+        ]
+      }
+    ],
+    "phase2": [
+      {
+        "id": "F4",
+        "text": "初检记录被撤回，复核员确认封存的区位 Q。",
+        "parents": [
+          "F1",
+          "F2"
+        ]
+      },
+      {
+        "id": "F5",
+        "text": "月报 M4 已根据原始单据重新核验为 Q，负责人另行签字。",
+        "parents": [
+          "F1",
+          "F3"
+        ]
+      },
+      {
+        "id": "F6",
+        "text": "抽查表 T7 继续沿用原抄录，没有新的核验。",
+        "parents": [
+          "F3"
+        ]
+      },
+      {
+        "id": "F7",
+        "text": "本轮交付要求 M4 与 T7 都已核验。",
+        "parents": [
+          "F5",
+          "F6"
+        ]
+      }
+    ],
+    "noise": 42,
+    "questions": {
+      "receipt": "每月复核依据的原始单号。",
+      "site": "封存区位，填区位代码。",
+      "M4": "月报的当前状态，填 valid 或 needs_review。",
+      "T7": "抽查表的当前状态，填 valid 或 needs_review。",
+      "delivery": "整体交付目标，填 passed 或 unverified。"
+    },
+    "gold": {
+      "receipt": "P-63",
+      "site": "Q",
+      "M4": "valid",
+      "T7": "needs_review",
+      "delivery": "unverified"
+    }
+  }
+]
