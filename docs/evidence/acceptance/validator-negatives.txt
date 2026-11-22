@@ -1,6 +1,6 @@
-# 验收校验器负例（2026-11-22T14:08:34Z UTC）
-原运行目录　docs/evidence/acceptance/engagement-1795356472774
-期望受验提交　78ac41885feb8f4b4818ed2f419772aa25f9b112
+# 验收校验器负例（2026-11-22T14:11:39Z UTC）
+原运行目录　docs/evidence/acceptance/engagement-1795356668890
+期望受验提交　f34cc032cd9c4061a9212758595b34cf8d5fc2e0
 
 ## 原件必须先通过
 退出码　0（期望 0）
@@ -9,11 +9,11 @@
 ### 负例 zero-sha（只改这一处）
 退出码　1
 FAIL  code.commit.object  0000000000000000000000000000000000000000 不是本仓库里存在的提交对象
-FAIL  code.commit.expected  运行时提交 0000000000000000000000000000000000000000；期望 78ac41885feb8f4b4818ed2f419772aa25f9b112（--expect-commit（调用方独立给定））
+FAIL  code.commit.expected  运行时提交 0000000000000000000000000000000000000000；期望 f34cc032cd9c4061a9212758595b34cf8d5fc2e0（--expect-commit（调用方独立给定））
 
 ### 负例 other-commit（只改这一处）
 退出码　1
-FAIL  code.commit.expected  运行时提交 6ef71f926aad42cd2acc95ed147e66ead7872d95；期望 78ac41885feb8f4b4818ed2f419772aa25f9b112（--expect-commit（调用方独立给定））
+FAIL  code.commit.expected  运行时提交 692750631a7664963d11c997ad6d62645faee53c；期望 f34cc032cd9c4061a9212758595b34cf8d5fc2e0（--expect-commit（调用方独立给定））
 
 ### 负例 dirty（只改这一处）
 退出码　1
@@ -25,7 +25,7 @@ FAIL  scorecard.coverage  tested: 清单 99 ≠ 快照复算 1
 
 ### 负例 failed-step（只改这一处）
 退出码　1
-FAIL  record.json.bytes  acceptance-record.json 字节哈希 a31e01dd1f772cb4034ef976bf81b7f4630f2b391bf24b5f5c6f0daf2704f953（期望 ab71e6b63997aa7b6006897aea958c2a353c42c9f04eaa101d026bdb5d699aad）
+FAIL  record.json.bytes  acceptance-record.json 字节哈希 da813783b629d7e8d39ddb92ebfd5c12f1ff9907f4d4dc0a2c72fa1fa0c79fa6（期望 e14e64efaf24678dd4b3218bd3ce2885f9734162dab54e32e27424003bbdb22d）
 FAIL  record.json.steps  记录 80 步、失败 1（清单 80 步、失败 0）
 FAIL  record.json.steps.failed  记录中有 1 个失败步骤：阶段1 建档
 

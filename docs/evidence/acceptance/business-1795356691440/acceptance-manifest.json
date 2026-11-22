@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "kind": "business-acceptance",
+  "runId": "business-1795356691440",
+  "taskId": "c5b04fa7-d6c0-4d75-9b00-97a2cd12a7b4",
+  "dataRoot": "/private/tmp/gy-clean-f34cc03/repo/.gongyuai/acceptance/business-1795356691440",
+  "startedAt": "2026-11-22T14:11:31.439Z",
+  "finishedAt": "2026-11-22T14:11:33.020Z",
+  "code": {
+    "commit": "f34cc032cd9c4061a9212758595b34cf8d5fc2e0",
+    "branch": "HEAD",
+    "dirty": false,
+    "dirtyPaths": []
+  },
+  "steps": {
+    "total": 77,
+    "passed": 77,
+    "failed": 0
+  },
+  "record": {
+    "markdown": "acceptance-record.md",
+    "json": "acceptance-record.json"
+  },
+  "files": {
+    "recordMd": {
+      "path": "acceptance-record.md",
+      "sha256": "b95916691a4935d53d2985b1db84c994a56a44dc557efbd9d555bfe9a713c131"
+    },
+    "recordJson": {
+      "path": "acceptance-record.json",
+      "sha256": "5befef676eb399e870625ae19990af01eb7ef2d68fa01fb60b0ab6bdf55359e6"
+    },
+    "snapshot": {
+      "path": "delivery-snapshot.json",
+      "bytesSha256": "a6987d1da10ead9c9a54c8ef517c45479309c65dba6faae3c452b13436945b0e",
+      "sealSha256": "0b03c12f9f083d19fcae12f4bb3774dcc02cabfc4bc9dcb086ad0bcd0b026fab",
+      "capturedAt": "2026-11-22T14:11:32.972Z"
+    }
+  },
+  "scorecard": {
+    "snapshotSha256": "0b03c12f9f083d19fcae12f4bb3774dcc02cabfc4bc9dcb086ad0bcd0b026fab",
+    "denominator": 3,
+    "historicallyPassed": 3,
+    "currentlySupported": 3,
+    "unknownAttribution": 0,
+    "coverage": {
+      "untested": 0,
+      "partial": 0,
+      "tested": 0,
+      "blocked": 0,
+      "unregistered": 3
+    },
+    "capturedAt": "2026-11-22T14:11:32.972Z"
+  },
+  "notes": [
+    "内容封印 = 快照去掉 sha256 字段后对 canonical payload 计算的 sha256（可离线复算）。",
+    "字节哈希 = 快照文件原始字节的 sha256（确认交付的就是那一份文件）。",
+    "记分卡的 snapshotSha256 必须等于本清单 files.snapshot.sealSha256。",
+    "kind=business-acceptance：差异由平台实现从原始材料算出，预期差异另行封存。",
+    "缺件阶段必须报告缺件且目标未通过；补交后同一目标才能首次通过。",
+    "行号、重复主键、CRLF 与引号内逗号都是正常核算入口的实测。",
+    "材料为虚构样本；真实生产效果不在本次工程验收范围内。"
+  ]
+}

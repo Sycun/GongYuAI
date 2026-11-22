@@ -1,34 +1,33 @@
-# 交叉配对反例（2026-11-22T14:08:38Z UTC）
-# 清单与快照来自 engagement-1795356472774，记录来自 business-1795356495176；两者单独都通过。
-# 命令：node --import tsx scripts/acceptance-verify.ts docs/evidence/acceptance/engagement-1795356472774 \
-#   --record docs/evidence/acceptance/business-1795356495176 --expect-commit 78ac41885feb8f4b4818ed2f419772aa25f9b112
+# 交叉配对反例（2026-11-22T14:11:41Z UTC）
+# 清单与快照来自 engagement-1795356668890，记录来自 business-1795356691440；两者单独都通过。
+# 命令：node --import tsx scripts/acceptance-verify.ts docs/evidence/acceptance/engagement-1795356668890 --record docs/evidence/acceptance/business-1795356691440 --expect-commit f34cc032cd9c4061a9212758595b34cf8d5fc2e0
 
-验收清单校验：/Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795356472774
-PASS  manifest.present  清单 /Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795356472774/acceptance-manifest.json
+验收清单校验：/Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795356668890
+PASS  manifest.present  清单 /Users/sycpro/GongYuAI/docs/evidence/acceptance/engagement-1795356668890/acceptance-manifest.json
 PASS  manifest.version  version=1
-PASS  manifest.runId  runId=engagement-1795356472774
-PASS  manifest.code.commit  代码提交 78ac41885feb8f4b4818ed2f419772aa25f9b112
-PASS  code.commit.object  78ac41885feb8f4b4818ed2f419772aa25f9b112 是 /Users/sycpro/GongYuAI 里的真实提交对象
-PASS  code.commit.expected  运行时提交 78ac41885feb8f4b4818ed2f419772aa25f9b112；期望 78ac41885feb8f4b4818ed2f419772aa25f9b112（--expect-commit（调用方独立给定））
+PASS  manifest.runId  runId=engagement-1795356668890
+PASS  manifest.code.commit  代码提交 f34cc032cd9c4061a9212758595b34cf8d5fc2e0
+PASS  code.commit.object  f34cc032cd9c4061a9212758595b34cf8d5fc2e0 是 /Users/sycpro/GongYuAI 里的真实提交对象
+PASS  code.commit.expected  运行时提交 f34cc032cd9c4061a9212758595b34cf8d5fc2e0；期望 f34cc032cd9c4061a9212758595b34cf8d5fc2e0（--expect-commit（调用方独立给定））
 PASS  code.clean  运行时代码状态干净（dirty=false）
-FAIL  record.md.bytes  acceptance-record.md 字节哈希 cdd94c3c9c1aaac4dd215f58919b79a12950ca4f446112ae3304ab94f25ae9f8（期望 8677bdb5d67a69b4bdea16864fe79ffd73e16a373397957ccf0dc8672d7e1cef）
-FAIL  record.json.bytes  acceptance-record.json 字节哈希 d4b93971a79008c9b31ae22578daff21aeeabfa13a80d6c57672fdb4c92541a8（期望 ab71e6b63997aa7b6006897aea958c2a353c42c9f04eaa101d026bdb5d699aad）
-PASS  snapshot.file.bytes  快照文件字节哈希 97ff33f3a14629ef27b0d6d286d2e94903aa7dd4fc35ea2843f734a2f5fc3986（期望 97ff33f3a14629ef27b0d6d286d2e94903aa7dd4fc35ea2843f734a2f5fc3986）
-PASS  snapshot.seal  内容封印 d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb；文件内 sha256=d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb；清单 sealSha256=d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb
-PASS  snapshot.distinct-from-bytes  内容封印 d6f744c3356a… 与文件字节哈希 97ff33f3a146… 是两回事
-PASS  snapshot.capturedAt  快照 capturedAt=2026-11-22T14:08:04.307Z（清单 2026-11-22T14:08:04.307Z）
-PASS  snapshot.taskId  快照 taskId=60837915-f18c-42e5-b0b2-f23714b3f103（清单 60837915-f18c-42e5-b0b2-f23714b3f103）
+FAIL  record.md.bytes  acceptance-record.md 字节哈希 b95916691a4935d53d2985b1db84c994a56a44dc557efbd9d555bfe9a713c131（期望 d21afd23d9237cfe8652bd47b0c4502206e1e1373af616b15c63aadc728dc3d4）
+FAIL  record.json.bytes  acceptance-record.json 字节哈希 5befef676eb399e870625ae19990af01eb7ef2d68fa01fb60b0ab6bdf55359e6（期望 e14e64efaf24678dd4b3218bd3ce2885f9734162dab54e32e27424003bbdb22d）
+PASS  snapshot.file.bytes  快照文件字节哈希 550abbd154e1c118a70fb44b6b55b9f1c0c954eba04a8ae892a56f5b33eff2d2（期望 550abbd154e1c118a70fb44b6b55b9f1c0c954eba04a8ae892a56f5b33eff2d2）
+PASS  snapshot.seal  内容封印 8ef8768c0af25574a7cd99034ddc3e67a37632920ac46e52f9885033d1387504；文件内 sha256=8ef8768c0af25574a7cd99034ddc3e67a37632920ac46e52f9885033d1387504；清单 sealSha256=8ef8768c0af25574a7cd99034ddc3e67a37632920ac46e52f9885033d1387504
+PASS  snapshot.distinct-from-bytes  内容封印 8ef8768c0af2… 与文件字节哈希 550abbd154e1… 是两回事
+PASS  snapshot.capturedAt  快照 capturedAt=2026-11-22T14:11:20.416Z（清单 2026-11-22T14:11:20.416Z）
+PASS  snapshot.taskId  快照 taskId=5f34ea18-0e76-4642-8bcb-2a514afaf97d（清单 5f34ea18-0e76-4642-8bcb-2a514afaf97d）
 PASS  scorecard.recompute  纯函数复算成功
-PASS  scorecard.points-at-this-snapshot  记分卡引用 d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb；快照封印 d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb
+PASS  scorecard.points-at-this-snapshot  记分卡引用 8ef8768c0af25574a7cd99034ddc3e67a37632920ac46e52f9885033d1387504；快照封印 8ef8768c0af25574a7cd99034ddc3e67a37632920ac46e52f9885033d1387504
 PASS  scorecard.numbers  复算 4/4 历史 · 2/4 当前 · 归属未知 0（清单 4/4 · 2/4 · 0）
 PASS  scorecard.coverage  tested=1 partial=1 blocked=1 untested=0 unregistered=1（合计 4/4）
-PASS  scorecard.capturedAt  复算 capturedAt=2026-11-22T14:08:04.307Z（清单 2026-11-22T14:08:04.307Z）
-FAIL  record.json.taskId  记录 taskId=7d413b4b-dbe7-4d38-be1e-8f4b33a89e64（清单 60837915-f18c-42e5-b0b2-f23714b3f103）
-FAIL  record.json.snapshotSha256  记录引用 0439db0cc1336a62645b5fba1fee9aab9a61f904f430212650f6ba1903ccef92；快照封印 d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb
+PASS  scorecard.capturedAt  复算 capturedAt=2026-11-22T14:11:20.416Z（清单 2026-11-22T14:11:20.416Z）
+FAIL  record.json.taskId  记录 taskId=c5b04fa7-d6c0-4d75-9b00-97a2cd12a7b4（清单 5f34ea18-0e76-4642-8bcb-2a514afaf97d）
+FAIL  record.json.snapshotSha256  记录引用 0b03c12f9f083d19fcae12f4bb3774dcc02cabfc4bc9dcb086ad0bcd0b026fab；快照封印 8ef8768c0af25574a7cd99034ddc3e67a37632920ac46e52f9885033d1387504
 FAIL  record.json.scorecard  denominator: 记录 3 ≠ 快照复算 4；historicallyPassed: 记录 3 ≠ 快照复算 4；currentlySupported: 记录 3 ≠ 快照复算 2；coverage.tested: 记录 0 ≠ 快照复算 1；coverage.partial: 记录 0 ≠ 快照复算 1；coverage.blocked: 记录 0 ≠ 快照复算 1；coverage.unregistered: 记录 3 ≠ 快照复算 1
 FAIL  record.json.steps  记录 77 步、失败 0（清单 80 步、失败 0）
 PASS  record.json.steps.failed  记录中没有失败步骤
-FAIL  record.json.runId  记录数据目录 /private/tmp/gy-clean-78ac418/repo/.gongyuai/acceptance/business-1795356495176（清单 runId engagement-1795356472774）
+FAIL  record.json.runId  记录数据目录 /private/tmp/gy-clean-f34cc03/repo/.gongyuai/acceptance/business-1795356691440（清单 runId engagement-1795356668890）
 PASS  manifest.steps.failed  清单记录 80 步全部通过
 PASS  manifest.steps.passed  清单通过 80 / 总数 80
 FAIL  record.md.sealMention  记录正文写出了这份快照的内容封印
