@@ -26,7 +26,7 @@ function printHelp(): void {
   console.log(`GongYuAI CLI (single-user MVP)
 
 Usage:
-  gy serve [--data-dir DIR] [--port N]
+  gy serve [--data-dir DIR] [--port N] [--isolated]
   gy run --goals FILE --target URL [--target URL ...] --auth NOTE [--name NAME]
        [--mock] [--wait] [--concurrency N]
        [--capability observe|scan|active-lab|full]
@@ -174,7 +174,12 @@ async function main(): Promise<void> {
       dataRoot: opts.dataDir || undefined,
       host: opts.host,
       port: opts.port,
+      // 隔离模式（恢复演练）：不导入旧任务、不起 watchdog、不自动续跑。
+      isolated: has(rest, "--isolated") || process.env.GY_ISOLATED === "1",
     });
+    for (const rehome of plane.rehomed) {
+      console.log(`[gy] 数据目录归属：${rehome.taskId} ${rehome.from || "(空)"} → ${rehome.to}`);
+    }
     console.log(`GongYuAI control plane listening on ${plane.url}`);
     await new Promise(() => undefined);
   }

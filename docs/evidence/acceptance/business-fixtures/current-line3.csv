@@ -1,0 +1,4 @@
+host,role,version
+
+app-a-1,web,1.5
+app-a-2,db,2.1

@@ -21,6 +21,7 @@ export type SnapshotGoal = Pick<
   assets?: string[];
   evidenceChecks?: Array<{ pattern: string; field: string; equals: string | number | boolean }>;
   findingsGate?: GoalState["findingsGate"];
+  reconcileGate?: GoalState["reconcileGate"];
   boardGate?: GoalState["boardGate"];
 };
 

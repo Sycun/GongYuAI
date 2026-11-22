@@ -201,6 +201,25 @@ export function writeTaskReport(
       }
       lines.push("");
     }
+    // 首次通过采用的核算文件与最近一次拒绝原因都来自事件台账，不靠推断。
+    const events = history.listEvents(id, 500);
+    const adoptedByGoal = new Map<string, { path: string; sha256: string; name: string; counts?: Record<string, number> }>();
+    const rejectionByGoal = new Map<string, string>();
+    for (const event of [...events].reverse()) {
+      const payload = event.payload as {
+        goalId?: string;
+        reason?: string;
+        adoptedReconcile?: { path: string; sha256: string; name: string; counts?: Record<string, number> };
+      };
+      if (!payload.goalId) continue;
+      if (event.kind === "goal_asserted" && payload.adoptedReconcile && !adoptedByGoal.has(payload.goalId)) {
+        adoptedByGoal.set(payload.goalId, payload.adoptedReconcile);
+      }
+      if (event.kind === "goal_assert_rejected" && payload.reason) {
+        rejectionByGoal.set(payload.goalId, payload.reason);
+      }
+    }
+
     lines.push("", "## 逐项目标复核", "");
     for (const goal of goals) {
       const versions = proofs.filter((p) => p.goalId === goal.id);
@@ -232,6 +251,27 @@ export function writeTaskReport(
       if (!goal.passes) lines.push(`- 尚缺可通过验收的材料。所需路径：${goal.evidencePatterns.map(label).join("、")}`);
       for (const rule of goal.evidenceChecks ?? []) {
         lines.push(`- 内容判据：${label(rule.pattern)} 中 ${label(rule.field)} = ${label(JSON.stringify(rule.equals))}`);
+      }
+      if (goal.reconcileGate) {
+        const gate = goal.reconcileGate;
+        lines.push(
+          `- 核算条件：${label(gate.pattern)} 必须是一份满足条件的核算结果` +
+            `（未知项≤${gate.maxUnknown}、重复主键歧义≤${gate.maxAmbiguous}` +
+            (gate.names?.length ? `、核算名 ${gate.names.map(label).join(" / ")}` : "") +
+            "；只挂差异文件不算完成比对）",
+        );
+        const adopted = adoptedByGoal.get(goal.id);
+        if (adopted) {
+          lines.push(
+            `- 首次通过采用的核算文件：${label(adopted.path)} · SHA-256 ${adopted.sha256}` +
+              `（核算名 ${label(adopted.name)}；共 ${adopted.counts?.totalKeys ?? "?"} 项，未知 ${adopted.counts?.unknown ?? "?"}、` +
+              `歧义 ${adopted.counts?.ambiguous ?? 0}）`,
+          );
+        }
+        const rejection = rejectionByGoal.get(goal.id);
+        if (rejection && !goal.passes) {
+          lines.push(`- 未通过原因：${label(rejection)}`);
+        }
       }
       if (goal.findingsGate) {
         const gate = goal.findingsGate;

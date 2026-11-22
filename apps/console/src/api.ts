@@ -31,6 +31,13 @@ export type TaskRecord = {
     passes: boolean;
     evidencePaths?: string[];
     assessment?: string;
+    /** 目标级核算条件：声明后只挂差异文件不算完成比对。 */
+    reconcileGate?: {
+      pattern: string;
+      maxUnknown: number;
+      maxAmbiguous: number;
+      names?: string[];
+    };
   }>;
   budget: {
     maxTokens: number;
@@ -119,7 +126,12 @@ export type HistoryPayload = {
     concludedAt?: string | null;
     conclusion?: string | null;
   }>;
-  events: unknown[];
+  events: Array<{
+    id?: string;
+    kind?: string;
+    payload?: Record<string, unknown>;
+    createdAt?: string;
+  }>;
   assets?: AssetRecord[];
   findings?: FindingRecord[];
   retestRequests?: RetestRequestRecord[];

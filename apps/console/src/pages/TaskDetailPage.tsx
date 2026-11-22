@@ -292,6 +292,29 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
 
   const goals = history?.goals?.length ? history.goals : task.goals;
 
+  /**
+   * 首次通过采用的核算文件与最近一次拒绝原因都来自事件台账（服务端按时间
+   * 倒序返回），控制台只做展示，不自己推断结论。
+   */
+  const goalEvents = history?.events ?? [];
+  const adoptedByGoal = new Map<string, { path: string; sha256: string; name?: string }>();
+  for (const event of [...goalEvents].reverse()) {
+    const payload = (event?.payload ?? {}) as {
+      goalId?: string;
+      adoptedReconcile?: { path: string; sha256: string; name?: string };
+    };
+    if (event?.kind === "goal_asserted" && payload.goalId && payload.adoptedReconcile && !adoptedByGoal.has(payload.goalId)) {
+      adoptedByGoal.set(payload.goalId, payload.adoptedReconcile);
+    }
+  }
+  const rejectionByGoal = new Map<string, string>();
+  for (const event of goalEvents) {
+    const payload = (event?.payload ?? {}) as { goalId?: string; reason?: string };
+    if (event?.kind === "goal_assert_rejected" && payload.goalId && payload.reason) {
+      rejectionByGoal.set(payload.goalId, payload.reason);
+    }
+  }
+
   const dagPanel = (
     <Suspense fallback={<div className="gy-dag-empty" role="status">正在加载关系图…</div>}>
       <FactIntentDag
@@ -713,6 +736,23 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                               : g.evidencePatterns
                             ).join(", ") || "—"}
                           </Typography.Text>
+                          {g.reconcileGate && (
+                            <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                              核算条件：{g.reconcileGate.pattern}
+                              （未知项≤{g.reconcileGate.maxUnknown}、重复主键歧义≤{g.reconcileGate.maxAmbiguous}；
+                              只挂差异文件不算完成比对）
+                              {!g.passes && rejectionByGoal.get(g.id)
+                                ? ` · 未通过原因：${rejectionByGoal.get(g.id)}`
+                                : ""}
+                            </Typography.Paragraph>
+                          )}
+                          {g.passes && adoptedByGoal.get(g.id) && (
+                            <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                              首次通过采用的核算文件：{adoptedByGoal.get(g.id)!.path}
+                              {" · SHA-256 "}
+                              {adoptedByGoal.get(g.id)!.sha256}
+                            </Typography.Paragraph>
+                          )}
                           {history && <GoalCoverage
                             key={task.id + "/" + g.id}
                             taskId={task.id}

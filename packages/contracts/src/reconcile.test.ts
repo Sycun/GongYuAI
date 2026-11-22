@@ -160,3 +160,109 @@ test("相同输入重复核算得到逐字节相同的结果（可独立复算�
   });
   assert.equal(JSON.stringify(run()), JSON.stringify(run()));
 });
+
+// ── 第七轮补充：物理行号、跨行引号字段、重复主键 ────────────────────────────
+
+function diff(baselineCsv: string, currentCsv: string, overrides: Record<string, unknown> = {}) {
+  const req = request(overrides);
+  return reconcileMaterials({
+    request: req,
+    baseline: parseMaterial({ path: req.baseline.path, content: baselineCsv, keyField: req.keyField }),
+    current: parseMaterial({ path: req.current.path, content: currentCsv, keyField: req.keyField }),
+  });
+}
+
+test("来源行号是原文件物理行号：空行占行号，第 3 行的变化报第 3 行", () => {
+  const baseline = "host,role,version\napp-a-1,web,1.4\n\napp-a-2,db,2.1\n";
+  const current = "host,role,version\napp-a-1,web,1.5\n\napp-a-2,db,2.1\n";
+  const result = diff(baseline, current);
+  const changed = result.items.find((item) => item.key === "app-a-1")!;
+  assert.equal(changed.baselineLine, 2, "第 2 行是 app-a-1");
+  assert.equal(changed.currentLine, 2);
+  const untouched = result.items.find((item) => item.key === "app-a-2")!;
+  assert.equal(untouched.baselineLine, 4, "空行在物理第 3 行，app-a-2 在第 4 行");
+  assert.equal(untouched.currentLine, 4);
+
+  // 首行表头 + 一个空行 + 数据 → 数据在第 3 行（旧实现会报第 2 行）。
+  const withBlankAtTop = "host,role,version\n\napp-a-1,web,1.4\n";
+  const parsed = parseMaterial({ path: "b.csv", content: withBlankAtTop, keyField: "host" });
+  assert.equal(parsed.rows[0]!.line, 3);
+});
+
+test("CRLF 与引号内逗号：行号不偏移，字段不被切碎", () => {
+  const baseline = 'host,role,note\r\napp-a-1,web,"dc-1, rack-7"\r\napp-a-2,db,plain\r\n';
+  const current = 'host,role,note\r\napp-a-1,web,"dc-1, rack-8"\r\napp-a-2,db,plain\r\n';
+  const result = diff(baseline, current);
+  const changed = result.items.find((item) => item.key === "app-a-1")!;
+  assert.equal(changed.baselineLine, 2);
+  assert.equal(changed.currentLine, 2);
+  assert.deepEqual(changed.changes, [
+    { field: "note", before: "dc-1, rack-7", after: "dc-1, rack-8" },
+  ]);
+});
+
+test("引号内换行：起止行区间被记录，结论仍按字段比对", () => {
+  const baseline = 'host,note\napp-a-1,"line-1\nline-2"\napp-a-2,ok\n';
+  const current = 'host,note\napp-a-1,"line-1\nline-3"\napp-a-2,ok\n';
+  const parsed = parseMaterial({ path: "b.csv", content: baseline, keyField: "host" });
+  assert.equal(parsed.rows[0]!.line, 2, "跨行字段起始行");
+  assert.equal(parsed.rows[0]!.endLine, 3, "跨行字段结束行");
+  assert.equal(parsed.rows[1]!.line, 4, "下一条记录仍在物理第 4 行");
+
+  const result = diff(baseline, current);
+  const changed = result.items.find((item) => item.key === "app-a-1")!;
+  assert.equal(changed.status, "changed");
+  assert.equal(changed.baselineLine, 2);
+  assert.equal(changed.baselineEndLine, 3);
+  assert.equal(changed.changes[0]!.field, "note");
+});
+
+test("引号未闭合：明确拒绝，不给出行号猜测", () => {
+  assert.throws(
+    () => parseMaterial({ path: "b.csv", content: 'host,note\napp-a-1,"unterminated\n', keyField: "host" }),
+    /引号未闭合/,
+  );
+});
+
+test("基线侧重复主键且内容冲突：标为歧义并列出全部来源行，不报未变", () => {
+  const baseline = "host,version\ntest-A,1\ntest-A,2\n";
+  const current = "host,version\ntest-A,2\n";
+  const result = diff(baseline, current);
+  const item = result.items.find((entry) => entry.key === "test-A")!;
+  assert.equal(item.status, "ambiguous", "冲突重复键不得给出确定结论");
+  assert.notEqual(item.status, "unchanged");
+  assert.match(String(item.reason), /duplicate-key-conflict/);
+  assert.deepEqual(item.duplicates?.map((entry) => [entry.material, entry.line]), [["baseline", 2], ["baseline", 3]],
+    "只列重复出现的那一侧");
+  assert.equal(result.counts.ambiguous, 1);
+  assert.equal(result.counts.unchanged, 0);
+  // 材料摘要里也写明重复来源行。
+  assert.deepEqual(result.baseline.duplicateKeys, [{ key: "test-A", lines: [2, 3], identical: false }]);
+  assert.match(summarizeReconcile(result), /歧义 1/);
+});
+
+test("当前侧重复主键冲突：同样标为歧义；两侧都冲突只报一次", () => {
+  const baseline = "host,version\ntest-A,1\n";
+  const current = "host,version\ntest-A,1\ntest-A,9\n";
+  const oneSide = diff(baseline, current);
+  assert.equal(oneSide.items.find((entry) => entry.key === "test-A")!.status, "ambiguous");
+
+  const both = diff("host,version\ntest-A,1\ntest-A,2\n", "host,version\ntest-A,1\ntest-A,9\n");
+  const item = both.items.find((entry) => entry.key === "test-A")!;
+  assert.equal(item.status, "ambiguous");
+  assert.equal(both.counts.ambiguous, 1, "同一键只记一次");
+  assert.equal(item.duplicates?.length, 4, "两侧各两行全部列出");
+});
+
+test("重复主键但内容完全相同：收敛为一行，行号取首次出现，规则可测", () => {
+  const baseline = "host,version\ntest-A,1\ntest-A,1\ntest-B,7\n";
+  const current = "host,version\ntest-A,2\ntest-B,7\n";
+  const result = diff(baseline, current);
+  const item = result.items.find((entry) => entry.key === "test-A")!;
+  assert.equal(item.status, "changed", "内容相同的重复行不改变结论");
+  assert.equal(item.baselineLine, 2, "取首次出现的行号");
+  assert.deepEqual(item.duplicates?.map((entry) => entry.line), [2, 3]);
+  assert.deepEqual(result.baseline.duplicateKeys, [{ key: "test-A", lines: [2, 3], identical: true }]);
+  assert.equal(result.counts.ambiguous, 0);
+  assert.equal(result.counts.totalKeys, 2);
+});

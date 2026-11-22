@@ -31,12 +31,16 @@ export function describeGoalEvidence(
       return status === "verified" || status === "retested" || status === "accepted";
     },
   );
-  const contentCriteria = Boolean(goal.evidenceChecks?.length) || goal.boardGate === "tsecbench";
+  const reconcileGate = Boolean(goal.reconcileGate);
+  const contentCriteria =
+    Boolean(goal.evidenceChecks?.length) || goal.boardGate === "tsecbench" || reconcileGate;
 
   let label = "未验证";
   if (goal.passes) {
     if (versions.length) {
-      label = contentCriteria ? "已通过内容判据" : "已留存材料（仅文件判据）";
+      label = reconcileGate
+        ? "已通过核算条件（首次通过依据＝实际采用的核算文件）"
+        : contentCriteria ? "已通过内容判据" : "已留存材料（仅文件判据）";
     } else if (supports.length) {
       label = "已通过发现判据（首次通过依据已封存）";
     } else {

@@ -28,7 +28,9 @@
     "drill:restore": "tsx scripts/restore-drill.ts",
     "verify:acceptance": "tsx scripts/acceptance-verify.ts",
     "test:acceptance": "node --import tsx --test scripts/verify-acceptance.test.ts",
-    "acceptance:business": "tsx scripts/business-acceptance.ts"
+    "acceptance:business": "tsx scripts/business-acceptance.ts",
+    "restore:selftest": "tsx scripts/restore-isolation.ts selftest",
+    "restore:isolation": "tsx scripts/restore-isolation.ts"
   },
   "dependencies": {
     "@gongyuai/contracts": "workspace:*",

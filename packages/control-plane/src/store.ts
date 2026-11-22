@@ -12,10 +12,14 @@ import {
   type TerminalTaskStatus,
 } from "@gongyuai/contracts";
 import { taskDataDir, taskPaths } from "./paths.js";
+import { confineTaskDataDir, type RehomeRecord } from "./data-root.js";
 
 export class ControlStore {
   private readonly db: DatabaseSync;
   readonly dataRoot: string;
+
+  /** 本次启动把哪些任务记录从旧绝对路径改到了本数据根。 */
+  readonly rehomed: RehomeRecord[] = [];
 
   constructor(dataRoot: string) {
     this.dataRoot = dataRoot;
@@ -25,6 +29,40 @@ export class ControlStore {
     this.db = new DatabaseSync(dbPath);
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.migrate();
+    this.confineAll();
+  }
+
+  /**
+   * 启动时把每条任务记录的 dataDir 收回到本数据根内（恢复副本专用语义）。
+   * 旧备份里指向正式实例的绝对路径若原样生效，History / 证据 / 报告 / 快照 /
+   * 记分卡都会读到正式数据。这里改的是**本次数据根的记录**，也就是副本。
+   */
+  private confineAll(): void {
+    const rows = this.db.prepare(`SELECT id, json FROM tasks`).all() as Array<{
+      id: string;
+      json: string;
+    }>;
+    const update = this.db.prepare(`UPDATE tasks SET json = ? WHERE id = ?`);
+    for (const row of rows) {
+      let record: TaskRecord;
+      try {
+        record = JSON.parse(row.json) as TaskRecord;
+      } catch {
+        continue;
+      }
+      const { dataDir, rehomed } = confineTaskDataDir(this.dataRoot, record);
+      if (!rehomed) continue;
+      record.dataDir = dataDir;
+      // 跨机器恢复时旧的 worker/lease 指针没有意义，清掉避免自动续跑到别处。
+      record.workerPid = null;
+      record.workerPids = [];
+      record.containerId = null;
+      record.containerIds = [];
+      record.leaseOwner = null;
+      record.leaseUntil = null;
+      update.run(JSON.stringify(record), row.id);
+      this.rehomed.push(rehomed);
+    }
   }
 
   close(): void {
@@ -99,6 +137,9 @@ export class ControlStore {
   }
 
   private normalize(record: TaskRecord): TaskRecord {
+    // 读取路径一律留在本数据根内：dataDir 由 (dataRoot, taskId) 派生，不信任
+    // 记录里可能来自另一台机器的绝对路径。
+    record.dataDir = taskDataDir(this.dataRoot, record.id);
     record.execution = ExecutionConfigSchema.parse(record.execution ?? {});
     if (!Array.isArray(record.workerPids)) record.workerPids = [];
     if (!Array.isArray(record.containerIds)) record.containerIds = [];

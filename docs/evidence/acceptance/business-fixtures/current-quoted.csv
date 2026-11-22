@@ -1,0 +1,3 @@
+host,role,note
+app-q-1,web,"dc-1, rack-7"
+app-q-2,db,"dc-2, rack-9"

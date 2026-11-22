@@ -609,10 +609,41 @@ export class WorkerRunner {
   }
 
   /** Stage 2 — resume; start() rebuilds manifests from the latest scope revision. */
+  /**
+   * 继续运行。除了“已暂停”，还允许**补交材料后重新判定**：材料不齐导致的
+   * `incomplete` / `stopped` 不是硬失败，把任务永久锁死就没法走补交流程。
+   * `completed` 无需重开；`failed` / `budget_exhausted` 属于硬失败，继续要求
+   * 新的预算或另建任务，不在这里放开。
+   */
   async resume(taskId: string): Promise<TaskRecord> {
     const task = this.store.get(taskId);
     if (!task) throw new Error(`task not found: ${taskId}`);
-    if (isTerminalTaskStatus(task.status)) throw new Error("终态任务不能继续");
+    if (isTerminalTaskStatus(task.status)) {
+      const reopenable = task.status === "incomplete" || task.status === "stopped";
+      if (!reopenable) {
+        throw new Error(`终态任务不能继续（${task.status}）：完成的任务无需重开，失败或预算耗尽需另建任务`);
+      }
+      const paths = taskPaths(task.dataDir);
+      let allPassed = false;
+      if (existsSync(paths.historyDb)) {
+        const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+        try {
+          const goals = history.listGoals(task.id);
+          allPassed = goals.length > 0 && goals.every((goal) => goal.passes);
+          if (!allPassed) {
+            history.recordEvent(task.id, "task_resumed", {
+              from: task.status,
+              reopened: true,
+              reason: "补交材料后重新判定（未全部通过）",
+            });
+          }
+        } finally {
+          history.close();
+        }
+      }
+      if (allPassed) throw new Error("全部目标已通过，无需重新判定");
+      return this.start(taskId);
+    }
     if (task.status !== "paused") throw new Error("仅已暂停任务可继续");
     return this.start(taskId);
   }

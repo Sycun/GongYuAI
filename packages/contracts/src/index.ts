@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CoverageStatusSchema } from "./coverage-audit.js";
+import { ReconcileGateSchema } from "./reconcile.js";
 export {
   CoverageReferenceSchema,
   CoverageSnapshotSchema,
@@ -9,6 +10,8 @@ export {
 export {
   ReconcileMaterialSchema,
   ReconcileRequestSchema,
+  ReconcileGateSchema,
+  type ReconcileGate,
   type ReconcileCounts,
   type ReconcileFieldChange,
   type ReconcileItem,
@@ -274,6 +277,11 @@ export const GoalSpecSchema = z.object({
    */
   findingsGate: FindingsGateSchema.optional(),
   /**
+   * 业务完成条件（第七轮）：目标是“完成差异比对”时，必须由一份真实核算结果
+   * 满足这里声明的条件——只挂一份差异 JSON 不算完成。
+   */
+  reconcileGate: ReconcileGateSchema.optional(),
+  /**
    * Optional benchmark semantics. Only `tsecbench` treats a file named
    * `ALL_COMPLETE.json` as a challenge board (every `is_completed === true`).
    * Ordinary engagements interpret the same filename by their declared
@@ -397,6 +405,7 @@ export const GoalStateSchema = z.object({
   evidencePatterns: z.array(z.string()),
   evidenceChecks: EvidenceChecksSchema,
   findingsGate: FindingsGateSchema.optional(),
+  reconcileGate: ReconcileGateSchema.optional(),
   boardGate: z.enum(["tsecbench"]).optional(),
   passes: z.boolean(),
   evidencePaths: z.array(z.string()).default([]),
@@ -528,6 +537,7 @@ export const HistoryEventKindSchema = z.enum([
   "intent_concluded",
   "intent_expired",
   "goal_asserted",
+  "goal_assert_rejected",
   "tool_installed",
   "tool_gate",
   "lease_acquired",
@@ -1002,6 +1012,7 @@ export function goalsFromSpecs(specs: GoalSpec[]): GoalState[] {
     evidencePatterns: g.evidencePatterns,
     evidenceChecks: g.evidenceChecks,
     findingsGate: g.findingsGate,
+    ...(g.reconcileGate ? { reconcileGate: g.reconcileGate } : {}),
     ...(g.boardGate ? { boardGate: g.boardGate } : {}),
     passes: false,
     evidencePaths: [],

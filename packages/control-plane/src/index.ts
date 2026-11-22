@@ -28,6 +28,11 @@ export type BootOptions = {
   workerImage?: string;
   leaseMs?: number;
   watchdogMs?: number;
+  /**
+   * 隔离模式（恢复演练）：不导入 `~/.gongyuai` 的旧任务、不起 watchdog，因此
+   * 不会自动重启或续跑任何任务，也不会产生外部调用。所有读取都留在 dataRoot 内。
+   */
+  isolated?: boolean;
 };
 
 function readPackageVersion(installRoot: string): string {
@@ -48,11 +53,14 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     explicit: opts.dataRoot,
     envValue: process.env.GY_DATA_DIR,
   });
-  const migrated = migrateLegacyHomeDataRoot(dataRoot);
-  if (migrated.migrated > 0) {
-    console.error(
-      `[gy] migrated ${migrated.migrated} task(s) from ${migrated.from} -> ${dataRoot}`,
-    );
+  const isolated = opts.isolated === true;
+  if (!isolated) {
+    const migrated = migrateLegacyHomeDataRoot(dataRoot);
+    if (migrated.migrated > 0) {
+      console.error(
+        `[gy] migrated ${migrated.migrated} task(s) from ${migrated.from} -> ${dataRoot}`,
+      );
+    }
   }
   const host = opts.host ?? process.env.GY_HOST ?? "127.0.0.1";
   const port = opts.port ?? Number(process.env.GY_PORT ?? 8787);
@@ -82,7 +90,7 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     settings,
   );
   const watchdog = new Watchdog(store, runner, { intervalMs: watchdogMs, leaseMs, ownerId });
-  watchdog.start();
+  if (!isolated) watchdog.start();
   const updater = new SilentUpdater(settings, installRoot, dataRoot);
 
   const { startControlServer } = await import("./server.js");
@@ -100,6 +108,9 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     store,
     runner,
     watchdog,
+    isolated,
+    /** 本次启动把哪些恢复任务从旧绝对路径收回到本数据根。 */
+    rehomed: store.rehomed,
     settings,
     updater,
     server,

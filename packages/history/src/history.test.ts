@@ -663,3 +663,204 @@ test("broadcastTechnique suggests familyKey when omitted", () => {
   store.close();
   rmSync(root, { recursive: true, force: true });
 });
+
+// ── 第七轮：目标级核算条件（缺件不得判通过） ──────────────────────────────
+
+function reconcileFixture(overrides: {
+  name?: string;
+  missingMaterials?: string[];
+  unknown?: number;
+  ambiguous?: number;
+  totalKeys?: number;
+  baselinePath?: string;
+  currentPath?: string;
+  baselineSha?: string | null;
+  currentSha?: string | null;
+} = {}) {
+  const baselinePath = overrides.baselinePath ?? "assets/baseline.csv";
+  const currentPath = overrides.currentPath ?? "assets/current.csv";
+  return {
+    version: 1,
+    name: overrides.name ?? "asset-diff",
+    keyField: "host",
+    compareFields: ["version"],
+    baseline: {
+      path: baselinePath,
+      format: "csv",
+      rows: 2,
+      sha256: overrides.baselineSha === undefined ? "a".repeat(64) : overrides.baselineSha,
+    },
+    current: {
+      path: currentPath,
+      format: "csv",
+      rows: 2,
+      sha256: overrides.currentSha === undefined ? "b".repeat(64) : overrides.currentSha,
+    },
+    missingMaterials: overrides.missingMaterials ?? [],
+    counts: {
+      added: 0,
+      removed: 0,
+      changed: 1,
+      unchanged: 1,
+      missing: 0,
+      unknown: overrides.unknown ?? 0,
+      ambiguous: overrides.ambiguous ?? 0,
+      totalKeys: overrides.totalKeys ?? 2,
+    },
+    items: [
+      { key: "app-a-1", status: "changed", baselineLine: 2, currentLine: 2, changes: [{ field: "version", before: "1", after: "2" }] },
+      { key: "app-a-2", status: "unchanged", baselineLine: 3, currentLine: 3, changes: [] },
+    ],
+  };
+}
+
+function seedDiffGoal(store: ReturnType<typeof openHistory>, taskId: string) {
+  store.seedGoals(taskId, [{
+    id: "asset-baseline-diff",
+    title: "原始资产清单差异",
+    description: "按业务主键核对两份原始资产清单",
+    evidencePatterns: ["reconcile/*.json"],
+    reconcileGate: { pattern: "reconcile/*.json", maxUnknown: 0, maxAmbiguous: 0 },
+    passes: false,
+    evidencePaths: [],
+    assertedAt: null,
+  } as Parameters<typeof store.seedGoals>[1][number]]);
+}
+
+test("核算条件：只挂一份缺基线的差异 JSON 不能判通过，并点名缺哪份材料", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-gate-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(join(evidenceDir, "reconcile"), { recursive: true });
+  const store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
+  const taskId = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+  try {
+    seedDiffGoal(store, taskId);
+
+    // 1) 只交当前清单：差异 JSON 存在，但整份基线材料缺失。
+    writeFileSync(
+      join(evidenceDir, "reconcile", "asset-diff-1.json"),
+      JSON.stringify(reconcileFixture({
+        missingMaterials: ["assets/baseline.csv"],
+        unknown: 2,
+        baselineSha: null,
+      }), null, 2),
+    );
+    const rejected = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-1.json"]);
+    assert.equal(rejected.ok, false, "缺基线不得判通过");
+    if (!rejected.ok) {
+      assert.match(rejected.reason, /缺少基线材料 assets\/baseline\.csv/);
+    }
+    const goals = store.listGoals(taskId);
+    assert.equal(goals[0]!.passes, false);
+    assert.deepEqual(store.listGoalProofs(taskId), [], "未通过就不该有首次通过依据");
+    // 拒绝原因留在事件台账里，报告和控制台都读它。
+    const rejections = store.listEvents(taskId).filter((event) => event.kind === "goal_assert_rejected");
+    assert.equal(rejections.length, 1);
+    assert.match(String((rejections[0]!.payload as { reason?: string }).reason), /缺少基线材料/);
+
+    // 2) 两侧都缺：点名两份材料。
+    writeFileSync(
+      join(evidenceDir, "reconcile", "asset-diff-2.json"),
+      JSON.stringify(reconcileFixture({
+        name: "asset-diff-empty",
+        missingMaterials: ["assets/baseline.csv", "assets/current.csv"],
+        unknown: 2,
+        baselineSha: null,
+        currentSha: null,
+      }), null, 2),
+    );
+    const both = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-2.json"]);
+    assert.equal(both.ok, false);
+    if (!both.ok) assert.match(both.reason, /缺少两侧材料/);
+    assert.equal(store.listGoals(taskId)[0]!.passes, false);
+
+    // 3) 补交基线后重新核算：合格结果首次通过，且只采用这一份核算文件。
+    writeFileSync(
+      join(evidenceDir, "reconcile", "asset-diff-3.json"),
+      JSON.stringify(reconcileFixture(), null, 2),
+    );
+    const passed = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-3.json"]);
+    assert.equal(passed.ok, true);
+    const proofs = store.listGoalProofs(taskId);
+    assert.equal(proofs.length, 1, "首次通过只记这一份核算文件");
+    assert.equal(proofs[0]!.path, "reconcile/asset-diff-3.json");
+    assert.match(proofs[0]!.sha256, /^[0-9a-f]{64}$/);
+    const asserted = store.listEvents(taskId).filter((event) => event.kind === "goal_asserted");
+    assert.equal(asserted.length, 1);
+    const adopted = (asserted[0]!.payload as { adoptedReconcile?: { path: string; sha256: string } }).adoptedReconcile;
+    assert.equal(adopted?.path, "reconcile/asset-diff-3.json");
+    assert.equal(adopted?.sha256, proofs[0]!.sha256, "事件里的哈希等于首次通过依据的封存哈希");
+
+    // 4) 重复提交不重复记账。
+    const repeat = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-3.json"]);
+    assert.equal(repeat.ok, true);
+    assert.equal(store.listGoalProofs(taskId).length, 1, "重复提交不新增首次通过依据");
+    assert.equal(
+      store.listEvents(taskId).filter((event) => event.kind === "goal_asserted").length,
+      1,
+      "重复提交不重复记首次通过事件",
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("核算条件：两份清单齐全时“两侧都不存在的约定项”是有效结论，不拦通过", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-gate2-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(join(evidenceDir, "reconcile"), { recursive: true });
+  const store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
+  const taskId = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
+  try {
+    seedDiffGoal(store, taskId);
+    const result = reconcileFixture();
+    result.counts.missing = 1; // required-key-absent-in-both：两份清单里都没有该资产
+    writeFileSync(join(evidenceDir, "reconcile", "asset-diff-both.json"), JSON.stringify(result, null, 2));
+    const passed = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/asset-diff-both.json"]);
+    assert.equal(passed.ok, true, "缺项是核查结论，不是材料缺失");
+    assert.equal(store.listGoals(taskId)[0]!.passes, true);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("核算条件：重复主键歧义、未知项、非核算文件都不得判通过", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-gate3-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(join(evidenceDir, "reconcile"), { recursive: true });
+  const store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
+  const taskId = "cccccccc-3333-4333-8333-cccccccccccc";
+  try {
+    seedDiffGoal(store, taskId);
+
+    writeFileSync(
+      join(evidenceDir, "reconcile", "ambiguous.json"),
+      JSON.stringify(reconcileFixture({ ambiguous: 1 }), null, 2),
+    );
+    const ambiguous = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/ambiguous.json"]);
+    assert.equal(ambiguous.ok, false);
+    if (!ambiguous.ok) assert.match(ambiguous.reason, /歧义 1 项/);
+
+    writeFileSync(
+      join(evidenceDir, "reconcile", "unknown.json"),
+      JSON.stringify(reconcileFixture({ unknown: 1 }), null, 2),
+    );
+    const unknown = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/unknown.json"]);
+    assert.equal(unknown.ok, false);
+    if (!unknown.ok) assert.match(unknown.reason, /未知项 1 项/);
+
+    // 一份“长得像”的 JSON（占位/伪造）不算核算结果。
+    writeFileSync(join(evidenceDir, "reconcile", "stub.json"), JSON.stringify({ ok: true }, null, 2));
+    const stub = store.assertGoal(taskId, "asset-baseline-diff", ["reconcile/stub.json"]);
+    assert.equal(stub.ok, false);
+    if (!stub.ok) assert.match(stub.reason, /不是本平台的核算结果/);
+
+    assert.equal(store.listGoals(taskId)[0]!.passes, false);
+    assert.deepEqual(store.listGoalProofs(taskId), []);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

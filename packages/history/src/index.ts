@@ -21,6 +21,8 @@ import type {
   HistoryEventKind,
   Intent,
   IntentStatus,
+  ReconcileGate,
+  ReconcileResult,
 } from "@gongyuai/contracts";
 import {
   ASSET_KIND_RANK,
@@ -45,7 +47,7 @@ import {
   parseAssetSourceFromTags,
   suggestFamilyKey,
 } from "@gongyuai/contracts";
-import { captureEvidence, collectGoalEvidence, type EvidenceSnapshot } from "./goal-evidence.js";
+import { captureEvidence, checkReconcileGate, collectGoalEvidence, type EvidenceSnapshot } from "./goal-evidence.js";
 import { readIntegrationUsage, trackIntegrationCalls } from "./integration-usage.js";
 import {
   computeScorecard,
@@ -402,6 +404,9 @@ export class HistoryStore {
     if (!have.has("board_gate")) {
       this.db.exec(`ALTER TABLE goals ADD COLUMN board_gate TEXT`);
     }
+    if (!have.has("reconcile_gate_json")) {
+      this.db.exec(`ALTER TABLE goals ADD COLUMN reconcile_gate_json TEXT`);
+    }
   }
 
   /** Migrate pre-P0 DBs that lack source_fact_ids_json. */
@@ -440,13 +445,18 @@ export class HistoryStore {
     return event;
   }
 
+  /** 公开的事件写入口（控制面用它记录状态迁移，例如补交后重新判定）。 */
+  recordEvent(taskId: string, kind: HistoryEventKind, payload: Record<string, unknown> = {}): HistoryEvent {
+    return this.emit(taskId, kind, payload);
+  }
+
   seedGoals(taskId: string, goals: GoalState[]): void {
     // Control-plane snapshots can be older than the worker's evidence assertions.
     const stmt = this.db.prepare(`
       INSERT INTO goals
         (id, task_id, title, description, evidence_patterns_json, passes, evidence_paths_json,
-         asserted_at, findings_gate_json, assets_json, board_gate)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         asserted_at, findings_gate_json, assets_json, board_gate, reconcile_gate_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(task_id, id) DO NOTHING
     `);
     this.db.exec("BEGIN");
@@ -464,6 +474,7 @@ export class HistoryStore {
           g.findingsGate ? JSON.stringify(g.findingsGate) : null,
           g.assets?.length ? JSON.stringify(g.assets) : null,
           g.boardGate ?? null,
+          g.reconcileGate ? JSON.stringify(g.reconcileGate) : null,
         );
         if (inserted.changes && g.evidenceChecks?.length) {
           this.db.prepare("INSERT INTO goal_checks VALUES (?, ?, ?)")
@@ -635,6 +646,9 @@ export class HistoryStore {
         : undefined,
       ...(r.assets_json ? { assets: JSON.parse(String(r.assets_json)) as string[] } : {}),
       ...(r.board_gate === "tsecbench" ? { boardGate: "tsecbench" as const } : {}),
+      ...(r.reconcile_gate_json
+        ? { reconcileGate: JSON.parse(String(r.reconcile_gate_json)) as ReconcileGate }
+        : {}),
       passes: Boolean(r.passes),
       evidencePaths: JSON.parse(String(r.evidence_paths_json)) as string[],
       assertedAt: (r.asserted_at as string | null) ?? null,
@@ -1225,6 +1239,26 @@ export class HistoryStore {
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
 
+    // 第七轮：目标自报“完成差异比对”时，验收的是本次核算是否满足声明的业务条件。
+    // 只挂一份差异 JSON 不算完成：缺基线 / 缺当前 / 两侧都缺、结论停在未知或
+    // 重复主键歧义，都保持待补，不计入首次通过。通过时把实际采用的核算文件
+    // 收窄成首次通过依据（重复提交时 passes=1 已挡住，不再重复记账）。
+    let adopted: { path: string; sha256: string; name: string; counts: ReconcileResult["counts"] } | null = null;
+    if (goal.reconcileGate) {
+      const outcome = checkReconcileGate(files, goal.reconcileGate);
+      if (!outcome.ok) {
+        this.recordGoalRejection(taskId, goalId, outcome.reason);
+        return { ok: false, reason: outcome.reason };
+      }
+      adopted = {
+        path: outcome.adopted.path,
+        sha256: outcome.adopted.sha256,
+        name: outcome.result.name,
+        counts: outcome.result.counts,
+      };
+      files = [outcome.adopted];
+    }
+
     // A1: resolve which assets may testify for this goal *before* opening the
     // write transaction. A goal-scoped gate with no declared assets is refused
     // instead of silently falling back to "any finding in the task".
@@ -1288,6 +1322,16 @@ export class HistoryStore {
           goalId,
           evidencePaths: normalized,
           findingIds: supporting.map((f) => f.id),
+          ...(adopted
+            ? {
+                adoptedReconcile: {
+                  path: adopted.path,
+                  sha256: adopted.sha256,
+                  name: adopted.name,
+                  counts: adopted.counts,
+                },
+              }
+            : {}),
         });
       }
       const updated = this.listGoals(taskId).find((g) => g.id === goalId);
@@ -1297,6 +1341,29 @@ export class HistoryStore {
       try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
       throw err;
     }
+  }
+
+  /**
+   * 目标未通过的原因要能被人读到（不只是一次工具返回值）。同一目标同一原因
+   * 只记一次，避免每个循环都刷一条事件。
+   */
+  private recordGoalRejection(taskId: string, goalId: string, reason: string): void {
+    const recent = this.db
+      .prepare(
+        `SELECT payload_json FROM events
+         WHERE task_id = ? AND kind = 'goal_assert_rejected'
+         ORDER BY created_at DESC LIMIT 20`,
+      )
+      .all(taskId) as Array<{ payload_json: string }>;
+    for (const row of recent) {
+      try {
+        const payload = JSON.parse(row.payload_json) as { goalId?: string; reason?: string };
+        if (payload.goalId === goalId && payload.reason === reason) return;
+      } catch {
+        /* 忽略坏事件，继续判断 */
+      }
+    }
+    this.emit(taskId, "goal_assert_rejected", { goalId, reason });
   }
 
   /** First-pass finding attribution (A1/A3/A5). Empty for older archives. */
@@ -1333,6 +1400,7 @@ export class HistoryStore {
       ...(goal.assets?.length ? { assets: goal.assets } : {}),
       ...(goal.evidenceChecks?.length ? { evidenceChecks: goal.evidenceChecks } : {}),
       ...(goal.findingsGate ? { findingsGate: goal.findingsGate } : {}),
+      ...(goal.reconcileGate ? { reconcileGate: goal.reconcileGate } : {}),
       ...(goal.boardGate ? { boardGate: goal.boardGate } : {}),
     }));
     const findings: SnapshotFinding[] = this.listFindings(taskId).map((finding) => ({
