@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 1 | 普通操作员从正常入口完成一笔跨日委托（模拟流程），且业务差异可由原始材料算出 | ✅ | 运行 `engagement-1795354631468`（80 步，mock）；运行 `business-1795354653869`（34 步，非 mock 核算）；两份清单 `pnpm verify:acceptance` 全部通过 |
 | 2 | GitHub `Sycun/GongYuAI` 收到本轮代码提交 | ✅ | 受验代码 `d7c46d4956246ba448b565136683daf155af1c62`（[提交](https://github.com/Sycun/GongYuAI/commit/d7c46d4956246ba448b565136683daf155af1c62)）；`git ls-remote origin refs/heads/main` 与推送结果一致（回执见 §8） |
-| 3 | Kali 用该代码完整替换旧程序目录、正式入口验收、旧目录清理 | ✅ | `/home/parallels/GongYuAI`，HEAD `d7c46d4`，14 个任务（13 历史 + 本轮验收 1）；旧目录 `GongYuAI.old-20261122-213828` 已删除；正式入口读数见 §8 |
+| 3 | Kali 用该代码完整替换旧程序目录、正式入口验收、旧目录清理 | ✅ | `/home/parallels/GongYuAI`，运行版本 `d7c46d4`（HEAD 已随两个文档提交前进到 `aece9c7`，非 docs 差异为 0），14 个任务（13 历史 + 本轮验收 1）；旧目录 `GongYuAI.old-20261122-213828` 已删除；正式入口读数见 §8 |
 
 ## 2. 提交
 
@@ -24,7 +24,16 @@
 | 排除 | `.env`、`.gongyuai/`、`node_modules/`、`dist/`、`out/`、构建缓存、28MB 本地 PPTX（已加入 `.gitignore`） |
 | 推送方式 | 普通 `git push`，无 force |
 
-受验代码提交的文件范围：17 个修改 + 18 个新增（源码、契约、控制台、测试、脚本、验收夹具、证据），详见 `git show --stat d7c46d4`。
+受验代码提交的文件范围：16 个修改 + 24 个新增（源码、契约、控制台、测试、脚本、验收夹具、证据），详见 `git show --stat d7c46d4`。
+
+两个文档提交（相对受验代码只有 `docs/` 差异）：
+
+| 提交 | 角色 | 文件 |
+| --- | --- | --- |
+| `abc2485ce703f3695b8634c568e845aaa170c606` | 交付记录 + 台账 + 复核清单 + 验收证据 | 3 改 13 增 |
+| `aece9c7374876d8d3aa72e9ba3fa4d2a26ca13fe` | 发布回执（`docs/evidence/release/receipt.json`）与 §8 读数 | 1 改 1 增 |
+
+`git diff --stat d7c46d4 abc2485 -- ':!docs'` 与 `git diff --stat d7c46d4 aece9c7 -- ':!docs'` 均为空。
 
 ## 3. 验收运行与清单（可机器校验）
 
@@ -34,7 +43,7 @@
 | `business-1795354653869` | **业务差异核算**（原始材料） | 34/34 | `d7c46d4` | 同上 | `d4ea92c6e2c1…` | `fcdc2dce4388…` | 历史 2/2、当前 2/2、覆盖 未登记 2 |
 
 - 证据包：`docs/evidence/acceptance/engagement-1795354631468/`、`docs/evidence/acceptance/business-1795354653869/`（记录 md/json、快照、清单、校验回执 `verification.json`）。
-- 校验命令：`pnpm verify:acceptance docs/evidence/acceptance/<run>` → 23 项检查全过。
+- 校验命令：`pnpm verify:acceptance docs/evidence/acceptance/<run>` → 22 项检查全过（见该目录 `verification.json`）。
 - **两种哈希分开校验**：内容封印是快照去掉 `sha256` 字段后对 canonical payload 的 sha256；文件字节哈希是快照文件原始字节的 sha256。清单同时记录两者，校验器分别断言，并额外断言二者不相等。
 - 反例（交叉配对必须失败）：`docs/evidence/acceptance/cross-pair-rejection.txt` —— 把 `business-1795354653869` 的记录配到 `engagement-1795354631468` 的清单与快照上，7 项失败（任务 ID、快照封印、运行 ID、记录字节哈希等）；两次运行单独都通过。
 
@@ -102,7 +111,7 @@
 | --- | --- |
 | 主机 | `10.211.55.5`（kali-linux-2025-2，aarch64，SSH `parallels`） |
 | 正式目录 | `/home/parallels/GongYuAI`（完整新目录，`git clone` 自 `git bundle`，SHA 一致） |
-| 运行版本 | HEAD `d7c46d4956246ba448b565136683daf155af1c62`；监听进程 cwd = `/home/parallels/GongYuAI` |
+| 运行版本 | 运行代码 = `d7c46d4956246ba448b565136683daf155af1c62`（HEAD 随文档提交前进）；监听进程 cwd = `/home/parallels/GongYuAI` |
 | 依赖与构建 | Kali 本机 `pnpm install --frozen-lockfile` + `pnpm -r run build`（未复制 macOS 依赖） |
 | 数据与配置 | 切换前另取保护备份 `gongyuai-data-backup-20261122-213828.tar.gz`（21,305,901 字节，SHA-256 `b488916f…`），再复制 `.env` 与 `.gongyuai` 到新目录后切换 |
 | 切换 | 目录对调 → 终止旧主进程 → 新目录起服务（本轮 sudo 需密码，`systemd` 单元由 `Restart=on-failure` 未能自动重启，改用 `setsid nohup pnpm gy serve`；单元 `enabled`，重启机器即回到 systemd 托管；恢复托管的命令见 §10） |
@@ -119,7 +128,7 @@
 | --- | --- |
 | 受验代码 | `d7c46d4956246ba448b565136683daf155af1c62`（构建/测试/两套验收/恢复演练都在此提交） |
 | GitHub `main` | `abc2485ce703f3695b8634c568e845aaa170c606`（记录提交；相对受验代码非 docs 差异为 0） |
-| Kali 实际运行 | 目录 `/home/parallels/GongYuAI`、HEAD `abc2485ce703f3695b8634c568e845aaa170c606`、运行版本 `d7c46d4…`、监听进程 cwd 同目录、health `{"ok":true}`、任务 14 个 |
+| Kali 实际运行 | 目录 `/home/parallels/GongYuAI`、运行版本 `d7c46d4…`；HEAD 在回执采集时为 `abc2485…`，随后拉到回执提交 `aece9c7…`（两次都只有 docs 差异）；监听进程 cwd 同目录、health `{"ok":true}`、任务 14 个 |
 
 回执提交（本文件所在提交之后的第三个提交）只追加 `receipt.json` 与本节读数；两个文档提交相对受验代码都只有 `docs/` 差异（`git diff --stat d7c46d4 HEAD -- ':!docs'` 为空）。
 
@@ -146,7 +155,7 @@
 
 1. `git ls-remote origin refs/heads/main` 对照受验代码与记录提交。
 2. `pnpm install --frozen-lockfile && pnpm -r run build && pnpm -r run test && pnpm test:acceptance && pnpm smoke`（期望 126 + 2 通过、smoke PASS）。
-3. `pnpm verify:acceptance docs/evidence/acceptance/engagement-1795354631468` 与 `…/business-1795354653869`（23 项全过）；再跑一次交叉配对（`--record` 指向另一次运行）必须失败。
+3. `pnpm verify:acceptance docs/evidence/acceptance/engagement-1795354631468` 与 `…/business-1795354653869`（各 22 项全过）；再跑一次交叉配对（`--record` 指向另一次运行）必须失败。
 4. `pnpm acceptance:business` 复跑业务验收：先核对 `expected.json` 封存哈希，再逐项比对。
 5. `gy scorecard --recompute <snapshot>`：`sealValid=true`，分子分母与清单一致。
 6. Kali：`readlink /proc/<pid>/cwd`、`git -C /home/parallels/GongYuAI rev-parse HEAD`、`curl :8877/health`、`curl :8877/tasks`（14 个）；确认 `GongYuAI.old-*` 不存在、两份备份 tar 权限 0600。
