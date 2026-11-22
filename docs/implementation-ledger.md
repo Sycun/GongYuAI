@@ -82,7 +82,7 @@
 | --- | --- |
 | 发布提交 | `3a6b174bf544b61c58f28d631aa136a3c34b9e3a`（[GitHub](https://github.com/Sycun/GongYuAI/commit/3a6b174bf544b61c58f28d631aa136a3c34b9e3a)），父 `8e0a641` |
 | GitHub 远端 | `github.com/Sycun/GongYuAI`，`main`，`git ls-remote` 复核一致 |
-| Kali | 10.211.55.5，`/home/parallels/GongYuAI`，`gongyuai.service`，`:8877`；HEAD 同一 SHA，旧目录已删除 |
+| Kali | 10.211.55.5，`/home/parallels/GongYuAI`，`gongyuai.service`，`:8877`；代码树同一 SHA（HEAD 含文档提交），旧目录已删除 |
 | 详细证据 | [delivery-record.md](./delivery-record.md)（构建/测试/smoke/贯穿样例/恢复演练/浏览器/Kali 验收） |
 
 ## 5. 未纳入与明确排除

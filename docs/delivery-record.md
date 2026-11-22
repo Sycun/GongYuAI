@@ -18,7 +18,8 @@
 | --- | --- |
 | 仓库 | https://github.com/Sycun/GongYuAI |
 | 分支 | `main` |
-| 发布提交（代码） | `3a6b174bf544b61c58f28d631aa136a3c34b9e3a` |
+| 代码发布提交 | `3a6b174bf544b61c58f28d631aa136a3c34b9e3a` |
+| 记录提交 | 本文件所在的当前 `main` HEAD（`git rev-parse HEAD`）；相对代码提交仅 docs 差异 |
 | 提交链接 | https://github.com/Sycun/GongYuAI/commit/3a6b174bf544b61c58f28d631aa136a3c34b9e3a |
 | 父提交 | `8e0a641da62ea9048374bcd753a4803caf3a89d3` |
 | 提交范围 | 106 个文件，+9299 / −354；源码、契约、控制台、测试、脚本、锁文件、文档 |
@@ -61,7 +62,7 @@ curl -s "localhost:8877/tasks/<taskId>/evidence/file?path=baseline/sys-a/config.
 | --- | --- |
 | 主机 | `10.211.55.5`（kali-linux-2025-2，aarch64，SSH 用户 `parallels`） |
 | 正式目录 | `/home/parallels/GongYuAI`（完整新目录，非覆盖复制） |
-| Git | HEAD `3a6b174bf544b61c58f28d631aa136a3c34b9e3a`，工作区干净 |
+| Git | 代码树 = `3a6b174bf544b61c58f28d631aa136a3c34b9e3a`，工作区干净；HEAD = 当前 `main`（含本文档提交，`git diff --stat 3a6b174 HEAD -- ':!docs'` 为空） |
 | 服务 | `gongyuai.service`（systemd，User=parallels，WorkingDirectory=/home/parallels/GongYuAI） |
 | 启动命令 | `pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir /home/parallels/GongYuAI/.gongyuai` |
 | 持久数据 | `/home/parallels/GongYuAI/.gongyuai`（control.sqlite、tasks、settings、证据） |
@@ -76,8 +77,9 @@ curl -s "localhost:8877/tasks/<taskId>/evidence/file?path=baseline/sys-a/config.
 一致性证据：
 
 ```text
-GitHub refs/heads/main : 3a6b174bf544b61c58f28d631aa136a3c34b9e3a
-Kali git HEAD          : 3a6b174bf544b61c58f28d631aa136a3c34b9e3a
+GitHub refs/heads/main : 当前 HEAD（与 Kali 相同；git ls-remote origin refs/heads/main）
+Kali git HEAD          : 当前 HEAD（同上）
+代码树（两端）         : 3a6b174bf544b61c58f28d631aa136a3c34b9e3a（非 docs 文件差异为空）
 Kali MainPID cwd       : /home/parallels/GongYuAI
 Kali health            : {"ok":true,"version":"0.1.0"}
 Kali tasks             : 13（切换前 11 + 验收 2）
