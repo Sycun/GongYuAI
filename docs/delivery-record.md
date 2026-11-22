@@ -1,14 +1,89 @@
 # 交付记录（Release / Deployment Record）
 
 累计记录：每轮复核整改都在同一份文件里留下可复核读数，历史章节保留备查。
-本轮（第七轮 / 第三轮独立复核整改）的读数在 §0；上一轮（第六轮）的章节从 §1 开始。
+本轮（第八轮 / 第四轮独立复核整改）的读数在 §0；上一轮的第七轮记录在 §0A；第六轮的章节从 §1 开始。
 
-## 0. 本轮（第七轮）关键读数
+## 0. 本轮（第八轮）关键读数
+
+日期：2026-11-22（Asia/Shanghai）　实施：DSH 实施会话（lead）
+状态口径见 [implementation-ledger.md](./implementation-ledger.md) §0；复核最短路径见 [review-checklist.md](./review-checklist.md) §0。
+
+### 0.1 两端读数（同一受验提交）
+
+| 项 | 值 |
+| --- | --- |
+| 受验代码 | `77f8b8c2c526eb8106e63e40f0b01fb131c90e89`（tree `96ffb3222670a3b37299cf58ddc4ac847551a1fb`） |
+| 上一轮受验 / 复核 | `f34cc03`（第三轮独立复核），当时 GitHub `main` = `c1d95e2` |
+| 本轮起点 | `c1d95e2`（工作区另有他人未提交的控制台 / 聊天改动，未纳入本次提交） |
+| GitHub `main` | `77f8b8c`（`git ls-remote origin refs/heads/main` 现场取值，与受验提交相同） |
+| 干净副本回归 | `/tmp/gy-clean-77f8b8c`（`git clone` 自本地仓库，checkout 受验提交，0 条未提交改动）；日志 `/tmp/gy-clean-77f8b8c/clean-regression.log` |
+| Kali 检出 | `/home/parallels/GongYuAI-77f8b8c2`，HEAD = 同一受验提交，tree 同 `96ffb32`，工作区 0 条改动 |
+| Kali 实际运行 | 同一提交（systemd `gongyuai.service`，MainPID 1720624，监听 PID 1720656 在 `/system.slice/gongyuai.service`，cwd = 上述目录） |
+
+### 0.2 干净副本回归读数（受验提交）
+
+| 步骤 | 读数 |
+| --- | --- |
+| 冻结依赖安装 + 构建 | exit 0 |
+| 全量单测 | **162 通过 / 0 失败**（contracts 41、history 49、control-plane 37、worker 35） |
+| 验收校验器测试 | 8 通过 / 0 失败 |
+| smoke | PASS |
+| 跨日模拟流程 | `engagement-1795360108864`：80/80，快照封印 `966437660d6c…`，文件字节 `e43a08932e7d…` |
+| 原始材料业务验收 | `business-1795360131311`：77/77，快照封印 `2f20073d8e5b…` |
+| 首次通过绑定验收（本轮新增） | `firstpass-1795360133436`：**69/69**（A、B1、B2 与原反例逐条对应） |
+| 恢复隔离自测 | 通过（含“源目录不可访问仍从副本读”负例） |
+| 失败步骤计数 | 0 |
+
+### 0.3 两项缺陷的修复位置与实测
+
+| 缺陷 | 修复位置 | 正常入口 | 实测 |
+| --- | --- | --- | --- |
+| 一、控制台建档只生成文件目标，缺材料仍可能通过 | `packages/contracts/src/index.ts`（`GoalSpec.kind` + `business` + `normalizeGoalSpecs`，唯一边界派生 `evidencePatterns`/`reconcileGate`）；`packages/contracts/src/reconcile.ts`（`BusinessReconcileConfigSchema`、`reconcileGateFromConfig`）；`packages/history/src/index.ts`（`seedGoals`/`listGoals` 读写 `goal_kind`/`business_json`）；`apps/console/src/pages/TasksPage.tsx`、`apps/console/src/components/GoalReconcileCard.tsx` | 控制台「任务 → 新建任务 → 目标类型：业务核算」填两份材料与主键；无需手写 JSON | 建档后服务端返回 `kind=business-reconcile`、派生 `evidencePatterns=["reconcile/asset-diff-*.json"]`、`reconcileGate{maxUnknown:0,maxAmbiguous:0}`，`business` 原样落库；Kali 任务 `a0c5638d…` 经 UI 建档即为此形态 |
+| 二、首次通过可被“曾经合格”的旧文件满足 | `packages/history/src/goal-evidence.ts`（`verifyRevisionInputs` / `selectAdoptedReconcile` / `describeReconcileState`）；`packages/history/src/index.ts`（`reconcile_revisions` 表、`archiveReconcile`、`assertGoal` 事务内二次核对）；`packages/control-plane/src/reconcile.ts`（目标级核算解析）；`packages/history/src/report.ts`（报告写入采用的输入版本） | 目标卡「运行核算」「触发判定」；证据页「导入/替换」「撤回」 | 撤走基线后两个时点均 0/1（Kali `bf6b3bac…`）；同路径冲突重复键歧义 0/1 且界面列出 `app-a-1` 与「当前第 2 行、第 3 行」（Kali `c8c451d3…`）；修正后各自 1/1，且只记一条首次通过事件 |
+
+### 0.4 Kali 正式控制台复跑（虚构业务材料）
+
+| 场景 | Kali 任务 ID | 首次通过采用的输入版本 | 结果文件 | 状态 |
+| --- | --- | --- | --- | --- |
+| A（只交当前→补交基线） | `a0c5638d-2e84-4581-b07f-23c738d6471a` | `r1795360324163-0001` | `reconcile/asset-diff-r1795360324163-0001.json`（SHA-256 `a02b86468ae2…`） | completed · 历史 1/1 · 当前 1/1 |
+| B1（撤回基线两时点） | `bf6b3bac-b095-4399-9975-71c0dc914aaa` | `r1795360401215-0001` | `reconcile/asset-diff-r1795360401215-0001.json`（SHA-256 `652204a327ce…`） | completed · 1/1 |
+| B2（同路径冲突重复键） | `c8c451d3-9bec-4484-b9a4-0ee65269f5a6` | `r1795360478812-0001` | `reconcile/asset-diff-r1795360478812-0001.json`（SHA-256 `821437c8fb48…`） | completed · 1/1 |
+
+三笔任务的三次首次通过各只产生 1 条 `goal_asserted` 与 1 份 `goal_proofs`，报告均含「首次通过采用的核算文件」「首次通过采用的输入版本」「基线 / 当前材料 SHA-256」。完整读数（含全部核算版本、输入哈希、拒绝原因、材料审计事件）见
+[`docs/evidence/round8/kali-console-acceptance.json`](./evidence/round8/kali-console-acceptance.json)；
+本机控制台同场景见 [`docs/evidence/round8/console-browser-acceptance.json`](./evidence/round8/console-browser-acceptance.json)。
+
+### 0.5 Kali 部署与托管核对
+
+| 项 | 读数 |
+| --- | --- |
+| 保护备份 | `gongyuai-data-backup-20261122-231008.tar.gz`，21,420,362 字节，SHA-256 `b0ee2b48dd40…`，权限 0600 |
+| 切换 | `prepare`（parallels 用户：备份 → clone 受验提交 → 本机 `pnpm install --frozen-lockfile` + 构建 → 迁移 `.gongyuai` 与 `.env`）→ `switch`（root：改写单元 `WorkingDirectory` → 重启 → 逐项核对） |
+| 单元状态 | `ActiveState=active`、`SubState=running`、`UnitFileState=enabled`、`NRestarts=0` |
+| 监听与归属 | `0.0.0.0:8877`，PID 1720656，`/proc/<pid>/cwd` = `/home/parallels/GongYuAI-77f8b8c2`，cgroup `0::/system.slice/gongyuai.service` |
+| 实际构建产物 | 6 份编译产物（`control-plane/dist/{server,reconcile,store}.js`、`contracts/dist/reconcile.js`、`history/dist/{index,goal-evidence}.js`）与本机 / 干净副本**逐字节相同**；控制台 `web/index.html` 指向本机构建的 `assets/index-CkF6Raet.js`，`/assets/index-CkF6Raet.js` 返回 200 |
+| 数据保留 | 切换前后任务数 18 → 18；复跑后 22；第七轮正式任务 `497126a0…` 的 `passes=true` 与 `goal_proofs`（`reconcile/kali-eng-diff-20261122141507.json`，`478da5dfc3d0…`）保留 |
+
+### 0.6 提交差异（受验提交之后）
+
+本轮只有一次文档 / 证据提交（本文件、台账、复核清单与 `docs/evidence/round8/`）。它相对受验提交 `77f8b8c` 的差异全部落在 `docs/` 与 `docs/evidence/`，运行时源码零差异；复核命令：
+
+```bash
+git diff --stat 77f8b8c HEAD -- ':!docs'
+```
+
+### 0.7 仍然未验证的（工程验收 ≠ 生产盲评）
+
+- **真实生产效果待验证**：缺 (1) 一份获准用于本次验收的脱敏真实委托（含材料先后顺序、范围修订、撤回与实际覆盖、中途交接），(2) 客户对该材料用途的书面许可，(3) 平台结果产生前独立封存的人工底稿（预期差异、未验证项、已撤回结论、遗留事项）。
+- 本轮全部材料为虚构样本（`diff.example.com` / `app-a-*` 主机名），不构成真实业务结论。
+- 采用规则是**内容哈希绑定**而不是“时间上最新”：材料被换回与某次核算完全相同的字节时，该次核算重新具备采用资格（不需要重新生成），因为判定依据的是“判定时有效的那份输入”。材料内容一旦变化，旧结果即失去资格——两个反例都已固定成回归。
+
+## 0A. 上一轮（第七轮）关键读数
 
 日期：2026-11-22（Asia/Shanghai）　实施：DSH 实施会话（lead）
 状态口径见 [implementation-ledger.md](./implementation-ledger.md) §0；复核最短路径见 [review-checklist.md](./review-checklist.md)。
 
-### 0.1 三个版本与两套运行
+### 0A.1 三个版本与两套运行
 
 | 项 | 值 |
 | --- | --- |
@@ -24,7 +99,7 @@
 140 项单测、8 项校验器测试、smoke、80 步跨日流程、77 步业务验收、恢复隔离自测），清单里的
 `code.commit` 就是上表受验提交、`dirty=false`，校验器各 30 项全过。
 
-### 0.2 七项复核反例的处置
+### 0A.2 七项复核反例的处置
 
 | 复核项 | 本轮改动 | 证据 |
 | --- | --- | --- |
@@ -36,7 +111,7 @@
 | GitHub 与 Kali 不同步 | 干净副本全量回归通过后普通 push（无 force），Kali 从同一提交准备新目录、本机安装构建、迁移配置与数据、切换、核对、清理旧程序目录 | 回执 `github` / `kali` 两节 |
 | 文档与证据 | 本文件 + 台账 + 复核清单 + 回执 + 四类新证据（验收、恢复、服务、正式入口） | 本文件 §0；`docs/evidence/` |
 
-### 0.3 仍然未验证的
+### 0A.3 仍然未验证的
 
 - **生产盲评待验证**：缺一份获准使用的脱敏历史委托、查看平台结果前独立封存的人工底稿、客户书面确认。
   缺任一项就不把工程夹具当作人工底稿，也不宣称真实生产效果已验证。

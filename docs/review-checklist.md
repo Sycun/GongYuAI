@@ -1,10 +1,52 @@
 # 复核清单（最短可执行路径）
 
 给只拿到代码与证据包的复核人。每条都写清「命令 → 期望」，不依赖本机隐藏状态。
+
+**本轮（第八轮）受验代码 `77f8b8c2c526eb8106e63e40f0b01fb131c90e89`（tree `96ffb32`）**，
+对应 [delivery-record.md](./delivery-record.md) §0。上一轮（第七轮，受验 `f34cc03`）的清单保留在 §0A。
+
+## 0. 本轮（第八轮）最短路径
+
+```bash
+git ls-remote origin refs/heads/main            # 期望 77f8b8c2c526eb8106e63e40f0b01fb131c90e89
+git diff --stat 77f8b8c HEAD -- ':!docs'        # 期望为空（本轮之后只有文档/证据提交）
+bash scripts/clean-regression.sh 77f8b8c2c526eb8106e63e40f0b01fb131c90e89 /tmp/gy-clean
+# 期望：162 单测通过、校验器 8 项、smoke PASS、跨日 80/80、业务 77/77、首次通过 69/69、失败步骤 0
+```
+
+```bash
+pnpm --filter @gongyuai/history test        # 期望 49 通过（含 reconcile-firstpass 10 例）
+pnpm --filter @gongyuai/contracts test      # 期望 41 通过
+pnpm --filter @gongyuai/control-plane test  # 期望 37 通过（含 business-goal-api 5 例）
+pnpm acceptance:firstpass                   # 期望 69 项全过
+```
+
+```bash
+# 反例读数（不经 UI，直接读 Kali 现场归档的证据）
+python3 -c "import json;r=json.load(open('docs/evidence/round8/kali-console-acceptance.json'));[print(k, v['taskId'], v['goal']['passes'], v['goalAssertedEvents'], len(v['firstPassProofs']), v['adoptedReconcile']['revisionId'], v['adoptedReconcile']['baseline']['sha256'][:12], v['adoptedReconcile']['current']['sha256'][:12]) for k,v in r['tasks'].items()]"
+# 期望：三笔任务各 1 条首次通过事件、1 份 goal_proofs；adoptedReconcile 的两侧哈希等于该 revision 里记录的哈希
+```
+
+```bash
+# Kali 现场核对
+systemctl show -p ActiveState -p MainPID -p WorkingDirectory gongyuai.service   # active / 1720624 / GongYuAI-77f8b8c2
+readlink /proc/$(pgrep -f 'gy serve' | head -1)/cwd                              # 同一目录
+git -C /home/parallels/GongYuAI-77f8b8c2 rev-parse HEAD                          # 77f8b8c…
+curl -s localhost:8877/health                                                    # {"ok":true}
+curl -s localhost:8877/tasks | python3 -c 'import json,sys;print(len(json.load(sys.stdin)["tasks"]))'  # 22
+```
+
+界面复核：任务 `a0c5638d…` / `bf6b3bac…` / `c8c451d3…` 的目标页应显示「核算态 · 已通过」
+「首次通过采用的输入版本：r…」「基线 … SHA-256 …」「当前 … SHA-256 …」「结果文件 … SHA-256 …」；
+`c8c451d3…` 的历史里还能查到期中那版冲突重复键（`app-a-1`，当前第 2、3 行）的歧义结论与拒绝原因。
+截图见 `docs/evidence/round8/`。
+
+## 0A. 上一轮（第七轮）清单（保留备查）
+
 受验代码 `f34cc032cd9c4061a9212758595b34cf8d5fc2e0`（tree `e9d5649`）；发布回执见
 [`docs/evidence/release/receipt.json`](./evidence/release/receipt.json)。
 
-## 0. 版本与提交
+### 0A.1 版本与提交
 
 ```bash
 git ls-remote origin refs/heads/main                 # 与回执 github.mainAtReceipt 对照
