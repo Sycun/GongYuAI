@@ -11,7 +11,7 @@
  *   pnpm tsx scripts/diff-harness.ts --goals examples/dvwa-smoke/goals.json \
  *     --target http://127.0.0.1 --auth "lab note……" --mock
  *
- * Real TSecBench: drop --mock, set OPENAI_API_KEY, VPN up; compare subsets only.
+ * Live rows are diagnostic. The groups use different runtimes and tool surfaces.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -91,6 +91,7 @@ async function runMode(
     leaseMs: 8_000,
     watchdogMs: 1_500,
   });
+  let createdTaskId: string | undefined;
   try {
     const body = CreateTaskRequestSchema.parse({
       name: `diff-${mode}`,
@@ -118,8 +119,8 @@ async function runMode(
     });
     if (!response.ok) throw new Error(`cannot start ${mode}: ${await response.text()}`);
     const { task: created } = (await response.json()) as { task: TaskRecord };
+    createdTaskId = created.id;
     const { status, task } = await waitTask(plane.url, created.id, 120_000);
-    if (status === "timeout") await plane.runner.stop(task.id);
     const relayDir = join(task.dataDir, "workspace", "relay");
     const relayFiles = existsSync(relayDir)
       ? readdirSync(relayDir).filter((file) => /^(π|pi)\d+\.json$/iu.test(file)).length
@@ -144,12 +145,16 @@ async function runMode(
     }
     return result;
   } finally {
-    await plane.close();
-    delete process.env.GY_HARNESS;
-    if (previousNoRelay === undefined) delete process.env.GY_DIFF_NO_RELAY;
-    else process.env.GY_DIFF_NO_RELAY = previousNoRelay;
-    if (previousMockRelay === undefined) delete process.env.GY_MOCK_RELAY;
-    else process.env.GY_MOCK_RELAY = previousMockRelay;
+    try {
+      if (createdTaskId) await plane.runner.stop(createdTaskId);
+    } finally {
+      await plane.close();
+      delete process.env.GY_HARNESS;
+      if (previousNoRelay === undefined) delete process.env.GY_DIFF_NO_RELAY;
+      else process.env.GY_DIFF_NO_RELAY = previousNoRelay;
+      if (previousMockRelay === undefined) delete process.env.GY_MOCK_RELAY;
+      else process.env.GY_MOCK_RELAY = previousMockRelay;
+    }
   }
 }
 
@@ -209,7 +214,7 @@ async function main() {
     );
   }
 
-  console.log(mock ? "\n# GongYuAI mock differential\n" : "\n# GongYuAI harness differential (relative only)\n");
+  console.log(mock ? "\n# GongYuAI mock differential\n" : "\n# GongYuAI live harness diagnostics\n");
   console.log(`| mode | status | tokens | toolCalls | goals | relay files |${mock ? " relay events |" : ""}`);
   console.log(`| --- | --- | ---: | ---: | ---: | ---: |${mock ? " ---: |" : ""}`);
   for (const r of rows) {
@@ -221,10 +226,7 @@ async function main() {
     console.log("\nMock fixture PASS. Tokens are unmeasured. toolCalls counts the two synthetic tool dispatches.");
     return;
   }
-  console.log(
-    "\n`bare` = GY_HARNESS=bare (no History DAG / no Session Relay). Report deltas only.",
-  );
-  console.log("TSecBench: drop --mock, fix budget, VPN up; never batch hint.\n");
+  console.log("\nDiagnostic only. Runtime, tool availability and metering differ between groups.");
 }
 
 main().catch((err) => {

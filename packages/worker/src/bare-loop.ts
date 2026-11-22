@@ -17,9 +17,9 @@ import {
 import { listEvidenceFiles, minimatch, openHistory, collectGoalEvidence, writeTaskReport } from "@gongyuai/history";
 import { CheckpointStore } from "./checkpoint.js";
 import { assertMockGoals, collectMockBanner, dispatchMockTool } from "./mock-fixture.js";
-import { appendProgress, runShell, writeEvidence, type ToolContext } from "./tools.js";
+import { appendProgress, assertCommandAllowed, chargeToolCall, gateTool, writeEvidence, type ToolContext } from "./tools.js";
 import { writeWorkerStatus } from "./status.js";
-import { formatShellResult, recordExecutionStep } from "./execution-trace.js";
+import { recordExecutionStep } from "./execution-trace.js";
 
 function matchingPaths(evidenceDir: string, goal: GoalSpec): string[] {
   const patterns = [...goal.evidencePatterns, ...(goal.evidenceChecks ?? []).map((rule) => rule.pattern)];
@@ -125,19 +125,16 @@ async function runBareOpenAi(manifest: WorkerManifest): Promise<void> {
   mkdirSync(manifest.workspaceDir, { recursive: true });
   mkdirSync(manifest.evidenceDir, { recursive: true });
 
-  const stubHistory = {
-    appendFact: () => ({}),
-    recordInstall: () => {},
-  } as unknown as ToolContext["history"];
+  const ledger = openHistory({ dbPath: manifest.historyDb, evidenceDir: manifest.evidenceDir });
   const ctx: ToolContext = {
     manifest,
-    history: stubHistory,
+    history: ledger,
     usage: { toolCalls: state.toolCalls, installs: state.installs },
   };
 
   writeWorkerStatus(manifest.dataDir, {
     status: "running",
-    usage: { tokens: state.tokens, toolCalls: 0, installs: 0 },
+    usage: { tokens: state.tokens, ...ctx.usage },
   });
 
   const goalsBlurb = manifest.goals
@@ -152,7 +149,7 @@ async function runBareOpenAi(manifest: WorkerManifest): Promise<void> {
       type: "function" as const,
       function: {
         name: "shell",
-        description: "Run bash in workspace",
+        description: "Shell execution is unavailable in this baseline. Requests are audited as denied.",
         parameters: {
           type: "object",
           properties: { command: { type: "string" } },
@@ -207,13 +204,18 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
     manifest.budget.maxToolCalls > 0
       ? Math.max(manifest.budget.maxToolCalls, 20)
       : Number.MAX_SAFE_INTEGER;
+  const exhaustedBudget = () => {
+    const budget = manifest.budget;
+    if (isBudgetHit(ctx.usage.toolCalls, budget.maxToolCalls)) return "maxToolCalls exceeded";
+    if (isBudgetHit(state.tokens, budget.maxTokens)) return "maxTokens exceeded";
+    if (isBudgetHit(ctx.usage.installs, budget.maxInstalls)) return "maxInstalls exceeded";
+    if (isWallHit(started, budget.maxWallMs)) return "maxWallMs exceeded";
+  };
 
   try {
     for (let i = 0; i < maxRounds; i++) {
       if (allGoalsSatisfied(manifest)) break;
-      if (isBudgetHit(ctx.usage.toolCalls, manifest.budget.maxToolCalls)) break;
-      if (isBudgetHit(state.tokens, manifest.budget.maxTokens)) break;
-      if (isWallHit(started, manifest.budget.maxWallMs)) break;
+      if (exhaustedBudget()) break;
 
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
@@ -241,6 +243,7 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
         u?.total_tokens ??
         (u?.prompt_tokens ?? 0) + (u?.completion_tokens ?? 0);
       state.tokens += delta;
+      if (exhaustedBudget()) break;
       const msg = data.choices[0]?.message;
       if (!msg) throw new Error("empty model response");
       messages.push({
@@ -260,15 +263,22 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
 
       const shellCalls: ShellTraceCall[] = [];
       for (const call of msg.tool_calls) {
-        const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
+        if (exhaustedBudget()) break;
+        let command: string | null = null;
         let result = "";
-        let shellResult: string | undefined;
         try {
           if (call.function.name === "shell") {
-            const output = runShell(ctx, args.command ?? "");
-            result = JSON.stringify(output);
-            shellResult = formatShellResult(output);
+            gateTool(ctx, "shell", () => {
+              const args = JSON.parse(call.function.arguments || "{}") as Record<string, unknown> | null;
+              command = typeof args?.command === "string" ? args.command : null;
+              if (!command?.trim()) throw new Error("invalid shell arguments");
+              assertCommandAllowed(manifest, command);
+              chargeToolCall(ctx);
+              // Keep this baseline fail-closed. The ledger only records the denial.
+              throw new Error("denied: shell execution is unavailable in the bare baseline");
+            }, { callId: call.id });
           } else if (call.function.name === "write_evidence") {
+            const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
             result = writeEvidence(
               ctx,
               args.relativePath ?? "note.txt",
@@ -294,8 +304,8 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
         if (call.function.name === "shell") {
           shellCalls.push({
             id: call.id,
-            command: typeof args?.command === "string" ? args.command : null,
-            result: shellResult ?? result,
+            command,
+            result,
           });
         }
         messages.push({
@@ -327,22 +337,21 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
       );
     }
 
-    const ledger = openHistory({ dbPath: manifest.historyDb, evidenceDir: manifest.evidenceDir });
-    let passed: boolean;
-    try {
-      ledger.seedGoals(manifest.taskId, manifest.goals);
-      for (const goal of manifest.goals) {
-        ledger.assertGoal(manifest.taskId, goal.id, matchingPaths(manifest.evidenceDir, goal));
-      }
-      passed = ledger.allGoalsPass(manifest.taskId);
-      writeTaskReport(manifest, ledger, { status: passed ? "completed" : "incomplete" });
-    } finally {
-      ledger.close();
+    const budgetReason = exhaustedBudget();
+    ledger.seedGoals(manifest.taskId, manifest.goals);
+    for (const goal of manifest.goals) {
+      ledger.assertGoal(manifest.taskId, goal.id, matchingPaths(manifest.evidenceDir, goal));
     }
+    const status = ledger.allGoalsPass(manifest.taskId)
+      ? "completed"
+      : budgetReason ? "budget_exhausted" : "incomplete";
+    const reason = status === "budget_exhausted" ? budgetReason : undefined;
+    writeTaskReport(manifest, ledger, { status, reason });
     state.phase = "done";
     ckpt.save(state);
     writeWorkerStatus(manifest.dataDir, {
-      status: passed ? "completed" : "incomplete",
+      status,
+      error: reason,
       usage: {
         tokens: state.tokens,
         toolCalls: ctx.usage.toolCalls,
@@ -363,6 +372,7 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
     throw err;
   } finally {
     ckpt.close();
+    ledger.close();
   }
 }
 
