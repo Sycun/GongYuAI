@@ -10,6 +10,17 @@ AI-native **long-running** authorized pentest agent，产品面定位为 **Missi
 - **Harness 差分**：`pnpm diff-harness`（bare / history / relay）
 - **单用户 MVP** CLI（`gy`）；多人后置
 
+## 当前发布（第七轮，2026-11-22）
+
+| 项 | 值 |
+| --- | --- |
+| 受验代码 | `f34cc032cd9c4061a9212758595b34cf8d5fc2e0`（tree `e9d5649`） |
+| 跨日模拟运行 | `engagement-1795356668890`（80/80）· 快照封印 `d6f744c3356a…` · 字节 `97ff33f3a146…` |
+| 业务验收运行 | `business-1795356691440`（77/77）· 快照封印 `0439db0cc133…` · 字节 `5ef79202a6d5…` |
+| Kali 正式入口验收任务 | `497126a0-93ac-4c9b-b293-acd380759f40` · 首次通过依据 `reconcile/kali-eng-diff-20261122141507.json` · `478da5dfc3d0…` |
+| 交付记录 | [docs/delivery-record.md](docs/delivery-record.md) §0 · [发布回执](docs/evidence/release/receipt.json) |
+| 复核最短路径 | [docs/review-checklist.md](docs/review-checklist.md) |
+
 文档入口：[docs/README.md](docs/README.md)。后续开发按 [docs/dev-handbook.md](docs/dev-handbook.md)。
 
 > Authorized testing only. You must supply an explicit authorization note and target allow-list.
@@ -27,7 +38,7 @@ pnpm smoke
 | 角色 | 路径 | 动作 |
 | --- | --- | --- |
 | Mac | `/Users/sycpro/GongYuAI` | 开发；`git push origin main` |
-| Kali | `/home/parallels/GongYuAI` | `bash scripts/parallels/redeploy.sh`（pull + build + `:8877`） |
+| Kali | `/home/parallels/GongYuAI-f34cc032`（systemd `gongyuai.service`） | `bash scripts/kali/deploy.sh prepare|switch <commit>`（clone + build + 迁移数据 + 切换） |
 
 首次在 Kali 从旧共享盘树切到 Git：`bash scripts/parallels/bootstrap-from-github.sh`。  
 不再使用 `~/Downloads/GongYuAI-sync` / Parallels 共享盘 rsync 做传输。
