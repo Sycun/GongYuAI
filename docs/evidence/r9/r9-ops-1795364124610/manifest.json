@@ -1,17 +1,17 @@
 {
   "version": 2,
   "kind": "r9-ops",
-  "runId": "r9-ops-1795363923307",
-  "taskId": "d9f05da1-bab6-468b-af17-e84c933ddcae",
-  "dataRoot": "/private/tmp/gy-clean-r9/.gongyuai/acceptance/r9-ops-1795363923307",
-  "startedAt": "2026-11-22T16:12:03.306Z",
-  "finishedAt": "2026-11-22T16:12:09.766Z",
+  "runId": "r9-ops-1795364124610",
+  "taskId": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+  "dataRoot": "/private/tmp/gy-clean-r9f/.gongyuai/acceptance/r9-ops-1795364124610",
+  "startedAt": "2026-11-22T16:15:24.609Z",
+  "finishedAt": "2026-11-22T16:15:31.087Z",
   "code": {
-    "commit": "d6d32ae60974c366a6d70cf2506c1110a40d2025",
+    "commit": "e93c159ad8b3c8de467ba39051ddb6fe7d9b4e66",
     "branch": "HEAD",
     "dirty": false,
     "dirtyPaths": [
-      "?? docs/evidence/r9/"
+      "?? docs/evidence/r9/r9-ops-1795364124610/"
     ],
     "sourceDirtyPaths": [],
     "evidenceOnlyDirty": true
@@ -24,23 +24,23 @@
   "files": {
     "acceptance-record.json": {
       "path": "acceptance-record.json",
-      "sha256": "16cba7a2da8ca458ad5371c215c8235c899f198b02d8aeb6e1cde92c1272b975",
-      "bytes": 20966
+      "sha256": "c3d725fc514c47e1be756e20a3fbd9ab0cf1685a49d0836c6b8e23a23b6aa670",
+      "bytes": 20989
     },
     "acceptance-record.md": {
       "path": "acceptance-record.md",
-      "sha256": "2daf18f356bd5d38da35d6529670adec0e32a7ef201718577e07460a59b1c4ca",
-      "bytes": 8629
+      "sha256": "2090933f010b0a39ed3127477efcb79936539687eb47e43c6e39b85c2f4c32d5",
+      "bytes": 8631
     },
     "delivery-snapshot.json": {
       "path": "delivery-snapshot.json",
-      "sha256": "7014dbca58c7b5016123ab628d9d8ce6c6780748a51ba74f845ed8c77e8ed36b",
+      "sha256": "854367a3412b7132e812a45562076acc1da607475a1a86f4690202526f538d5a",
       "bytes": 2673
     },
     "manifest.json": {
       "path": "manifest.json",
-      "sha256": "a4dc3da627b21e6abe241d37bc92b2d7f7b01c6664e5bfd56c09eb0912509825",
-      "bytes": 3955
+      "sha256": "11e24d3eedd7b60da6c90c551be4c6caf8208157fea1c5b807bef73cd00eb152",
+      "bytes": 3977
     }
   },
   "artifacts": [
@@ -95,13 +95,13 @@
       "bytes": 65
     },
     {
-      "path": "reconcile/asset-diff-r1795363927336-0001.json",
-      "sha256": "95617d8bfac37977fed30a2717360952e1cae3ea756a0f9e474bf9cc49cdcfb8",
+      "path": "reconcile/asset-diff-r1795364128651-0001.json",
+      "sha256": "2f2b40b342167063f7e76910344250aa1cca1e9122dec7709f840681107abefb",
       "bytes": 2512
     },
     {
-      "path": "reconcile/asset-diff-r1795363929195-0001.json",
-      "sha256": "9fb17647b3028f576078cf487802f63cf16a337ba157007ad7996f4068312954",
+      "path": "reconcile/asset-diff-r1795364130508-0001.json",
+      "sha256": "d57935f8ea592ba2e63b428e7fe19a0cb7461b0b049cb5d16196f2fc7cfe812f",
       "bytes": 2512
     },
     {
@@ -111,11 +111,11 @@
     }
   ],
   "commands": [
-    "curl -s -X POST $BASE/tasks -d @task-a.json  # -> d9f05da1-bab6-468b-af17-e84c933ddcae",
-    "curl -s -X POST $BASE/tasks/d9f05da1-bab6-468b-af17-e84c933ddcae/jobs -d @job1.json  # -> 87674cb2-c163-413e-b97a-b756ce024563",
-    "gy jobs d9f05da1-bab6-468b-af17-e84c933ddcae --base-url http://127.0.0.1:19622",
-    "gy job-retry d9f05da1-bab6-468b-af17-e84c933ddcae 87674cb2-c163-413e-b97a-b756ce024563 --base-url http://127.0.0.1:19622",
-    "gy handoff d9f05da1-bab6-468b-af17-e84c933ddcae --next-owner op-b --base-url http://127.0.0.1:19622",
-    "gy answer d9f05da1-bab6-468b-af17-e84c933ddcae d4b2944a-5c8d-4044-b5b1-28ead6811ec7 继续验证，仅限已授权资产 --by op-b --base-url http://127.0.0.1:19622"
+    "curl -s -X POST $BASE/tasks -d @task-a.json  # -> efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+    "curl -s -X POST $BASE/tasks/efb1bbfd-93a1-47d0-a304-1b5c668ac89f/jobs -d @job1.json  # -> e56f026a-7b16-4aed-8305-dc588f8d0a6e",
+    "gy jobs efb1bbfd-93a1-47d0-a304-1b5c668ac89f --base-url http://127.0.0.1:19350",
+    "gy job-retry efb1bbfd-93a1-47d0-a304-1b5c668ac89f e56f026a-7b16-4aed-8305-dc588f8d0a6e --base-url http://127.0.0.1:19350",
+    "gy handoff efb1bbfd-93a1-47d0-a304-1b5c668ac89f --next-owner op-b --base-url http://127.0.0.1:19350",
+    "gy answer efb1bbfd-93a1-47d0-a304-1b5c668ac89f 095e63b3-ede2-4cd7-8bb0-d686ee41e954 继续验证，仅限已授权资产 --by op-b --base-url http://127.0.0.1:19350"
   ]
 }

@@ -1,10 +1,10 @@
 # 第九轮验收记录：r9-ops
 
-- 运行 ID：`r9-ops-1795363923307`
-- 任务 ID：`d9f05da1-bab6-468b-af17-e84c933ddcae`
-- 数据根：`/private/tmp/gy-clean-r9/.gongyuai/acceptance/r9-ops-1795363923307`
-- 代码：`d6d32ae60974c366a6d70cf2506c1110a40d2025`（dirty=false）
-- 时间：2026-11-22T16:12:03.306Z → 2026-11-22T16:12:09.766Z
+- 运行 ID：`r9-ops-1795364124610`
+- 任务 ID：`efb1bbfd-93a1-47d0-a304-1b5c668ac89f`
+- 数据根：`/private/tmp/gy-clean-r9f/.gongyuai/acceptance/r9-ops-1795364124610`
+- 代码：`e93c159ad8b3c8de467ba39051ddb6fe7d9b4e66`（dirty=false）
+- 时间：2026-11-22T16:15:24.609Z → 2026-11-22T16:15:31.087Z
 - 步骤：67/67 通过，0 失败
 
 ## 步骤（命令 / 输入 / 预期 / 实际）
@@ -25,7 +25,7 @@
 | 12 | 作业产物：核算结果带 SHA-256 | true | true | PASS |
 | 13 | 完成回流：业务目标首次通过 | true | true | PASS |
 | 14 | 完成回流：GET /tasks 目标 passes=true | true | true | PASS |
-| 15 | 产物哈希与落盘字节一致 | "95617d8bfac37977fed30a2717360952e1cae3ea756a0f9e474bf9cc49cdcfb8" | "95617d8bfac37977fed30a2717360952e1cae3ea756a0f9e474bf9cc49cdcfb8" | PASS |
+| 15 | 产物哈希与落盘字节一致 | "2f2b40b342167063f7e76910344250aa1cca1e9122dec7709f840681107abefb" | "2f2b40b342167063f7e76910344250aa1cca1e9122dec7709f840681107abefb" | PASS |
 | 16 | 范围收缩：scopeVersion 单调 +1 | 2 | 2 | PASS |
 | 17 | 迟到结果：完成时范围已前移 → lateResult=true | true | true | PASS |
 | 18 | 迟到结果：保留提交时的范围版本 | 1 | 1 | PASS |
@@ -33,7 +33,7 @@
 | 20 | 回执幂等：首次 duplicate=false | false | false | PASS |
 | 21 | 回执幂等：重复投递 duplicate=true | true | true | PASS |
 | 22 | 回执幂等：只留一条回执 | 1 | 1 | PASS |
-| 23 | 人工求助：默认 24h 到期 | "2026-11-23T16:12:09.273Z" | "2026-11-23T16:12:09.273Z" | PASS |
+| 23 | 人工求助：默认 24h 到期 | "2026-11-23T16:15:30.588Z" | "2026-11-23T16:15:30.588Z" | PASS |
 | 24 | 24h 前半段：仍阻塞（released=0） | 0 | 0 | PASS |
 | 25 | 24h 到期：只解除阻塞（released=1） | 1 | 1 | PASS |
 | 26 | 24h 到期：问题仍 open，status 不变 | ["open",false] | ["open",false] | PASS |
@@ -76,27 +76,27 @@
 | 63 | 越界读：带别的委托查询被拒 403 | 403 | 403 | PASS |
 | 64 | 越界读：租户不匹配被拒 403 | 403 | 403 | PASS |
 | 65 | 交付快照：内容封印存在 | true | true | PASS |
-| 66 | 记分卡：与快照同源 | "fb662a9df1a5ea09453367774a2124ed007a0b56122293b618cff57dd97c765b" | "fb662a9df1a5ea09453367774a2124ed007a0b56122293b618cff57dd97c765b" | PASS |
-| 67 | 记录与清单落盘（含逐文件 SHA-256） | 写入验收记录 | /private/tmp/gy-clean-r9/docs/evidence/r9/r9-ops-1795363923307/acceptance-record.json | PASS |
+| 66 | 记分卡：与快照同源 | "4e1b37bd6d56dcaaf9358a984ff3ae35c9ef51e9c54fc46d88ccf3528b1c2a1c" | "4e1b37bd6d56dcaaf9358a984ff3ae35c9ef51e9c54fc46d88ccf3528b1c2a1c" | PASS |
+| 67 | 记录与清单落盘（含逐文件 SHA-256） | 写入验收记录 | /private/tmp/gy-clean-r9f/docs/evidence/r9/r9-ops-1795364124610/acceptance-record.json | PASS |
 
 ## 汇总
 
 ```json
 {
-  "taskA": "d9f05da1-bab6-468b-af17-e84c933ddcae",
-  "taskB": "3681cff6-a5a2-49b5-b279-7fd63db77539",
-  "job1": "87674cb2-c163-413e-b97a-b756ce024563",
-  "job2": "4bb39dca-175d-4fa2-8c97-71bc3584e44b",
-  "consultId": "d4b2944a-5c8d-4044-b5b1-28ead6811ec7",
+  "taskA": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+  "taskB": "713ee60c-afe4-459c-9782-c220c55c1dae",
+  "job1": "e56f026a-7b16-4aed-8305-dc588f8d0a6e",
+  "job2": "22633de4-85a8-4a2c-ab33-0abe393b80ae",
+  "consultId": "095e63b3-ede2-4cd7-8bb0-d686ee41e954",
   "findings": {
-    "sqlLogin": "586a6a68-0da0-414f-9e56-5b527651bda1",
-    "sqlSearch": "ffff8d9a-7695-4ef0-b424-c26954f875c8",
-    "xss": "2f9ef53d-6c7e-40df-b1b9-09e85fb00555"
+    "sqlLogin": "6a88a235-7567-445a-83af-966661208940",
+    "sqlSearch": "e1400a5f-fb96-4452-ba61-f485c59668d0",
+    "xss": "9673a815-6fe2-47c5-a1ed-cfca994dd93d"
   },
   "scorecard": {
-    "taskId": "d9f05da1-bab6-468b-af17-e84c933ddcae",
-    "capturedAt": "2026-11-22T16:12:09.706Z",
-    "snapshotSha256": "fb662a9df1a5ea09453367774a2124ed007a0b56122293b618cff57dd97c765b",
+    "taskId": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+    "capturedAt": "2026-11-22T16:15:31.026Z",
+    "snapshotSha256": "4e1b37bd6d56dcaaf9358a984ff3ae35c9ef51e9c54fc46d88ccf3528b1c2a1c",
     "denominator": 1,
     "totalGoals": 1,
     "applicable": true,
@@ -136,7 +136,7 @@
     "baselineSha": "d7bc7d6eee81592ece9dbbb486e6de2817dd9e5c6ce12c377e4c418a8ce5093c",
     "currentSha": "e2ff471b94a255a8aea203e91ca0e300b27b75626deaa66bec65336b31fe0ac5"
   },
-  "serverPort": 19622
+  "serverPort": 19350
 }
 ```
 

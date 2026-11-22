@@ -1,17 +1,17 @@
 {
   "version": 2,
   "kind": "r9-ops",
-  "runId": "r9-ops-1795363923307",
-  "taskId": "d9f05da1-bab6-468b-af17-e84c933ddcae",
-  "dataRoot": "/private/tmp/gy-clean-r9/.gongyuai/acceptance/r9-ops-1795363923307",
-  "startedAt": "2026-11-22T16:12:03.306Z",
-  "finishedAt": "2026-11-22T16:12:09.766Z",
+  "runId": "r9-ops-1795364124610",
+  "taskId": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+  "dataRoot": "/private/tmp/gy-clean-r9f/.gongyuai/acceptance/r9-ops-1795364124610",
+  "startedAt": "2026-11-22T16:15:24.609Z",
+  "finishedAt": "2026-11-22T16:15:31.087Z",
   "code": {
-    "commit": "d6d32ae60974c366a6d70cf2506c1110a40d2025",
+    "commit": "e93c159ad8b3c8de467ba39051ddb6fe7d9b4e66",
     "branch": "HEAD",
     "dirty": false,
     "dirtyPaths": [
-      "?? docs/evidence/r9/"
+      "?? docs/evidence/r9/r9-ops-1795364124610/"
     ],
     "sourceDirtyPaths": [],
     "evidenceOnlyDirty": true
@@ -27,86 +27,86 @@
         "expected": "201",
         "actual": "201",
         "detail": "POST /tasks",
-        "at": "2026-11-22T16:12:03.653Z"
+        "at": "2026-11-22T16:15:24.956Z"
       },
       {
         "step": "材料导入：两份清单 accepted",
         "ok": true,
         "expected": "[\"accepted\",\"accepted\"]",
         "actual": "[\"accepted\",\"accepted\"]",
-        "at": "2026-11-22T16:12:03.660Z"
+        "at": "2026-11-22T16:15:24.962Z"
       },
       {
         "step": "材料导入：原件 SHA-256 落台账",
         "ok": true,
         "expected": "[\"d7bc7d6eee81592ece9dbbb486e6de2817dd9e5c6ce12c377e4c418a8ce5093c\",\"e2ff471b94a255a8aea203e91ca0e300b27b75626deaa66bec65336b31fe0ac5\"]",
         "actual": "[\"d7bc7d6eee81592ece9dbbb486e6de2817dd9e5c6ce12c377e4c418a8ce5093c\",\"e2ff471b94a255a8aea203e91ca0e300b27b75626deaa66bec65336b31fe0ac5\"]",
-        "at": "2026-11-22T16:12:03.660Z"
+        "at": "2026-11-22T16:15:24.962Z"
       },
       {
         "step": "作业提交：202 + queued",
         "ok": true,
         "expected": "[202,\"queued\"]",
         "actual": "[202,\"queued\"]",
-        "at": "2026-11-22T16:12:03.666Z"
+        "at": "2026-11-22T16:15:24.968Z"
       },
       {
         "step": "作业执行中：状态为 running 或已完成（记录中断前现场）",
         "ok": true,
         "expected": "running",
         "actual": "running",
-        "at": "2026-11-22T16:12:04.268Z"
+        "at": "2026-11-22T16:15:25.571Z"
       },
       {
         "step": "服务被强制中断（SIGKILL）",
         "ok": true,
         "expected": "进程消失",
         "actual": "killed",
-        "detail": "pid=12524",
-        "at": "2026-11-22T16:12:04.268Z"
+        "detail": "pid=15052",
+        "at": "2026-11-22T16:15:25.571Z"
       },
       {
         "step": "重启对账：上一代 running 作业标 unknown（不假装成功）",
         "ok": true,
         "expected": "\"unknown\"",
         "actual": "\"unknown\"",
-        "at": "2026-11-22T16:12:04.580Z"
+        "at": "2026-11-22T16:15:25.885Z"
       },
       {
         "step": "重启对账：pauseState=unknown，状态三态可分",
         "ok": true,
         "expected": "\"unknown\"",
         "actual": "\"unknown\"",
-        "at": "2026-11-22T16:12:04.580Z"
+        "at": "2026-11-22T16:15:25.885Z"
       },
       {
         "step": "CLI 接手：gy jobs 读到 unknown",
         "ok": true,
         "expected": "输出含 unknown",
         "actual": "true",
-        "detail": "{\n  \"jobs\": [\n    {\n      \"id\": \"87674cb2-c163-413e-b97a-b756ce024563\",\n      \"taskId\": \"d9f05da1-bab6-468b-af17-e84c933ddcae\",\n      \"engagementId\": \"eng-a\",\n      \"kind\": \"material-check\",\n      \"la",
-        "at": "2026-11-22T16:12:04.760Z"
+        "detail": "{\n  \"jobs\": [\n    {\n      \"id\": \"e56f026a-7b16-4aed-8305-dc588f8d0a6e\",\n      \"taskId\": \"efb1bbfd-93a1-47d0-a304-1b5c668ac89f\",\n      \"engagementId\": \"eng-a\",\n      \"kind\": \"material-check\",\n      \"la",
+        "at": "2026-11-22T16:15:26.072Z"
       },
       {
         "step": "CLI 接管：job-retry 接受",
         "ok": true,
         "expected": "0",
         "actual": "0",
-        "at": "2026-11-22T16:12:04.944Z"
+        "at": "2026-11-22T16:15:26.259Z"
       },
       {
         "step": "重试后作业成功",
         "ok": true,
         "expected": "\"succeeded\"",
         "actual": "\"succeeded\"",
-        "at": "2026-11-22T16:12:07.380Z"
+        "at": "2026-11-22T16:15:28.695Z"
       },
       {
         "step": "作业产物：核算结果带 SHA-256",
         "ok": true,
         "expected": "true",
         "actual": "true",
-        "at": "2026-11-22T16:12:07.380Z"
+        "at": "2026-11-22T16:15:28.695Z"
       },
       {
         "step": "完成回流：业务目标首次通过",
@@ -114,42 +114,42 @@
         "expected": "true",
         "actual": "true",
         "detail": "[{\"goalId\":\"g-diff\",\"ok\":true,\"reason\":null}]",
-        "at": "2026-11-22T16:12:07.380Z"
+        "at": "2026-11-22T16:15:28.695Z"
       },
       {
         "step": "完成回流：GET /tasks 目标 passes=true",
         "ok": true,
         "expected": "true",
         "actual": "true",
-        "at": "2026-11-22T16:12:07.382Z"
+        "at": "2026-11-22T16:15:28.697Z"
       },
       {
         "step": "产物哈希与落盘字节一致",
         "ok": true,
-        "expected": "\"95617d8bfac37977fed30a2717360952e1cae3ea756a0f9e474bf9cc49cdcfb8\"",
-        "actual": "\"95617d8bfac37977fed30a2717360952e1cae3ea756a0f9e474bf9cc49cdcfb8\"",
-        "at": "2026-11-22T16:12:07.383Z"
+        "expected": "\"2f2b40b342167063f7e76910344250aa1cca1e9122dec7709f840681107abefb\"",
+        "actual": "\"2f2b40b342167063f7e76910344250aa1cca1e9122dec7709f840681107abefb\"",
+        "at": "2026-11-22T16:15:28.698Z"
       },
       {
         "step": "范围收缩：scopeVersion 单调 +1",
         "ok": true,
         "expected": "2",
         "actual": "2",
-        "at": "2026-11-22T16:12:07.642Z"
+        "at": "2026-11-22T16:15:28.957Z"
       },
       {
         "step": "迟到结果：完成时范围已前移 → lateResult=true",
         "ok": true,
         "expected": "true",
         "actual": "true",
-        "at": "2026-11-22T16:12:09.267Z"
+        "at": "2026-11-22T16:15:30.583Z"
       },
       {
         "step": "迟到结果：保留提交时的范围版本",
         "ok": true,
         "expected": "1",
         "actual": "1",
-        "at": "2026-11-22T16:12:09.267Z"
+        "at": "2026-11-22T16:15:30.583Z"
       },
       {
         "step": "范围收缩：job 完成事件进台账",
@@ -157,156 +157,156 @@
         "expected": "lateResult 标记",
         "actual": "true",
         "detail": "succeeded",
-        "at": "2026-11-22T16:12:09.267Z"
+        "at": "2026-11-22T16:15:30.583Z"
       },
       {
         "step": "回执幂等：首次 duplicate=false",
         "ok": true,
         "expected": "false",
         "actual": "false",
-        "at": "2026-11-22T16:12:09.270Z"
+        "at": "2026-11-22T16:15:30.586Z"
       },
       {
         "step": "回执幂等：重复投递 duplicate=true",
         "ok": true,
         "expected": "true",
         "actual": "true",
-        "at": "2026-11-22T16:12:09.270Z"
+        "at": "2026-11-22T16:15:30.586Z"
       },
       {
         "step": "回执幂等：只留一条回执",
         "ok": true,
         "expected": "1",
         "actual": "1",
-        "at": "2026-11-22T16:12:09.272Z"
+        "at": "2026-11-22T16:15:30.588Z"
       },
       {
         "step": "人工求助：默认 24h 到期",
         "ok": true,
-        "expected": "\"2026-11-23T16:12:09.273Z\"",
-        "actual": "\"2026-11-23T16:12:09.273Z\"",
-        "at": "2026-11-22T16:12:09.274Z"
+        "expected": "\"2026-11-23T16:15:30.588Z\"",
+        "actual": "\"2026-11-23T16:15:30.588Z\"",
+        "at": "2026-11-22T16:15:30.590Z"
       },
       {
         "step": "24h 前半段：仍阻塞（released=0）",
         "ok": true,
         "expected": "0",
         "actual": "0",
-        "at": "2026-11-22T16:12:09.276Z"
+        "at": "2026-11-22T16:15:30.592Z"
       },
       {
         "step": "24h 到期：只解除阻塞（released=1）",
         "ok": true,
         "expected": "1",
         "actual": "1",
-        "at": "2026-11-22T16:12:09.278Z"
+        "at": "2026-11-22T16:15:30.593Z"
       },
       {
         "step": "24h 到期：问题仍 open，status 不变",
         "ok": true,
         "expected": "[\"open\",false]",
         "actual": "[\"open\",false]",
-        "at": "2026-11-22T16:12:09.278Z"
+        "at": "2026-11-22T16:15:30.593Z"
       },
       {
         "step": "交接包：范围版本为 v2",
         "ok": true,
         "expected": "2",
         "actual": "2",
-        "at": "2026-11-22T16:12:09.463Z"
+        "at": "2026-11-22T16:15:30.777Z"
       },
       {
         "step": "交接包：已完成目标含 g-diff",
         "ok": true,
         "expected": "true",
         "actual": "true",
-        "at": "2026-11-22T16:12:09.463Z"
+        "at": "2026-11-22T16:15:30.777Z"
       },
       {
         "step": "交接包：待答问题保留（已转非阻塞仍需答复）",
         "ok": true,
         "expected": "[1,false]",
         "actual": "[1,false]",
-        "at": "2026-11-22T16:12:09.463Z"
+        "at": "2026-11-22T16:15:30.777Z"
       },
       {
         "step": "交接包：下一责任人",
         "ok": true,
         "expected": "\"op-b\"",
         "actual": "\"op-b\"",
-        "at": "2026-11-22T16:12:09.463Z"
+        "at": "2026-11-22T16:15:30.777Z"
       },
       {
         "step": "交接包：列出后台作业（含迟到标记）",
         "ok": true,
         "expected": "含 lateResult 作业",
         "actual": "true",
-        "detail": "[{\"id\":\"4bb39dca-175d-4fa2-8c97-71bc3584e44b\",\"kind\":\"material-check\",\"status\":\"succeeded\",\"label\":\"复核清单（范围收缩期间）\",\"scopeVersion\":1,\"lateResult\":true},{\"id\":\"87674cb2-c163-413e-b97a-b756ce024563\",\"kind\":\"material-check\",\"status\":\"succeeded\",\"label\":\"核查两份清单\",\"scopeVersion\":1,\"lateResult\":false}]",
-        "at": "2026-11-22T16:12:09.463Z"
+        "detail": "[{\"id\":\"22633de4-85a8-4a2c-ab33-0abe393b80ae\",\"kind\":\"material-check\",\"status\":\"succeeded\",\"label\":\"复核清单（范围收缩期间）\",\"scopeVersion\":1,\"lateResult\":true},{\"id\":\"e56f026a-7b16-4aed-8305-dc588f8d0a6e\",\"kind\":\"material-check\",\"status\":\"succeeded\",\"label\":\"核查两份清单\",\"scopeVersion\":1,\"lateResult\":false}]",
+        "at": "2026-11-22T16:15:30.777Z"
       },
       {
         "step": "另一位操作员从 CLI 答复",
         "ok": true,
         "expected": "0",
         "actual": "0",
-        "at": "2026-11-22T16:12:09.644Z"
+        "at": "2026-11-22T16:15:30.964Z"
       },
       {
         "step": "答复落库：status=answered + answeredBy",
         "ok": true,
         "expected": "[\"answered\",\"op-b\"]",
         "actual": "[\"answered\",\"op-b\"]",
-        "at": "2026-11-22T16:12:09.646Z"
+        "at": "2026-11-22T16:15:30.966Z"
       },
       {
         "step": "答复以 human Hint 回注",
         "ok": true,
         "expected": "Hint 含 consult 标签",
         "actual": "true",
-        "detail": "[{\"id\":\"91e02159-b365-4b30-82a3-2b3b28b9affc\",\"taskId\":\"d9f05da1-bab6-468b-af17-e84c933ddcae\",\"text\":\"[人工答复 consult:d4b2944a-5c8d-4044-b5b1-28ead6811ec7] 继续验证，仅限已授权资产\",\"source\":\"human\",\"tags\":[\"consult\",\"consult:d4b2944a-5c8d-4044-b5b1-28ead6811ec7\",\"answeredBy:op-b\"],\"createdAt\":\"2026-11-22T16:12:09.627Z\"}]",
-        "at": "2026-11-22T16:12:09.648Z"
+        "detail": "[{\"id\":\"3aec72fa-6a13-44b1-93aa-e72af26eb09c\",\"taskId\":\"efb1bbfd-93a1-47d0-a304-1b5c668ac89f\",\"text\":\"[人工答复 consult:095e63b3-ede2-4cd7-8bb0-d686ee41e954] 继续验证，仅限已授权资产\",\"source\":\"human\",\"tags\":[\"consult\",\"consult:095e63b3-ede2-4cd7-8bb0-d686ee41e954\",\"answeredBy:op-b\"],\"createdAt\":\"2026-11-22T16:15:30.945Z\"}]",
+        "at": "2026-11-22T16:15:30.967Z"
       },
       {
         "step": "材料语义：配置核查/HTTP 事务/人工复测均 accepted",
         "ok": true,
         "expected": "[\"accepted\",\"accepted\",\"accepted\"]",
         "actual": "[\"accepted\",\"accepted\",\"accepted\"]",
-        "at": "2026-11-22T16:12:09.654Z"
+        "at": "2026-11-22T16:15:30.973Z"
       },
       {
         "step": "材料语义：格式不支持 → unsupported（不静默转已验证）",
         "ok": true,
         "expected": "[\"unsupported\",null]",
         "actual": "[\"unsupported\",null]",
-        "at": "2026-11-22T16:12:09.656Z"
+        "at": "2026-11-22T16:15:30.975Z"
       },
       {
         "step": "材料语义：归属不明 → unknown-owner",
         "ok": true,
         "expected": "\"unknown-owner\"",
         "actual": "\"unknown-owner\"",
-        "at": "2026-11-22T16:12:09.658Z"
+        "at": "2026-11-22T16:15:30.976Z"
       },
       {
         "step": "材料语义：材料过期 → expired",
         "ok": true,
         "expected": "\"expired\"",
         "actual": "\"expired\"",
-        "at": "2026-11-22T16:12:09.659Z"
+        "at": "2026-11-22T16:15:30.978Z"
       },
       {
         "step": "凭据材料：明文被拒（要求受控引用）",
         "ok": true,
         "expected": "422",
         "actual": "422",
-        "at": "2026-11-22T16:12:09.659Z"
+        "at": "2026-11-22T16:15:30.978Z"
       },
       {
         "step": "凭据材料：受控引用 accepted + sensitivity",
         "ok": true,
         "expected": "[\"accepted\",\"controlled-ref\"]",
         "actual": "[\"accepted\",\"controlled-ref\"]",
-        "at": "2026-11-22T16:12:09.661Z"
+        "at": "2026-11-22T16:15:30.980Z"
       },
       {
         "step": "凭据材料：落盘只有指针与摘要，无明文",
@@ -314,71 +314,71 @@
         "expected": "false",
         "actual": "false",
         "detail": "{\n  \"secretRef\": \"env:GY_FIXTURE_TOKEN\",\n  \"locator\": \"\",\n  \"sha256OfOriginal\": \"9fad59383bc147b52e4a924c8e08ade720dae78",
-        "at": "2026-11-22T16:12:09.661Z"
+        "at": "2026-11-22T16:15:30.980Z"
       },
       {
         "step": "finding 播种：三条已证实现场",
         "ok": true,
         "expected": "证据哈希一致",
         "actual": "true",
-        "detail": "586a6a68-0da0-414f-9e56-5b527651bda1,ffff8d9a-7695-4ef0-b424-c26954f875c8,2f9ef53d-6c7e-40df-b1b9-09e85fb00555",
-        "at": "2026-11-22T16:12:09.669Z"
+        "detail": "6a88a235-7567-445a-83af-966661208940,e1400a5f-fb96-4452-ba61-f485c59668d0,9673a815-6fe2-47c5-a1ed-cfca994dd93d",
+        "at": "2026-11-22T16:15:30.987Z"
       },
       {
         "step": "人工覆盖登记：201",
         "ok": true,
         "expected": "201",
         "actual": "201",
-        "at": "2026-11-22T16:12:09.671Z"
+        "at": "2026-11-22T16:15:30.989Z"
       },
       {
         "step": "矩阵（撤回前）：CWE-89 verified",
         "ok": true,
         "expected": "\"verified\"",
         "actual": "\"verified\"",
-        "at": "2026-11-22T16:12:09.674Z"
+        "at": "2026-11-22T16:15:30.992Z"
       },
       {
         "step": "矩阵（撤回前）：CWE-79 verified",
         "ok": true,
         "expected": "\"verified\"",
         "actual": "\"verified\"",
-        "at": "2026-11-22T16:12:09.674Z"
+        "at": "2026-11-22T16:15:30.992Z"
       },
       {
         "step": "矩阵（撤回前）：人工覆盖 AUTHZ-BOLA manual",
         "ok": true,
         "expected": "\"manual\"",
         "actual": "\"manual\"",
-        "at": "2026-11-22T16:12:09.674Z"
+        "at": "2026-11-22T16:15:30.992Z"
       },
       {
         "step": "证据撤回：DELETE 成功",
         "ok": true,
         "expected": "200",
         "actual": "200",
-        "at": "2026-11-22T16:12:09.675Z"
+        "at": "2026-11-22T16:15:30.993Z"
       },
       {
         "step": "撤回后：CWE-89 仍有独立依据 → verified",
         "ok": true,
         "expected": "[\"verified\",false]",
         "actual": "[\"verified\",false]",
-        "at": "2026-11-22T16:12:09.676Z"
+        "at": "2026-11-22T16:15:30.994Z"
       },
       {
         "step": "撤回后：CWE-79 唯一依据被撤回 → retracted",
         "ok": true,
         "expected": "[\"retracted\",true]",
         "actual": "[\"retracted\",true]",
-        "at": "2026-11-22T16:12:09.676Z"
+        "at": "2026-11-22T16:15:30.995Z"
       },
       {
         "step": "撤回后：人工覆盖不受影响",
         "ok": true,
         "expected": "\"manual\"",
         "actual": "\"manual\"",
-        "at": "2026-11-22T16:12:09.676Z"
+        "at": "2026-11-22T16:15:30.995Z"
       },
       {
         "step": "图 API：CWE-79 覆盖边标 broken + 依据已撤回",
@@ -386,51 +386,51 @@
         "expected": "broken=true, label 含 retracted",
         "actual": "true",
         "detail": "{\"id\":\"asset:eng-a::app-a-1.example.com->technique:CWE-79:coverage\",\"from\":\"asset:eng-a::app-a-1.example.com\",\"to\":\"technique:CWE-79\",\"kind\":\"coverage\",\"label\":\"retracted（依据已撤回）\",\"broken\":true}",
-        "at": "2026-11-22T16:12:09.678Z"
+        "at": "2026-11-22T16:15:30.996Z"
       },
       {
         "step": "图 API：CWE-89 覆盖边仍为 verified 且不 broken",
         "ok": true,
         "expected": "[true,false]",
         "actual": "[true,false]",
-        "at": "2026-11-22T16:12:09.678Z"
+        "at": "2026-11-22T16:15:30.996Z"
       },
       {
         "step": "终态留档：stop 成功",
         "ok": true,
         "expected": "200",
         "actual": "200",
-        "at": "2026-11-22T16:12:09.684Z"
+        "at": "2026-11-22T16:15:31.002Z"
       },
       {
         "step": "报告：新增「证据撤回影响」段",
         "ok": true,
         "expected": "含撤回段",
         "actual": "true",
-        "detail": "# GongYuAI Report\n\nTask: d9f05da1-bab6-468b-af17-e84c933ddcae\nStatus: stopped\nTargets: app-a-2.example.com\nAuthorization",
-        "at": "2026-11-22T16:12:09.685Z"
+        "detail": "# GongYuAI Report\n\nTask: efb1bbfd-93a1-47d0-a304-1b5c668ac89f\nStatus: stopped\nTargets: app-a-2.example.com\nAuthorization",
+        "at": "2026-11-22T16:15:31.002Z"
       },
       {
         "step": "报告：受影响项区分「仍有独立依据」与「唯一依据已撤回」",
         "ok": true,
         "expected": "两类都在",
         "actual": "true",
-        "at": "2026-11-22T16:12:09.685Z"
+        "at": "2026-11-22T16:15:31.003Z"
       },
       {
         "step": "报告：CWE-79 结论被点名",
         "ok": true,
         "expected": "含该 finding 标题",
         "actual": "true",
-        "at": "2026-11-22T16:12:09.685Z"
+        "at": "2026-11-22T16:15:31.003Z"
       },
       {
         "step": "事实时效：可控时钟 40 天后出现待复核（原事实保留）",
         "ok": true,
         "expected": "needsReview>0",
         "actual": "true",
-        "detail": "[{\"factId\":\"115eb3ac-7f7a-442d-90cf-d203b966fd59\",\"title\":\"资产 · seed · app-a-1.example.com\",\"layer\":\"title\",\"tags\":[\"asset\",\"asset.kind:seed\",\"asset.addr:app-a-1.example.com\",\"asset.source:auth\"],\"createdAt\":\"2026-11-22T16:12:03.645Z\",\"freshness\":{\"factId\":\"115eb3ac-7f7a-442d-90cf-d203b966fd59\",\"state\":\"needs-review\",\"ageMs\":3456006040,\"ttlMs\":604800000,\"freshUntil\":\"2026-11-29T16:12:03.645Z\",\"reason\":\"fact-older-than-7d\"}},{\"factId\":\"2cfeddff-437f-427e-9025-4f245222a391\",\"title\":\"资产 · seed · app-a-2.example.com\",\"layer\":\"title\",\"tags\":[\"asset\",\"asset.kind:seed\",\"asset.addr:app-a-2.example.com\",\"asset.source:auth\"],\"createdAt\":\"2026-11-22T16:12:03.646Z\",\"freshness\":{\"factId\":\"2cfeddff-437f-427e-9025-4f245222a391\",\"state\":\"needs-review\",\"ageMs\":3456006039,\"ttlMs\":604800000,\"freshUntil\":\"2026-11-29T16:12:03.646Z\",\"reason\":\"fact-older-than-7d\"}}]",
-        "at": "2026-11-22T16:12:09.687Z"
+        "detail": "[{\"factId\":\"1fa8c1ae-0f87-4f85-8963-46565d4bf6fc\",\"title\":\"资产 · seed · app-a-1.example.com\",\"layer\":\"title\",\"tags\":[\"asset\",\"asset.kind:seed\",\"asset.addr:app-a-1.example.com\",\"asset.source:auth\"],\"createdAt\":\"2026-11-22T16:15:24.949Z\",\"freshness\":{\"factId\":\"1fa8c1ae-0f87-4f85-8963-46565d4bf6fc\",\"state\":\"needs-review\",\"ageMs\":3456006054,\"ttlMs\":604800000,\"freshUntil\":\"2026-11-29T16:15:24.949Z\",\"reason\":\"fact-older-than-7d\"}},{\"factId\":\"fa3d2ad5-c078-4e7c-9dc8-cb5241b7a78c\",\"title\":\"资产 · seed · app-a-2.example.com\",\"layer\":\"title\",\"tags\":[\"asset\",\"asset.kind:seed\",\"asset.addr:app-a-2.example.com\",\"asset.source:auth\"],\"createdAt\":\"2026-11-22T16:15:24.949Z\",\"freshness\":{\"factId\":\"fa3d2ad5-c078-4e7c-9dc8-cb5241b7a78c\",\"state\":\"needs-review\",\"ageMs\":3456006054,\"ttlMs\":604800000,\"freshUntil\":\"2026-11-29T16:15:24.949Z\",\"reason\":\"fact-older-than-7d\"}}]",
+        "at": "2026-11-22T16:15:31.005Z"
       },
       {
         "step": "事实时效：不改写/不删除原事实",
@@ -438,21 +438,21 @@
         "expected": "GET /history 200",
         "actual": "true",
         "detail": "200",
-        "at": "2026-11-22T16:12:09.689Z"
+        "at": "2026-11-22T16:15:31.008Z"
       },
       {
         "step": "反例建档：客户 B 同名资产",
         "ok": true,
         "expected": "201",
         "actual": "201",
-        "at": "2026-11-22T16:12:09.700Z"
+        "at": "2026-11-22T16:15:31.020Z"
       },
       {
         "step": "同名资产不串客户：两张资产图节点 ID 交集为空",
         "ok": true,
         "expected": "[]",
         "actual": "[]",
-        "at": "2026-11-22T16:12:09.702Z"
+        "at": "2026-11-22T16:15:31.024Z"
       },
       {
         "step": "同名资产不串客户：A 图节点带 eng-a",
@@ -460,7 +460,7 @@
         "expected": "含 eng-a",
         "actual": "true",
         "detail": "[\"asset:eng-a::app-a-1.example.com\",\"asset:eng-a::app-a-2.example.com\",\"asset:eng-a::app-a-3.example.com\"]",
-        "at": "2026-11-22T16:12:09.702Z"
+        "at": "2026-11-22T16:15:31.024Z"
       },
       {
         "step": "同名资产不串客户：B 图节点带 eng-b",
@@ -468,60 +468,60 @@
         "expected": "含 eng-b",
         "actual": "true",
         "detail": "[\"asset:eng-b::app-a-1.example.com\",\"scope:app-a-1.example.com\"]",
-        "at": "2026-11-22T16:12:09.702Z"
+        "at": "2026-11-22T16:15:31.024Z"
       },
       {
         "step": "越界读：带别的委托查询被拒 403",
         "ok": true,
         "expected": "403",
         "actual": "403",
-        "at": "2026-11-22T16:12:09.703Z"
+        "at": "2026-11-22T16:15:31.025Z"
       },
       {
         "step": "越界读：租户不匹配被拒 403",
         "ok": true,
         "expected": "403",
         "actual": "403",
-        "at": "2026-11-22T16:12:09.703Z"
+        "at": "2026-11-22T16:15:31.025Z"
       },
       {
         "step": "交付快照：内容封印存在",
         "ok": true,
         "expected": "true",
         "actual": "true",
-        "at": "2026-11-22T16:12:09.706Z"
+        "at": "2026-11-22T16:15:31.026Z"
       },
       {
         "step": "记分卡：与快照同源",
         "ok": true,
-        "expected": "\"fb662a9df1a5ea09453367774a2124ed007a0b56122293b618cff57dd97c765b\"",
-        "actual": "\"fb662a9df1a5ea09453367774a2124ed007a0b56122293b618cff57dd97c765b\"",
-        "at": "2026-11-22T16:12:09.706Z"
+        "expected": "\"4e1b37bd6d56dcaaf9358a984ff3ae35c9ef51e9c54fc46d88ccf3528b1c2a1c\"",
+        "actual": "\"4e1b37bd6d56dcaaf9358a984ff3ae35c9ef51e9c54fc46d88ccf3528b1c2a1c\"",
+        "at": "2026-11-22T16:15:31.026Z"
       },
       {
         "step": "记录与清单落盘（含逐文件 SHA-256）",
         "ok": true,
         "expected": "写入验收记录",
-        "actual": "/private/tmp/gy-clean-r9/docs/evidence/r9/r9-ops-1795363923307/acceptance-record.json",
-        "at": "2026-11-22T16:12:09.766Z"
+        "actual": "/private/tmp/gy-clean-r9f/docs/evidence/r9/r9-ops-1795364124610/acceptance-record.json",
+        "at": "2026-11-22T16:15:31.087Z"
       }
     ]
   },
   "summary": {
-    "taskA": "d9f05da1-bab6-468b-af17-e84c933ddcae",
-    "taskB": "3681cff6-a5a2-49b5-b279-7fd63db77539",
-    "job1": "87674cb2-c163-413e-b97a-b756ce024563",
-    "job2": "4bb39dca-175d-4fa2-8c97-71bc3584e44b",
-    "consultId": "d4b2944a-5c8d-4044-b5b1-28ead6811ec7",
+    "taskA": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+    "taskB": "713ee60c-afe4-459c-9782-c220c55c1dae",
+    "job1": "e56f026a-7b16-4aed-8305-dc588f8d0a6e",
+    "job2": "22633de4-85a8-4a2c-ab33-0abe393b80ae",
+    "consultId": "095e63b3-ede2-4cd7-8bb0-d686ee41e954",
     "findings": {
-      "sqlLogin": "586a6a68-0da0-414f-9e56-5b527651bda1",
-      "sqlSearch": "ffff8d9a-7695-4ef0-b424-c26954f875c8",
-      "xss": "2f9ef53d-6c7e-40df-b1b9-09e85fb00555"
+      "sqlLogin": "6a88a235-7567-445a-83af-966661208940",
+      "sqlSearch": "e1400a5f-fb96-4452-ba61-f485c59668d0",
+      "xss": "9673a815-6fe2-47c5-a1ed-cfca994dd93d"
     },
     "scorecard": {
-      "taskId": "d9f05da1-bab6-468b-af17-e84c933ddcae",
-      "capturedAt": "2026-11-22T16:12:09.706Z",
-      "snapshotSha256": "fb662a9df1a5ea09453367774a2124ed007a0b56122293b618cff57dd97c765b",
+      "taskId": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+      "capturedAt": "2026-11-22T16:15:31.026Z",
+      "snapshotSha256": "4e1b37bd6d56dcaaf9358a984ff3ae35c9ef51e9c54fc46d88ccf3528b1c2a1c",
       "denominator": 1,
       "totalGoals": 1,
       "applicable": true,
@@ -561,15 +561,15 @@
       "baselineSha": "d7bc7d6eee81592ece9dbbb486e6de2817dd9e5c6ce12c377e4c418a8ce5093c",
       "currentSha": "e2ff471b94a255a8aea203e91ca0e300b27b75626deaa66bec65336b31fe0ac5"
     },
-    "serverPort": 19622
+    "serverPort": 19350
   },
   "commands": [
-    "curl -s -X POST $BASE/tasks -d @task-a.json  # -> d9f05da1-bab6-468b-af17-e84c933ddcae",
-    "curl -s -X POST $BASE/tasks/d9f05da1-bab6-468b-af17-e84c933ddcae/jobs -d @job1.json  # -> 87674cb2-c163-413e-b97a-b756ce024563",
-    "gy jobs d9f05da1-bab6-468b-af17-e84c933ddcae --base-url http://127.0.0.1:19622",
-    "gy job-retry d9f05da1-bab6-468b-af17-e84c933ddcae 87674cb2-c163-413e-b97a-b756ce024563 --base-url http://127.0.0.1:19622",
-    "gy handoff d9f05da1-bab6-468b-af17-e84c933ddcae --next-owner op-b --base-url http://127.0.0.1:19622",
-    "gy answer d9f05da1-bab6-468b-af17-e84c933ddcae d4b2944a-5c8d-4044-b5b1-28ead6811ec7 继续验证，仅限已授权资产 --by op-b --base-url http://127.0.0.1:19622"
+    "curl -s -X POST $BASE/tasks -d @task-a.json  # -> efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+    "curl -s -X POST $BASE/tasks/efb1bbfd-93a1-47d0-a304-1b5c668ac89f/jobs -d @job1.json  # -> e56f026a-7b16-4aed-8305-dc588f8d0a6e",
+    "gy jobs efb1bbfd-93a1-47d0-a304-1b5c668ac89f --base-url http://127.0.0.1:19350",
+    "gy job-retry efb1bbfd-93a1-47d0-a304-1b5c668ac89f e56f026a-7b16-4aed-8305-dc588f8d0a6e --base-url http://127.0.0.1:19350",
+    "gy handoff efb1bbfd-93a1-47d0-a304-1b5c668ac89f --next-owner op-b --base-url http://127.0.0.1:19350",
+    "gy answer efb1bbfd-93a1-47d0-a304-1b5c668ac89f 095e63b3-ede2-4cd7-8bb0-d686ee41e954 继续验证，仅限已授权资产 --by op-b --base-url http://127.0.0.1:19350"
   ],
   "notes": [
     "finding 由验收脚本按 worker 同一 History 写入路径播种（recordFinding + verifyFinding，证据落 evidence/ 并封存 SHA-256）；本场景验证后端投影与撤回语义，不验证 worker 自动发现。"

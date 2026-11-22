@@ -1,0 +1,65 @@
+{
+  "version": 2,
+  "kind": "r9-flywheel",
+  "runId": "r9-flywheel-1795364131957",
+  "taskId": "95d4681d-e0f5-44f0-9bce-49df66cf434f",
+  "dataRoot": "/private/tmp/gy-clean-r9f/.gongyuai/acceptance/r9-flywheel-1795364131957",
+  "startedAt": "2026-11-22T16:15:31.957Z",
+  "finishedAt": "2026-11-22T16:15:33.452Z",
+  "code": {
+    "commit": "e93c159ad8b3c8de467ba39051ddb6fe7d9b4e66",
+    "branch": "HEAD",
+    "dirty": false,
+    "dirtyPaths": [
+      "?? docs/evidence/r9/r9-flywheel-1795364131957/",
+      "?? docs/evidence/r9/r9-ops-1795364124610/"
+    ],
+    "sourceDirtyPaths": [],
+    "evidenceOnlyDirty": true
+  },
+  "steps": {
+    "total": 57,
+    "passed": 57,
+    "failed": 0
+  },
+  "files": {
+    "acceptance-record.json": {
+      "path": "acceptance-record.json",
+      "sha256": "1b7d682bdccff7d3ead88c70c5a96b3d61f20b3528ebecf1b577d2b4140185d9",
+      "bytes": 15444
+    },
+    "acceptance-record.md": {
+      "path": "acceptance-record.md",
+      "sha256": "9384305c2d65147f7240c01085949794f47010eda164f8447f5aae81dd4d0232",
+      "bytes": 7678
+    },
+    "manifest.json": {
+      "path": "manifest.json",
+      "sha256": "c456a59df442fdfba3fa9b5155c217bec86f98a484fdbc66c8c2eff9de1ced10",
+      "bytes": 1789
+    },
+    "snapshot.json": {
+      "path": "snapshot.json",
+      "sha256": "62e6cc0b496a7ad3777bcfa0ae36a0f8045a83da5e00b920b58c7349b62ba743",
+      "bytes": 926
+    }
+  },
+  "artifacts": [
+    {
+      "path": "http/tx-a.txt",
+      "sha256": "3e451851550fd0d6eadde58d546fbb69687c16673440326ff8528d1c49f41560",
+      "bytes": 64
+    },
+    {
+      "path": "jobs/4667c012-1847-432d-a8b9-dfd3fc140897/role.json",
+      "sha256": "de7a4f113777392c2dfd4de0c58ca801631bbf47513dbc3878f5c4fbaad5ef2d",
+      "bytes": 954
+    },
+    {
+      "path": "jobs/cce1972e-c95d-477d-8422-c93231661e19/role.json",
+      "sha256": "9f14d02dbd3c917ee37e2585b356ec629e478ee6a318848b5d148ef129cb9f79",
+      "bytes": 1128
+    }
+  ],
+  "commands": []
+}

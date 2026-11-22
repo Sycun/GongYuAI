@@ -1,0 +1,14 @@
+{
+  "runId": "r9-flywheel-1795364131957",
+  "taskA": "95d4681d-e0f5-44f0-9bce-49df66cf434f",
+  "taskB": "7cce6ac5-79f6-4aec-b9b8-d5690c035465",
+  "memoryId": "d09e04c1-4e02-487b-bb20-592d30de6a00",
+  "findingId": "97f3e9c8-c33e-4d44-a187-00a0e28bbb13",
+  "runG1Id": "197cce1f-dcb7-4b43-8bd1-1dcbfd041277",
+  "proposalId": "2aa8d8f2-7ef4-4658-97b5-c936863b1664",
+  "hashes": {
+    "recordJson": "1b7d682bdccff7d3ead88c70c5a96b3d61f20b3528ebecf1b577d2b4140185d9",
+    "recordMd": "9384305c2d65147f7240c01085949794f47010eda164f8447f5aae81dd4d0232",
+    "manifest": "ef8f0313f56cab393f7b0bda90fe4a314ef6995a397bc8b7effae6538a130d95"
+  }
+}

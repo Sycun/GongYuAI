@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "taskId": "c3d2d4fd-fb6e-4442-9475-b6b3e817c451",
-  "capturedAt": "2026-11-22T16:12:12.082Z",
+  "taskId": "95d4681d-e0f5-44f0-9bce-49df66cf434f",
+  "capturedAt": "2026-11-22T16:15:33.410Z",
   "goals": [
     {
       "id": "g-a",
@@ -19,7 +19,7 @@
   "goalFindings": [],
   "findings": [
     {
-      "id": "b42f6801-5f4d-4f31-b813-162620d50d97",
+      "id": "97f3e9c8-c33e-4d44-a187-00a0e28bbb13",
       "title": "A 客户专属 SQL 注入（marker A-ONLY-7731）",
       "asset": "app-a-1.example.com",
       "vulnClass": "CWE-89",
@@ -34,5 +34,5 @@
     }
   ],
   "coverage": [],
-  "sha256": "3cf0bf7093a77ed93021a452451ac627577496285b8322de7a6f619b11dcd889"
+  "sha256": "fdbe24c8cc6eb044a5653b958c84fe6178f8f3711c88d4cf4a458080fa2939e3"
 }

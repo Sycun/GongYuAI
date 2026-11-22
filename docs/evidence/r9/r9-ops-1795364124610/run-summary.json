@@ -1,0 +1,57 @@
+{
+  "runId": "r9-ops-1795364124610",
+  "taskA": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+  "taskB": "713ee60c-afe4-459c-9782-c220c55c1dae",
+  "job1": "e56f026a-7b16-4aed-8305-dc588f8d0a6e",
+  "job2": "22633de4-85a8-4a2c-ab33-0abe393b80ae",
+  "consultId": "095e63b3-ede2-4cd7-8bb0-d686ee41e954",
+  "findings": {
+    "f1": "6a88a235-7567-445a-83af-966661208940",
+    "f2": "e1400a5f-fb96-4452-ba61-f485c59668d0",
+    "f3": "9673a815-6fe2-47c5-a1ed-cfca994dd93d"
+  },
+  "scorecard": {
+    "taskId": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+    "capturedAt": "2026-11-22T16:15:31.026Z",
+    "snapshotSha256": "4e1b37bd6d56dcaaf9358a984ff3ae35c9ef51e9c54fc46d88ccf3528b1c2a1c",
+    "denominator": 1,
+    "totalGoals": 1,
+    "applicable": true,
+    "historicallyPassed": 1,
+    "currentlySupported": 1,
+    "unknownAttribution": 0,
+    "retractedReferences": 0,
+    "coverage": {
+      "untested": 0,
+      "partial": 0,
+      "tested": 0,
+      "blocked": 0,
+      "unregistered": 1
+    },
+    "findings": {
+      "verified": 3,
+      "tentative": 0,
+      "retracted": 0,
+      "other": 0
+    },
+    "goals": [
+      {
+        "goalId": "g-diff",
+        "title": "两份清单差异核算",
+        "historicalPass": true,
+        "currentSupported": true,
+        "verdict": "supported",
+        "proofCount": 1,
+        "supportFindingIds": [],
+        "retractedSupportFindingIds": [],
+        "coverage": "unregistered",
+        "missingAttribution": false
+      }
+    ]
+  },
+  "hashes": {
+    "recordJson": "c3d725fc514c47e1be756e20a3fbd9ab0cf1685a49d0836c6b8e23a23b6aa670",
+    "recordMd": "2090933f010b0a39ed3127477efcb79936539687eb47e43c6e39b85c2f4c32d5",
+    "manifest": "f57dc9384e284bfc622d35e4b635cb742ef3f133700b7733f288cf2efd168f7e"
+  }
+}

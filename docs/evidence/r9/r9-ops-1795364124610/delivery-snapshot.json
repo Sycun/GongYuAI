@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "taskId": "d9f05da1-bab6-468b-af17-e84c933ddcae",
-  "capturedAt": "2026-11-22T16:12:09.706Z",
+  "taskId": "efb1bbfd-93a1-47d0-a304-1b5c668ac89f",
+  "capturedAt": "2026-11-22T16:15:31.026Z",
   "goals": [
     {
       "id": "g-diff",
@@ -11,9 +11,9 @@
         "reconcile/asset-diff-*.json"
       ],
       "evidencePaths": [
-        "reconcile/asset-diff-r1795363927336-0001.json"
+        "reconcile/asset-diff-r1795364128651-0001.json"
       ],
-      "assertedAt": "2026-11-22T16:12:07.340Z",
+      "assertedAt": "2026-11-22T16:15:28.655Z",
       "reconcileGate": {
         "pattern": "reconcile/asset-diff-*.json",
         "maxUnknown": 0,
@@ -41,14 +41,14 @@
   "proofs": [
     {
       "goalId": "g-diff",
-      "path": "reconcile/asset-diff-r1795363927336-0001.json",
-      "sha256": "95617d8bfac37977fed30a2717360952e1cae3ea756a0f9e474bf9cc49cdcfb8"
+      "path": "reconcile/asset-diff-r1795364128651-0001.json",
+      "sha256": "2f2b40b342167063f7e76910344250aa1cca1e9122dec7709f840681107abefb"
     }
   ],
   "goalFindings": [],
   "findings": [
     {
-      "id": "586a6a68-0da0-414f-9e56-5b527651bda1",
+      "id": "6a88a235-7567-445a-83af-966661208940",
       "title": "登录处 SQL 注入",
       "asset": "app-a-1.example.com",
       "vulnClass": "CWE-89",
@@ -66,7 +66,7 @@
       ]
     },
     {
-      "id": "ffff8d9a-7695-4ef0-b424-c26954f875c8",
+      "id": "e1400a5f-fb96-4452-ba61-f485c59668d0",
       "title": "搜索接口 SQL 注入",
       "asset": "app-a-1.example.com",
       "vulnClass": "CWE-89",
@@ -80,7 +80,7 @@
       ]
     },
     {
-      "id": "2f9ef53d-6c7e-40df-b1b9-09e85fb00555",
+      "id": "9673a815-6fe2-47c5-a1ed-cfca994dd93d",
       "title": "反射型 XSS",
       "asset": "app-a-1.example.com",
       "vulnClass": "CWE-79",
@@ -95,5 +95,5 @@
     }
   ],
   "coverage": [],
-  "sha256": "fb662a9df1a5ea09453367774a2124ed007a0b56122293b618cff57dd97c765b"
+  "sha256": "4e1b37bd6d56dcaaf9358a984ff3ae35c9ef51e9c54fc46d88ccf3528b1c2a1c"
 }
