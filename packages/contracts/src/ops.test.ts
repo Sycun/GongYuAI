@@ -116,6 +116,27 @@ test("覆盖矩阵：verified > manual > attempted > retracted > material", () =
   assert.equal(state("CWE-22"), "retracted", "唯一依据撤回后压过材料存在");
   assert.equal(state("CWE-352"), "attempted");
   assert.equal(state("CWE-78"), "manual");
+  // 人工覆盖未附证据：仍算 manual，不得被当成 retracted。
+  const noRefs = deriveCoverageMatrix({
+    assets: ["b.example.com"],
+    techniques: ["AUTHZ-BOLA"],
+    materials: [],
+    findings: [],
+    intents: [],
+    manual: [{ asset: "b.example.com", technique: "AUTHZ-BOLA", state: "manual", evidenceRefs: [] }],
+  });
+  assert.equal(noRefs[0]?.state, "manual");
+  // 人工覆盖附的证据被撤回：降为 retracted。
+  const retractedManual = deriveCoverageMatrix({
+    assets: ["b.example.com"],
+    techniques: ["AUTHZ-BOLA"],
+    materials: [],
+    findings: [],
+    intents: [],
+    manual: [{ asset: "b.example.com", technique: "AUTHZ-BOLA", state: "manual", evidenceRefs: ["gone.txt"] }],
+    retractedEvidence: ["gone.txt"],
+  });
+  assert.equal(retractedManual[0]?.state, "retracted");
 });
 
 test("事实时效：TTL 只产生待复核派生态，不改原事实", () => {

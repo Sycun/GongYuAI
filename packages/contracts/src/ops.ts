@@ -634,10 +634,12 @@ export function deriveCoverageMatrix(input: CoverageInput): CoverageCell[] {
 
       let state: CoverageState = "unknown";
       if (verifiedFindings.length > 0 && !retractedOnlyFinding) state = "verified";
-      else if (manual.length > 0 && freshManual.length > 0) state = "manual";
-      else if (attempted) state = "attempted";
+      else if (manual.length > 0) {
+        // 人工覆盖没有附证据也算"已人工覆盖"；只有附了证据且全被撤回才降为 retracted。
+        state = manualRefs.length === 0 || freshManual.length > 0 ? "manual" : "retracted";
+      } else if (attempted) state = "attempted";
       // 依据被撤回优先于“材料存在”：材料在架不等于结论仍成立。
-      else if (retractedOnlyFinding || retractedFindings.length > 0 || manual.length > 0) state = "retracted";
+      else if (retractedOnlyFinding || retractedFindings.length > 0) state = "retracted";
       else if (materialRefs.length > 0) state = "material";
 
       const notes: string[] = [];
