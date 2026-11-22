@@ -343,6 +343,18 @@ export function startControlServer(opts: ServerOptions) {
           const started = await runner.start(taskId);
           return send(res, 200, { task: started });
         }
+        if (method === "POST" && rest === "/archive") {
+          try {
+            const archived = store.setArchived(taskId, true);
+            return send(res, 200, { task: archived });
+          } catch (e) {
+            return send(res, 400, { error: e instanceof Error ? e.message : String(e) });
+          }
+        }
+        if (method === "POST" && rest === "/unarchive") {
+          const unarchived = store.setArchived(taskId, false);
+          return send(res, 200, { task: unarchived });
+        }
         if (method === "GET" && rest === "/logs") {
           const text = readTaskWorkerLogs(task.dataDir);
           res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
@@ -593,15 +605,17 @@ export function startControlServer(opts: ServerOptions) {
 
       if (method === "GET" && url.pathname === "/overview") {
         const tasks = store.list();
+        const visible = tasks.filter((t) => !t.archivedAt);
         const byStatus: Record<string, number> = {};
-        for (const t of tasks) byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
+        for (const t of visible) byStatus[t.status] = (byStatus[t.status] ?? 0) + 1;
         return send(res, 200, {
-          total: tasks.length,
+          total: visible.length,
+          archived: tasks.length - visible.length,
           byStatus,
-          active: tasks.filter((t) =>
+          active: visible.filter((t) =>
             ["queued", "initializing", "running", "recovering"].includes(t.status),
           ).length,
-          recent: tasks.slice(-8).reverse(),
+          recent: visible.slice(-8).reverse(),
         });
       }
 

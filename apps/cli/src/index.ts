@@ -32,6 +32,8 @@ Usage:
   gy logs <taskId>
   gy report <taskId>
   gy stop <taskId>
+  gy archive <taskId>
+  gy unarchive <taskId>
 
 Defaults: all budget gates unlimited (0). Pass --max-* only when you want a hard cap.
 Data dir defaults to <repo>/.gongyuai (not cwd). Legacy ~/.gongyuai tasks are imported on boot.
@@ -299,6 +301,20 @@ async function main(): Promise<void> {
     try {
       const stopped = await api(opts, "POST", `/tasks/${id}/stop`);
       console.log(stopped.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "archive" || cmd === "unarchive") {
+    const id = rest[0];
+    if (!id) throw new Error(`gy ${cmd} <taskId>`);
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/${cmd}`);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
     } finally {
       if (owned.close) await owned.close();
     }

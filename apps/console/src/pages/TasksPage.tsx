@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Button,
   Card,
@@ -11,11 +11,13 @@ import {
 import { IconPlus } from "@douyinfe/semi-icons";
 import { api, type TaskRecord } from "../api";
 import { TaskTable } from "../components/TaskTable";
+import { isArchivedTask } from "../labels";
 
 type Props = {
   tasks: TaskRecord[];
   onSelect: (taskId: string) => void;
   onCreated: (taskId: string) => void;
+  onRefresh: () => Promise<void>;
 };
 
 type FormValues = {
@@ -55,9 +57,23 @@ function goalsFromObjective(objective: string) {
   }));
 }
 
-export function TasksPage({ tasks, onSelect, onCreated }: Props) {
+export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+
+  const archivedCount = useMemo(
+    () => tasks.filter((t) => isArchivedTask(t)).length,
+    [tasks],
+  );
+
+  const visibleTasks = useMemo(() => {
+    const filtered = showArchived
+      ? tasks.filter((t) => isArchivedTask(t))
+      : tasks.filter((t) => !isArchivedTask(t));
+    return [...filtered].reverse();
+  }, [tasks, showArchived]);
 
   const submit = async (values: FormValues) => {
     const targetList = parseTargets(values.targets ?? "");
@@ -107,23 +123,73 @@ export function TasksPage({ tasks, onSelect, onCreated }: Props) {
     }
   };
 
+  const archiveTask = async (task: TaskRecord) => {
+    setActionBusyId(task.id);
+    try {
+      await api.archive(task.id);
+      Toast.success("已归档");
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const unarchiveTask = async (task: TaskRecord) => {
+    setActionBusyId(task.id);
+    try {
+      await api.unarchive(task.id);
+      Toast.success("已恢复到列表");
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
   return (
     <div>
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "flex-end",
+          justifyContent: "space-between",
           marginBottom: 16,
+          gap: 12,
         }}
       >
+        <Space>
+          <Button
+            theme={!showArchived ? "solid" : "light"}
+            type={!showArchived ? "primary" : "tertiary"}
+            onClick={() => setShowArchived(false)}
+          >
+            进行中
+          </Button>
+          <Button
+            theme={showArchived ? "solid" : "light"}
+            type={showArchived ? "primary" : "tertiary"}
+            onClick={() => setShowArchived(true)}
+            disabled={archivedCount === 0 && !showArchived}
+          >
+            已归档{archivedCount > 0 ? ` · ${archivedCount}` : ""}
+          </Button>
+        </Space>
         <Button theme="solid" icon={<IconPlus />} onClick={() => setOpen(true)}>
           新建任务
         </Button>
       </div>
 
       <Card style={{ background: "var(--semi-color-bg-1)" }} bodyStyle={{ paddingTop: 8 }}>
-        <TaskTable tasks={[...tasks].reverse()} onSelect={onSelect} />
+        <TaskTable
+          tasks={visibleTasks}
+          onSelect={onSelect}
+          onArchive={(t) => void archiveTask(t)}
+          onUnarchive={(t) => void unarchiveTask(t)}
+          actionBusyId={actionBusyId}
+        />
       </Card>
 
       <SideSheet

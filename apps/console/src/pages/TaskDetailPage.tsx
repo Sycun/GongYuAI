@@ -15,7 +15,7 @@ import {
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
-import { IconPlay, IconRefresh, IconStop } from "@douyinfe/semi-icons";
+import { IconArchive, IconPlay, IconRefresh, IconStop, IconUndo } from "@douyinfe/semi-icons";
 import {
   api,
   type AssetRecord,
@@ -31,7 +31,9 @@ import {
   STATUS_LABEL,
   formatWorkerStatus,
   isActiveStatus,
+  isArchivedTask,
   isStartableStatus,
+  isTerminalStatus,
   shortId,
   statusColor,
 } from "../labels";
@@ -170,6 +172,8 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
   const usage = liveUsage ?? task.usage;
   const active = isActiveStatus(task.status);
   const startable = isStartableStatus(task.status);
+  const archived = isArchivedTask(task);
+  const archivable = isTerminalStatus(task.status) && !archived;
 
   const stopTask = async () => {
     if (!active || actionBusy) return;
@@ -191,6 +195,34 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     try {
       await api.start(task.id);
       Toast.success("已开始运行");
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const archiveTask = async () => {
+    if (!archivable || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await api.archive(task.id);
+      Toast.success("已归档");
+      await onRefresh();
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const unarchiveTask = async () => {
+    if (!archived || actionBusy) return;
+    setActionBusy(true);
+    try {
+      await api.unarchive(task.id);
+      Toast.success("已恢复到列表");
       await onRefresh();
     } catch (e) {
       Toast.error(e instanceof Error ? e.message : String(e));
@@ -234,6 +266,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
               {task.name}
             </Typography.Title>
             <StatusTag status={task.status} />
+            {archived ? <Tag color="grey">已归档</Tag> : null}
           </Space>
           <Typography.Text type="tertiary" style={{ display: "block", marginTop: 6 }}>
             编号 {shortId(task.id)} · 目标 {(task.auth.targets || []).join(", ") || "—"}
@@ -248,6 +281,24 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
           <Button icon={<IconRefresh />} onClick={() => void onRefresh()} loading={loading}>
             刷新
           </Button>
+          {archivable ? (
+            <Button
+              icon={<IconArchive />}
+              loading={actionBusy}
+              onClick={() => void archiveTask()}
+            >
+              归档
+            </Button>
+          ) : null}
+          {archived ? (
+            <Button
+              icon={<IconUndo />}
+              loading={actionBusy}
+              onClick={() => void unarchiveTask()}
+            >
+              取消归档
+            </Button>
+          ) : null}
           {active ? (
             <Button
               type="danger"

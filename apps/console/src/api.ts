@@ -42,11 +42,14 @@ export type TaskRecord = {
   error: string | null;
   createdAt: string;
   updatedAt: string;
+  finishedAt?: string | null;
+  archivedAt?: string | null;
 };
 
 export type Overview = {
   total: number;
   active: number;
+  archived?: number;
   byStatus: Record<string, number>;
   recent: TaskRecord[];
 };
@@ -285,6 +288,10 @@ export const api = {
     }),
   stop: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/stop`, { method: "POST" }),
   start: (id: string) => request<{ task: TaskRecord }>(`/tasks/${id}/start`, { method: "POST" }),
+  archive: (id: string) =>
+    request<{ task: TaskRecord }>(`/tasks/${id}/archive`, { method: "POST" }),
+  unarchive: (id: string) =>
+    request<{ task: TaskRecord }>(`/tasks/${id}/unarchive`, { method: "POST" }),
   history: (id: string) => request<HistoryPayload>(`/tasks/${id}/history`),
   assets: (id: string) => request<{ assets: AssetRecord[] }>(`/tasks/${id}/assets`),
   hints: (id: string) => request<{ hints: HintRecord[] }>(`/tasks/${id}/hints`),

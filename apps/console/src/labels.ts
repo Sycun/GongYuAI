@@ -36,12 +36,28 @@ export const STARTABLE_STATUSES = new Set([
   "incomplete",
 ]);
 
+export const TERMINAL_STATUSES = new Set([
+  "completed",
+  "failed",
+  "budget_exhausted",
+  "incomplete",
+  "stopped",
+]);
+
 export function isActiveStatus(status: string): boolean {
   return ACTIVE_STATUSES.has(status);
 }
 
 export function isStartableStatus(status: string): boolean {
   return STARTABLE_STATUSES.has(status);
+}
+
+export function isTerminalStatus(status: string): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
+export function isArchivedTask(task: { archivedAt?: string | null }): boolean {
+  return Boolean(task.archivedAt);
 }
 
 export function formatWorkerStatus(ws: unknown): Array<{ key: string; value: string }> {
@@ -89,7 +105,7 @@ export function formatWorkerStatus(ws: unknown): Array<{ key: string; value: str
 
 export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   overview: { title: "总览", subtitle: "系统态势 · 活跃任务与恢复" },
-  tasks: { title: "任务", subtitle: "任务列表 · 点选进入深潜" },
+  tasks: { title: "任务", subtitle: "任务列表 · 终态可归档 · 点选进入深潜" },
   live: { title: "运行态", subtitle: "相位 · 租约 · 预算 · Hint" },
   assets: { title: "资产", subtitle: "授权靶标 · 发现 · 与 Observe 同表" },
   goals: { title: "目标", subtitle: "证据闸门 · 开放 Intent · DAG" },

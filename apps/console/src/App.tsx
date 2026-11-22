@@ -232,6 +232,7 @@ export function App() {
             <TasksPage
               tasks={tasks}
               onSelect={openTask}
+              onRefresh={refresh}
               onCreated={(id) => {
                 void refresh().then(() => openTask(id));
               }}

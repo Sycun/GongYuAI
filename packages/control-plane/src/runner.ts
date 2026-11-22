@@ -203,6 +203,7 @@ export class WorkerRunner {
     // instantly re-fire maxWallMs on "开始" after a long idle.
     task.startedAt = null;
     task.finishedAt = null;
+    task.archivedAt = null;
     task.error = null;
     task.workerPid = null;
     task.workerPids = [];

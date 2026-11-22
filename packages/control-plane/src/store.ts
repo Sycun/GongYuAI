@@ -65,6 +65,7 @@ export class ControlStore {
       updatedAt: now,
       startedAt: null,
       finishedAt: null,
+      archivedAt: null,
       leaseOwner: null,
       leaseUntil: null,
       fence: 0,
@@ -94,7 +95,31 @@ export class ControlStore {
     record.execution = ExecutionConfigSchema.parse(record.execution ?? {});
     if (!Array.isArray(record.workerPids)) record.workerPids = [];
     if (!Array.isArray(record.containerIds)) record.containerIds = [];
+    if (record.archivedAt === undefined) record.archivedAt = null;
     return record;
+  }
+
+  private static readonly TERMINAL = new Set<TaskStatus>([
+    "completed",
+    "failed",
+    "budget_exhausted",
+    "incomplete",
+    "stopped",
+  ]);
+
+  setArchived(taskId: string, archived: boolean): TaskRecord | null {
+    const t = this.get(taskId);
+    if (!t) return null;
+    if (archived) {
+      if (!ControlStore.TERMINAL.has(t.status)) {
+        throw new Error("仅终态任务可归档");
+      }
+      if (!t.archivedAt) t.archivedAt = this.now();
+    } else {
+      t.archivedAt = null;
+    }
+    this.save(t);
+    return t;
   }
 
   get(taskId: string): TaskRecord | null {

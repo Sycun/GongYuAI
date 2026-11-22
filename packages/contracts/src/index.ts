@@ -278,6 +278,8 @@ export const TaskRecordSchema = z.object({
   updatedAt: z.string().datetime(),
   startedAt: z.string().datetime().nullable(),
   finishedAt: z.string().datetime().nullable(),
+  /** Soft-hide from the default task list; evidence/report/logs retained. */
+  archivedAt: z.string().datetime().nullable().default(null),
   leaseOwner: z.string().nullable(),
   leaseUntil: z.string().datetime().nullable(),
   fence: z.number().int().nonnegative(),

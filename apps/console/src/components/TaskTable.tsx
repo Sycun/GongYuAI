@@ -1,14 +1,24 @@
-import { Table, Typography } from "@douyinfe/semi-ui";
+import { Button, Space, Table, Typography } from "@douyinfe/semi-ui";
+import { IconArchive, IconUndo } from "@douyinfe/semi-icons";
 import type { TaskRecord } from "../api";
-import { shortId } from "../labels";
+import { isArchivedTask, isTerminalStatus, shortId } from "../labels";
 import { StatusTag } from "./StatusTag";
 
 type Props = {
   tasks: TaskRecord[];
   onSelect: (taskId: string) => void;
+  onArchive?: (task: TaskRecord) => void;
+  onUnarchive?: (task: TaskRecord) => void;
+  actionBusyId?: string | null;
 };
 
-export function TaskTable({ tasks, onSelect }: Props) {
+export function TaskTable({
+  tasks,
+  onSelect,
+  onArchive,
+  onUnarchive,
+  actionBusyId,
+}: Props) {
   return (
     <Table
       rowKey="id"
@@ -23,7 +33,16 @@ export function TaskTable({ tasks, onSelect }: Props) {
         {
           title: "名称",
           dataIndex: "name",
-          render: (name: string) => <Typography.Text strong>{name}</Typography.Text>,
+          render: (name: string, record: TaskRecord) => (
+            <Space spacing={8}>
+              <Typography.Text strong>{name}</Typography.Text>
+              {isArchivedTask(record) ? (
+                <Typography.Text type="tertiary" size="small">
+                  已归档
+                </Typography.Text>
+              ) : null}
+            </Space>
+          ),
         },
         {
           title: "状态",
@@ -46,6 +65,48 @@ export function TaskTable({ tasks, onSelect }: Props) {
               {shortId(id)}
             </Typography.Text>
           ),
+        },
+        {
+          title: "操作",
+          dataIndex: "id",
+          width: 100,
+          render: (_id: string, record: TaskRecord) => {
+            const busy = actionBusyId === record.id;
+            const archived = isArchivedTask(record);
+            if (archived) {
+              return (
+                <Button
+                  size="small"
+                  theme="borderless"
+                  type="tertiary"
+                  icon={<IconUndo />}
+                  loading={busy}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUnarchive?.(record);
+                  }}
+                >
+                  恢复
+                </Button>
+              );
+            }
+            if (!isTerminalStatus(record.status)) return null;
+            return (
+              <Button
+                size="small"
+                theme="borderless"
+                type="tertiary"
+                icon={<IconArchive />}
+                loading={busy}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onArchive?.(record);
+                }}
+              >
+                归档
+              </Button>
+            );
+          },
         },
       ]}
     />
