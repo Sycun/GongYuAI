@@ -14,6 +14,7 @@ AI-native **long-running** authorized pentest agent，产品面定位为 **Missi
 
 | 项 | 值 |
 | --- | --- |
+| 受验代码 | `e93c159ad8b3c8de467ba39051ddb6fe7d9b4e66`（tree `223c131`；GitHub `main` 为其后的 docs/证据提交） |
 | 本轮范围 | 后端：委托边界、持久资料作业、24h 求助与跨班交接、材料语义/覆盖矩阵/证据撤回一致性、四图与因果 API、全局记忆与档案索引、冻结评测/提案晋升回退、角色分层与供应商韧性（模拟） |
 | 新增验收 | `pnpm acceptance:r9:ops`（67/67）· `pnpm acceptance:r9:flywheel`（57/57）· 证据 `docs/evidence/r9/` |
 | 单测 | 195 通过（contracts 51、history 57、control-plane 52、worker 35） |
