@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Button,
   Card,
@@ -40,8 +40,9 @@ import {
 import { StatusTag } from "../components/StatusTag";
 import { GoalCoverage } from "../components/GoalCoverage";
 import { ExecutionTrace } from "../components/ExecutionTrace";
-import { FactIntentDag } from "../components/dag/FactIntentDag";
 import { formatDateTime } from "../time";
+
+const FactIntentDag = lazy(() => import("../components/dag/FactIntentDag"));
 
 type Props = {
   task: TaskRecord | null;
@@ -74,7 +75,6 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     async function load() {
       setLoading(true);
       setPaneText("");
-      setHistory(null);
       try {
         if (tab === "live" || tab === "goals" || tab === "history") {
           const [h, r] = await Promise.all([api.history(task!.id), api.runtime(task!.id)]);
@@ -252,17 +252,20 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
 
   const goals = history?.goals?.length ? history.goals : task.goals;
 
+  const dagPanel = (
+    <Suspense fallback={<div className="gy-dag-empty" role="status">正在加载关系图…</div>}>
+      <FactIntentDag
+        facts={history?.facts ?? []}
+        intents={history?.intents ?? []}
+        height={tab === "goals" ? 380 : 420}
+        loading={loading}
+      />
+    </Suspense>
+  );
+
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 16,
-          alignItems: "flex-start",
-          marginBottom: 12,
-        }}
-      >
+      <div className="gy-task-heading">
         <div>
           <Space align="center" spacing={12}>
             <Typography.Title heading={4} style={{ margin: 0 }}>
@@ -327,6 +330,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
       </div>
 
       <Tabs
+        collapsible
         type="line"
         activeKey={tab}
         onChange={(key) => onTabChange(key as DetailTab)}
@@ -619,20 +623,8 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
 
         {tab === "goals" && (
           <Row gutter={16}>
-            <Col span={24}>
-              <Card
-                title="Fact–Intent DAG"
-                style={{ background: "var(--semi-color-bg-1)" }}
-                bodyStyle={{ paddingTop: 12 }}
-              >
-                <FactIntentDag
-                  facts={history?.facts ?? []}
-                  intents={history?.intents ?? []}
-                  height={380}
-                />
-              </Card>
-            </Col>
-            <Col span={14} style={{ marginTop: 16 }}>
+            <Col span={24}>{dagPanel}</Col>
+            <Col xs={24} sm={14} style={{ marginTop: 16 }}>
               <Card
                 title="目标契约"
                 style={{ background: "var(--semi-color-bg-1)" }}
@@ -675,7 +667,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
                 />
               </Card>
             </Col>
-            <Col span={10} style={{ marginTop: 16 }}>
+            <Col xs={24} sm={10} style={{ marginTop: 16 }}>
               <Card
                 title={`图前沿 · 开放意图 (${
                   (history?.intents ?? []).filter((i) =>
@@ -756,25 +748,13 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
 
         {tab === "history" && (
           <Row gutter={16}>
-            <Col span={24}>
-              <Card
-                title="Fact–Intent DAG"
-                style={{ background: "var(--semi-color-bg-1)" }}
-                bodyStyle={{ paddingTop: 12 }}
-              >
-                <FactIntentDag
-                  facts={history?.facts ?? []}
-                  intents={history?.intents ?? []}
-                  height={420}
-                />
-              </Card>
-            </Col>
-            <Col span={12} style={{ marginTop: 16 }}>
+            <Col span={24}>{dagPanel}</Col>
+            <Col xs={24} sm={12} style={{ marginTop: 16 }}>
               <Card title="总览" style={{ background: "var(--semi-color-bg-1)" }}>
                 <pre className="gy-mono">{history?.overview || "—"}</pre>
               </Card>
             </Col>
-            <Col span={12} style={{ marginTop: 16 }}>
+            <Col xs={24} sm={12} style={{ marginTop: 16 }}>
               <Card title="意图" style={{ background: "var(--semi-color-bg-1)" }}>
                 <List
                   dataSource={

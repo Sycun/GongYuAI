@@ -1,4 +1,4 @@
-/** Build a layered Fact–Intent DAG layout for SVG rendering. */
+import { Graph, layout, type Point } from "@dagrejs/dagre";
 
 export type DagFact = {
   id: string;
@@ -6,7 +6,6 @@ export type DagFact = {
   title: string;
   summary?: string;
   intentId?: string | null;
-  createdAt?: string;
 };
 
 export type DagIntent = {
@@ -17,233 +16,73 @@ export type DagIntent = {
   sourceFactIds?: string[];
 };
 
-export type DagNodeKind = "origin" | "fact" | "intent";
-
-export type DagNode = {
-  id: string;
-  kind: DagNodeKind;
-  label: string;
-  sub?: string;
-  status?: string;
-  layer?: string;
-  rank: number;
-  indexInRank: number;
-  x: number;
-  y: number;
+export type DagRecord = {
+  kind: "origin" | "fact" | "intent";
+  title: string;
+  meta?: string;
+  summary?: string;
+  sources?: string[];
 };
 
-export type DagEdge = {
-  id: string;
-  from: string;
-  to: string;
-  kind: "trigger" | "produce";
-};
+type Link = { source: string; target: string; kind: "trigger" | "produce" };
+type Topology = { ids: string[]; links: Link[] };
 
-export type DagLayout = {
-  nodes: DagNode[];
-  edges: DagEdge[];
-  width: number;
-  height: number;
-};
+export const CARD_SIZE = { width: 184, height: 64 };
 
-const ORIGIN_ID = "origin";
-const NODE_W = 168;
-const NODE_H = 52;
-const RANK_GAP = 96;
-const ROW_GAP = 28;
-const PAD_X = 28;
-const PAD_Y = 24;
+export function collectDag(facts: DagFact[], intents: DagIntent[]) {
+  const records = new Map<string, DagRecord>();
+  const links: Link[] = [];
+  const intentIds = new Set(intents.map((intent) => intent.id));
+  const referenced = new Set(intents.flatMap((intent) => intent.sourceFactIds ?? []));
 
-export const DAG_NODE_SIZE = { w: NODE_W, h: NODE_H } as const;
-
-function truncate(s: string, n: number): string {
-  const t = s.trim();
-  if (t.length <= n) return t;
-  return `${t.slice(0, n - 1)}…`;
-}
-
-/** Prefer title-layer facts; keep any fact that participates in an edge. */
-function selectFacts(facts: DagFact[], intents: DagIntent[]): DagFact[] {
-  const keep = new Set<string>();
-  for (const f of facts) {
-    if (f.layer === "title") keep.add(f.id);
-    if (f.intentId) keep.add(f.id);
-  }
-  for (const i of intents) {
-    for (const sid of i.sourceFactIds ?? []) {
-      if (sid !== ORIGIN_ID) keep.add(sid);
+  for (const fact of facts) {
+    if (fact.layer !== "title" && !fact.intentId && !referenced.has(fact.id)) continue;
+    records.set(fact.id, { kind: "fact", title: fact.title, meta: fact.layer, summary: fact.summary });
+    if (fact.intentId && intentIds.has(fact.intentId)) {
+      links.push({ source: fact.intentId, target: fact.id, kind: "produce" });
     }
   }
-  return facts.filter((f) => keep.has(f.id));
-}
-
-export function buildDagLayout(facts: DagFact[], intents: DagIntent[]): DagLayout {
-  const selected = selectFacts(facts, intents);
-  const factById = new Map(selected.map((f) => [f.id, f]));
-  const intentById = new Map(intents.map((i) => [i.id, i]));
-
-  const nodeIds = new Set<string>();
-  const edges: DagEdge[] = [];
-
-  const needsOrigin = intents.some((i) => (i.sourceFactIds ?? []).includes(ORIGIN_ID));
-  if (needsOrigin) nodeIds.add(ORIGIN_ID);
-
-  for (const f of selected) nodeIds.add(f.id);
-  for (const i of intents) nodeIds.add(i.id);
-
   for (const intent of intents) {
-    const sources = intent.sourceFactIds?.length ? intent.sourceFactIds : [ORIGIN_ID];
-    for (const sid of sources) {
-      if (sid === ORIGIN_ID) nodeIds.add(ORIGIN_ID);
-      else if (!factById.has(sid) && !nodeIds.has(sid)) {
-        /* dangling source — still show stub if missing from selected */
-        nodeIds.add(sid);
+    const sources = [...new Set(intent.sourceFactIds?.length ? intent.sourceFactIds : ["origin"])];
+    records.set(intent.id, {
+      kind: "intent", title: intent.title, meta: intent.status, summary: intent.summary, sources,
+    });
+    for (const source of sources) {
+      if (!records.has(source)) {
+        records.set(source, { kind: "fact", title: source, meta: "记录缺失" });
       }
-      if (!nodeIds.has(sid)) continue;
-      edges.push({
-        id: `t:${sid}->${intent.id}`,
-        from: sid,
-        to: intent.id,
-        kind: "trigger",
-      });
+      links.push({ source, target: intent.id, kind: "trigger" });
     }
   }
 
-  for (const fact of selected) {
-    if (!fact.intentId || !intentById.has(fact.intentId)) continue;
-    edges.push({
-      id: `p:${fact.intentId}->${fact.id}`,
-      from: fact.intentId,
-      to: fact.id,
-      kind: "produce",
-    });
-  }
+  if (records.has("origin")) records.set("origin", { kind: "origin", title: "任务起点" });
 
-  if (nodeIds.size === 0) {
-    return { nodes: [], edges: [], width: PAD_X * 2, height: 120 };
-  }
-
-  // Kahn layers
-  const preds = new Map<string, Set<string>>();
-  const succs = new Map<string, Set<string>>();
-  for (const id of nodeIds) {
-    preds.set(id, new Set());
-    succs.set(id, new Set());
-  }
-  for (const e of edges) {
-    if (!nodeIds.has(e.from) || !nodeIds.has(e.to)) continue;
-    preds.get(e.to)!.add(e.from);
-    succs.get(e.from)!.add(e.to);
-  }
-
-  const rank = new Map<string, number>();
-  const ready = [...nodeIds].filter((id) => preds.get(id)!.size === 0);
-  const remaining = new Set(nodeIds);
-  for (const id of ready) {
-    rank.set(id, 0);
-    remaining.delete(id);
-  }
-  let guard = nodeIds.size + 2;
-  while (remaining.size && guard-- > 0) {
-    let progressed = false;
-    for (const id of [...remaining]) {
-      const ps = [...preds.get(id)!];
-      if (ps.some((p) => !rank.has(p))) continue;
-      const r = Math.max(0, ...ps.map((p) => rank.get(p)!)) + 1;
-      rank.set(id, r);
-      remaining.delete(id);
-      progressed = true;
-    }
-    if (!progressed) {
-      // cycle / orphan — park leftovers at end
-      const maxR = Math.max(0, ...[...rank.values()]);
-      for (const id of remaining) rank.set(id, maxR + 1);
-      remaining.clear();
-    }
-  }
-
-  const byRank = new Map<number, string[]>();
-  for (const id of nodeIds) {
-    const r = rank.get(id) ?? 0;
-    const list = byRank.get(r) ?? [];
-    list.push(id);
-    byRank.set(r, list);
-  }
-
-  // Stable-ish order: origin first, then intents, then facts by createdAt/title
-  for (const [r, ids] of byRank) {
-    ids.sort((a, b) => {
-      const ka = kindKey(a, factById, intentById);
-      const kb = kindKey(b, factById, intentById);
-      if (ka !== kb) return ka - kb;
-      return labelOf(a, factById, intentById).localeCompare(labelOf(b, factById, intentById));
-    });
-    byRank.set(r, ids);
-  }
-
-  const maxRank = Math.max(0, ...byRank.keys());
-  const maxRows = Math.max(1, ...[...byRank.values()].map((xs) => xs.length));
-
-  const nodes: DagNode[] = [];
-  for (let r = 0; r <= maxRank; r++) {
-    const ids = byRank.get(r) ?? [];
-    ids.forEach((id, indexInRank) => {
-      const kind = nodeKind(id, factById, intentById);
-      const fact = factById.get(id);
-      const intent = intentById.get(id);
-      nodes.push({
-        id,
-        kind,
-        label: truncate(labelOf(id, factById, intentById), 22),
-        sub:
-          kind === "fact"
-            ? fact?.layer
-            : kind === "intent"
-              ? intent?.status
-              : "起点",
-        status: intent?.status,
-        layer: fact?.layer,
-        rank: r,
-        indexInRank,
-        x: PAD_X + r * (NODE_W + RANK_GAP),
-        y: PAD_Y + indexInRank * (NODE_H + ROW_GAP),
-      });
-    });
-  }
-
-  const width = PAD_X * 2 + (maxRank + 1) * NODE_W + maxRank * RANK_GAP;
-  const height = PAD_Y * 2 + maxRows * NODE_H + (maxRows - 1) * ROW_GAP;
-
-  return { nodes, edges: edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to)), width, height };
+  // Polls can update titles and statuses without changing any coordinates.
+  links.sort((a, b) =>
+    a.source.localeCompare(b.source) || a.target.localeCompare(b.target) || a.kind.localeCompare(b.kind));
+  const topology: Topology = { ids: [...records.keys()].sort(), links };
+  return { records, topologyKey: JSON.stringify(topology) };
 }
 
-function nodeKind(
-  id: string,
-  facts: Map<string, DagFact>,
-  intents: Map<string, DagIntent>,
-): DagNodeKind {
-  if (id === ORIGIN_ID) return "origin";
-  if (intents.has(id)) return "intent";
-  if (facts.has(id)) return "fact";
-  return "fact";
-}
+export function buildDagLayout(topologyKey: string, vertical: boolean) {
+  const { ids, links }: Topology = JSON.parse(topologyKey);
+  const graph = new Graph({ multigraph: true });
+  graph.setGraph({ rankdir: vertical ? "TB" : "LR", ranksep: 52, nodesep: 24 });
+  for (const id of ids) graph.setNode(id, { ...CARD_SIZE });
+  for (const link of links) graph.setEdge(link.source, link.target, {}, link.kind);
+  if (ids.length) layout(graph);
 
-function kindKey(
-  id: string,
-  facts: Map<string, DagFact>,
-  intents: Map<string, DagIntent>,
-): number {
-  const k = nodeKind(id, facts, intents);
-  if (k === "origin") return 0;
-  if (k === "intent") return 1;
-  return 2;
-}
+  const positions = ids.map((id) => {
+    const { x, y } = graph.node(id);
+    return { id, position: { x: x - CARD_SIZE.width / 2, y: y - CARD_SIZE.height / 2 } };
+  }).sort((a, b) => vertical
+    ? a.position.y - b.position.y || a.position.x - b.position.x
+    : a.position.x - b.position.x || a.position.y - b.position.y);
 
-function labelOf(
-  id: string,
-  facts: Map<string, DagFact>,
-  intents: Map<string, DagIntent>,
-): string {
-  if (id === ORIGIN_ID) return "origin";
-  return intents.get(id)?.title ?? facts.get(id)?.title ?? id.slice(0, 8);
+  const edges = links.map(({ source, target, kind }) => {
+    const points: Point[] = graph.edge(source, target, kind).points;
+    const path = points.map(({ x, y }, i) => `${i ? "L" : "M"}${x} ${y}`).join(" ");
+    return { id: JSON.stringify([source, target, kind]), source, target, kind, path };
+  });
+  return { positions, edges };
 }
