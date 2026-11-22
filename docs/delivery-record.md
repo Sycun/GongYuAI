@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 1 | 普通操作员从正常入口完成一笔跨日生产委托 | ✅ | `scripts/engagement-e2e.ts` 53 项全过；验收记录 `.gongyuai/acceptance/engagement-1795350021687/acceptance-record.md`；控制台交付页（报告 Tab）可见记分卡/更正/撤回提示 |
 | 2 | GitHub `Sycun/GongYuAI` 收到验收后的本次提交 | ✅ | `main` = `3a6b174bf544b61c58f28d631aa136a3c34b9e3a`（[提交](https://github.com/Sycun/GongYuAI/commit/3a6b174bf544b61c58f28d631aa136a3c34b9e3a)），远端 `git ls-remote` 复核一致 |
-| 3 | Kali 用该提交完整替换旧项目、正式入口验收、旧程序目录删除 | ✅ | 服务 `gongyuai.service` active，`MainPID` cwd=`/home/parallels/GongYuAI`，代码树=`3a6b174…`、HEAD=当前 `main`；旧目录 `GongYuAI.old-20261122-202221` 已删除 |
+| 3 | Kali 用该提交完整替换旧项目、正式入口验收、旧程序目录删除 | ✅ | 服务 `gongyuai.service` active，`MainPID` cwd=`/home/parallels/GongYuAI`；首版替换用 `3a6b174`，复核后当前代码树 `6c6bebd…`，HEAD=当前 `main`；旧目录 `GongYuAI.old-20261122-202221` 已删除 |
 
 ## 2. 发布提交
 
@@ -109,12 +109,12 @@ Kali tasks             : 13（切换前 11 + 验收 2）
 
 ## 7. 独立复核结论与处置（2026-11-22）
 
-独立复核（只读）确认：GitHub 三方 SHA 一致、两端树 hash 相同（`df6286a5…`）、107 项测试通过、smoke 通过、A1–A5 与阶段 2 实现符合契约、Kali 服务/目录/备份/任务数/旧目录清理与记录一致。提出的 Important 项已处置：
+独立复核（只读；上一轮基线 `907cb63`，两端树 hash `df6286a5…`，107 项测试）确认：GitHub 三方 SHA 一致、smoke 通过、A1–A5 与阶段 2 实现符合契约、Kali 服务/目录/备份/任务数/旧目录清理与记录一致。提出的 Important 项已处置，复验基线 `6e1db7a`（树 hash `8601654…`，111 项测试）：
 
 | 项 | 处置 |
 | --- | --- |
 | I1 快照 hash 与交付件不对应 | `/snapshot` 改为对同一次快照做纯函数记分卡；e2e 只取一次 `/snapshot` 并落盘同一对象；复核后验收记录 `6b299710…` 与文件 hash 相等 |
-| I2 交付记录 Kali HEAD 过期 | §1 与 §4 统一为“代码树 3a6b174 / HEAD=当前 main”，复核后 Kali 已同步 |
+| I2 交付记录 Kali HEAD 过期 | §1 与 §4 统一为“首版替换 3a6b174 / 当前代码树 6c6bebd / HEAD=当前 main”，复核后 Kali 已同步 |
 | I3 首次通过后无法重新归属 | 明确为**首次通过时冻结归属**；重新打开需新目标/重跑，文档不再暗示自动重归属 |
 | I4 归属未知计入当前支持 | `unknown-attribution` 改为 `currentSupported=false`，记分卡与交付摘要分开报；A4 夹具断言 0 |
 | I5 阶段 2 无单测 | 新增 `packages/control-plane/src/pause-scope.test.ts`（状态语义、看门狗不重启 draining、范围修订门禁） |

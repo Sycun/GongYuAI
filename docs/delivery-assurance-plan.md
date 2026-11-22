@@ -56,7 +56,7 @@
 | --- | --- | --- |
 | A1 发现归属 | ✅ | `packages/history/src/delivery-assurance.test.ts` A1/A1+；`findingsGate.scope/assets` + `goal_findings` |
 | A2 覆盖型目标 | ✅ | A2 用例：tested/partial/unknown 三态；零发现不证明覆盖 |
-| A3 提交顺序 | ✅ | A3 用例：撤回在先是断言失败；断言在先保留历史并提示唯一依据已撤回 |
+| A3 提交顺序 | ✅ | A3 用例：撤回在先是断言失败；断言在先保留历史并提示唯一依据已撤回；另留独立依据须在**断言前**已备，归属首次通过时冻结 |
 | A4 旧档只读 | ✅ | A4 用例：两次记分卡一致；快照与历史库字节不变；归属未知单列且**不计入** `currentlySupported` |
 | A5 复用/去重/复算 | ✅ | A5 用例：两目标各计一次；更正幂等；快照独立复算一致 |
 | 普通附件同名回归 | ✅ | `delivery-assurance.test.ts` 末例：业务 `ALL_COMPLETE.json` 按文件判据 |

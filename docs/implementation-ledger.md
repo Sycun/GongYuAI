@@ -34,7 +34,7 @@
 | P11-S3/S4 | 隧道/pivot、开源 Chromium、速率自判 | — | — | — | 📐 |
 | P12 | D1 事实保鲜 / D2 防御反馈 / D3 Provider 韧性 / D5 规划者 / D6 辅助者 / D8 法律级证据 / 攻击链图 | — | — | — | 📐 |
 | 交付可信度 | **A1–A5 + 同名附件 + 基准兼容** | 见 P6-E1+ / P9-F1 / 报告与更正 | 控制台交付页、`gy scorecard`、`gy correct` | `delivery-assurance.test.ts`（30 项历史测试含 7 项新增） | ✅ |
-| 阶段 2 | **暂停/恢复/范围版本/未知外部状态** | `runner.pause/resume/setScope`、`TaskStatus`、`/runtime` | `POST /tasks/:id/pause|resume|scope`；控制台按钮 | 贯穿样例：暂停确认、检查点留存、v2 生效、跨日无重复通过 | ✅ |
+| 阶段 2 | **暂停/恢复/范围版本/未知外部状态** | `runner.pause/resume/setScope`、`TaskStatus`、`/runtime` | `POST /tasks/:id/pause|resume|scope`；控制台按钮 | 贯穿样例：暂停确认、检查点留存、v2 生效、跨日无重复通过；`pause-scope.test.ts` 覆盖状态语义/看门狗/范围门禁 | ✅ |
 | 阶段 5 | **整改复测 / 客户风险处置 / 交付更正** | `finding_actions`、`delivery_corrections`、report 版本留存 | `gy retest`/`gy accept`/`gy correct`、控制台报告页 | 贯穿样例：retested → accepted → retracted → 更正 #1 → 已通知 | ✅ |
 
 ## 2. 阶段 1–7 实际状态
