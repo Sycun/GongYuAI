@@ -1,7 +1,7 @@
 # 实施台账（Implementation Ledger）
 
 > 面向独立复核人：本文件把 P0–P12 与七个阶段映射到**实际代码、正常用户入口、测试证据、本轮实际走查结果与剩余差距**，并区分「文档已设计 / 代码已实现 / 入口已走查 / 真实委托已验证 / 缺外部材料」。
-> 本轮基线：上轮复核修复 `6c6bebd` + 文档 `04c798b`；本轮发布 `d7c46d4…`（代码）。验收运行与哈希见 [delivery-record.md](./delivery-record.md) 与 `docs/evidence/acceptance/`。
+> 本轮基线：第三轮独立复核（受验 `d7c46d4`，复核记录 `out/independent-review-6ef71f9-20261122-215318/`）之后的重整；本轮受验代码 `f34cc032cd9c4061a9212758595b34cf8d5fc2e0`。验收运行与哈希见 [delivery-record.md](./delivery-record.md) §0 与 `docs/evidence/`。
 
 ## 0. 签收状态口径（全文统一）
 
@@ -38,6 +38,11 @@
 | 阶段 5 | **整改复测 / 客户风险处置 / 交付更正 / 客户复测申请 / 跨任务署名复核** | `finding_actions`、`delivery_corrections`、`retest_requests`、`peer_reviews`、report 版本留存 | `gy retest`/`accept`/`correct`/`retest-request`/`peer-review`；控制台报告页 | 贯穿样例末段实跑；`api-entries.test.ts` | 已验证 |
 | 本轮新增 | **原始材料差异核算** | `packages/contracts/src/reconcile.ts`、`packages/control-plane/src/reconcile.ts` | `POST/GET /tasks/:id/reconcile`、`gy reconcile`、控制台「原始材料差异核算」面板 | `reconcile.test.ts`、`business-acceptance.ts`（34 项）、控制台实跑 | 已验证（虚构材料） |
 | 本轮新增 | **验收清单与校验器** | `scripts/acceptance-manifest.ts`、`scripts/acceptance-verify.ts` | `pnpm verify:acceptance <dir>` | `verify-acceptance.test.ts`（交叉配对反例）、两份清单校验通过 | 已验证 |
+| 第七轮新增 | **目标级核算条件（缺件不得判通过）** | `contracts.ReconcileGateSchema`、`history/goal-evidence.ts#checkReconcileGate`、`assertGoal` | 建档 `goals[].reconcileGate`；`POST /tasks/:id/resume`；控制台目标页、报告、事件台账 | `history.test.ts` 三条用例；业务验收第 3/11 段；正式入口 `497126a0…` | 已验证（虚构材料） |
+| 第七轮新增 | **恢复副本目录归属 + 隔离启动** | `control-plane/data-root.ts`、`store.ts`、`bootControlPlane({isolated})`、`gy serve --isolated` | `gy serve --data-dir <副本> --isolated`；`pnpm restore:selftest` / `restore:isolation` | `data-root.test.ts` 4 例；Kali 原备份与工程备份两次演练 | 已验证 |
+| 第七轮新增 | **校验器补强（提交对象/干净状态/覆盖复算/失败步骤）** | `scripts/acceptance-verify.ts`、`scripts/validator-negatives.sh` | `pnpm verify:acceptance <dir> --expect-commit <sha>` / `--release-record` | `verify-acceptance.test.ts` 8 例；`validator-negatives.txt` | 已验证 |
+| 第七轮新增 | **重复主键与 CSV 物理行号** | `contracts/reconcile.ts` | `POST /tasks/:id/reconcile`（同一实现三入口） | `reconcile.test.ts` 13 例；业务验收第 7–10 段 | 已验证 |
+| 第七轮新增 | **Kali systemd 托管与受控切换** | 部署脚本 `scripts/kali/{deploy,systemd-switch,systemd-crash-test}.sh` | `systemctl`（单元 `gongyuai.service`） | `docs/evidence/service/` | 已验证 |
 
 ## 2. 阶段 1–7 签收
 

@@ -1,0 +1,17 @@
+[2026-11-22T22:13:27+08:00] 故障前：MainPID=1675680 listener=1675712  tasks=14 health={"ok":true,"version":"0.1.0"}
+ActiveState=active
+SubState=running
+Result=success
+NRestarts=0
+[2026-11-22T22:13:27+08:00] 动作：kill -9 1675680（模拟服务进程意外退出）
+[2026-11-22T22:13:33+08:00] 已自动恢复：用时约  秒
+[2026-11-22T22:13:33+08:00] 故障后：MainPID=1675680 → 1675967
+ActiveState=active
+SubState=running
+Result=success
+NRestarts=1
+[2026-11-22T22:13:33+08:00] tasks=14
+[2026-11-22T22:13:33+08:00] kali-demo facts=5 events=15 goals=2
+[2026-11-22T22:13:33+08:00] listener pid=1675999 cgroup=0::/system.slice/gongyuai.service  cwd=/home/parallels/GongYuAI-f34cc032
+[2026-11-22T22:13:33+08:00] health={"ok":true,"version":"0.1.0"}
+[2026-11-22T22:13:33+08:00] 结论：故障恢复通过（systemd 自动拉起，入口与历史仍可读）

@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "taskId": "497126a0-93ac-4c9b-b293-acd380759f40",
+  "capturedAt": "2026-11-22T14:15:12.847Z",
+  "goals": [
+    {
+      "id": "kali-eng-asset-diff",
+      "title": "两份原始资产清单完成差异比对",
+      "passes": true,
+      "evidencePatterns": [
+        "reconcile/kali-eng-*.json"
+      ],
+      "evidencePaths": [
+        "reconcile/kali-eng-diff-20261122141507.json"
+      ],
+      "assertedAt": "2026-11-22T14:15:07.859Z",
+      "assets": [
+        "kali-fixture.invalid"
+      ],
+      "reconcileGate": {
+        "pattern": "reconcile/kali-eng-*.json",
+        "maxUnknown": 0,
+        "maxAmbiguous": 0
+      }
+    }
+  ],
+  "proofs": [
+    {
+      "goalId": "kali-eng-asset-diff",
+      "path": "reconcile/kali-eng-diff-20261122141507.json",
+      "sha256": "478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf"
+    }
+  ],
+  "goalFindings": [],
+  "findings": [],
+  "coverage": [],
+  "sha256": "0c2e7f4ae7824b2fd40e58be790276b904cb5f4d0efc5611948049a41aa75f11"
+}

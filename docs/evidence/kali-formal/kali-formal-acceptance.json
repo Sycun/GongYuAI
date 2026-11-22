@@ -1,0 +1,308 @@
+{
+  "kind": "kali-formal-acceptance",
+  "startedAt": "2026-11-22T22:15:05+0800",
+  "finishedAt": "2026-11-22T22:15:12+0800",
+  "base": "http://127.0.0.1:8877",
+  "taskName": "kali-engineering-acceptance-1795356905",
+  "taskId": "497126a0-93ac-4c9b-b293-acd380759f40",
+  "goalId": "kali-eng-asset-diff",
+  "dataRoot": "/home/parallels/GongYuAI-f34cc032/.gongyuai",
+  "materials": {
+    "baseline": {
+      "path": "assets/yingji-baseline.csv",
+      "sha256": "4a1eb54cd2f0db5d77ba18ad12e0bd03393a07916945d0316135cff7b375bb0e"
+    },
+    "current": {
+      "path": "assets/yingji-current.csv",
+      "sha256": "328bf611ef06fd5613dc97d58f8c4a9e4ce73364b45a123e28b664ddd1813b0f"
+    }
+  },
+  "missingStage": {
+    "evidencePath": "reconcile/kali-eng-missing-20261122141506.json",
+    "evidenceSha256": "7ec699b9beb8313d120d0915a274cd5b21b1e79a0a22635cbcc6b8992635a97c",
+    "missingMaterials": [
+      "assets/yingji-baseline.csv"
+    ],
+    "counts": {
+      "added": 0,
+      "removed": 0,
+      "changed": 0,
+      "unchanged": 0,
+      "missing": 0,
+      "unknown": 5,
+      "ambiguous": 0,
+      "totalKeys": 5
+    },
+    "taskStatus": "incomplete",
+    "goalPasses": false,
+    "rejectionReason": "核算条件未满足：reconcile/kali-eng-missing-20261122141506.json：缺少基线材料 assets/yingji-baseline.csv；未知项 5 项 > 允许 0 项（本次核算没有得出结论）",
+    "scorecard": {
+      "denominator": 1,
+      "historicallyPassed": 0,
+      "currentlySupported": 0,
+      "unknownAttribution": 0,
+      "coverage": {
+        "untested": 0,
+        "partial": 0,
+        "tested": 0,
+        "blocked": 0,
+        "unregistered": 1
+      }
+    }
+  },
+  "firstPass": {
+    "evidencePath": "reconcile/kali-eng-diff-20261122141507.json",
+    "evidenceSha256": "478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf",
+    "fileMtime": "2026-11-22T22:15:07+0800",
+    "assertedAt": "2026-11-22T14:15:07.859Z",
+    "adopted": {
+      "path": "reconcile/kali-eng-diff-20261122141507.json",
+      "sha256": "478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf",
+      "name": "kali-eng-diff",
+      "counts": {
+        "added": 1,
+        "removed": 1,
+        "changed": 1,
+        "unchanged": 2,
+        "missing": 1,
+        "unknown": 0,
+        "ambiguous": 0,
+        "totalKeys": 6
+      }
+    },
+    "proofs": [
+      {
+        "goalId": "kali-eng-asset-diff",
+        "path": "reconcile/kali-eng-diff-20261122141507.json",
+        "sha256": "478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf"
+      }
+    ],
+    "counts": {
+      "added": 1,
+      "removed": 1,
+      "changed": 1,
+      "unchanged": 2,
+      "missing": 1,
+      "unknown": 0,
+      "ambiguous": 0,
+      "totalKeys": 6
+    },
+    "spotCheck": {
+      "key": "GY-SRV-02",
+      "status": "changed",
+      "baselineLine": 3,
+      "currentLine": 3,
+      "changes": [
+        {
+          "field": "risk",
+          "before": "high",
+          "after": "medium"
+        }
+      ]
+    },
+    "absentInBoth": {
+      "key": "GY-SRV-09",
+      "status": "missing",
+      "baselineLine": null,
+      "currentLine": null,
+      "changes": [],
+      "reason": "required-key-absent-in-both"
+    },
+    "scorecard": {
+      "denominator": 1,
+      "historicallyPassed": 1,
+      "currentlySupported": 1,
+      "unknownAttribution": 0,
+      "coverage": {
+        "untested": 0,
+        "partial": 0,
+        "tested": 0,
+        "blocked": 0,
+        "unregistered": 1
+      }
+    },
+    "snapshotSha256": "0c2e7f4ae7824b2fd40e58be790276b904cb5f4d0efc5611948049a41aa75f11"
+  },
+  "steps": [
+    {
+      "step": "0 正式入口健康",
+      "ok": true,
+      "detail": "http://127.0.0.1:8877/health → 200 {\"ok\": true, \"version\": \"0.1.0\"}",
+      "at": "2026-11-22T22:15:05+0800"
+    },
+    {
+      "step": "1 建档",
+      "ok": true,
+      "detail": "POST /tasks → 201 task=497126a0-93ac-4c9b-b293-acd380759f40",
+      "at": "2026-11-22T22:15:06+0800"
+    },
+    {
+      "step": "1 暂停模拟 Worker",
+      "ok": true,
+      "detail": "status=paused",
+      "at": "2026-11-22T22:15:06+0800"
+    },
+    {
+      "step": "2 导入当前清单（只交一侧）",
+      "ok": true,
+      "detail": "{'path': 'assets/yingji-current.csv'}",
+      "at": "2026-11-22T22:15:06+0800"
+    },
+    {
+      "step": "2 缺件核算被接受",
+      "ok": true,
+      "detail": "POST /reconcile → 201 reconcile/kali-eng-missing-20261122141506.json",
+      "at": "2026-11-22T22:15:06+0800"
+    },
+    {
+      "step": "2 缺件结论点名基线材料",
+      "ok": true,
+      "detail": "missingMaterials=[\"assets/yingji-baseline.csv\"]",
+      "at": "2026-11-22T22:15:06+0800"
+    },
+    {
+      "step": "2 缺件时全部为未知",
+      "ok": true,
+      "detail": "counts={\"added\": 0, \"removed\": 0, \"changed\": 0, \"unchanged\": 0, \"missing\": 0, \"unknown\": 5, \"ambiguous\": 0, \"totalKeys\": 5}",
+      "at": "2026-11-22T22:15:06+0800"
+    },
+    {
+      "step": "2 证据目录没有预置答案",
+      "ok": true,
+      "detail": "命中 0 个：[]",
+      "at": "2026-11-22T22:15:06+0800"
+    },
+    {
+      "step": "3 任务恢复",
+      "ok": true,
+      "detail": "status=initializing",
+      "at": "2026-11-22T22:15:06+0800"
+    },
+    {
+      "step": "3 缺件运行没有判通过",
+      "ok": true,
+      "detail": "任务 status=incomplete（缺一侧材料不得 completed）",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "3 目标保持未通过",
+      "ok": true,
+      "detail": "kali-eng-asset-diff passes=False",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "3 未通过原因点名缺件",
+      "ok": true,
+      "detail": "核算条件未满足：reconcile/kali-eng-missing-20261122141506.json：缺少基线材料 assets/yingji-baseline.csv；未知项 5 项 > 允许 0 项（本次核算没有得出结论）",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "3 缺件阶段没有首次通过依据",
+      "ok": true,
+      "detail": "goalProofs=0",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "3 记分卡当前支持为 0",
+      "ok": true,
+      "detail": "历史 0/1 · 当前 0/1",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "3 报告写出缺件与未通过",
+      "ok": true,
+      "detail": "报告 2300 字节",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "4 补交基线清单",
+      "ok": true,
+      "detail": "assets/yingji-baseline.csv 已导入",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "4 合格核算",
+      "ok": true,
+      "detail": "POST /reconcile → 201 reconcile/kali-eng-diff-20261122141507.json",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "4 差异结论符合预期",
+      "ok": true,
+      "detail": "counts={\"added\": 1, \"removed\": 1, \"changed\": 1, \"unchanged\": 2, \"missing\": 1, \"unknown\": 0, \"ambiguous\": 0, \"totalKeys\": 6}",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "4 人工抽查 GY-SRV-02",
+      "ok": true,
+      "detail": "{\"key\": \"GY-SRV-02\", \"status\": \"changed\", \"baselineLine\": 3, \"currentLine\": 3, \"changes\": [{\"field\": \"risk\", \"before\": \"high\", \"after\": \"medium\"}]}",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "4 两侧都不存在的约定项是有效结论",
+      "ok": true,
+      "detail": "{\"key\": \"GY-SRV-09\", \"status\": \"missing\", \"baselineLine\": null, \"currentLine\": null, \"changes\": [], \"reason\": \"required-key-absent-in-both\"}",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "4 差异文件由本次实现产生",
+      "ok": true,
+      "detail": "reconcile/kali-eng-diff-20261122141507.json mtime=2026-11-22T22:15:07+0800 sha256=478da5dfc3d0…",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "5 补交后从正常入口重新判定",
+      "ok": true,
+      "detail": "status=initializing",
+      "at": "2026-11-22T22:15:07+0800"
+    },
+    {
+      "step": "5 目标由核算结果满足",
+      "ok": true,
+      "detail": "status=completed",
+      "at": "2026-11-22T22:15:12+0800"
+    },
+    {
+      "step": "5 目标首次通过",
+      "ok": true,
+      "detail": "assertedAt=2026-11-22T14:15:07.859Z",
+      "at": "2026-11-22T22:15:12+0800"
+    },
+    {
+      "step": "5 差异文件生成时间早于首次通过",
+      "ok": true,
+      "detail": "文件 mtime=2026-11-22T22:15:07+08:00（1795356907s） ≤ 首次通过 2026-11-22T14:15:07.859Z（1795356907s）",
+      "at": "2026-11-22T22:15:12+0800"
+    },
+    {
+      "step": "5 首次通过只指向一份核算文件",
+      "ok": true,
+      "detail": "[{\"goalId\": \"kali-eng-asset-diff\", \"path\": \"reconcile/kali-eng-diff-20261122141507.json\", \"sha256\": \"478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf\"}]",
+      "at": "2026-11-22T22:15:12+0800"
+    },
+    {
+      "step": "5 首次通过事件指向实际采用的核算文件",
+      "ok": true,
+      "detail": "reconcile/kali-eng-diff-20261122141507.json · 478da5dfc3d0…（事件 1 条）",
+      "at": "2026-11-22T22:15:12+0800"
+    },
+    {
+      "step": "5 报告引用采用的核算文件与哈希",
+      "ok": true,
+      "detail": "报告 2875 字节",
+      "at": "2026-11-22T22:15:12+0800"
+    },
+    {
+      "step": "6 交付快照已保存",
+      "ok": true,
+      "detail": "/home/parallels/GongYuAI-f34cc032/out/kali-formal/delivery-snapshot.json",
+      "at": "2026-11-22T22:15:12+0800"
+    },
+    {
+      "step": "6 记分卡历史与当前分列",
+      "ok": true,
+      "detail": "历史 1/1 · 当前 1/1 · 归属未知 0 · 人工覆盖 {\"untested\": 0, \"partial\": 0, \"tested\": 0, \"blocked\": 0, \"unregistered\": 1}",
+      "at": "2026-11-22T22:15:12+0800"
+    }
+  ]
+}

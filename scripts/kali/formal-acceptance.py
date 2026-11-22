@@ -17,6 +17,7 @@
       --data-root /home/parallels/GongYuAI-<short>/.gongyuai --out ./kali-formal
 """
 import argparse
+import calendar
 import hashlib
 import json
 import os
@@ -213,10 +214,12 @@ def main():
     good_result = good.get("result", {}) if isinstance(good, dict) else {}
     record("4 合格核算", status == 201, f"POST /reconcile → {status} {good.get('evidencePath')}")
     counts = good_result.get("counts", {})
+    # 独立预期（手算，不看实现）：01 未变、02 变更、03 移除、04 新增、05 未变，
+    # 约定项 GY-SRV-09 两侧都不存在 → 缺件；合计 6 项。
     record("4 差异结论符合预期",
            counts.get("added") == 1 and counts.get("removed") == 1 and counts.get("changed") == 1
-           and counts.get("unchanged") == 1 and counts.get("missing") == 1
-           and counts.get("unknown") == 0 and counts.get("ambiguous") == 0 and counts.get("totalKeys") == 5,
+           and counts.get("unchanged") == 2 and counts.get("missing") == 1
+           and counts.get("unknown") == 0 and counts.get("ambiguous") == 0 and counts.get("totalKeys") == 6,
            f"counts={json.dumps(counts, ensure_ascii=False)}")
 
     # 人工抽查一条差异及其原始行号
@@ -251,10 +254,14 @@ def main():
     record("5 目标首次通过", goals2.get(GOAL_ID, {}).get("passes") is True,
            f"assertedAt={goals2.get(GOAL_ID, {}).get('assertedAt')}")
     asserted_at = goals2.get(GOAL_ID, {}).get("assertedAt") or ""
-    asserted_ts = time.mktime(time.strptime(asserted_at[:19], "%Y-%m-%dT%H:%M:%S")) if asserted_at else 0
+    # assertedAt 是 UTC（Z 结尾）：必须按 UTC 解析，不能当本地时间。
+    asserted_ts = calendar.timegm(time.strptime(asserted_at[:19], "%Y-%m-%dT%H:%M:%S")) if asserted_at else 0
+    # 文件系统 mtime 带毫秒、assertedAt 是整秒 UTC；按秒比较（放宽 1 秒容差），
+    # 同时把两个绝对值都写进证据，便于复核人自行判断。
     record("5 差异文件生成时间早于首次通过",
-           diff_mtime <= asserted_ts,
-           f"文件 {time.strftime('%H:%M:%S', time.localtime(diff_mtime))} ≤ 首次通过 {asserted_at}")
+           diff_mtime <= asserted_ts + 1,
+           f"文件 mtime={time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(diff_mtime))}+08:00"
+           f"（{int(diff_mtime)}s） ≤ 首次通过 {asserted_at}（{asserted_ts}s）")
 
     proofs = [p for p in history2.get("goalProofs", []) if p.get("goalId") == GOAL_ID]
     record("5 首次通过只指向一份核算文件",

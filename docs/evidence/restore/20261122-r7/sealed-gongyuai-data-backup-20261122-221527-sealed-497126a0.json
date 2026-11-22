@@ -1,0 +1,99 @@
+{
+  "kind": "restore-isolation-sealed",
+  "at": "2026-11-22T14:15:57.105Z",
+  "archive": "/home/parallels/gongyuai-data-backup-20261122-221527-sealed.tar.gz",
+  "archiveSha256": "1109faa35bcbcfb4a869b67a7d7c48b62731dd12d49daeae358754e6fc6e8197",
+  "archiveBytes": 21421622,
+  "proofCount": 1,
+  "sample": {
+    "taskId": "497126a0-93ac-4c9b-b293-acd380759f40",
+    "goalId": "kali-eng-asset-diff",
+    "path": "reconcile/kali-eng-diff-20261122141507.json",
+    "sha256": "478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf",
+    "bytes": 1688,
+    "seal": "84bca91a3ed518d8dca77a061a765dafad0fad983756af522d413511dfc3afd2",
+    "scorecard": {
+      "taskId": "497126a0-93ac-4c9b-b293-acd380759f40",
+      "capturedAt": "2026-11-22T14:15:57.348Z",
+      "snapshotSha256": "84bca91a3ed518d8dca77a061a765dafad0fad983756af522d413511dfc3afd2",
+      "denominator": 1,
+      "totalGoals": 1,
+      "applicable": true,
+      "historicallyPassed": 1,
+      "currentlySupported": 1,
+      "unknownAttribution": 0,
+      "retractedReferences": 0,
+      "coverage": {
+        "untested": 0,
+        "partial": 0,
+        "tested": 0,
+        "blocked": 0,
+        "unregistered": 1
+      },
+      "findings": {
+        "verified": 0,
+        "tentative": 0,
+        "retracted": 0,
+        "other": 0
+      },
+      "goals": [
+        {
+          "goalId": "kali-eng-asset-diff",
+          "title": "两份原始资产清单完成差异比对",
+          "historicalPass": true,
+          "currentSupported": true,
+          "verdict": "supported",
+          "proofCount": 1,
+          "supportFindingIds": [],
+          "retractedSupportFindingIds": [],
+          "coverage": "unregistered",
+          "missingAttribution": false
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "tasks.ids",
+      "ok": true,
+      "detail": "18 项，与副本目录一致（18 项）"
+    },
+    {
+      "id": "restore.rehomed",
+      "ok": true,
+      "detail": "改写目录归属 18 条（期望 18）（如 e9d288f8-4580-4a42-813f-ec66c93d63a3: /home/parallels/GongYuAI-f34cc032/.gongyuai/tasks/e9d288f8-4580-4a42-813f-ec66c93d63a3 → /tmp/gy-restore-sealed-63u5eQ/extract/.gongyuai/tasks/e9d288f8-4580-4a42-813f-ec66c93d63a3）"
+    },
+    {
+      "id": "tasks.dataDir-in-copy",
+      "ok": true,
+      "detail": "全部任务 dataDir 在副本内"
+    },
+    {
+      "id": "port.loopback",
+      "ok": true,
+      "detail": "隔离实例地址 http://127.0.0.1:33595"
+    },
+    {
+      "id": "isolated.no-watchdog",
+      "ok": true,
+      "detail": "isolated=true（不自动续跑、不导入旧数据根）"
+    },
+    {
+      "id": "sealed.proofs-present",
+      "ok": true,
+      "detail": "恢复出 1 条首次通过依据（封存原件）"
+    },
+    {
+      "id": "sealed.version-readable",
+      "ok": true,
+      "detail": "读取封存版本 reconcile/kali-eng-diff-20261122141507.json（1688 字节，哈希 478da5dfc3d0…）"
+    },
+    {
+      "id": "sealed.snapshot-offline-recompute",
+      "ok": true,
+      "detail": "离线复算通过：封印 84bca91a3ed5…，历史 1/1、当前 1/1"
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-11-22T14:15:57.369Z"
+}

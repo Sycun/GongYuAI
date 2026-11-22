@@ -1,0 +1,65 @@
+# Kali 正式入口交付快照的离线复算（2026-11-22T14:17:08Z UTC）
+
+运行环境：Mac（与 Kali 服务无关，只读随交付保存的快照文件）
+
+```bash
+$ pnpm gy scorecard --recompute docs/evidence/kali-formal/delivery-snapshot.json
+```
+
+```json
+
+> gongyuai@0.1.0 gy /Users/sycpro/GongYuAI
+> tsx apps/cli/src/index.ts scorecard --recompute docs/evidence/kali-formal/delivery-snapshot.json
+
+{
+  "sealValid": true,
+  "scorecard": {
+    "taskId": "497126a0-93ac-4c9b-b293-acd380759f40",
+    "capturedAt": "2026-11-22T14:15:12.847Z",
+    "snapshotSha256": "0c2e7f4ae7824b2fd40e58be790276b904cb5f4d0efc5611948049a41aa75f11",
+    "denominator": 1,
+    "totalGoals": 1,
+    "applicable": true,
+    "historicallyPassed": 1,
+    "currentlySupported": 1,
+    "unknownAttribution": 0,
+    "retractedReferences": 0,
+    "coverage": {
+      "untested": 0,
+      "partial": 0,
+      "tested": 0,
+      "blocked": 0,
+      "unregistered": 1
+    },
+    "findings": {
+      "verified": 0,
+      "tentative": 0,
+      "retracted": 0,
+      "other": 0
+    },
+    "goals": [
+      {
+        "goalId": "kali-eng-asset-diff",
+        "title": "两份原始资产清单完成差异比对",
+        "historicalPass": true,
+        "currentSupported": true,
+        "verdict": "supported",
+        "proofCount": 1,
+        "supportFindingIds": [],
+        "retractedSupportFindingIds": [],
+        "coverage": "unregistered",
+        "missingAttribution": false
+      }
+    ]
+  }
+}
+```
+
+## 文件与封印
+
+- 文件字节 SHA-256　`72256e61f35db1ee434d207aed44514622b2e7a0cbba62c839e366cb60412389`
+- 快照内容封印　`0c2e7f4ae7824b2fd40e58be790276b904cb5f4d0efc5611948049a41aa75f11`
+- taskId　`497126a0-93ac-4c9b-b293-acd380759f40`
+- capturedAt　2026-11-22T14:15:12.847Z
+- 目标　`kali-eng-asset-diff` passes=True assertedAt=2026-11-22T14:15:07.859Z
+- 首次通过依据　`reconcile/kali-eng-diff-20261122141507.json` · 478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf

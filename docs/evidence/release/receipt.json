@@ -1,94 +1,136 @@
 {
   "kind": "release-receipt",
-  "capturedAtUtc": "2026-11-22T13:40:54Z",
-  "capturedAtLocal": "2026-11-22T21:40:54+08:00",
+  "round": "第七轮（第三轮独立复核整改）",
+  "capturedAtUtc": "2026-11-22T14:18:00Z",
+  "capturedAtLocal": "2026-11-22T22:18:00+08:00",
   "testedCode": {
-    "commit": "d7c46d4956246ba448b565136683daf155af1c62",
-    "meaning": "构建、126 项单测、2 项校验器测试、smoke、两套验收、本地恢复演练都在这个提交上运行"
+    "commit": "f34cc032cd9c4061a9212758595b34cf8d5fc2e0",
+    "tree": "e9d564949804f8722de584e60d06cd4ad81331a3",
+    "meaning": "干净 clone 上跑完冻结依赖安装、构建、140 项单测、8 项验收校验器测试、smoke、80 步跨日流程、77 步业务验收、恢复隔离自测；Kali 也检出同一提交运行"
   },
   "github": {
     "repo": "https://github.com/Sycun/GongYuAI",
     "branch": "main",
-    "mainAtReceipt": "abc2485ce703f3695b8634c568e845aaa170c606",
+    "mainAtReceipt": "493b23844b29143204a4328fe0b845c8e70c3fa9",
     "verifiedBy": "git ls-remote origin refs/heads/main",
-    "nonDocsDiffFromTestedCode": 0
+    "nonDocsDiffFromTestedCode": "scripts/kali/formal-acceptance.py（Kali 正式入口验收驱动，不参与运行时）",
+    "note": "受验提交之后的提交只追加验收证据与驱动脚本；回执与三份文档在下一个 docs-only 提交里",
+    "noForcePush": true
   },
   "kali": {
     "host": "10.211.55.5",
     "hostname": "kali-linux-2025-2",
-    "directory": "/home/parallels/GongYuAI",
-    "headAtReceipt": "abc2485ce703f3695b8634c568e845aaa170c606",
-    "runtimeVersion": "d7c46d4956246ba448b565136683daf155af1c62",
-    "listenerPid": 1644897,
-    "listenerCwd": "/home/parallels/GongYuAI",
-    "health": {
-      "ok": true,
-      "version": "0.1.0"
-    },
-    "taskCount": 14,
+    "directory": "/home/parallels/GongYuAI-f34cc032",
+    "headAtReceipt": "f34cc032cd9c4061a9212758595b34cf8d5fc2e0",
+    "treeAtReceipt": "e9d564949804f8722de584e60d06cd4ad81331a3",
+    "workingTreeDirty": 0,
+    "runtimeVersion": "f34cc032cd9c4061a9212758595b34cf8d5fc2e0",
+    "nodeVersion": "v26.13.0",
+    "pnpmVersion": "10.15.0",
     "service": {
-      "systemdActive": "inactive",
-      "systemdEnabled": "enabled",
-      "note": "本轮 sudo 需要密码，systemd 单元未能自动重启；当前由 setsid nohup 进程提供正式入口，单元 enabled，重启机器回到 systemd 托管。恢复命令：pkill -f \"gy serve --host 0.0.0.0 --port 8877\" && sudo systemctl restart gongyuai.service"
+      "unit": "gongyuai.service",
+      "managedBySystemd": true,
+      "enabled": true,
+      "activeState": "active",
+      "subState": "running",
+      "mainPid": 1675967,
+      "mainPidKind": "pnpm 启动器",
+      "listenerPid": 1675999,
+      "listenerCgroup": "0::/system.slice/gongyuai.service",
+      "listenerCwd": "/home/parallels/GongYuAI-f34cc032",
+      "dataDirArgument": "/home/parallels/GongYuAI-f34cc032/.gongyuai",
+      "restartVerified": "systemctl restart 后 MainPID 1665169 → 1665371，14 个任务与 kali-demo 历史仍可读",
+      "crashRecoveryVerified": "kill -9 MainPID 1675680 后 systemd 自动拉起，MainPID → 1675967，NRestarts=1，历史仍可读",
+      "bootEnableVerified": "systemctl is-enabled = enabled"
     },
-    "nodeVersion": "v24.21.0",
-    "oldProgramDir": "/home/parallels/GongYuAI.old-20261122-213828 (deleted)",
-    "untouched": [
-      "/home/parallels/GongYuAI-hosted-build (uid 501, ownership unconfirmed)",
-      "CyberStrikeAI"
-    ]
+    "tasks": 18,
+    "taskStatusCounts": { "completed": 10, "budget_exhausted": 2, "failed": 1, "stopped": 5 },
+    "consoleAsset": "assets/index-C5PF0Rth.js",
+    "oldProgramDirs": [
+      "/home/parallels/GongYuAI（上一轮正式目录，2026-11-22 22:10 删除，删除前 0 个进程 cwd、0 个单元引用、0 条数据记录指向）",
+      "/home/parallels/GongYuAI-78ac4188（本轮中间目录，2026-11-22 22:13 删除，同上核对为 0）"
+    ],
+    "untouched": ["/home/parallels/GongYuAI-hosted-build（uid 501，归属未确认）", "CyberStrikeAI"]
   },
   "acceptanceRuns": [
     {
-      "runId": "engagement-1795354631468",
+      "runId": "engagement-1795356668890",
       "kind": "engagement-e2e-mock",
-      "steps": {
-        "total": 80,
-        "passed": 80,
-        "failed": 0
-      },
-      "codeCommit": "d7c46d4956246ba448b565136683daf155af1c62",
+      "steps": { "total": 80, "passed": 80, "failed": 0 },
+      "codeCommit": "f34cc032cd9c4061a9212758595b34cf8d5fc2e0",
       "dirty": false,
-      "snapshotSeal": "f05327fc54a2cfc4313f461b632bde624adce98a43b84ac7659d99cf4e1cb2e9",
-      "snapshotBytes": "2e760951a13e2ed43ac0f50f42d73e7eef00419297356350df06c4317e267a7f",
-      "scorecard": {
-        "denominator": 4,
-        "historicallyPassed": 4,
-        "currentlySupported": 2
-      }
+      "snapshotSeal": "d6f744c3356a286d611406779a480a37ced42d5b9a8ca2082ab86c354f1248cb",
+      "snapshotBytes": "97ff33f3a14629ef27b0d6d286d2e94903aa7dd4fc35ea2843f734a2f5fc3986",
+      "scorecard": { "denominator": 4, "historicallyPassed": 4, "currentlySupported": 2 },
+      "verifiedChecks": 30
     },
     {
-      "runId": "business-1795354653869",
+      "runId": "business-1795356691440",
       "kind": "business-acceptance",
-      "steps": {
-        "total": 34,
-        "passed": 34,
-        "failed": 0
-      },
-      "codeCommit": "d7c46d4956246ba448b565136683daf155af1c62",
+      "steps": { "total": 77, "passed": 77, "failed": 0 },
+      "codeCommit": "f34cc032cd9c4061a9212758595b34cf8d5fc2e0",
       "dirty": false,
-      "snapshotSeal": "fcdc2dce438883ec5565bc9982fae9afc2aabfb74f7f4c3476fc4dfc83efb63a",
-      "snapshotBytes": "d4ea92c6e2c1d333c8a81d4c263675f907e850948d87948aaa90376d17b9454f",
-      "scorecard": {
-        "denominator": 2,
-        "historicallyPassed": 2,
-        "currentlySupported": 2
-      }
+      "snapshotSeal": "0439db0cc1336a62645b5fba1fee9aab9a61f904f430212650f6ba1903ccef92",
+      "snapshotBytes": "5ef79202a6d52a76606c0c80d592c100169b81f46e0cc464e605b24dd563d9fa",
+      "scorecard": { "denominator": 3, "historicallyPassed": 3, "currentlySupported": 3 },
+      "verifiedChecks": 30
     }
   ],
-  "kaliBackupDrill": {
-    "archive": "/home/parallels/gongyuai-data-backup-20261122-202154.tar.gz",
-    "bytes": 21217525,
-    "sha256": "cef807d98dc0567b2ff8fa58764c9a295ae6965465bfc938c60d8e24a89d1925",
-    "restoredTasks": 11,
-    "evidenceReportHashesMatch": true,
-    "offlineRecomputeSealValid": true,
-    "ceiling": "备份时点没有 goal_proofs / evidence_versions / report-evidence，封存原件与交付记录同源无法核对"
+  "validatorNegatives": {
+    "file": "docs/evidence/acceptance/validator-negatives.txt",
+    "cases": ["全零 SHA", "另一个存在但不匹配的提交", "dirty=true", "已测数改为 99", "记录中出现失败步骤"],
+    "allNonZeroExit": true,
+    "originalStillPasses": true
   },
-  "protectionBackup": {
-    "archive": "/home/parallels/gongyuai-data-backup-20261122-213828.tar.gz",
-    "bytes": 21305901,
-    "sha256": "b488916f2129b0cd01f78e0bc8113d147889121c8ead42f93f7b684f3e92f7a3"
+  "unitTests": { "contracts": 35, "history": 38, "control-plane": 32, "worker": 35, "total": 140 },
+  "validatorTests": 8,
+  "kaliFormalAcceptance": {
+    "taskId": "497126a0-93ac-4c9b-b293-acd380759f40",
+    "goalId": "kali-eng-asset-diff",
+    "missingStageEvidence": "reconcile/kali-eng-missing-20261122141506.json",
+    "missingStageSha256": "7ec699b9beb8313d120d0915a274cd5b21b1e79a0a22635cbcc6b8992635a97c",
+    "firstPassEvidence": "reconcile/kali-eng-diff-20261122141507.json",
+    "firstPassSha256": "478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf",
+    "firstPassAt": "2026-11-22T14:15:07.859Z",
+    "snapshotSeal": "0c2e7f4ae7824b2fd40e58be790276b904cb5f4d0efc5611948049a41aa75f11",
+    "snapshotBytesSha256": "72256e61f35db1ee434d207aed44514622b2e7a0cbba62c839e366cb60412389",
+    "scorecard": { "denominator": 1, "historicallyPassed": 1, "currentlySupported": 1, "unknownAttribution": 0, "coverageUnregistered": 1 }
   },
-  "note": "本文档（回执）是受验代码之后的第二个文档提交；两次文档提交相对受验代码只有 docs/ 差异。Kali 在测量后拉到本回执提交（仍为 docs-only）。"
+  "restoreDrills": {
+    "oldBackup": {
+      "archive": "/home/parallels/gongyuai-data-backup-20261122-202154.tar.gz",
+      "bytes": 21217525,
+      "sha256": "cef807d98dc0567b2ff8fa58764c9a295ae6965465bfc938c60d8e24a89d1925",
+      "restoredTasks": 11,
+      "kaliDemoFactsEvents": [4, 14],
+      "formalInstanceAtSameTime": [5, 15],
+      "reportSha256": "df3b63ad417f…",
+      "sealChain": "evidence_versions=0、goal_proofs=0、goal_findings=0：封存链无法验证（上限保留）"
+    },
+    "sealedBackup": {
+      "archive": "/home/parallels/gongyuai-data-backup-20261122-221527-sealed.tar.gz",
+      "bytes": 21421622,
+      "sha256": "1109faa35bcbcfb4a869b67a7d7c48b62731dd12d49daeae358754e6fc6e8197",
+      "restoredTasks": 18,
+      "sealedProofs": 8,
+      "verifiedTask": "497126a0-93ac-4c9b-b293-acd380759f40",
+      "sealedVersionRead": "reconcile/kali-eng-diff-20261122141507.json",
+      "sealedVersionSha256": "478da5dfc3d0873d2298ce9b22b64e9376085635b53dec06a5ab87915d80bdbf",
+      "offlineRecomputeSeal": "84bca91a3ed5…"
+    },
+    "protectionBackup": {
+      "archive": "/home/parallels/gongyuai-data-backup-20261122-221233.tar.gz",
+      "bytes": 21330144,
+      "sha256": "311437e15fb826d4fa06d1275b42c1b57753e15f38514d30c004ecf65579bd2c"
+    }
+  },
+  "productionBlindReview": {
+    "status": "待验证",
+    "missing": [
+      "一份已人工结项、已脱敏、获准用于本次验收的历史委托（含材料先后顺序、范围修订、中途交接点）",
+      "该委托的独立人工底稿（覆盖、未验证项、已撤回结论、遗留事项）",
+      "客户对“用该委托做验收”的书面确认"
+    ],
+    "impact": "工程侧已可认定（缺件不判通过、首次通过指向真实核算文件、隔离恢复留在副本内、校验器可拦篡改）；真实生产效果与人工判定口径仍未验证，不用工程夹具替代人工底稿"
+  }
 }

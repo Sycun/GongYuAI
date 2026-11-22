@@ -15,7 +15,10 @@ export PATH="/home/parallels/.npm-global/bin:/home/parallels/.n/bin:${PATH}"
 ACTION=${1:?用法: deploy.sh prepare|switch <commit>}
 COMMIT=${2:?用法: deploy.sh prepare|switch <commit>}
 SHORT=${COMMIT:0:8}
-OLD_DIR=/home/parallels/GongYuAI
+# 正式目录来自 systemd 单元的 WorkingDirectory（第一次部署时是 /home/parallels/GongYuAI，
+# 之后每轮换新目录），不再写死，避免重复部署时指错源目录。
+OLD_DIR=$(systemctl show -p WorkingDirectory --value gongyuai.service 2>/dev/null)
+[ -n "${OLD_DIR}" ] && [ -d "${OLD_DIR}" ] || OLD_DIR=/home/parallels/GongYuAI
 NEW_DIR=/home/parallels/GongYuAI-${SHORT}
 UNIT=gongyuai.service
 PORT=8877
@@ -42,15 +45,16 @@ wait_health() {
   done
   return 1
 }
-write_override() {
+# 直接把单元文件里的目录换掉（不用 drop-in）：留一个指向旧目录的基础文件，
+# 下次少一个 drop-in 就会起不来，也不符合“旧程序目录没有数据引用”。
+write_unit() {
   local dir=$1
-  mkdir -p "${OVERRIDE_DIR}"
-  cat > "${OVERRIDE_DIR}/override.conf" <<EOF
-[Service]
-WorkingDirectory=${dir}
-ExecStart=
-ExecStart=/home/parallels/.npm-global/bin/pnpm gy serve --host 0.0.0.0 --port ${PORT} --data-dir ${dir}/${DATA_DIR_NAME}
-EOF
+  local unit=/etc/systemd/system/${UNIT}
+  sed -i "s|^WorkingDirectory=.*|WorkingDirectory=${dir}|" "${unit}"
+  sed -i "s|^EnvironmentFile=-.*tsecbench/env|EnvironmentFile=-${dir}/${DATA_DIR_NAME}/tsecbench/env|" "${unit}"
+  sed -i "s|^# EnvironmentFile=-.*\.env|# EnvironmentFile=-${dir}/.env|" "${unit}"
+  sed -i "s|^ExecStart=/home/parallels/.npm-global/bin/pnpm gy serve .*|ExecStart=/home/parallels/.npm-global/bin/pnpm gy serve --host 0.0.0.0 --port ${PORT} --data-dir ${dir}/${DATA_DIR_NAME}|" "${unit}"
+  rm -rf "${OVERRIDE_DIR}"
   systemctl daemon-reload
 }
 
@@ -108,11 +112,11 @@ switch_to_new() {
   log "== switch: 切换单元到 ${NEW_DIR} =="
   log "切换前任务数=$(tasks_count)（prepare 记录 ${TASKS_BEFORE}）"
   cp -a "/etc/systemd/system/${UNIT}" "/tmp/${UNIT}.bak-${STAMP}" 2>/dev/null || true
-  write_override "${NEW_DIR}"
+  write_unit "${NEW_DIR}"
   systemctl restart "${UNIT}"
   if ! wait_health; then
     log "!! 新目录实例未健康，回退到 ${OLD_DIR}"
-    write_override "${OLD_DIR}"
+    write_unit "${OLD_DIR}"
     systemctl restart "${UNIT}"
     wait_health && log "已回退，旧目录实例健康" || log "!! 回退后仍不健康，需人工处理"
     exit 1

@@ -1,0 +1,11 @@
+[2026-11-22T22:13:06+08:00] == switch: 切换单元到 /home/parallels/GongYuAI-f34cc032 ==
+[2026-11-22T22:13:06+08:00] 切换前任务数=14（prepare 记录 14）
+[2026-11-22T22:13:09+08:00] == switch: 核对 ==
+[2026-11-22T22:13:09+08:00] 单元 active=active sub=running enabled=enabled
+MainPID=1674959
+WorkingDirectory=/home/parallels/GongYuAI-f34cc032
+User=parallels
+[2026-11-22T22:13:09+08:00] 监听 pid=1674991 cwd=/home/parallels/GongYuAI-f34cc032 cgroup=0::/system.slice/gongyuai.service 
+[2026-11-22T22:13:09+08:00] 切换后任务数=14（切换前 14）
+[2026-11-22T22:13:09+08:00] health={"ok":true,"version":"0.1.0"}
+[2026-11-22T22:13:09+08:00] 结论：切换通过（新目录 /home/parallels/GongYuAI-f34cc032 由 systemd 托管；旧目录 /home/parallels/GongYuAI-78ac4188 保留待清理）

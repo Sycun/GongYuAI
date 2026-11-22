@@ -1,0 +1,9 @@
+ActiveState=active
+SubState=running
+MainPID=1675967
+NRestarts=1
+ExecStart={ path=/home/parallels/.npm-global/bin/pnpm ; argv[]=/home/parallels/.npm-global/bin/pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir /home/parallels/GongYuAI-f34cc032/.gongyuai ; ignore_errors=no ; start_time=[Sun 2026-11-22 22:13:32 CST] ; stop_time=[n/a] ; pid=1675967 ; code=(null) ; status=0/0 }
+WorkingDirectory=/home/parallels/GongYuAI-f34cc032
+User=parallels
+
+LISTEN 0      511    0.0.0.0:8877 0.0.0.0:* users:(("node-MainThread",pid=1675999,fd=26))

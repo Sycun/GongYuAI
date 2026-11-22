@@ -1,8 +1,55 @@
 # 交付记录（Release / Deployment Record）
 
-日期：2026-11-22（Asia/Shanghai）
-实施与发布：DSH 实施会话（lead）
+累计记录：每轮复核整改都在同一份文件里留下可复核读数，历史章节保留备查。
+本轮（第七轮 / 第三轮独立复核整改）的读数在 §0；上一轮（第六轮）的章节从 §1 开始。
+
+## 0. 本轮（第七轮）关键读数
+
+日期：2026-11-22（Asia/Shanghai）　实施：DSH 实施会话（lead）
 状态口径见 [implementation-ledger.md](./implementation-ledger.md) §0；复核最短路径见 [review-checklist.md](./review-checklist.md)。
+
+### 0.1 三个版本与两套运行
+
+| 项 | 值 |
+| --- | --- |
+| 受验代码 | `f34cc032cd9c4061a9212758595b34cf8d5fc2e0`（tree `e9d564949804f8722de584e60d06cd4ad81331a3`） |
+| GitHub `main` | 见 [`docs/evidence/release/receipt.json`](./evidence/release/receipt.json) 的 `github.mainAtReceipt`；受验提交之后的提交只加证据与 Kali 驱动脚本 |
+| Kali 检出 | `/home/parallels/GongYuAI-f34cc032`，HEAD = 同一受验提交，工作区 0 条改动 |
+| Kali 实际运行 | 同一提交（systemd `gongyuai.service`，MainPID 1675967，监听进程在 `/system.slice/gongyuai.service`） |
+| 跨日模拟运行 | `engagement-1795356668890`（80/80，快照封印 `d6f744c3356a…`，字节 `97ff33f3a146…`，历史 4/4、当前 2/4） |
+| 业务验收运行 | `business-1795356691440`（77/77，快照封印 `0439db0cc133…`，字节 `5ef79202a6d5…`，历史 3/3、当前 3/3） |
+| 正式入口验收任务 | `497126a0-93ac-4c9b-b293-acd380759f40`（配额 1，历史 1/1、当前 1/1、未登记 1） |
+
+两套运行都在受验提交的**干净 clone** 上产生（`scripts/clean-regression.sh` 一条命令跑完安装、构建、
+140 项单测、8 项校验器测试、smoke、80 步跨日流程、77 步业务验收、恢复隔离自测），清单里的
+`code.commit` 就是上表受验提交、`dirty=false`，校验器各 30 项全过。
+
+### 0.2 七项复核反例的处置
+
+| 复核项 | 本轮改动 | 证据 |
+| --- | --- | --- |
+| 缺件仍判通过 | 目标新增 `reconcileGate`：两侧材料都要真正读到、结论不得停在未知或重复主键歧义，缺哪份点名哪份；通过时首次通过依据收窄为实际采用的那份核算文件；拒绝原因进事件台账（`goal_assert_rejected`）；材料不齐导致的 `incomplete` 允许从 `/resume` 重新判定 | 业务验收第 3、11 段；`packages/history/src/history.test.ts` 三条核算条件用例；正式入口任务 `497126a0…` |
+| 恢复副本读回正式目录 | 启动时把每条任务记录的 `dataDir` 收回本次数据根（先验证任务 ID 与目录边界），只改副本；读取路径由 `(dataRoot, taskId)` 派生；副本内 JSON 旧绝对路径同批改写；旧 worker/lease 指针清空；新增 `isolated` 启动 | `packages/control-plane/src/data-root.test.ts`（4 例）；`pnpm restore:selftest`（20 项）；Kali 两次演练 |
+| 校验器三处遗漏 | 提交必须是真实 Git 对象且等于调用方给定/冻结记录的受验提交；`dirty=true` 不通过；每类覆盖数、分母、历史通过、当前支持、归属未知逐字段从快照复算并与记录/清单三方比对；自报失败步骤一律不通过 | `scripts/verify-acceptance.test.ts` 8 例；`docs/evidence/acceptance/validator-negatives.txt`（五例非零退出） |
+| 重复主键与 CSV 行号 | 进入差异计算前处理重复键：冲突标 `ambiguous` 并列出材料/键/全部来源行，给不出“未变”；内容相同按固定规则收敛为一行；CSV 改为原文件物理行号（空行占行号、CRLF、引号内逗号、引号内换行记起止行、未闭合引号报错） | `packages/contracts/src/reconcile.test.ts`（13 例）；业务验收第 7–10 段 |
+| Kali 服务未由 systemd 托管 | 受控切换：先记录现场，再停用户会话监听并交 systemd，单元起不来就回退；单元文件改成指向新目录（不用 drop-in）；重启与故障恢复分别实测 | `docs/evidence/service/`；回执 `kali.service` |
+| GitHub 与 Kali 不同步 | 干净副本全量回归通过后普通 push（无 force），Kali 从同一提交准备新目录、本机安装构建、迁移配置与数据、切换、核对、清理旧程序目录 | 回执 `github` / `kali` 两节 |
+| 文档与证据 | 本文件 + 台账 + 复核清单 + 回执 + 四类新证据（验收、恢复、服务、正式入口） | 本文件 §0；`docs/evidence/` |
+
+### 0.3 仍然未验证的
+
+- **生产盲评待验证**：缺一份获准使用的脱敏历史委托、查看平台结果前独立封存的人工底稿、客户书面确认。
+  缺任一项就不把工程夹具当作人工底稿，也不宣称真实生产效果已验证。
+- 旧备份（`…202154.tar.gz`）里 11 个任务没有 `evidence_versions` / `goal_proofs` / `goal_findings`，
+  封存链无法验证；本轮另用含封存原件的工程备份单独演练，两次结论分开记录。
+- 正式入口的三次驱动自检中断运行（`2d193d11…`、`b31cc09f…`、`b9f69705…`）同样被正常恢复到 completed，
+  但不作为本轮证据，只作过程记录。
+- 本轮工作区里同时存在别人的未提交改动（`packages/control-plane/src/chat.ts`、控制台 chat 页面等），
+  与本轮交付无关，未提交、未计入证据。
+
+---
+
+## 上一轮（第六轮）记录（保留备查）
 
 ## 1. 三个可验证结果
 
@@ -190,3 +237,18 @@
 | A3 只有顺序用例 | 新增两个连接 + 两个进程的并发用例 | §6 |
 | 备份未验到真实备份 | 用 Kali 真实备份做隔离恢复，写明上限 | §7 |
 | 阶段签收不符 | 台账 §2 逐阶段列入口与实测，阶段 5 补通两个入口 | §9、台账 §2.1 |
+### 第三轮（本轮，受验代码 `f34cc032…`）
+
+复核记录：[`out/independent-review-6ef71f9-20261122-215318/review.md`](../out/independent-review-6ef71f9-20261122-215318/review.md)
+（复核人在 126 项单测、80 步流程、34 步业务验收全绿之后仍找到的反例）。逐项处置：
+
+| 复核项 | 反例（复核人实测） | 处置 | 本轮证据 |
+| --- | --- | --- | --- |
+| 缺件仍判通过 | 只交当前清单 → 核算 `unknown=1`，任务却 `completed`、当前支持 1/1 | 目标级 `reconcileGate`：两侧材料都要读到、未知/歧义不得超限、缺哪份点名哪份；通过只认实际采用的核算文件；拒绝进事件台账；`incomplete` 可从 `/resume` 重新判定 | 业务验收第 3、11 段（缺件阶段当前支持 0/3、报告写缺件、首次通过依据 1 条）；正式入口 `497126a0…` 同形复演 |
+| 恢复副本读回正式目录 | 备份 11 个任务 dataDir 全指正式目录；副本启动后 API 读回正式 5/15 | `ControlStore` 启动时按 `(dataRoot, taskId)` 收回归属并改写副本；越界拒绝猜测；副本 JSON 旧路径同批改写；`isolated` 启动不导入旧根、不起 watchdog | `data-root.test.ts` 4 例；`pnpm restore:selftest` 20 项；Kali 原备份演练 4/14 vs 正式 5/15 |
+| 校验器只做 40 位十六进制检查 | 改全零 SHA / 改 dirty / 改已测数，三次仍全部通过 | 提交要真实 Git 对象且等于受验提交或冻结记录；`dirty` 拦截；覆盖数逐字段复算；三向比对；失败步骤拦截 | `verify-acceptance.test.ts` 8 例；`validator-negatives.txt` 五例非零退出；`cross-pair-rejection.txt` 9 项失败 |
+| 重复主键覆盖 + 行号偏移 | 冲突重复主键被压成“未变”；空行使来源行号偏移 | 重复键在差异计算前处理（冲突标歧义并列出全部来源行、内容相同收敛）；CSV 用物理行号，支持 CRLF/引号/跨行并拒绝未闭合引号 | `reconcile.test.ts` 13 例；业务验收第 7–10 段 |
+| 服务未由 systemd 托管 | `gongyuai.service` inactive/dead、MainPID=0，8877 由用户会话进程持有 | 先核对现场 → 停用户监听并交 systemd（失败即回退）→ 单元文件改指新目录 → 重启与 kill -9 故障恢复各自验证 | `docs/evidence/service/`（切换 22:04、重启 22:05、故障恢复 22:13） |
+| 发布与部署 | 上一轮 8877 在线但版本落后、旧程序目录与数据引用关系不清 | 干净副本全量回归 → 普通 push（无 force）→ Kali 新目录本机安装构建 → 迁移配置与数据 → 切换 → 核对为 0 引用后删除旧目录 | 回执 `github`/`kali` 两节；`deploy-prepare.txt`/`deploy-switch.txt` |
+| 生产盲评 | — | 仍缺：脱敏历史委托、独立人工底稿、客户书面确认 | 回执 `productionBlindReview` |
+

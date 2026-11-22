@@ -1,0 +1,236 @@
+{
+  "kind": "restore-isolation-backup",
+  "at": "2026-11-22T14:13:49.959Z",
+  "archive": "/home/parallels/gongyuai-data-backup-20261122-202154.tar.gz",
+  "archiveSha256": "cef807d98dc0567b2ff8fa58764c9a295ae6965465bfc938c60d8e24a89d1925",
+  "archiveBytes": 21217525,
+  "taskIds": [
+    "10ab8714-c03f-406a-9e85-16c3039f44be",
+    "194f8f99-665e-4a16-a234-dc24b78531d2",
+    "387eecb4-ec8c-46c4-80b3-925cb905b3da",
+    "8e7d7980-9ffa-4d72-a125-0e526dee8ffb",
+    "94fb54bf-7950-4649-9329-0093d99a77a3",
+    "c04c5f1c-6daf-4124-a24f-5d17909cc299",
+    "c90a41bb-b110-4a43-9f2f-de0ad3d6210c",
+    "cb27aca9-6999-42b0-a44a-9155787e7d79",
+    "e73db2b2-d436-4c54-bdd3-837c0ef2800a",
+    "e99ac22c-3a25-4156-b4e1-161fd48ae2e0",
+    "e9d288f8-4580-4a42-813f-ec66c93d63a3"
+  ],
+  "kaliDemo": {
+    "taskId": "e9d288f8-4580-4a42-813f-ec66c93d63a3",
+    "counts": {
+      "facts": 4,
+      "events": 14,
+      "goals": 2,
+      "findings": 0
+    },
+    "reportSha": "df3b63ad417f7053830f9332d2388fd3b47e29c1698301349f54bd86e3d41d8f"
+  },
+  "evidenceHashes": {
+    "goals/report.md": "67e75606bfb369cfa765dc5ce456b57024f117fea21366d840a12d8446bf7fdc",
+    "recon/banner.txt": "0a6acaff7ab891a5bf618e6a36b26d996d2c87ca3fb59890794e6ae9c8411833"
+  },
+  "formal": {
+    "facts": 5,
+    "events": 15
+  },
+  "sealChain": {
+    "evidenceVersions": 0,
+    "goalProofs": 0,
+    "goalFindings": 0
+  },
+  "snapshot": {
+    "seal": "80892fc030a633fc2bc554ef26fbd36f1abaad15767adfab96b41190263ed987",
+    "recomputed": {
+      "taskId": "e9d288f8-4580-4a42-813f-ec66c93d63a3",
+      "capturedAt": "2026-11-22T14:13:50.207Z",
+      "snapshotSha256": "80892fc030a633fc2bc554ef26fbd36f1abaad15767adfab96b41190263ed987",
+      "denominator": 2,
+      "totalGoals": 2,
+      "applicable": true,
+      "historicallyPassed": 2,
+      "currentlySupported": 0,
+      "unknownAttribution": 2,
+      "retractedReferences": 0,
+      "coverage": {
+        "untested": 0,
+        "partial": 0,
+        "tested": 0,
+        "blocked": 0,
+        "unregistered": 2
+      },
+      "findings": {
+        "verified": 0,
+        "tentative": 0,
+        "retracted": 0,
+        "other": 0
+      },
+      "goals": [
+        {
+          "goalId": "recon",
+          "title": "HTTP recon",
+          "historicalPass": true,
+          "currentSupported": false,
+          "verdict": "unknown-attribution",
+          "proofCount": 0,
+          "supportFindingIds": [],
+          "retractedSupportFindingIds": [],
+          "coverage": "unregistered",
+          "missingAttribution": true
+        },
+        {
+          "goalId": "report",
+          "title": "Write findings note",
+          "historicalPass": true,
+          "currentSupported": false,
+          "verdict": "unknown-attribution",
+          "proofCount": 0,
+          "supportFindingIds": [],
+          "retractedSupportFindingIds": [],
+          "coverage": "unregistered",
+          "missingAttribution": true
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "archive.tasks",
+      "ok": true,
+      "detail": "归档内 11 个任务"
+    },
+    {
+      "id": "archive.records-point-at-formal",
+      "ok": true,
+      "detail": "11/11 条记录的 dataDir 指向正式目录"
+    },
+    {
+      "id": "archive.demo-counts",
+      "ok": true,
+      "detail": "kali-demo 归档读数：事实 4、事件 14"
+    },
+    {
+      "id": "tasks.ids",
+      "ok": true,
+      "detail": "11 项，与副本目录一致（11 项）"
+    },
+    {
+      "id": "restore.rehomed",
+      "ok": true,
+      "detail": "改写目录归属 11 条（期望 11）（如 e9d288f8-4580-4a42-813f-ec66c93d63a3: /home/parallels/GongYuAI/.gongyuai/tasks/e9d288f8-4580-4a42-813f-ec66c93d63a3 → /tmp/gy-restore-backup-kKwxUp/extract/.gongyuai/tasks/e9d288f8-4580-4a42-813f-ec66c93d63a3）"
+    },
+    {
+      "id": "tasks.dataDir-in-copy",
+      "ok": true,
+      "detail": "全部任务 dataDir 在副本内"
+    },
+    {
+      "id": "port.loopback",
+      "ok": true,
+      "detail": "隔离实例地址 http://127.0.0.1:34925"
+    },
+    {
+      "id": "isolated.no-watchdog",
+      "ok": true,
+      "detail": "isolated=true（不自动续跑、不导入旧数据根）"
+    },
+    {
+      "id": "api.demo-counts-match-archive",
+      "ok": true,
+      "detail": "API 事实 4、事件 14；归档 4/14"
+    },
+    {
+      "id": "api.demo-report-bytes",
+      "ok": true,
+      "detail": "报告字节哈希 df3b63ad417f… = 归档文件 df3b63ad417f…"
+    },
+    {
+      "id": "api.evidence-bytes-match-archive",
+      "ok": true,
+      "detail": "2/2 份证据字节一致"
+    },
+    {
+      "id": "formal.differs-from-backup",
+      "ok": true,
+      "detail": "正式实例 5/15 vs 备份 4/14（隔离实例返回的是备份读数）"
+    },
+    {
+      "id": "api.returns-backup-not-formal",
+      "ok": true,
+      "detail": "隔离实例事实 4，既不等于正式 5，也等于归档 4"
+    },
+    {
+      "id": "seal.chain-absent",
+      "ok": true,
+      "detail": "evidence_versions=0、goal_proofs=0、goal_findings=0：旧备份没有封存原件，封存链无法验证（结论保留，不用新备份冒充）"
+    },
+    {
+      "id": "snapshot.recompute",
+      "ok": true,
+      "detail": "快照可复算：历史 2/2、当前 0/2、归属未知 2"
+    },
+    {
+      "id": "tasks.ids",
+      "ok": true,
+      "detail": "11 项，与副本目录一致（11 项）"
+    },
+    {
+      "id": "restore.rehomed",
+      "ok": true,
+      "detail": "改写目录归属 1 条（期望 1）（如 e9d288f8-4580-4a42-813f-ec66c93d63a3: /tmp/gy-restore-backup-kKwxUp/decoy/tasks/e9d288f8-4580-4a42-813f-ec66c93d63a3 → /tmp/gy-restore-backup-kKwxUp/extract/.gongyuai/tasks/e9d288f8-4580-4a42-813f-ec66c93d63a3）"
+    },
+    {
+      "id": "tasks.dataDir-in-copy",
+      "ok": true,
+      "detail": "全部任务 dataDir 在副本内"
+    },
+    {
+      "id": "port.loopback",
+      "ok": true,
+      "detail": "隔离实例地址 http://127.0.0.1:37145"
+    },
+    {
+      "id": "isolated.no-watchdog",
+      "ok": true,
+      "detail": "isolated=true（不自动续跑、不导入旧数据根）"
+    },
+    {
+      "id": "decoy.copy-wins",
+      "ok": true,
+      "detail": "把记录改指诱饵目录后，API 仍返回副本报告（df3b63ad417f…）"
+    },
+    {
+      "id": "tasks.ids",
+      "ok": true,
+      "detail": "11 项，与副本目录一致（11 项）"
+    },
+    {
+      "id": "restore.rehomed",
+      "ok": true,
+      "detail": "改写目录归属 0 条（期望 0）"
+    },
+    {
+      "id": "tasks.dataDir-in-copy",
+      "ok": true,
+      "detail": "全部任务 dataDir 在副本内"
+    },
+    {
+      "id": "port.loopback",
+      "ok": true,
+      "detail": "隔离实例地址 http://127.0.0.1:36851"
+    },
+    {
+      "id": "isolated.no-watchdog",
+      "ok": true,
+      "detail": "isolated=true（不自动续跑、不导入旧数据根）"
+    },
+    {
+      "id": "decoy.copy-wins-without-source",
+      "ok": true,
+      "detail": "诱饵目录不可访问时同样成立"
+    }
+  ],
+  "ok": true,
+  "finishedAt": "2026-11-22T14:13:50.242Z"
+}

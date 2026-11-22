@@ -484,7 +484,7 @@ async function backupDrill(archive: string, outDir: string) {
 
 // ── 三、含封存原件的工程备份：恢复 → 读取封存版本 → 离线复算 ──────────────
 
-async function sealedDrill(archive: string) {
+async function sealedDrill(archive: string, onlyTask?: string) {
   const work = mkdtempSync(join(tmpdir(), "gy-restore-sealed-"));
   const record: Record<string, unknown> = {
     kind: "restore-isolation-sealed",
@@ -497,7 +497,8 @@ async function sealedDrill(archive: string) {
     const copyRoot = extractArchive(archive, join(work, "extract"));
     const run = await drillCopy(copyRoot, { expectRehome: "all" });
     try {
-      const tasks = run.tasks;
+      const tasks = onlyTask ? run.tasks.filter((task) => task.id === onlyTask) : run.tasks;
+      if (onlyTask && !tasks.length) throw new Error(`恢复出来的任务里没有 ${onlyTask}`);
       const proofs: Array<{ taskId: string; goalId: string; path: string; sha256: string }> = [];
       for (const task of tasks) {
         try {
@@ -574,9 +575,11 @@ async function main() {
     name = `backup-${basename(target).replace(/\.tar\.gz$/, "")}`;
     record = await backupDrill(resolve(target), outDir);
   } else if (command === "sealed") {
-    if (!target) throw new Error("用法：restore-isolation sealed <archive.tar.gz> [--out DIR]");
-    name = `sealed-${basename(target).replace(/\.tar\.gz$/, "")}`;
-    record = await sealedDrill(resolve(target));
+    if (!target) throw new Error("用法：restore-isolation sealed <archive.tar.gz> [--task <taskId>] [--out DIR]");
+    const taskIndex = rest.indexOf("--task");
+    const onlyTask = taskIndex >= 0 ? rest[taskIndex + 1] : undefined;
+    name = `sealed-${basename(target).replace(/\.tar\.gz$/, "")}${onlyTask ? `-${onlyTask.slice(0, 8)}` : ""}`;
+    record = await sealedDrill(resolve(target), onlyTask);
   } else {
     console.error("用法：restore-isolation selftest | backup <archive> | sealed <archive> [--out DIR]");
     process.exit(2);

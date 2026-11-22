@@ -1,0 +1,38 @@
+[2026-11-22T22:04:36+08:00] == 切换前现场 ==
+[2026-11-22T22:04:36+08:00] unit enabled=enabled active=inactive
+ActiveState=inactive
+SubState=dead
+MainPID=0
+WorkingDirectory=/home/parallels/GongYuAI
+User=parallels
+[2026-11-22T22:04:36+08:00] 数据目录：/home/parallels/GongYuAI/.gongyuai
+[2026-11-22T22:04:36+08:00] 活跃任务：      2 "status": "budget_exhausted"       6 "status": "completed"       1 "status": "failed"       5 "status": "stopped" 
+[2026-11-22T22:04:36+08:00] 监听 8877 的进程：1644897
+  pid=1644897 ppid=1644881 pgid=1644821 cwd=/home/parallels/GongYuAI
+  cmdline=/home/parallels/.n/bin/node --require /home/parallels/GongYuAI/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/preflight.cjs --import file:///home/parallels/GongYuAI/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/loader.mjs apps/
+  cgroup=0::/user.slice/user-1000.slice/session-383.scope 
+[2026-11-22T22:04:36+08:00] == 停止用户会话监听（保持正式入口不中断为先，失败即回滚）==
+[2026-11-22T22:04:36+08:00] 端口释放：是
+[2026-11-22T22:04:36+08:00] == 启动 systemd 单元 ==
+[2026-11-22T22:04:37+08:00] == 切换后核对 ==
+[2026-11-22T22:04:37+08:00] unit enabled=enabled active=active
+ActiveState=active
+SubState=running
+Type=simple
+MainPID=1665169
+WorkingDirectory=/home/parallels/GongYuAI
+User=parallels
+[2026-11-22T22:04:37+08:00] MainPID=1665169
+[2026-11-22T22:04:37+08:00] MainPID 详情：
+  pid=1665169 ppid=1 pgid=1665169 cwd=/home/parallels/GongYuAI
+  cmdline=node /home/parallels/.npm-global/bin/pnpm gy serve --host 0.0.0.0 --port 8877 --data-dir /home/parallels/GongYuAI/.gongyuai 
+  cgroup=0::/system.slice/gongyuai.service 
+[2026-11-22T22:04:37+08:00] 监听 8877 的进程：1665201
+  pid=1665201 ppid=1665185 pgid=1665169 cwd=/home/parallels/GongYuAI
+  cmdline=/home/parallels/.n/bin/node --require /home/parallels/GongYuAI/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/preflight.cjs --import file:///home/parallels/GongYuAI/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/loader.mjs apps/
+  cgroup=0::/system.slice/gongyuai.service 
+[2026-11-22T22:04:37+08:00] 单元 ControlGroup=/system.slice/gongyuai.service
+[2026-11-22T22:04:37+08:00] 监听进程工作目录：/home/parallels/GongYuAI
+[2026-11-22T22:04:37+08:00] 健康检查：{  "ok": true,  "version": "0.1.0"}
+[2026-11-22T22:04:37+08:00] 任务数：50
+[2026-11-22T22:04:37+08:00] 结论：systemd 托管核对通过
