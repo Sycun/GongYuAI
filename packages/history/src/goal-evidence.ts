@@ -282,6 +282,26 @@ function describeReconcileFailure(result: ReconcileResult, gate: ReconcileGate):
   return problems;
 }
 
+/**
+ * 一条归档能否为这个目标作证。
+ *
+ * 业务目标：必须记在它名下，且核算口径与目标声明一致。
+ * 老形状目标（只声明 reconcileGate、没有 business）：仍按图案匹配，但**不能
+ * 借用记在别的目标名下的结果**——只接受未绑定目标的归档（旧的手动核算），
+ * 或包含本目标的归档。这样“另一笔业务目标的核算结果”不会被老目标捡走。
+ */
+function archiveBelongsToGoal(
+  archive: ArchivedReconcile,
+  goalId: string,
+  expectedConfigDigest: string | undefined,
+): boolean {
+  const goalIds = archive.revision.goalIds ?? [];
+  if (expectedConfigDigest) {
+    return goalIds.includes(goalId) && archive.revision.configDigest === expectedConfigDigest;
+  }
+  return goalIds.length === 0 || goalIds.includes(goalId);
+}
+
 export type ReconcileGateOutcome =
   | {
       ok: true;
@@ -403,29 +423,34 @@ export function selectAdoptedReconcile(input: {
   archives: ArchivedReconcile[];
 }): ReconcileGateOutcome {
   const { evidenceDir, gate, goalId, expectedConfigDigest, goalConfig, archives } = input;
-  const candidates = newestFirst(archives).filter((archive) => {
-    if (!minimatch(archive.evidencePath, gate.pattern)) return false;
-    if (!expectedConfigDigest) return true;
-    return (
-      archive.revision.goalIds.includes(goalId) &&
-      archive.revision.configDigest === expectedConfigDigest
-    );
-  });
+  const candidates = newestFirst(archives).filter(
+    (archive) =>
+      minimatch(archive.evidencePath, gate.pattern) &&
+      archiveBelongsToGoal(archive, goalId, expectedConfigDigest),
+  );
   if (!candidates.length) {
     // 有归档但没一条属于这个目标/这个口径时，要说清是哪一层对不上：
     // 记在别目标名下、还是核算口径与目标声明不同（逐项列出差异）。
     const samePattern = newestFirst(archives).filter((archive) =>
       minimatch(archive.evidencePath, gate.pattern),
     );
-    const otherGoal = samePattern.filter((archive) => !archive.revision.goalIds.includes(goalId));
-    const sameGoalOtherScope = samePattern.filter(
-      (archive) => archive.revision.goalIds.includes(goalId) && archive.revision.configDigest !== expectedConfigDigest,
+    const otherGoal = samePattern.filter(
+      (archive) => (archive.revision.goalIds ?? []).length > 0 && !archive.revision.goalIds.includes(goalId),
     );
+    const sameGoalOtherScope = expectedConfigDigest
+      ? samePattern.filter(
+          (archive) =>
+            archive.revision.goalIds.includes(goalId) && archive.revision.configDigest !== expectedConfigDigest,
+        )
+      : [];
     let scope: string;
     if (!samePattern.length) {
+      const legacy = archives.filter((archive) => !archive.revision.goalIds?.length).length;
       scope = expectedConfigDigest
         ? `该目标还没有按目标配置核算过（${gate.pattern}）`
-        : `evidence/ 下没有匹配 ${gate.pattern} 的核算结果`;
+        : archives.length && legacy
+          ? `该目标没有可用的核算归档（${gate.pattern}）：已有 ${legacy} 份未绑定目标的旧格式结果不参与首次判定，需按当前材料重新核算`
+          : `evidence/ 下没有匹配 ${gate.pattern} 的核算结果`;
     } else if (sameGoalOtherScope.length) {
       scope =
         `核算口径与目标声明不一致（${sameGoalOtherScope[0]!.evidencePath}）：` +
@@ -553,11 +578,11 @@ export function describeReconcileState(input: {
   declaredMaterials?: { baseline: string; current: string };
 }): ReconcileStateReport {
   const { evidenceDir, gate, goalId, expectedConfigDigest, archives, declaredMaterials } = input;
-  const candidates = newestFirst(archives).filter((archive) => {
-    if (!minimatch(archive.evidencePath, gate.pattern)) return false;
-    if (!expectedConfigDigest) return true;
-    return archive.revision.goalIds.includes(goalId) && archive.revision.configDigest === expectedConfigDigest;
-  });
+  const candidates = newestFirst(archives).filter(
+    (archive) =>
+      minimatch(archive.evidencePath, gate.pattern) &&
+      archiveBelongsToGoal(archive, goalId, expectedConfigDigest),
+  );
   const latest = candidates[0]?.revision ?? null;
   const materials = latest
     ? {

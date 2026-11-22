@@ -508,3 +508,48 @@ test("核算态：冲突重复键要把键与来源行带到界面上，而不�
     ctx.close();
   }
 });
+
+test("老形状目标（只声明 reconcileGate）不能借用别的目标的核算结果", () => {
+  const ctx = setup();
+  try {
+    // 老形状目标：只声明 reconcileGate / evidencePatterns，没有 business 配置。
+    ctx.store.seedGoals(ctx.taskId, [{
+      id: "legacy-goal",
+      title: "旧形状目标：完成差异比对",
+      description: "只声明核算条件，没有业务配置",
+      evidencePatterns: ["reconcile/asset-diff-*.json"],
+      reconcileGate: { pattern: "reconcile/asset-diff-*.json", maxUnknown: 0, maxAmbiguous: 0 },
+      passes: false,
+      evidencePaths: [],
+      assertedAt: null,
+    } as Parameters<typeof ctx.store.seedGoals>[1][number]]);
+
+    material(ctx, "assets/baseline.csv", BASELINE);
+    material(ctx, "assets/current.csv", CURRENT);
+    // 这次核算只记在业务目标 biz-goal 名下。
+    const archived = archive(ctx, {}, ["biz-goal"]);
+    assert.equal(archived.result.counts.unknown, 0);
+
+    const borrowed = ctx.store.assertGoal(ctx.taskId, "legacy-goal", []);
+    assert.equal(borrowed.ok, false, "记在别的目标名下的结果不能被老形状目标采用");
+    if (!borrowed.ok) assert.match(borrowed.reason, /记在别的目标名下（biz-goal）/);
+    assert.deepEqual(ctx.store.listGoalProofs(ctx.taskId), []);
+
+    // 未绑定目标的旧式手动核算（goalIds 为空）仍然可以为老形状目标作证。
+    const manual = ctx.store.archiveReconcile({
+      taskId: ctx.taskId,
+      request: {
+        name: "asset-diff",
+        baseline: { path: "assets/baseline.csv" },
+        current: { path: "assets/current.csv" },
+        keyField: "host",
+      } as Parameters<typeof ctx.store.archiveReconcile>[0]["request"],
+      goalIds: [],
+    });
+    const passed = ctx.store.assertGoal(ctx.taskId, "legacy-goal", []);
+    assert.equal(passed.ok, true, "未绑定目标的旧式核算仍按原约定验收");
+    assert.equal(ctx.store.listGoalProofs(ctx.taskId)[0]!.path, manual.evidencePath);
+  } finally {
+    ctx.close();
+  }
+});
