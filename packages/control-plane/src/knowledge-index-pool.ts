@@ -57,8 +57,8 @@ export class KnowledgeIndexPool {
     return groups;
   }
 
-  markPending(versionId: string): boolean {
-    return this.of(versionId).markPending(versionId);
+  markPending(versionId: string, opts: { enqueue?: boolean } = {}): boolean {
+    return this.of(versionId).markPending(versionId, opts);
   }
 
   versionState(versionId: string): KnowledgeVersionIndexState {

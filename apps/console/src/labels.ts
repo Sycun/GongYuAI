@@ -67,6 +67,11 @@ export function isTerminalStatus(status: string): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
+/** 可归档条件单独定义：已暂停或已进入终态；归档只改标记，暂停任务仍可继续执行。 */
+export function isArchivableStatus(status: string): boolean {
+  return isPausedStatus(status) || isTerminalStatus(status);
+}
+
 export function isArchivedTask(task: { archivedAt?: string | null }): boolean {
   return Boolean(task.archivedAt);
 }
@@ -116,7 +121,7 @@ export function formatWorkerStatus(ws: unknown): Array<{ key: string; value: str
 
 export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   overview: { title: "总览", subtitle: "系统态势 · 活跃任务与恢复" },
-  tasks: { title: "任务", subtitle: "任务列表 · 终态可归档 · 点选进入深潜" },
+  tasks: { title: "任务", subtitle: "任务列表 · 已暂停或终态可归档 · 点选进入深潜" },
   live: { title: "运行态", subtitle: "相位 · 租约 · 预算 · Hint" },
   assets: { title: "资产", subtitle: "授权靶标 · 发现 · 与 Observe 同表" },
   goals: { title: "目标", subtitle: "证据闸门 · 开放 Intent · DAG" },
@@ -130,14 +135,14 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   "settings-approval": { title: "命令审批", subtitle: "审批模型与风险范围" },
   graphs: { title: "图谱中心", subtitle: "资产 · 攻击面 · 执行 · 记忆" },
   demo: { title: "演示场景", subtitle: "规划者与 Worker 的标注演示，不调用控制面" },
-  knowledge: { title: "参考资料", subtitle: "知识与经验 · 委托范围 · 向量化设置与索引状态" },
+  knowledge: { title: "知识库", subtitle: "全局文档 · 导入与向量化 · 混合检索" },
   "settings-assets": {
     title: "资产收集",
     subtitle: "FOFA · 鹰图 · 自定义 API · AI 自动发现写入清单",
   },
   "settings-mcp": {
     title: "MCP",
-    subtitle: "按工具拆分的 Kali 渗透 MCP · 开关控制模型可见性",
+    subtitle: "连接器目录 · 按需或启动时加载",
   },
   "settings-skills": {
     title: "Skill",

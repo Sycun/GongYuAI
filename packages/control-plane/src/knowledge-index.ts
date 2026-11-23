@@ -224,8 +224,12 @@ export class KnowledgeIndex {
     };
   }
 
-  /** 导入或重切分后登记待索引，并排入后台队列；导入本身不等待向量化。返回是否真的入队。 */
-  markPending(versionId: string): boolean {
+  /**
+   * 登记待索引状态。默认同时排入后台队列（重试/重建走这里）；
+   * 导入只传 enqueue:false——向量化由用户显式开始，上传本身不触发嵌入请求。
+   * 返回是否真的入队。
+   */
+  markPending(versionId: string, opts: { enqueue?: boolean } = {}): boolean {
     const total = this.host.sectionsOf(versionId).length;
     if (!this.configured) {
       this.writeState(versionId, this.indexKey, this.client.runtime.enabled ? "unconfigured" : "disabled",
@@ -237,6 +241,7 @@ export class KnowledgeIndex {
       return false;
     }
     this.writeState(versionId, this.indexKey, "pending", total, this.indexedCount(versionId), 0, null);
+    if (opts.enqueue === false) return false;
     return this.enqueue(versionId);
   }
 

@@ -28,8 +28,9 @@
 | [asset-inventory.md](./asset-inventory.md) | **资产清单**：seed↔发现双向投影、CIDR/通配自动准入、控制台与 Observe 同表 | 靶标回流 / 资产 Tab / FOFA 发现 |
 | [parallel-explore-scaling.md](./parallel-explore-scaling.md) | **Explore 并发**：智能推荐 3–10、按资产数动态扩容（只扩不缩）、非战术纪律 | 改并发 / runner / watchdog 调度前读 |
 | [memory-layer.md](./memory-layer.md) | **记忆层（P8）**：项目记忆×全局记忆两级、繁衍闭环、记忆图溯源、档案索引、控制台 Memory 页；知识库首版后端已落地 | 改记忆 / 经验传承 / Memory 画布前读 |
-| [knowledge-library-api.md](./knowledge-library-api.md) | **参考资料库接口契约（✅ 后端）**：路由、请求响应类型、委托上下文传递、状态与错误、最小调用示例 | 控制台对接知识库 / 改引用与导出前读 |
-| [knowledge-library-console.md](./knowledge-library-console.md) | **知识与经验控制台接入设计**，含文章样本、定版引用、旧报告离线复验、双向委托隔离与向量化服务切换签收单 | 控制台接线及浏览器验收前读 |
+| [knowledge-library-api.md](./knowledge-library-api.md) | **知识库接口契约（✅ 后端）**：路由、请求响应类型、委托上下文传递、导入不自动入队与两步向量化、逐份索引状态、versionIds 批量重试/重建 | 控制台对接知识库 / 改引用与导出前读 |
+| [knowledge-library-console.md](./knowledge-library-console.md) | **知识库页面接入设计**（原「参考资料」）：首页全局文档、导入→开始向量化→检索操作路径、逐份状态、定版引用、旧报告离线复验、双向委托隔离与向量化服务切换签收单 | 控制台接线及浏览器验收前读 |
+| [知识库页面改版验收记录](./evidence/knowledge-library/knowledge-ui-20261123/acceptance-record.md) | **两步向量化 + 逐份状态（✅ 页面）**：全新环境四场景（两步导入 / 配置并开始跨项目检索定位回原文 / 点开始前零嵌入请求 / 失败单独重试） | 复跑知识库页面验收前读 |
 | [向量化服务切换验收记录](./evidence/knowledge-library/provider-1795419920217/acceptance-record.md) | **本地/云端互切 + 重试缺陷修复（✅ 页面）**：真实页面读数、逐请求授权隔离、真实本机 1024 维模型、当轮云端使用测试服务；后续[真实云端验收](./evidence/knowledge-library/siliconflow-acceptance.json) | 复跑服务切换 / 排查重试与索引归属前读 |
 | [data-flywheel.md](./data-flywheel.md) | **数据飞轮（P9 提案）**：采集→评测→蒸馏→改进→验证五环、质量闸、提案收件箱、越用越好用 | 改记分卡 / 趋势 / 自动蒸馏 / 晋升闸前读 |
 | [graph-views.md](./graph-views.md) | **图视图族（P10 提案）**：资产/攻击面/执行/记忆四图投影、跨图导航、图提示、Graph workspace | 改控制台图视图 / 投影 / 跨图跳转前读 |

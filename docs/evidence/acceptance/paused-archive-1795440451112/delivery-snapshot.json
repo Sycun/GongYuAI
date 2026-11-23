@@ -1,0 +1,447 @@
+{
+  "runId": "paused-archive-1795440451112",
+  "taskId": "054fdf07-fa4d-459e-a521-f0236784a360",
+  "note": "归档/取消归档/继续各阶段的任务记录快照；archivedAt 是唯一变化字段（状态、检查点与历史另在步骤中断言）。",
+  "stages": {
+    "afterPause": {
+      "id": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "tenantId": "default",
+      "name": "已暂停任务归档验收",
+      "engagementId": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "status": "paused",
+      "auth": {
+        "authorizationNote": "本地验收虚构授权：暂停归档流程核查",
+        "targets": [
+          "example.invalid"
+        ],
+        "outOfScope": [],
+        "capability": "observe"
+      },
+      "goals": [
+        {
+          "id": "paused-archive",
+          "title": "暂停归档流程核查",
+          "description": "用于暂停归档验收的目标",
+          "kind": "file",
+          "evidencePatterns": [
+            "proof.txt"
+          ],
+          "passes": false,
+          "evidencePaths": [],
+          "assertedAt": null
+        }
+      ],
+      "budget": {
+        "maxTokens": 0,
+        "maxWallMs": 0,
+        "maxToolCalls": 0,
+        "maxInstalls": 0,
+        "relayTokenThreshold": 30000,
+        "relayMinToolCalls": 2
+      },
+      "execution": {
+        "maxConcurrentExplores": 1,
+        "maxIntentsPerReason": 4,
+        "maxIntentsPerAssetRoot": 2,
+        "exploreTimeoutMs": 900000,
+        "reasonLeaseMs": 120000
+      },
+      "mock": true,
+      "createdAt": "2026-11-23T13:27:31.142Z",
+      "updatedAt": "2026-11-23T13:27:32.275Z",
+      "startedAt": "2026-11-23T13:27:31.158Z",
+      "finishedAt": null,
+      "archivedAt": null,
+      "leaseOwner": null,
+      "leaseUntil": null,
+      "fence": 1,
+      "containerId": null,
+      "workerPid": null,
+      "workerPids": [],
+      "containerIds": [],
+      "dataDir": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112/tasks/054fdf07-fa4d-459e-a521-f0236784a360",
+      "error": null,
+      "usage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "scopeVersion": 1,
+      "pauseRequestedAt": "2026-11-23T13:27:32.074Z",
+      "pausedAt": "2026-11-23T13:27:32.275Z",
+      "lastHeartbeatAt": "2026-11-23T13:27:32.275Z"
+    },
+    "afterArchive": {
+      "id": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "tenantId": "default",
+      "name": "已暂停任务归档验收",
+      "engagementId": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "status": "paused",
+      "auth": {
+        "authorizationNote": "本地验收虚构授权：暂停归档流程核查",
+        "targets": [
+          "example.invalid"
+        ],
+        "outOfScope": [],
+        "capability": "observe"
+      },
+      "goals": [
+        {
+          "id": "paused-archive",
+          "title": "暂停归档流程核查",
+          "description": "用于暂停归档验收的目标",
+          "kind": "file",
+          "evidencePatterns": [
+            "proof.txt"
+          ],
+          "passes": false,
+          "evidencePaths": [],
+          "assertedAt": null
+        }
+      ],
+      "budget": {
+        "maxTokens": 0,
+        "maxWallMs": 0,
+        "maxToolCalls": 0,
+        "maxInstalls": 0,
+        "relayTokenThreshold": 30000,
+        "relayMinToolCalls": 2
+      },
+      "execution": {
+        "maxConcurrentExplores": 1,
+        "maxIntentsPerReason": 4,
+        "maxIntentsPerAssetRoot": 2,
+        "exploreTimeoutMs": 900000,
+        "reasonLeaseMs": 120000
+      },
+      "mock": true,
+      "createdAt": "2026-11-23T13:27:31.142Z",
+      "updatedAt": "2026-11-23T13:27:32.289Z",
+      "startedAt": "2026-11-23T13:27:31.158Z",
+      "finishedAt": null,
+      "archivedAt": "2026-11-23T13:27:32.289Z",
+      "leaseOwner": null,
+      "leaseUntil": null,
+      "fence": 1,
+      "containerId": null,
+      "workerPid": null,
+      "workerPids": [],
+      "containerIds": [],
+      "dataDir": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112/tasks/054fdf07-fa4d-459e-a521-f0236784a360",
+      "error": null,
+      "usage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "scopeVersion": 1,
+      "pauseRequestedAt": "2026-11-23T13:27:32.074Z",
+      "pausedAt": "2026-11-23T13:27:32.275Z",
+      "lastHeartbeatAt": "2026-11-23T13:27:32.275Z"
+    },
+    "afterReread": {
+      "id": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "tenantId": "default",
+      "name": "已暂停任务归档验收",
+      "engagementId": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "status": "paused",
+      "auth": {
+        "authorizationNote": "本地验收虚构授权：暂停归档流程核查",
+        "targets": [
+          "example.invalid"
+        ],
+        "outOfScope": [],
+        "capability": "observe"
+      },
+      "goals": [
+        {
+          "id": "paused-archive",
+          "title": "暂停归档流程核查",
+          "description": "用于暂停归档验收的目标",
+          "evidencePatterns": [
+            "proof.txt"
+          ],
+          "kind": "file",
+          "passes": false,
+          "evidencePaths": [],
+          "assertedAt": null
+        }
+      ],
+      "budget": {
+        "maxTokens": 0,
+        "maxWallMs": 0,
+        "maxToolCalls": 0,
+        "maxInstalls": 0,
+        "relayTokenThreshold": 30000,
+        "relayMinToolCalls": 2
+      },
+      "execution": {
+        "maxConcurrentExplores": 1,
+        "maxIntentsPerReason": 4,
+        "maxIntentsPerAssetRoot": 2,
+        "exploreTimeoutMs": 900000,
+        "reasonLeaseMs": 120000
+      },
+      "mock": true,
+      "createdAt": "2026-11-23T13:27:31.142Z",
+      "updatedAt": "2026-11-23T13:27:32.289Z",
+      "startedAt": "2026-11-23T13:27:31.158Z",
+      "finishedAt": null,
+      "archivedAt": "2026-11-23T13:27:32.289Z",
+      "leaseOwner": null,
+      "leaseUntil": null,
+      "fence": 1,
+      "containerId": null,
+      "workerPid": null,
+      "workerPids": [],
+      "containerIds": [],
+      "dataDir": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112/tasks/054fdf07-fa4d-459e-a521-f0236784a360",
+      "error": null,
+      "usage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "scopeVersion": 1,
+      "pauseRequestedAt": "2026-11-23T13:27:32.074Z",
+      "pausedAt": "2026-11-23T13:27:32.275Z",
+      "lastHeartbeatAt": "2026-11-23T13:27:32.275Z",
+      "runUsage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      }
+    },
+    "afterUnarchive": {
+      "id": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "tenantId": "default",
+      "name": "已暂停任务归档验收",
+      "engagementId": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "status": "paused",
+      "auth": {
+        "authorizationNote": "本地验收虚构授权：暂停归档流程核查",
+        "targets": [
+          "example.invalid"
+        ],
+        "outOfScope": [],
+        "capability": "observe"
+      },
+      "goals": [
+        {
+          "id": "paused-archive",
+          "title": "暂停归档流程核查",
+          "description": "用于暂停归档验收的目标",
+          "kind": "file",
+          "evidencePatterns": [
+            "proof.txt"
+          ],
+          "passes": false,
+          "evidencePaths": [],
+          "assertedAt": null
+        }
+      ],
+      "budget": {
+        "maxTokens": 0,
+        "maxWallMs": 0,
+        "maxToolCalls": 0,
+        "maxInstalls": 0,
+        "relayTokenThreshold": 30000,
+        "relayMinToolCalls": 2
+      },
+      "execution": {
+        "maxConcurrentExplores": 1,
+        "maxIntentsPerReason": 4,
+        "maxIntentsPerAssetRoot": 2,
+        "exploreTimeoutMs": 900000,
+        "reasonLeaseMs": 120000
+      },
+      "mock": true,
+      "createdAt": "2026-11-23T13:27:31.142Z",
+      "updatedAt": "2026-11-23T13:27:32.299Z",
+      "startedAt": "2026-11-23T13:27:31.158Z",
+      "finishedAt": null,
+      "archivedAt": null,
+      "leaseOwner": null,
+      "leaseUntil": null,
+      "fence": 1,
+      "containerId": null,
+      "workerPid": null,
+      "workerPids": [],
+      "containerIds": [],
+      "dataDir": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112/tasks/054fdf07-fa4d-459e-a521-f0236784a360",
+      "error": null,
+      "usage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "scopeVersion": 1,
+      "pauseRequestedAt": "2026-11-23T13:27:32.074Z",
+      "pausedAt": "2026-11-23T13:27:32.275Z",
+      "lastHeartbeatAt": "2026-11-23T13:27:32.275Z"
+    },
+    "afterResume": {
+      "id": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "tenantId": "default",
+      "name": "已暂停任务归档验收",
+      "engagementId": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "status": "initializing",
+      "auth": {
+        "authorizationNote": "本地验收虚构授权：暂停归档流程核查",
+        "targets": [
+          "example.invalid"
+        ],
+        "outOfScope": [],
+        "capability": "observe"
+      },
+      "goals": [
+        {
+          "id": "paused-archive",
+          "title": "暂停归档流程核查",
+          "description": "用于暂停归档验收的目标",
+          "kind": "file",
+          "evidencePatterns": [
+            "proof.txt"
+          ],
+          "passes": false,
+          "evidencePaths": [],
+          "assertedAt": null
+        }
+      ],
+      "budget": {
+        "maxTokens": 0,
+        "maxWallMs": 0,
+        "maxToolCalls": 0,
+        "maxInstalls": 0,
+        "relayTokenThreshold": 30000,
+        "relayMinToolCalls": 2
+      },
+      "execution": {
+        "maxConcurrentExplores": 1,
+        "maxIntentsPerReason": 4,
+        "maxIntentsPerAssetRoot": 2,
+        "exploreTimeoutMs": 900000,
+        "reasonLeaseMs": 120000
+      },
+      "mock": true,
+      "createdAt": "2026-11-23T13:27:31.142Z",
+      "updatedAt": "2026-11-23T13:27:33.916Z",
+      "startedAt": "2026-11-23T13:27:33.916Z",
+      "finishedAt": null,
+      "archivedAt": null,
+      "leaseOwner": "cp-m5max-6734",
+      "leaseUntil": "2026-11-23T13:27:48.911Z",
+      "fence": 2,
+      "containerId": null,
+      "workerPid": 6819,
+      "workerPids": [
+        6819
+      ],
+      "containerIds": [],
+      "dataDir": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112/tasks/054fdf07-fa4d-459e-a521-f0236784a360",
+      "error": null,
+      "usage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "scopeVersion": 1,
+      "pauseRequestedAt": "2026-11-23T13:27:32.074Z",
+      "pausedAt": "2026-11-23T13:27:32.275Z",
+      "lastHeartbeatAt": "2026-11-23T13:27:32.275Z",
+      "runStartUsage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "usageOffset": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      }
+    },
+    "final": {
+      "id": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "tenantId": "default",
+      "name": "已暂停任务归档验收",
+      "engagementId": "054fdf07-fa4d-459e-a521-f0236784a360",
+      "status": "stopped",
+      "auth": {
+        "authorizationNote": "本地验收虚构授权：暂停归档流程核查",
+        "targets": [
+          "example.invalid"
+        ],
+        "outOfScope": [],
+        "capability": "observe"
+      },
+      "goals": [
+        {
+          "id": "paused-archive",
+          "title": "暂停归档流程核查",
+          "description": "用于暂停归档验收的目标",
+          "evidencePatterns": [
+            "proof.txt"
+          ],
+          "kind": "file",
+          "passes": false,
+          "evidencePaths": [],
+          "assertedAt": null
+        }
+      ],
+      "budget": {
+        "maxTokens": 0,
+        "maxWallMs": 0,
+        "maxToolCalls": 0,
+        "maxInstalls": 0,
+        "relayTokenThreshold": 30000,
+        "relayMinToolCalls": 2
+      },
+      "execution": {
+        "maxConcurrentExplores": 1,
+        "maxIntentsPerReason": 4,
+        "maxIntentsPerAssetRoot": 2,
+        "exploreTimeoutMs": 900000,
+        "reasonLeaseMs": 120000
+      },
+      "mock": true,
+      "createdAt": "2026-11-23T13:27:31.142Z",
+      "updatedAt": "2026-11-23T13:27:33.945Z",
+      "startedAt": "2026-11-23T13:27:33.916Z",
+      "finishedAt": "2026-11-23T13:27:33.942Z",
+      "archivedAt": null,
+      "leaseOwner": null,
+      "leaseUntil": null,
+      "fence": 2,
+      "containerId": null,
+      "workerPid": null,
+      "workerPids": [],
+      "containerIds": [],
+      "dataDir": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112/tasks/054fdf07-fa4d-459e-a521-f0236784a360",
+      "error": null,
+      "usage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "scopeVersion": 1,
+      "pauseRequestedAt": "2026-11-23T13:27:32.074Z",
+      "pausedAt": "2026-11-23T13:27:32.275Z",
+      "lastHeartbeatAt": "2026-11-23T13:27:33.936Z",
+      "runStartUsage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "usageOffset": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      },
+      "runUsage": {
+        "tokens": 0,
+        "toolCalls": 0,
+        "installs": 0
+      }
+    }
+  }
+}

@@ -180,6 +180,18 @@ async function importArticle(plane: { url: string }, overrides: Record<string, u
   return res.json;
 }
 
+/**
+ * 新契约：导入只登记待向量化、不排入后台队列。测试里显式「开始向量化」
+ * （等价控制台的 retry 入队门）再等队列空闲。
+ */
+async function startVectorization(plane: { url: string }, engagementId = "eng-hybrid", versionIds?: string[]) {
+  const res = await call("POST",
+    `${plane.url}/knowledge/index/retry?engagementId=${engagementId}`,
+    versionIds ? { versionIds } : {});
+  assert.equal(res.status, 202, res.text);
+  return res.json.queued as string[];
+}
+
 test("整篇 Markdown 按标题层级切片：标题路径、原文范围精确、表格与代码块整块保留", async (t) => {
   const stub = await startEmbeddingStub(t);
   const { plane } = await fixture(t, { embeddingBaseUrl: stub.url });
@@ -222,6 +234,7 @@ test("混合检索：语义命中补上同义表达，且绝不标成正文字�
   const stub = await startEmbeddingStub(t);
   const { plane } = await fixture(t, { embeddingBaseUrl: stub.url });
   const imported = await importArticle(plane);
+  await startVectorization(plane, "eng-hybrid", [imported.version.id]);
   await plane.knowledge.index.idle();
 
   const status = await call("GET", `${plane.url}/knowledge/index?engagementId=eng-hybrid`);
@@ -269,6 +282,7 @@ test("精确值检索保持关键词精度：R-017 / 54/60 / §6.4 字面命中�
     title: "R-017 补证用例", sourceUrl: "https://example.invalid/r017",
     content: "## 报告交付后收到更正凭据\n\nR-017 要求把更正回函并入既有证据链。",
   }));
+  await startVectorization(plane);
   await plane.knowledge.index.idle();
 
   for (const [query, expected, field] of [
@@ -297,6 +311,7 @@ test("向量服务不可用时降级为关键词，并给出状态、重试与�
   const { plane } = await fixture(t, { embeddingBaseUrl: stub.url });
   stub.options.fail = true;
   const imported = await importArticle(plane);
+  await startVectorization(plane, "eng-hybrid", [imported.version.id]);
   await plane.knowledge.index.idle();
 
   const degraded = await call("GET", `${plane.url}/knowledge/search?q=${encodeURIComponent("换任")}&engagementId=eng-hybrid`);
@@ -352,6 +367,7 @@ test("定版引用固定原文范围：重切分、换模型、重建索引、�
   const stub = await startEmbeddingStub(t);
   const { root, plane, task, base, shutdown } = await fixture(t, { embeddingBaseUrl: stub.url });
   const imported = await importArticle(plane);
+  await startVectorization(plane, "eng-hybrid", [imported.version.id]);
   await plane.knowledge.index.idle();
 
   const hit = (await call("GET", `${plane.url}/knowledge/search?q=${encodeURIComponent("负责人换班")}&engagementId=eng-hybrid`)).json.hits[0];
@@ -399,6 +415,7 @@ test("定版引用固定原文范围：重切分、换模型、重建索引、�
     },
   });
   t.after(async () => { await restarted.close(); });
+  await startVectorization(restarted);
   await restarted.knowledge.index.idle();
   const afterModelSwap = await readBack(restarted.url);
   assert.equal(afterModelSwap.citation.versionId, imported.version.id);
@@ -454,6 +471,7 @@ test("语义一路同样执行委托隔离：跨委托查询、计数与索引�
   }));
   assert.equal(secret.status, 201, secret.text);
   const own = await importArticle(plane);
+  await startVectorization(plane, "eng-hybrid", [own.version.id]);
   await plane.knowledge.index.idle();
 
   // 语义查询在 A 侧不得召回 B 的正文
@@ -474,6 +492,42 @@ test("语义一路同样执行委托隔离：跨委托查询、计数与索引�
   const rebuild = await call("POST", `${plane.url}/knowledge/index/rebuild?engagementId=eng-hybrid`,
     { materialId: secret.json.material.id });
   assert.equal(rebuild.status, 404);
+});
+
+test("导入不触发向量化：点「开始向量化」前零嵌入请求，列表逐份给出状态", async (t) => {
+  const stub = await startEmbeddingStub(t);
+  const { plane } = await fixture(t, { embeddingBaseUrl: stub.url });
+  const imported = await importArticle(plane);
+  assert.equal(stub.calls(), 0, "导入完成后不得发出任何文档嵌入请求");
+
+  // 列表逐份带生效版本与索引状态
+  const list = await call("GET", `${plane.url}/knowledge/materials?engagementId=eng-hybrid`);
+  assert.equal(list.status, 200, list.text);
+  const item = list.json.materials.find((m: any) => m.id === imported.material.id);
+  assert.equal(item.version.id, imported.version.id);
+  assert.equal(item.version.bodyStatus, "ready");
+  assert.equal(item.index.state, "pending");
+  assert.equal(item.index.totalChunks, imported.sections.length);
+
+  // 重放同一份导入命中已有版本，同样不触发排队
+  const replay = await call("POST", `${plane.url}/knowledge/materials`, articleImport());
+  assert.equal(replay.status, 200, replay.text);
+  assert.equal(replay.json.reused, true);
+  assert.equal(stub.calls(), 0, "重放导入不得发出嵌入请求");
+
+  // 开始向量化：只入队所选版本；范围外的 versionIds 被忽略而不是报错
+  const badPick = await call("POST", `${plane.url}/knowledge/index/retry?engagementId=eng-hybrid`,
+    { versionIds: [imported.version.id, "00000000-0000-0000-0000-000000000000"] });
+  assert.equal(badPick.status, 202, badPick.text);
+  assert.deepEqual(badPick.json.queued, [imported.version.id]);
+  await plane.knowledge.index.idle();
+  assert.ok(stub.calls() > 0, "开始向量化后才发出嵌入请求");
+  const ready = await call("GET", `${plane.url}/knowledge/index?engagementId=eng-hybrid`);
+  assert.equal(ready.json.index.state, "ready");
+
+  // 已就绪版本重试时自动跳过，不重复入队
+  const again = await startVectorization(plane, "eng-hybrid", [imported.version.id]);
+  assert.deepEqual(again, []);
 });
 
 /** 三页 PDF，页内含空行；页码必须按物理页而不是空行推算。 */

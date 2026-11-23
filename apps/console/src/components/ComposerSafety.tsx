@@ -5,8 +5,9 @@ import { CHAT_FILE_ACCEPT, MAX_CHAT_FILES, MAX_FILES_BYTES, type ApprovalReceipt
 import type { ChatCatalog } from "@gongyuai/contracts";
 import { api } from "../api";
 import { prepareFile, type DraftFile } from "../chat/attachments";
+import { confirmationLabel, confirmationDescription } from "../approvalPolicy";
 
-export const decisions = { allow: "审批通过", block: "审批拦截", unavailable: "审批未完成" };
+export const decisions = { allow: "审批通过", block: "审批拦截", unavailable: "审批未完成", expired: "已过期" };
 const risks = { low: "低风险", medium: "中风险", high: "高风险", unknown: "风险未确定" };
 export function ReviewRecord({ review }: { review: ApprovalReceipt }) {
   return <details className={'gy-review-record gy-review-' + review.decision}>
@@ -53,9 +54,9 @@ export function ComposerSafety({ files, onFiles, onReading, busy, catalog, onSet
       aria-haspopup="dialog" onClick={() => setOpen(true)}><span>审批</span></Button>
     <SideSheet title="命令审批" aria-label="命令审批" visible={open} closeOnEsc width="min(360px, 92vw)" onCancel={() => setOpen(false)}>
       {policy ? <dl className="gy-session-meta"><dt>审批模型</dt><dd>{selected?.modelId ?? profile?.modelId ?? "未配置"}</dd>
-        <dt>审查范围</dt><dd>{policy.scope === "read-only" ? "只读分析" : "只读分析与低风险本地校验"}</dd></dl> :
+        <dt>命令执行前如何确认</dt><dd>{confirmationLabel(policy)}<small>{confirmationDescription(policy)}</small></dd></dl> :
         <p role="status">{failed ? "无法读取审批策略" : "读取审批策略…"}</p>}
-      <p className="gy-approval-note">任务在执行命令前检查风险。被拦截时，任务回执或关联任务进展卡会显示暂停原因。</p>
+      <p className="gy-approval-note">命令先判断是否在任务授权范围与执行器支持范围内，超出范围直接拦截；范围内的命令按上述确认方式处理。待确认时，任务回执或关联任务进展卡会出现审批卡。</p>
       <Button onClick={() => { setOpen(false); onSettings(); }}>审批设置</Button>
     </SideSheet>
   </div>;

@@ -64,8 +64,9 @@ test("independent worker dispatch is held before spawn and the supervisor drains
   const paused = plane.store.get(task.id)!;
   assert.equal(paused.status, "paused");
   assert.equal(paused.commandReview?.decision, "block");
-  assert.match(paused.error!, /人工复核/);
-  assert.deepEqual(calls, ["uname -m", "touch"]);
+  assert.match(paused.error!, /超出任务授权范围或执行器支持范围/);
+  // 范围外的 touch 不再送审：只有白名单探针会调用审批模型。
+  assert.deepEqual(calls, ["uname -m"]);
   assert.ok(readFileSync(join(task.dataDir, "allowed.txt"), "utf8").trim());
   assert.ok(!existsSync(join(task.dataDir, "should-not-exist")));
   assert.equal((await ended)[1], "SIGTERM");

@@ -213,6 +213,7 @@ test("停用后重新启用同一模型：只点重试即恢复 ready，不再�
   const local = await startStub(t, { dim: 8, offset: 0 });
   const { plane } = await fixture(t, { local });
   const imported = await importMaterial(plane);
+  await retryOf(plane, "eng-a");
   await plane.knowledge.index.idle();
   const ready = await indexOf(plane, "eng-a");
   assert.equal(ready.json.index.state, "ready");
@@ -253,6 +254,7 @@ test("服务暂时不可用：恢复后只靠重试补满索引，不需要重�
   const { plane } = await fixture(t, { local });
   local.options.fail = true;
   const imported = await importMaterial(plane);
+  await retryOf(plane, "eng-a");
   await plane.knowledge.index.idle();
   const failed = await indexOf(plane, "eng-a");
   assert.ok(["unavailable", "error"].includes(failed.json.index.state), failed.json.index.state);
@@ -273,6 +275,7 @@ test("本地→云端→本地互切：配置各自留存、凭据不串用、�
   const cloud = await startStub(t, { dim: 12, offset: 4 });
   const { plane } = await fixture(t, { local, cloud });
   const imported = await importMaterial(plane, { scope: { kind: "shared" } });
+  await retryOf(plane);
   await plane.knowledge.index.idle();
 
   const localIndex = (await indexOf(plane)).json.index;
@@ -347,6 +350,8 @@ test("委托专属资料默认本地：未允许的委托查询零次云端请�
     content: "## 交接记录\n\n06:14 换任，继任者读 STATE 续接进度。",
     scope: { kind: "engagement", engagementId: "eng-b" },
   });
+  await retryOf(plane, "eng-a");
+  await retryOf(plane, "eng-b");
   await plane.knowledge.index.idle();
 
   // 共享 + 已允许的 A 走云端；未允许的 B 走本地
@@ -405,6 +410,7 @@ test("测试连接只发固定合成短句：报告实测维度，不写索引�
   const cloud = await startStub(t, { dim: 12, offset: 4 });
   const { plane } = await fixture(t, { local, cloud });
   const imported = await importMaterial(plane);
+  await retryOf(plane, "eng-a");
   await plane.knowledge.index.idle();
   const before = (await indexOf(plane, "eng-a")).json.index;
   local.reset(); cloud.reset();
@@ -448,6 +454,7 @@ test("切换服务与模型后旧报告仍回读原段落，原文与片段 SHA-
   const cloud = await startStub(t, { dim: 12, offset: 4 });
   const { plane, task, base } = await fixture(t, { local, cloud });
   const imported = await importMaterial(plane);
+  await retryOf(plane, "eng-a");
   await plane.knowledge.index.idle();
   const hit = (await searchOf(plane, "负责人换班", "eng-a")).json.hits[0];
   assert.equal(hit.locator, "§6.4");
@@ -499,6 +506,7 @@ test("切换过程中迟到的响应不写入新指纹的索引", async (t) => {
   const local = await startStub(t, { dim: 8, offset: 0 });
   const { root, plane } = await fixture(t, { local });
   await importMaterial(plane, { scope: { kind: "shared" } });
+  await retryOf(plane);
   await plane.knowledge.index.idle();
 
   // 让本地服务慢响应，然后在途换模型：旧响应回来时指纹已经变了
@@ -549,6 +557,7 @@ test("升级迁移：旧的扁平配置搬进本地服务，云端保持未配�
 
   // 旧配置照常工作，指纹用规范化后的地址（尾斜杠不产生第二套索引）
   await importMaterial(plane);
+  await retryOf(plane, "eng-a");
   await plane.knowledge.index.idle();
   const status = (await indexOf(plane, "eng-a")).json.index;
   assert.equal(status.state, "ready");
@@ -561,6 +570,7 @@ test("慢响应服务 + 页面轮询并发：只点一次重试即到 ready，�
   local.options.delayMs = 400; // 探测与每个正文批次都慢
   const { plane } = await fixture(t, { local });
   const imported = await importMaterial(plane);
+  await retryOf(plane, "eng-a");
   await plane.knowledge.index.idle(30_000);
   assert.equal((await indexOf(plane, "eng-a")).json.index.state, "ready");
 
@@ -619,6 +629,10 @@ test("首批在途时撤销委托云端授权：未发送批次零次外发、�
     scope: { kind: "engagement", engagementId: "eng-b" },
   });
 
+  // 显式开始向量化（等价控制台勾选后点「开始」），云端按批处理
+  await retryOf(plane, "eng-a");
+  await retryOf(plane, "eng-b");
+
   // 等云端收到「探测 + A 首批」两次调用后撤权：首批已在途，其余批次尚未发送
   await waitFor(() => cloud.calls() >= 2);
   const inFlightInputs = cloud.inputs().length;
@@ -665,6 +679,7 @@ test("探测维度与正文维度不一致：整批不落库不显示就绪，�
   local.options.dims = [12, 3]; // 探测 12 维，正文实际 3 维
   const { root, plane } = await fixture(t, { local });
   const imported = await importMaterial(plane);
+  await retryOf(plane, "eng-a");
   await plane.knowledge.index.idle(20_000);
 
   const broken = (await indexOf(plane, "eng-a")).json.index;

@@ -220,7 +220,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
     setActionBusyId(task.id);
     try {
       await api.unarchive(task.id);
-      Toast.success("已恢复到列表");
+      Toast.success("已取消归档");
       await onRefresh();
     } catch (e) {
       Toast.error(e instanceof Error ? e.message : String(e));
@@ -246,7 +246,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
             type={!showArchived ? "primary" : "tertiary"}
             onClick={() => setShowArchived(false)}
           >
-            进行中
+            未归档
           </Button>
           <Button
             theme={showArchived ? "solid" : "light"}

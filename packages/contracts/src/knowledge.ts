@@ -168,6 +168,16 @@ export type KnowledgeMaterial = {
   versionCount: number;
 };
 
+/**
+ * GET /knowledge/materials 的列表条目：资料 + 当前生效版本 + 该版本的索引状态。
+ * 列表页据此逐份回答「待向量化 / 处理中 / 已就绪 / 失败原因」。
+ * version 与 index 同空：没有未停用版本（全部停用）时一并缺失。
+ */
+export type KnowledgeMaterialListItem = KnowledgeMaterial & {
+  version: KnowledgeVersion | null;
+  index: KnowledgeVersionIndexState | null;
+};
+
 export type KnowledgePreview = {
   title: string;
   publisher: string;

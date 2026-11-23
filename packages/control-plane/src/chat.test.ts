@@ -240,6 +240,131 @@ test("workspace submissions create durable tasks and review only actual command 
   assert.equal(reviewCalls.length, count);
 });
 
+test("command confirmation: scope first, user decides in session, one execution per click", async t => {
+  const root = mkdtempSync(join(tmpdir(), "gy-command-confirm-"));
+  writeFileSync(join(root, "settings.json"), JSON.stringify({ chatApproval: { scope: "local-validation", reviewer: null } }));
+  const plane = await bootControlPlane({ dataRoot: root, host: "127.0.0.1", port: 0, isolated: true });
+  t.after(async () => { await plane.close(); rmSync(root, { recursive: true, force: true }); });
+  // 旧设置升级：沿用原范围约束与自动审批行为。
+  const legacy = await (await fetch(plane.url + "/settings/approval")).json() as { scope: string; confirmation: string };
+  assert.equal(legacy.scope, "local-validation");
+  assert.equal(legacy.confirmation, "auto");
+
+  const reviewCalls: unknown[] = [];
+  let unavailable = false;
+  const fixture = createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    res.setHeader("content-type", "application/json");
+    if (body.model === "reviewer") {
+      reviewCalls.push(body);
+      if (unavailable) { res.statusCode = 503; res.end(); }
+      else res.end(reviewBody(lowRisk));
+    } else res.end(reviewBody(JSON.stringify({ kind: "result", text: "材料已整理" })));
+  });
+  await new Promise<void>(resolve => fixture.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>(resolve => fixture.close(() => resolve())));
+  const addr = fixture.address();
+  assert.ok(addr && typeof addr === "object");
+  plane.settings.saveChatProfile({ id: "custom-test", name: "夹具", modelId: "text", visionModelId: "vision",
+    protocol: "openai", baseUrl: "http://127.0.0.1:" + addr.port, apiKey: "", models: ["reviewer"] }, true);
+  const reviewer = { profileId: "custom-test", modelId: "reviewer" };
+  const selection = { profileId: "custom-test", modelId: "text" };
+  const call = (path: string, method: string, body?: unknown) => fetch(plane.url + path, {
+    method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const save = (policy: Record<string, unknown>) => call("/settings/approval", "PUT", policy);
+  const run = async (command: string) => settled(plane.url, await submit(plane.url, {
+    messages: [{ role: "user", content: "执行命令：" + command }], selection,
+  }));
+
+  // 每次执行前由我确认：待审记录落库、不调审批模型、批准前不执行。
+  assert.equal((await save({ scope: "local-validation", confirmation: "manual", reviewer })).status, 200);
+  const before = reviewCalls.length;
+  const waiting = await run("date -u");
+  assert.equal(waiting.status, "paused");
+  assert.equal(waiting.commandReview?.decision, "waiting");
+  assert.equal(waiting.commandReview?.summary, "date -u");
+  assert.equal(waiting.commandReview?.mode, "manual");
+  assert.equal(waiting.result, undefined);
+  assert.equal(reviewCalls.length, before);
+
+  // 允许本次 → 实际执行并回写成败；重复点击只处理一次。
+  const approve = await call("/tasks/" + waiting.taskId + "/command-review/approve", "POST", {});
+  assert.equal(approve.status, 200);
+  const decided = await approve.json() as { task: { commandReview?: { decision: string; outcome?: string } } };
+  assert.equal(decided.task.commandReview?.decision, "executed");
+  assert.ok(decided.task.commandReview?.outcome);
+  const executed = await (await fetch(plane.url + "/tasks/" + waiting.taskId + "/assignment")).json() as AssignmentView;
+  assert.equal(executed.status, "completed");
+  assert.equal(executed.result, decided.task.commandReview?.outcome);
+  const dup = await call("/tasks/" + waiting.taskId + "/command-review/approve", "POST", {});
+  assert.equal(dup.status, 400);
+  assert.equal(reviewCalls.length, before);
+
+  // 拒绝本次 → 明确拒绝结果，任务保持暂停。
+  const second = await run("uname -r");
+  assert.equal(second.status, "paused");
+  assert.equal(second.commandReview?.decision, "waiting");
+  const rejected = await call("/tasks/" + second.taskId + "/command-review/reject", "POST", {});
+  assert.equal(rejected.status, 200);
+  const rejectedView = await (await fetch(plane.url + "/tasks/" + second.taskId + "/assignment")).json() as AssignmentView;
+  assert.equal(rejectedView.status, "paused");
+  assert.equal(rejectedView.commandReview?.decision, "rejected");
+  assert.equal(rejectedView.result, undefined);
+
+  // 范围外操作直接拦截：逐次确认模式下也不进入等待、不调模型。
+  const outOfScope = await run("touch " + join(root, "never"));
+  assert.equal(outOfScope.status, "paused");
+  assert.equal(outOfScope.commandReview?.decision, "block");
+  assert.match(outOfScope.commandReview?.reason ?? "", /超出任务授权范围或执行器支持范围/);
+  assert.equal(existsSync(join(root, "never")), false);
+  assert.equal(reviewCalls.length, before);
+
+  // 自动审批：模型不可用显示原因，重试入口就同一命令重审并执行。
+  assert.equal((await save({ scope: "local-validation", confirmation: "auto", reviewer })).status, 200);
+  unavailable = true;
+  const down = await run("uname -s");
+  assert.equal(down.status, "paused");
+  assert.equal(down.commandReview?.decision, "unavailable");
+  unavailable = false;
+  const retried = await call("/tasks/" + down.taskId + "/command-review/retry", "POST", {});
+  assert.equal(retried.status, 200);
+  const retriedView = await (await fetch(plane.url + "/tasks/" + down.taskId + "/assignment")).json() as AssignmentView;
+  assert.equal(retriedView.status, "completed");
+  assert.equal(retriedView.commandReview?.decision, "executed");
+  assert.ok(retriedView.result?.trim());
+  const retryCalls = reviewCalls.length;
+  assert.equal((await call("/tasks/" + down.taskId + "/command-review/retry", "POST", {})).status, 400);
+  assert.equal(reviewCalls.length, retryCalls);
+
+  // 等待中的命令随任务重新运行过期：旧决定不延续，新调用重新等待。
+  assert.equal((await save({ scope: "local-validation", confirmation: "manual", reviewer })).status, 200);
+  const stale = await run("uname -m");
+  assert.equal(stale.commandReview?.decision, "waiting");
+  assert.equal((await call("/tasks/" + stale.taskId + "/start", "POST", {})).status, 200);
+  const poll = async () => {
+    let view = await (await fetch(plane.url + "/tasks/" + stale.taskId + "/assignment")).json() as AssignmentView;
+    for (let i = 0; ["running", "queued"].includes(view.status) && i < 100; i++) {
+      await delay(10);
+      view = await (await fetch(plane.url + "/tasks/" + stale.taskId + "/assignment")).json() as AssignmentView;
+    }
+    return view;
+  };
+  const restarted = await poll();
+  assert.equal(restarted.status, "paused");
+  assert.equal(restarted.commandReview?.decision, "waiting");
+  assert.notEqual(restarted.commandReview?.id, stale.commandReview?.id);
+  // 新调用需要新决定：允许后执行的是这一次调用。
+  const reApprove = await call("/tasks/" + stale.taskId + "/command-review/approve", "POST", {});
+  assert.equal(reApprove.status, 200);
+  const restartedDone = await poll();
+  assert.equal(restartedDone.status, "completed");
+  assert.equal(restartedDone.commandReview?.decision, "executed");
+  assert.ok(restartedDone.result?.trim());
+});
+
 test("plain material text is saved, while invalid model replies stay unsuccessful", async t => {
   const root = mkdtempSync(join(tmpdir(), "gy-material-reply-"));
   const plane = await bootControlPlane({ dataRoot: root, host: "127.0.0.1", port: 0, isolated: true });

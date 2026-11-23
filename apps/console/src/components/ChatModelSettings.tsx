@@ -1,94 +1,60 @@
 import { useEffect, useRef, useState } from "react";
-import { AutoComplete, Button, Input, Select, Checkbox } from "@douyinfe/semi-ui";
-import { IconChevronDown, IconPlus, IconSearch } from "@douyinfe/semi-icons";
+import { Button, Input, Select, Checkbox } from "@douyinfe/semi-ui";
+import { IconPlus, IconSearch } from "@douyinfe/semi-icons";
 import type { ChatCatalog, ChatProfile, ChatProtocol, PublicChatProfile } from "@gongyuai/contracts";
 import { selectableChatModels } from "@gongyuai/contracts/chat-model-options";
+import { ModelInput, protocolOptions, useChatModelQuery } from "./ChatModelFields";
 import { api } from "../api";
 import { newId } from "../chat/id";
 
 type Props = { initialId?: string | null; catalog: ChatCatalog; onSaved: (catalog: ChatCatalog) => void };
-const protocolOptions = [
-  { value: "openai", label: "OpenAI 兼容" }, { value: "anthropic", label: "Anthropic Messages" },
-  { value: "gemini", label: "Google Gemini" },
-];
 function draftOf(profile: PublicChatProfile): ChatProfile {
   const { hasKey: _, ...data } = profile;
   return { ...data, apiKey: "" };
-}
-
-type ModelInputProps = {
-  id: string;
-  options: string[];
-  value: string;
-  placeholder: string;
-  onChange: (model: string) => void;
-  required?: boolean;
-};
-
-function ModelInput({ id, options, value, placeholder, onChange, required }: ModelInputProps) {
-  const [search, setSearch] = useState("");
-  const filter = search.trim().toLowerCase();
-  const matches = filter ? options.filter(model => model.toLowerCase().includes(filter)) : options;
-  return <AutoComplete value={value} data={matches} maxHeight={240} motion={false}
-    onSearch={setSearch} onChange={model => onChange(String(model))}
-    onDropdownVisibleChange={open => { if (!open) setSearch(""); }}
-    emptyContent={filter ? "没有匹配的模型，可手动输入" : "暂无候选模型，可手动输入"}
-    triggerRender={({ inputValue, onChange: onInput, onFocus, onBlur }) => (
-      <Input id={id} value={inputValue} required={required} placeholder={placeholder}
-        onChange={onInput} onFocus={onFocus} onBlur={onBlur}
-        suffix={<IconChevronDown size="small" aria-hidden="true" />} />
-    )} />;
 }
 
 export function ChatModelSettings({ catalog, onSaved, initialId }: Props) {
   const initial = catalog.profiles.find(p => p.id === initialId) ?? catalog.profiles.find(p => p.id === catalog.defaultId) ?? catalog.profiles[0]!;
   const [draft, setDraft] = useState(() => draftOf(initial));
   const [makeDefault, setMakeDefault] = useState(catalog.defaultId === initial.id);
-  const [found, setFound] = useState<string[] | null>(null);
-  const [busy, setBusy] = useState<"save" | "query" | null>(null);
+  const [busy, setBusy] = useState<"save" | null>(null);
   const [notice, setNotice] = useState("");
-  const generation = useRef(0);
-  useEffect(() => () => { generation.current++; }, []);
+  const { found, busy: querying, query, reset } = useChatModelQuery();
+  const saveGuard = useRef(0);
+  useEffect(() => () => { saveGuard.current++; }, []);
   const current = catalog.profiles.find(p => p.id === draft.id);
   const choose = (p: PublicChatProfile) => {
-    generation.current++; setDraft(draftOf(p)); setMakeDefault(p.id === catalog.defaultId);
-    setFound(null); setNotice(""); setBusy(null);
+    saveGuard.current++; reset();
+    setDraft(draftOf(p)); setMakeDefault(p.id === catalog.defaultId);
+    setNotice(""); setBusy(null);
   };
   function edit(patch: Partial<ChatProfile>) {
     setDraft(d => ({ ...d, ...patch }));
     setNotice("");
     if ("baseUrl" in patch || "apiKey" in patch || "protocol" in patch) {
-      generation.current++; setFound(null); setBusy(null);
+      saveGuard.current++; reset(); setBusy(null);
     }
   }
-  async function query() {
-    const request = ++generation.current;
-    setFound(null); setNotice(""); setBusy("query");
-    try {
-      const { json } = await api.queryChatModels({
-        id: draft.id, baseUrl: draft.baseUrl.trim(), protocol: draft.protocol, apiKey: draft.apiKey.trim(),
-      });
-      if (generation.current !== request) return;
-      setFound(json.models);
-      if (!json.models.length) setNotice("服务未列出模型，仍可手动输入。");
-    } catch (e) {
-      if (generation.current === request) setNotice(e instanceof Error ? e.message : "模型查询失败。");
-    } finally { if (generation.current === request) setBusy(null); }
+  async function runQuery() {
+    setNotice("");
+    setNotice(await query(draft));
   }
   async function save() {
-    const request = ++generation.current;
+    const request = ++saveGuard.current;
     setBusy("save"); setNotice("");
     try {
       const result = await api.saveChatProfile({
         ...draft, baseUrl: draft.baseUrl.trim(), apiKey: draft.apiKey.trim(), models: found ?? draft.models,
       }, makeDefault);
-      if (generation.current !== request) return;
+      if (saveGuard.current !== request) return;
       onSaved(result.json);
       setDraft(d => ({ ...d, apiKey: "", models: found ?? d.models }));
       setNotice("模型配置已保存。");
     } catch (e) {
-      if (generation.current === request) setNotice(e instanceof Error ? e.message : "保存失败。");
-    } finally { if (generation.current === request) setBusy(null); }
+      if (saveGuard.current === request) setNotice(e instanceof Error ? e.message : "保存失败。");
+    } finally {
+      if (saveGuard.current === request) setBusy(null);
+    }
   }
   const sameConnection = current && current.baseUrl === draft.baseUrl && current.protocol === draft.protocol && !draft.apiKey;
   const modelOptions = found ?? (sameConnection ? selectableChatModels(current) : []);
@@ -121,8 +87,8 @@ export function ChatModelSettings({ catalog, onSaved, initialId }: Props) {
     <div className="gy-field"><label htmlFor="chat-model-id">主模型</label>
       <div className="gy-field-action"><ModelInput key={draft.id} id="chat-model-id" options={modelOptions} value={draft.modelId} placeholder="选择或输入模型标识"
         required onChange={modelId => edit({ modelId })} />
-        <Button icon={<IconSearch />} theme="light" loading={busy === "query"} disabled={!draft.baseUrl.trim() || busy === "save"}
-          onClick={() => void query()}>查询模型</Button>
+        <Button icon={<IconSearch />} theme="light" loading={querying} disabled={!draft.baseUrl.trim() || busy === "save"}
+          onClick={() => void runQuery()}>查询模型</Button>
       </div>
     </div>
     <div className="gy-field"><label htmlFor="chat-vision-model">视觉模型</label>
@@ -133,7 +99,7 @@ export function ChatModelSettings({ catalog, onSaved, initialId }: Props) {
     <Checkbox checked={makeDefault} disabled={draft.id === catalog.defaultId}
       onChange={e => setMakeDefault(Boolean(e.target.checked))}>设为新任务的默认模型</Checkbox>
     <div className="gy-form-footer"><Button htmlType="submit" theme="solid" loading={busy === "save"}
-      disabled={busy === "query" || !draft.name.trim() || !draft.modelId.trim() || !draft.baseUrl.trim()}>保存配置</Button>
+      disabled={querying || !draft.name.trim() || !draft.modelId.trim() || !draft.baseUrl.trim()}>保存配置</Button>
       <span role="status">{notice}</span></div>
   </form>;
 }

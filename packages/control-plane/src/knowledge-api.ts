@@ -341,7 +341,7 @@ export async function routeKnowledge(ctx: RouteContext): Promise<boolean> {
     }
     if (method === "GET" && path === "/knowledge/materials") {
       const scope = libraryScope(ctx);
-      return send(res, 200, { scope, materials: knowledge.list(scope) }), true;
+      return send(res, 200, { scope, materials: knowledge.listItems(scope) }), true;
     }
     if (method === "GET" && path === "/knowledge/search") {
       const scope = libraryScope(ctx);
@@ -364,10 +364,15 @@ export async function routeKnowledge(ctx: RouteContext): Promise<boolean> {
     }
     if (method === "POST" && (path === "/knowledge/index/rebuild" || path === "/knowledge/index/retry")) {
       const scope = libraryScope(ctx);
-      const body = await ctx.readJson(req) as { materialId?: unknown; versionId?: unknown };
+      const body = await ctx.readJson(req) as { materialId?: unknown; versionId?: unknown; versionIds?: unknown };
       const opts = {
         ...(typeof body.materialId === "string" && body.materialId.trim() ? { materialId: body.materialId.trim() } : {}),
         ...(typeof body.versionId === "string" && body.versionId.trim() ? { versionId: body.versionId.trim() } : {}),
+        ...(Array.isArray(body.versionIds)
+          ? { versionIds: body.versionIds
+              .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+              .map((id) => id.trim()) }
+          : {}),
       };
       if (opts.materialId && knowledge.get(opts.materialId, scope) === null) {
         throw new KnowledgeApiError(404, "资料不存在，或不在当前委托的可见范围");

@@ -21,7 +21,8 @@ import {
   type WorkerManifest,
 } from "@gongyuai/contracts";
 import { CommandLedger, hasCommandLedger, openHistory, writeTaskReport, type CommandTicket } from "@gongyuai/history";
-import { reviewCommand } from "./command-approval.js";
+import { executorBound, outOfScopeReason, policyReceipt, userReceipt, reviewCommand } from "./command-approval.js";
+import type { ApprovalReceipt } from "@gongyuai/contracts";
 import { durableDbForSlot, manifestPathForSlot, taskPaths } from "./paths.js";
 import { exhaustedCounter, mergeUsageFromDisk, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
@@ -84,6 +85,7 @@ function writeManifestForSlot(
   }
   const manifest: WorkerManifest = {
     taskId: task.id, commandFence: task.fence,
+    commandConfirmation: settings.get().chatApproval.confirmation,
     dataDir: task.dataDir,
     historyDb: paths.historyDb,
     durableDb,
@@ -149,6 +151,51 @@ export class WorkerRunner {
     try { ledger.deactivate(task.id, task.fence); } finally { ledger.close(); }
   }
 
+  /** 台账回执 → 任务级审批记录的 decision。 */
+  private static reviewDecisionOf(receipt: ApprovalReceipt): "block" | "unavailable" | "rejected" | "expired" {
+    if (receipt.decision === "expired") return "expired";
+    if (receipt.decision === "unavailable") return "unavailable";
+    if (receipt.actor === "user" && receipt.decision === "block") return "rejected";
+    return "block";
+  }
+
+  private waitingReview(ticket: CommandTicket, fence: number): NonNullable<TaskRecord["commandReview"]> {
+    const probe = ticket.action.localProbe ?? ticket.action.summary;
+    return { id: ticket.id, fence, tool: ticket.action.tool, summary: probe,
+      at: new Date(ticket.at).toISOString(),
+      reason: `任务请求执行本地检查「${probe}」，等待你确认。`, decision: "waiting", model: "", mode: "manual" };
+  }
+
+  /** 已允许的命令：把 worker 回写的执行结果同步进任务记录。不阻塞活性检查。 */
+  private mirrorOutcome(task: TaskRecord, ledger: CommandLedger): boolean {
+    const review = task.commandReview;
+    if (!review?.id || review.fence !== task.fence) {
+      // 后台重试（继续运行）后旧记录仍停在「不可用」：回填最近一次实际执行结果。
+      if (review?.decision === "unavailable") {
+        const latest = ledger.latestResolved(task.id);
+        if (latest && latest.at >= Date.parse(review.at)) {
+          review.decision = latest.outcome.ok ? "executed" : "failed";
+          review.outcome = latest.outcome.snippet;
+          review.reason = latest.outcome.ok ? "重试审批通过，命令已执行。" : latest.outcome.snippet;
+          review.at = new Date(latest.outcome.at).toISOString();
+          this.store.save(task);
+        }
+      }
+      return false;
+    }
+    const ticket = ledger.get(review.id);
+    if (!ticket || ticket.receipt?.decision !== "allow") return false;
+    const outcome = ledger.outcome(review.id);
+    if (outcome && (review.decision === "waiting" || review.decision === "executed")) {
+      review.decision = outcome.ok ? "executed" : "failed";
+      review.outcome = outcome.snippet;
+      if (!outcome.ok) review.reason = outcome.snippet;
+      // 更新调用方持有的快照：watchdog 随后会保存同一对象，避免旧值覆盖。
+      this.store.save(task);
+    }
+    return false;
+  }
+
   /** Process approvals separately from the worker. A slow reviewer must not stall other tasks' leases. */
   async reconcileCommands(task: TaskRecord): Promise<boolean> {
     if (!hasCommandLedger(task.dataDir)) return false;
@@ -158,7 +205,38 @@ export class WorkerRunner {
       held = ledger.next(task.id, task.fence, "held");
       if (!held) {
         const pending = ledger.next(task.id, task.fence, "pending");
-        if (!pending) return false;
+        if (!pending) {
+          const awaiting = ledger.next(task.id, task.fence, "awaiting_user");
+          if (!awaiting) return this.mirrorOutcome(task, ledger);
+          // 控制面重启后恢复等待展示，保证刷新页面仍能处理待办。
+          const record = this.store.get(task.id);
+          if (record && record.fence === task.fence) {
+            const current = record.commandReview;
+            if (!current || current.id !== awaiting.id || current.decision !== "waiting") {
+              record.commandReview = this.waitingReview(awaiting, task.fence);
+              this.store.save(record);
+            }
+          }
+          // worker 存活才维持「审批处理中」；否则交回 watchdog 重启流程。
+          return this.isAlive(task);
+        }
+        // 1) 先判断「能否执行」：超出授权范围或执行器支持范围直接拦截，不调模型、不等待。
+        if (!executorBound(pending.action)) {
+          ledger.settle(pending, policyReceipt(this.settings, pending, outOfScopeReason));
+          return true;
+        }
+        // 2) 逐次确认：转入待用户确认，任务继续运行，worker 长等待回执。
+        if (this.settings.get().chatApproval.confirmation === "manual") {
+          if (ledger.awaitUser(pending)) {
+            const record = this.store.get(task.id);
+            if (record && record.fence === task.fence) {
+              record.commandReview = this.waitingReview(pending, task.fence);
+              this.store.save(record);
+            }
+          }
+          return true;
+        }
+        // 3) 低风险自动审批：审批模型判定。
         const key = task.id + ":" + task.fence;
         if (!this.reviews.has(key)) {
           const controller = new AbortController();
@@ -179,11 +257,72 @@ export class WorkerRunner {
     const receipt = held.receipt!;
     const record = this.store.get(task.id);
     if (!record || record.fence !== task.fence) return true;
-    record.commandReview = { id: receipt.id, fence: task.fence, at: receipt.at, tool: held.action.tool, model: receipt.model,
-      decision: receipt.decision === "unavailable" ? "unavailable" : "block", reason: receipt.reason };
+    record.commandReview = { id: receipt.id, fence: task.fence, at: receipt.at, tool: held.action.tool,
+      summary: held.action.localProbe ?? held.action.summary,
+      model: receipt.model, decision: WorkerRunner.reviewDecisionOf(receipt), reason: receipt.reason,
+      ...(receipt.actor === "user" ? { mode: "manual" as const } : {}) };
     this.store.save(record);
     await this.pause(task.id);
     return true;
+  }
+
+  /** 用户允许后台任务的待确认命令：只结算这一次调用，worker 收到回执后执行。 */
+  async approveCommand(taskId: string): Promise<TaskRecord> {
+    const task = this.store.get(taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const review = task.commandReview;
+    if (!review || review.decision !== "waiting" || review.fence !== task.fence) {
+      throw new Error("没有等待确认的命令，或该命令已处理、已过期。");
+    }
+    if (!hasCommandLedger(task.dataDir)) throw new Error("命令审批台账不可用。");
+    const ledger = new CommandLedger(task.dataDir);
+    try {
+      const ticket = ledger.get(review.id);
+      if (!ticket || ticket.fence !== task.fence) throw new Error("待审命令已失效。");
+      // settle 以 awaiting_user 状态为条件，重复点击只结算一次。
+      if (!ledger.settle(ticket, userReceipt(this.settings, ticket, true))) {
+        throw new Error("该命令已处理。");
+      }
+    } finally { ledger.close(); }
+    review.decision = "executed";
+    review.outcome = "已允许本次执行，等待执行回执。";
+    this.store.save(task);
+    return task;
+  }
+
+  /** 用户拒绝后台任务的待确认命令：结算拒绝并暂停任务。 */
+  async rejectCommand(taskId: string): Promise<TaskRecord> {
+    const task = this.store.get(taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const review = task.commandReview;
+    if (!review || review.decision !== "waiting" || review.fence !== task.fence) {
+      throw new Error("没有等待确认的命令，或该命令已处理、已过期。");
+    }
+    if (!hasCommandLedger(task.dataDir)) throw new Error("命令审批台账不可用。");
+    const ledger = new CommandLedger(task.dataDir);
+    try {
+      const ticket = ledger.get(review.id);
+      if (!ticket || ticket.fence !== task.fence) throw new Error("待审命令已失效。");
+      if (!ledger.settle(ticket, userReceipt(this.settings, ticket, false))) {
+        throw new Error("该命令已处理。");
+      }
+    } finally { ledger.close(); }
+    review.decision = "rejected";
+    review.reason = "你拒绝了本次执行，任务将暂停。";
+    this.store.save(task);
+    await this.pause(taskId);
+    return this.store.get(taskId)!;
+  }
+
+  /** 后台任务的重试入口：恢复任务，worker 从检查点重提命令并重新送审。 */
+  async retryCommand(taskId: string): Promise<TaskRecord> {
+    const task = this.store.get(taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const review = task.commandReview;
+    if (!review || review.decision !== "unavailable" || review.fence !== task.fence) {
+      throw new Error("只有审批模型不可用的命令可以重试。");
+    }
+    return this.resume(taskId);
   }
 
   async start(taskId: string): Promise<TaskRecord> {
@@ -206,7 +345,7 @@ export class WorkerRunner {
       if (!image) {
         const reason = "工作镜像缺少命令审批版本，任务暂停，需使用新版 worker 镜像。";
         task.commandReview = { id: "image-" + task.fence, fence: task.fence, at: new Date().toISOString(),
-          tool: "worker", model: "", decision: "unavailable", reason };
+          tool: "worker", summary: "", model: "", decision: "unavailable", reason };
         this.store.save(task);
         await this.pause(task.id);
         throw new Error(reason);
@@ -219,6 +358,13 @@ export class WorkerRunner {
 
     const lease = this.store.acquireLease(taskId, this.cfg.ownerId, this.cfg.leaseMs);
     if (!lease.ok) throw new Error(`lease: ${lease.reason}`);
+
+    // 重新启动后 fence 已递增：旧 fence 的待确认命令只绑定上一轮调用，标记过期。
+    const stale = lease.task.commandReview;
+    if (stale?.decision === "waiting" && stale.fence !== lease.task.fence) {
+      stale.decision = "expired"; stale.reason = "任务已重新运行，该次待确认命令已过期。";
+      this.store.save(lease.task);
+    }
 
     const ledger = new CommandLedger(lease.task.dataDir);
     try { ledger.activate(taskId, lease.task.fence); } finally { ledger.close(); }
@@ -643,6 +789,10 @@ export class WorkerRunner {
     if (task.status === "stopping") throw new Error("任务正在停止，不能暂停");
 
     this.invalidateCommands(task);
+    // 等待确认的命令随操作暂停取消：worker 已被终止，票据不再可处理。
+    if (task.commandReview?.decision === "waiting" && task.commandReview.fence === task.fence) {
+      task.commandReview = { ...task.commandReview, decision: "cancelled", reason: "任务已暂停，该次待确认命令已取消。" };
+    }
     task.status = "pause_requested";
     task.pauseRequestedAt = new Date().toISOString();
     task.error = null;
@@ -748,6 +898,9 @@ export class WorkerRunner {
     }
 
     this.invalidateCommands(task);
+    if (task.commandReview?.decision === "waiting" && task.commandReview.fence === task.fence) {
+      task.commandReview = { ...task.commandReview, decision: "cancelled", reason: "任务已停止，该次待确认命令已取消。" };
+    }
     task.status = "stopping";
     this.store.save(task);
     let status: "stopped" | "budget_exhausted" = "stopped";

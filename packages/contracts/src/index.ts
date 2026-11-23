@@ -136,6 +136,15 @@ export function isTerminalTaskStatus(status: unknown): status is TerminalTaskSta
 }
 
 /**
+ * Archivable set: paused or terminal. Archiving is a soft-hide flag only —
+ * status, checkpoints and history are untouched, so a paused task keeps its
+ * "resume" semantics after unarchive.
+ */
+export function isArchivableTaskStatus(status: unknown): boolean {
+  return typeof status === "string" && (pausedTaskStatuses.has(status) || terminalTaskStatuses.has(status));
+}
+
+/**
  * Budget hard gates. **0 = unlimited** (default): no wall/tool/token/install ceiling;
  * the worker runs until goals pass, fatal error, or operator stop.
  * Pass a positive value via CLI/API only when you want an explicit cap.
@@ -555,10 +564,16 @@ export const TaskRecordSchema = z.object({
     id: z.string(),
     fence: z.number().optional(),
     tool: z.string(),
+    summary: z.string().default(""),
     at: z.string(),
     reason: z.string(),
-    decision: z.enum(["block", "unavailable"]),
+    decision: z.enum([
+      "block", "unavailable", "waiting",
+      "executed", "failed", "rejected", "cancelled", "expired",
+    ]),
     model: z.string(),
+    outcome: z.string().optional(),
+    mode: z.enum(["auto", "manual"]).optional(),
   }).optional(),
   /** Cumulative counters at the start of this operator-initiated run. */
   runStartUsage: UsageCountersSchema.optional(),
@@ -966,6 +981,8 @@ export const WorkerManifestSchema = z.object({
   workerCount: z.number().int().positive().default(1),
   /** Command-approval epoch. Older manifests omit it and cannot dispatch guarded commands. */
   commandFence: z.number().int().nonnegative().optional(),
+  /** 命令执行前的确认方式：manual 时 worker 对范围内命令长等待用户确认。 */
+  commandConfirmation: z.enum(["auto", "manual"]).default("auto"),
   mock: z.boolean(),
   model: z
     .object({
@@ -1068,11 +1085,13 @@ export function mergeSkillPacks(
 
 export const ChatApprovalSchema = z.object({
   scope: z.enum(["read-only", "local-validation"]),
+  /** 命令执行前的确认方式；旧设置缺省时沿用自动审批行为。 */
+  confirmation: z.enum(["auto", "manual"]).default("auto"),
   reviewer: z.object({ profileId: z.string().min(1).max(80), modelId: z.string().min(1).max(256) }).strict().nullable(),
 }).strict();
 
 export const AppSettingsSchema = z.object({
-  chatApproval: ChatApprovalSchema.default({ scope: "read-only", reviewer: null }),
+  chatApproval: ChatApprovalSchema.default({ scope: "read-only", confirmation: "auto", reviewer: null }),
   chatProfiles: z.array(ChatProfileSchema).default([]),
   defaultChatProfile: z.string().optional(),
   model: ModelSettingsSchema.default({

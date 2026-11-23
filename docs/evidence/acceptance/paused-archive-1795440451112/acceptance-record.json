@@ -1,0 +1,204 @@
+{
+  "runId": "paused-archive-1795440451112",
+  "kind": "paused-archive-mock",
+  "taskId": "054fdf07-fa4d-459e-a521-f0236784a360",
+  "dataRoot": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112",
+  "finishedAt": "2026-11-23T13:27:33.990Z",
+  "code": {
+    "commit": "5247b6987ca7c772e834b36159c914f4e26f4a5c",
+    "branch": "main",
+    "dirty": true,
+    "dirtyPaths": [
+      "M README.md",
+      "M apps/console/src/api.ts",
+      "M apps/console/src/chat.css",
+      "M apps/console/src/components/ChatModelSettings.tsx",
+      "M apps/console/src/components/KnowledgeEmbeddingSettings.tsx",
+      "M apps/console/src/components/TaskTable.tsx",
+      "M apps/console/src/labels.ts",
+      "M apps/console/src/pages/SettingsPage.tsx",
+      "M apps/console/src/pages/TaskDetailPage.tsx",
+      "M apps/console/src/pages/TasksPage.tsx",
+      "M docs/console-logic.md",
+      "M docs/knowledge-library-api.md",
+      "M docs/knowledge-library-console.md",
+      "M package.json",
+      "M packages/contracts/src/chat-input.ts",
+      "M packages/contracts/src/index.ts",
+      "M packages/control-plane/src/settings.ts",
+      "M packages/control-plane/src/store.ts",
+      "M scripts/console-fixture.mjs",
+      "?? apps/console/src/components/ChatModelFields.tsx",
+      "?? apps/console/src/components/approvalModelConfig.test.ts",
+      "?? apps/console/src/components/approvalModelConfig.ts",
+      "?? packages/control-plane/src/archive-paused.test.ts",
+      "?? scripts/acceptance-mcp-load.ts",
+      "?? scripts/paused-archive-acceptance.ts"
+    ]
+  },
+  "steps": [
+    {
+      "step": "建档",
+      "ok": true,
+      "detail": "POST /tasks → 201",
+      "at": "2026-11-23T13:27:31.161Z"
+    },
+    {
+      "step": "运行中",
+      "ok": true,
+      "detail": "任务进入 running",
+      "at": "2026-11-23T13:27:32.072Z"
+    },
+    {
+      "step": "暂停",
+      "ok": true,
+      "detail": "status=paused",
+      "at": "2026-11-23T13:27:32.280Z"
+    },
+    {
+      "step": "检查点留存",
+      "ok": true,
+      "detail": "durable.sqlite 存在",
+      "at": "2026-11-23T13:27:32.280Z"
+    },
+    {
+      "step": "归档请求",
+      "ok": true,
+      "detail": "POST /tasks/:id/archive → 200",
+      "at": "2026-11-23T13:27:32.289Z"
+    },
+    {
+      "step": "归档不改状态",
+      "ok": true,
+      "detail": "status=paused（仍为已暂停）",
+      "at": "2026-11-23T13:27:32.289Z"
+    },
+    {
+      "step": "归档标记",
+      "ok": true,
+      "detail": "archivedAt=2026-11-23T13:27:32.289Z",
+      "at": "2026-11-23T13:27:32.289Z"
+    },
+    {
+      "step": "移入已归档",
+      "ok": true,
+      "detail": "列表已归档视图包含该任务",
+      "at": "2026-11-23T13:27:32.292Z"
+    },
+    {
+      "step": "离开未归档",
+      "ok": true,
+      "detail": "列表未归档视图不含该任务",
+      "at": "2026-11-23T13:27:32.292Z"
+    },
+    {
+      "step": "刷新后仍已暂停",
+      "ok": true,
+      "detail": "status=paused，归档标记保留",
+      "at": "2026-11-23T13:27:32.295Z"
+    },
+    {
+      "step": "归档保留检查点",
+      "ok": true,
+      "detail": "durable.sqlite 未被归档改动",
+      "at": "2026-11-23T13:27:32.295Z"
+    },
+    {
+      "step": "归档保留历史",
+      "ok": true,
+      "detail": "events=16（前后一致）",
+      "at": "2026-11-23T13:27:32.298Z"
+    },
+    {
+      "step": "归档保留目标状态",
+      "ok": true,
+      "detail": "goals 前后一致",
+      "at": "2026-11-23T13:27:32.299Z"
+    },
+    {
+      "step": "取消归档请求",
+      "ok": true,
+      "detail": "POST /tasks/:id/unarchive → 200",
+      "at": "2026-11-23T13:27:32.299Z"
+    },
+    {
+      "step": "取消归档只清标记",
+      "ok": true,
+      "detail": "archivedAt=null",
+      "at": "2026-11-23T13:27:32.299Z"
+    },
+    {
+      "step": "取消归档不恢复执行",
+      "ok": true,
+      "detail": "status=paused（仍为已暂停）",
+      "at": "2026-11-23T13:27:32.299Z"
+    },
+    {
+      "step": "回到未归档",
+      "ok": true,
+      "detail": "列表未归档视图包含该任务",
+      "at": "2026-11-23T13:27:32.301Z"
+    },
+    {
+      "step": "离开已归档",
+      "ok": true,
+      "detail": "列表已归档视图不含该任务",
+      "at": "2026-11-23T13:27:32.301Z"
+    },
+    {
+      "step": "无自动恢复",
+      "ok": true,
+      "detail": "watchdog 两个周期后 status=paused",
+      "at": "2026-11-23T13:27:33.905Z"
+    },
+    {
+      "step": "继续请求",
+      "ok": true,
+      "detail": "POST /tasks/:id/resume → 200",
+      "at": "2026-11-23T13:27:33.918Z"
+    },
+    {
+      "step": "点击继续才恢复执行",
+      "ok": true,
+      "detail": "status=initializing",
+      "at": "2026-11-23T13:27:33.918Z"
+    },
+    {
+      "step": "反例建档",
+      "ok": true,
+      "detail": "POST /tasks → 201",
+      "at": "2026-11-23T13:27:33.938Z"
+    },
+    {
+      "step": "运行中归档被拒绝",
+      "ok": true,
+      "detail": "→ 400",
+      "at": "2026-11-23T13:27:33.939Z"
+    },
+    {
+      "step": "拒绝原因",
+      "ok": true,
+      "detail": "仅已暂停或终态任务可归档",
+      "at": "2026-11-23T13:27:33.939Z"
+    },
+    {
+      "step": "运行中未被打上归档标记",
+      "ok": true,
+      "detail": "archivedAt=null",
+      "at": "2026-11-23T13:27:33.941Z"
+    },
+    {
+      "step": "收尾停止",
+      "ok": true,
+      "detail": "054fdf07 → stopped",
+      "at": "2026-11-23T13:27:33.947Z"
+    },
+    {
+      "step": "收尾停止",
+      "ok": true,
+      "detail": "bb391216 → stopped",
+      "at": "2026-11-23T13:27:33.951Z"
+    }
+  ],
+  "snapshotPath": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112/delivery-snapshot.json"
+}

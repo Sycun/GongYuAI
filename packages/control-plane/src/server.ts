@@ -441,6 +441,21 @@ export function startControlServer(opts: ServerOptions) {
         const rest = taskMatch[2] ?? "";
         const task = store.get(taskId);
         if (!task) return send(res, 404, { error: "not found" });
+        // 会话内处理一次待确认命令：允许/拒绝只绑定当次调用，重试针对审批模型不可用。
+        const reviewAction = /^\/command-review\/(approve|reject|retry)$/.exec(rest);
+        if (method === "POST" && reviewAction) {
+          const action = reviewAction[1]!;
+          const decided = task.assignment
+            ? (action === "retry"
+              ? await assignments.retryCommand(taskId)
+              : await assignments.decideCommand(taskId, action === "approve"))
+            : (action === "retry"
+              ? await runner.retryCommand(taskId)
+              : action === "approve"
+                ? await runner.approveCommand(taskId)
+                : await runner.rejectCommand(taskId));
+          return send(res, 200, { task: decided });
+        }
         if (task.assignment) {
           if (method === "GET" && rest === "/assignment") return send(res, 200, assignments.view(task));
           if (method === "POST" && (rest === "/pause" || rest === "/stop")) {

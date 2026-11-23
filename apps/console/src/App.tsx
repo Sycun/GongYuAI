@@ -30,7 +30,7 @@ const workPages = [
   { key: "demo", label: "演示场景" },
 ] as const;
 const knowledgePages = [
-  { key: "knowledge", label: "参考资料" },
+  { key: "knowledge", label: "知识库" },
 ] as const;
 const groups = [
   { title: "工作区", items: workPages },

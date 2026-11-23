@@ -199,6 +199,12 @@ async function main() {
     sourceUrl: "https://example.invalid/eng-b", content: ENG_B_ARTICLE, tags: [],
     scope: { kind: "engagement", engagementId: "eng-b" },
   });
+  // 新契约：导入只登记待向量化。这里显式「开始向量化」各委托范围内的版本再等队列空闲。
+  for (const engagementId of ["eng-a", "eng-b"]) {
+    await fetch(`${plane.url}/knowledge/index/retry?engagementId=${engagementId}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+    });
+  }
   await plane.knowledge.index.idle(300_000);
 
   const session = {

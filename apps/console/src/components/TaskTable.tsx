@@ -1,7 +1,7 @@
 import { Button, Space, Table, Typography } from "@douyinfe/semi-ui";
 import { IconArchive, IconUndo } from "@douyinfe/semi-icons";
 import type { TaskRecord } from "../api";
-import { isArchivedTask, isTerminalStatus, shortId } from "../labels";
+import { isArchivedTask, isArchivableStatus, shortId } from "../labels";
 import { StatusTag } from "./StatusTag";
 
 type Props = {
@@ -93,11 +93,11 @@ export function TaskTable({
                     onUnarchive?.(record);
                   }}
                 >
-                  恢复
+                  取消归档
                 </Button>
               );
             }
-            if (!isTerminalStatus(record.status)) return null;
+            if (!isArchivableStatus(record.status)) return null;
             return (
               <Button
                 size="small"

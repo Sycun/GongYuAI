@@ -34,27 +34,38 @@ export function recordHardDenial(m: WorkerManifest, tool: string, reason: string
     ledger.settle(ticket, { ...unavailable(reason, ticket.id), decision: "block", risk: "high" });
   } finally { ledger.close(); }
 }
-export async function reviewBeforeDispatch(m: WorkerManifest, action: CommandProposal) {
+/** 用户逐次确认时的等待窗口；自动审批保持快速失败。 */
+const MANUAL_WAIT_MS = 24 * 60 * 60 * 1000;
+export async function reviewBeforeDispatch(m: WorkerManifest, action: CommandProposal): Promise<string | null> {
   if (!m.commandFence || !hasCommandLedger(m.dataDir)) throw new Error("命令审批控制面不可用，操作已拦截");
   const fence = m.commandFence;
+  const manual = m.commandConfirmation === "manual";
   const ledger = new CommandLedger(m.dataDir);
   try {
     check(ledger, m, fence);
     const ticket = ledger.request(m.taskId, fence, action);
-    const deadline = Date.now() + 90_000;
+    const deadline = Date.now() + (manual ? MANUAL_WAIT_MS : 90_000);
     while (true) {
       check(ledger, m, fence);
       const result = ledger.get(ticket.id)?.receipt;
       if (result) {
-        if (result.decision === "allow" && action.localProbe && localProbes.some(s => s === action.localProbe)) return;
+        if (result.decision === "allow" && action.localProbe && localProbes.some(s => s === action.localProbe)) return ticket.id;
         throw new Error(result.reason);
       }
       if (Date.now() >= deadline) {
-        const failure = unavailable("命令审批超时，操作已拦截", ticket.id);
+        const failure: ApprovalReceipt = manual
+          ? { ...unavailable("等待用户确认超时，该次调用已过期", ticket.id), decision: "expired", actor: "policy" }
+          : unavailable("命令审批超时，操作已拦截", ticket.id);
         ledger.settle(ticket, failure);
         throw new Error(failure.reason);
       }
       await delay(100);
     }
   } finally { ledger.close(); }
+}
+/** 放行后的实际执行结果回写台账，控制面据此在审批卡上显示成败。 */
+export function reportCommandOutcome(m: WorkerManifest, ticketId: string, ok: boolean, snippet: string) {
+  if (!m.commandFence || !hasCommandLedger(m.dataDir)) return;
+  const ledger = new CommandLedger(m.dataDir);
+  try { ledger.complete(ticketId, { ok, snippet: snippet.slice(0, 200), at: new Date().toISOString() }); } finally { ledger.close(); }
 }

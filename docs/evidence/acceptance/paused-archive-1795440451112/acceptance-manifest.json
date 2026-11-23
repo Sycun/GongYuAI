@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "kind": "paused-archive-mock",
+  "runId": "paused-archive-1795440451112",
+  "taskId": "054fdf07-fa4d-459e-a521-f0236784a360",
+  "dataRoot": "/Users/sycpro/GongYuAI/.gongyuai/acceptance/paused-archive-1795440451112",
+  "startedAt": "2026-11-23T13:27:31.112Z",
+  "finishedAt": "2026-11-23T13:27:33.990Z",
+  "code": {
+    "commit": "5247b6987ca7c772e834b36159c914f4e26f4a5c",
+    "branch": "main",
+    "dirty": true,
+    "dirtyPaths": [
+      "M README.md",
+      "M apps/console/src/api.ts",
+      "M apps/console/src/chat.css",
+      "M apps/console/src/components/ChatModelSettings.tsx",
+      "M apps/console/src/components/KnowledgeEmbeddingSettings.tsx",
+      "M apps/console/src/components/TaskTable.tsx",
+      "M apps/console/src/labels.ts",
+      "M apps/console/src/pages/SettingsPage.tsx",
+      "M apps/console/src/pages/TaskDetailPage.tsx",
+      "M apps/console/src/pages/TasksPage.tsx",
+      "M docs/console-logic.md",
+      "M docs/knowledge-library-api.md",
+      "M docs/knowledge-library-console.md",
+      "M package.json",
+      "M packages/contracts/src/chat-input.ts",
+      "M packages/contracts/src/index.ts",
+      "M packages/control-plane/src/settings.ts",
+      "M packages/control-plane/src/store.ts",
+      "M scripts/console-fixture.mjs",
+      "?? apps/console/src/components/ChatModelFields.tsx",
+      "?? apps/console/src/components/approvalModelConfig.test.ts",
+      "?? apps/console/src/components/approvalModelConfig.ts",
+      "?? packages/control-plane/src/archive-paused.test.ts",
+      "?? scripts/acceptance-mcp-load.ts",
+      "?? scripts/paused-archive-acceptance.ts"
+    ]
+  },
+  "steps": {
+    "total": 27,
+    "passed": 27,
+    "failed": 0
+  },
+  "record": {
+    "markdown": "acceptance-record.md",
+    "json": "acceptance-record.json"
+  },
+  "files": {
+    "recordMd": {
+      "path": "acceptance-record.md",
+      "sha256": "bf03ba5fa36e071958739fa10e5df7faf4d0404693f74623c2ba6532ed75b96d"
+    },
+    "recordJson": {
+      "path": "acceptance-record.json",
+      "sha256": "dc168d18581200797ea8696b00498d9209cb6b4d1eac77e9eda9193c11cde582"
+    },
+    "snapshot": {
+      "path": "delivery-snapshot.json",
+      "bytesSha256": "18a76c9832685385facd3812a9abc0c3329aa093ca5b37fc98fd8948b1b1b09a",
+      "sealSha256": ""
+    }
+  },
+  "scorecard": {
+    "snapshotSha256": "",
+    "denominator": 0,
+    "historicallyPassed": 0,
+    "currentlySupported": 0,
+    "unknownAttribution": 0,
+    "coverage": {},
+    "capturedAt": ""
+  },
+  "notes": [
+    "内容封印 = 快照去掉 sha256 字段后对 canonical payload 计算的 sha256（可离线复算）。",
+    "字节哈希 = 快照文件原始字节的 sha256（确认交付的就是那一份文件）。",
+    "记分卡的 snapshotSha256 必须等于本清单 files.snapshot.sealSha256。",
+    "kind=paused-archive-mock：mock worker 只证明归档流程语义，不消耗模型额度。",
+    "归档/取消归档前后 events、goals、durable.sqlite 逐一比对，证明仅归档标记变化。"
+  ]
+}

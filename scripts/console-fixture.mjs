@@ -35,6 +35,7 @@ function task(id, name, status) {
   return {
     id, name, status, mock: true, scopeVersion: 2, fence: 1,
     leaseOwner: null, leaseUntil: null, workerPid: null, containerId: null, dataDir: "/tmp/fixture",
+    archivedAt: null,
     auth: { authorizationNote: "虚构委托", targets: ["app.example"], outOfScope: [] },
     goals: [{ id: "goal-1", title: "汇总一致结论", description: "对照两份会议材料", evidencePatterns: [], passes: false }],
     budget: { maxTokens: 1, maxWallMs: 1, maxToolCalls: 1, maxInstalls: 0 },
@@ -118,6 +119,17 @@ const server = http.createServer(async (req, res) => {
   if (rest === "" && req.method === "GET") return send(res, 200, { task: found });
   if (["/pause", "/stop", "/resume", "/start"].includes(rest) && req.method === "POST") {
     found.status = rest === "/pause" ? "paused" : rest === "/resume" || rest === "/start" ? "running" : "stopped";
+    return send(res, 200, { task: found });
+  }
+  // 与正式控制面同一条规则：已暂停或终态可归档，归档/取消归档只改标记。
+  const ARCHIVABLE = new Set(["paused", "completed", "failed", "budget_exhausted", "incomplete", "stopped"]);
+  if (rest === "/archive" && req.method === "POST") {
+    if (!ARCHIVABLE.has(found.status)) return send(res, 400, { error: "仅已暂停或终态任务可归档" });
+    if (!found.archivedAt) found.archivedAt = now;
+    return send(res, 200, { task: found });
+  }
+  if (rest === "/unarchive" && req.method === "POST") {
+    found.archivedAt = null;
     return send(res, 200, { task: found });
   }
   if (id === failed && ["/graphs/assets", "/graphs/execution", "/coverage-matrix", "/jobs", "/history"].includes(rest)) {

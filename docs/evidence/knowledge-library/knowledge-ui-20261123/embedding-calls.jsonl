@@ -1,0 +1,4 @@
+{"seq":1,"at":"2026-11-23T13:48:36.182Z","model":"stub-ui-embedding","inputs":["GongYuAI 向量化连通性探测 synthetic embedding probe"]}
+{"seq":2,"at":"2026-11-23T13:48:36.190Z","model":"stub-ui-embedding","inputs":["运维交接规程\n# 运维交接规程","运维交接规程 > 1. 换班要求\n## 1. 换班要求\n\n值班负责人换班时必须完成三件事：读 STATE 文件、核对值班日志、向继任者口头确认进度。","运维交接规程 > 2. STATE 文件\n## 2. STATE 文件\n\nSTATE 文件记录当前任务进度。换任后继任者先读 STATE 再继续，不得凭记忆续接。","运维交接规程 > 3. 更正凭据\n## 3. 更正凭据\n\n收到更正回函时并入既有证据链，并登记收件时间。"]}
+{"seq":3,"at":"2026-11-23T13:49:29.630Z","model":"stub-ui-embedding","inputs":["值班交接要求是什么"]}
+{"seq":4,"at":"2026-11-23T13:51:17.106Z","model":"stub-ui-embedding","inputs":["密电归档说明\n# 密电归档说明\n\n密电按日期归档，归档前需双人复核。"]}

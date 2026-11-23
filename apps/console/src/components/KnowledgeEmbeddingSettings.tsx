@@ -212,7 +212,7 @@ export function KnowledgeEmbeddingSettings({
       description="服务商会收到：待索引资料的正文片段（含标题路径），以及语义检索的查询文本。原文、版本、向量索引与报告快照始终留在本地，云端只负责计算 embedding。" />
     <div className="gy-field">
       <label id="ke-enabled-label">启用向量化</label>
-      <div className="gy-field-action">
+      <div className="gy-switch-row">
         <Switch checked={draft.enabled} aria-labelledby="ke-enabled-label" onChange={enabled => edit({ enabled })} />
         <small>停用后关键词检索仍可用，语义召回关闭。</small>
       </div>

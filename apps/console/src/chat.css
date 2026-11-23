@@ -160,10 +160,23 @@ body {
 .gy-field small, .gy-form-footer > [role="status"], .gy-release-note, .gy-release-meta, .gy-release-status { color: var(--gy-muted); line-height: 1.6; font-size: 13px; }
 .gy-field-action { display: flex; min-width: 0; gap: 8px; }
 .gy-field-action > :first-child { flex: 1; min-width: 0; }
+.gy-switch-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.gy-switch-row > .semi-switch { flex: none; }
+.gy-switch-row > small { flex: 1; min-width: 0; }
 .gy-model-form .semi-input-wrapper, .gy-model-form .semi-select, .gy-source .semi-input-wrapper { background-color: #f6f7fa; min-height: 36px; }
 .gy-model-form .semi-button, .gy-source .semi-button { min-height: 36px; }
 .gy-form-footer { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; border-top: 1px solid var(--gy-rule); padding-top: 18px; }
 .gy-form-footer .semi-button:disabled { color: #586170; background: #e6e8ea; }
+.gy-approval-options { display: grid; gap: 10px; }
+.gy-approval-option { display: grid; gap: 8px; border: 1px solid var(--gy-rule); border-radius: 14px; padding: 12px 14px; background: #fbfcfd; }
+.gy-approval-option.is-on { border-color: #b9c8f3; background: #eff3ff; }
+.gy-approval-option-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 550; cursor: pointer; }
+.gy-approval-option-head input { accent-color: var(--gy-accent); margin: 0; }
+.gy-approval-current { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gy-approval-current > small { flex: 1; min-width: 0; }
+.gy-approval-form { display: grid; gap: 14px; border-top: 1px dashed var(--gy-rule); padding-top: 14px; }
+.gy-approval-form-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.gy-approval-form-actions > small { flex: 1; min-width: 220px; }
 .gy-config-card .semi-button-primary.semi-button-solid { background: var(--gy-accent); }
 .gy-update-page { padding-top: 6px; }
 .gy-release { background: linear-gradient(115deg, #f3f6ff 0%, #fff 77%); border-color: #dce3f4; }
@@ -291,6 +304,20 @@ body {
 .gy-assignment-card a { color: var(--gy-accent); font-size: 13px; }
 .gy-assignment-card p, .gy-command-hold p { overflow-wrap: anywhere; font-size: 14px; }
 .gy-assignment-card .semi-button { margin-top: 8px; }
+
+.gy-command-card { display: grid; gap: 6px; margin: 10px 0; padding: 12px 14px; border: 1px solid var(--gy-rule); border-left-width: 4px; border-radius: 12px; background: #fbfcfd; overflow-wrap: anywhere; }
+.gy-command-waiting { border-left-color: #e8a23d; background: #fffaf1; }
+.gy-command-executed { border-left-color: #48a15f; }
+.gy-command-failed, .gy-command-block { border-left-color: #d4494c; background: #fdf6f5; }
+.gy-command-rejected { border-left-color: #9a6bb5; background: #faf6fc; }
+.gy-command-cancelled, .gy-command-expired, .gy-command-unavailable { border-left-color: #8a94a6; }
+.gy-command-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.gy-command-head small { color: var(--gy-muted); font-size: 12px; }
+.gy-command-subject { font-weight: 550; font-size: 14px; }
+.gy-command-reason { font-size: 13px; color: var(--gy-muted); line-height: 1.6; }
+.gy-command-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.gy-command-actions small { flex: 1; min-width: 180px; color: var(--gy-muted); font-size: 12px; }
+.gy-command-note { font-size: 13px; color: var(--gy-muted); }
 
 .gy-chat-body { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
 .gy-chat-center { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }

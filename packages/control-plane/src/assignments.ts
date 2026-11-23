@@ -12,7 +12,7 @@ import type { SettingsStore } from "./settings.js";
 import { taskPaths } from "./paths.js";
 import { validMessages } from "./chat-input.js";
 import { requestCompletion, needsKey, responseText } from "./chat-provider.js";
-import { reviewCommand } from "./command-approval.js";
+import { reviewCommand, outOfScopeReason } from "./command-approval.js";
 
 const execute = promisify(execFile);
 const instructions = `你是工作区的任务处理器。完成最新布置的任务，前文和附件作为材料。只有问候或缺少可交付目标时返回 paused 并说明需要补充什么。仅返回一个 JSON：
@@ -162,6 +162,10 @@ export class AssignmentService {
     this.running.set(task.id, controller);
     task.status = "running"; task.startedAt ??= new Date().toISOString(); task.pausedAt = null; task.finishedAt = null; task.error = null;
     task.assignment.ownerPid = process.pid; task.assignment.ownerHost = hostname();
+    // 任务重新运行：旧的待确认命令只绑定上一次调用，标记过期。
+    if (task.commandReview?.decision === "waiting") {
+      task.commandReview = { ...task.commandReview, decision: "expired", reason: "任务已重新运行，该次待确认命令已过期。" };
+    }
     task.fence++; this.store.save(task);
     void this.run(task, controller).catch(err => {
       if (this.current(task, controller)) this.interrupt(task, "failed", err instanceof Error ? err.message : "任务处理失败");
@@ -217,22 +221,60 @@ export class AssignmentService {
     }
     if (command) {
       const probe = localProbes.find(p => p === command);
-      const ticket: CommandTicket = { task: task.id, id: input.requestId + "-" + task.fence, fence: task.fence, at: Date.now(),
-        action: { tool: "shell", summary: probe ?? "自定义命令（参数已隐藏）", localProbe: probe,
-          digest: createHash("sha256").update(command).digest("hex") } };
+      const mode = this.settings.get().chatApproval.confirmation;
+      const reviewId = input.requestId + "-" + task.fence;
+      const action = { tool: "shell", summary: probe ?? "自定义命令（参数已隐藏）", localProbe: probe,
+        digest: createHash("sha256").update(command).digest("hex") };
+      const ticket: CommandTicket = { task: task.id, id: reviewId, fence: task.fence, at: Date.now(), action };
+      // 先判断「能否执行」：超出任务授权范围或执行器支持范围直接拦截，不调模型、不等待。
+      if (!probe) {
+        task.commandReview = { id: reviewId, fence: task.fence, tool: "shell", summary: action.summary,
+          at: new Date().toISOString(), reason: outOfScopeReason, decision: "block", model: "", mode };
+        this.interrupt(task, "paused", outOfScopeReason); return;
+      }
+      // 再应用「谁来确认」：逐次确认不调审批模型，落待审记录等用户在会话内处理。
+      if (mode === "manual") {
+        this.interrupt(task, "paused", `等待你确认命令：${probe}`);
+        task.commandReview = { id: reviewId, fence: task.fence, tool: "shell", summary: probe,
+          at: new Date().toISOString(), reason: `任务请求执行本地检查「${probe}」，等待你确认。`, decision: "waiting", model: "", mode: "manual" };
+        this.store.save(task); return;
+      }
       const review = await reviewCommand(this.settings, ticket, AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
       if (!this.current(task, controller)) return;
-      if (review.decision !== "allow" || !probe) {
-        task.commandReview = { id: review.id, fence: task.fence, tool: "shell", decision: review.decision === "unavailable" ? "unavailable" : "block",
-          reason: review.reason, at: review.at, model: review.model };
+      if (review.decision !== "allow") {
+        task.commandReview = { id: review.id, fence: task.fence, tool: "shell", summary: probe, at: review.at,
+          reason: review.reason, decision: review.decision === "unavailable" ? "unavailable" : "block",
+          model: review.model, mode: "auto" };
         this.interrupt(task, "paused", review.reason); return;
       }
-      const [bin, arg] = probe.split(" ");
-      const r = await execute(bin === "date" ? "/bin/date" : "/usr/bin/uname", [arg!], { signal, timeout: 5000, cwd: task.dataDir, env: { PATH: "/usr/bin:/bin", LC_ALL: "C" } });
-      result = r.stdout.trim();
+      const done = await this.runProbe(task, probe, signal);
+      if (!this.current(task, controller)) return;
+      task.commandReview = { id: review.id, fence: task.fence, tool: "shell", summary: probe,
+        at: review.at, reason: `已执行本地检查「${probe}」。`, decision: done.error ? "failed" : "executed",
+        model: review.model, mode: "auto", outcome: done.error ?? done.output };
+      this.store.save(task);
+      if (done.error) throw new Error(`本地检查执行失败：${done.error}`);
+      result = done.output!;
     }
     if (!this.current(task, controller)) return;
     if (!result) throw new Error("任务未产生可保存的结果");
+    await this.completeWithResult(task, result);
+  }
+
+  /** 执行一条白名单本地检查；返回输出或失败原因。 */
+  private async runProbe(task: TaskRecord, probe: string, signal: AbortSignal): Promise<{ output?: string; error?: string }> {
+    const [bin, arg] = probe.split(" ");
+    try {
+      const r = await execute(bin === "date" ? "/bin/date" : "/usr/bin/uname", [arg!],
+        { signal, timeout: 5000, cwd: task.dataDir, env: { PATH: "/usr/bin:/bin", LC_ALL: "C" } });
+      return { output: r.stdout.trim() };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** 结果落证据、判定目标并完结任务；用户允许后与自动放行共用。 */
+  private async completeWithResult(task: TaskRecord, result: string) {
     const paths = taskPaths(task.dataDir);
     const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
     try {
@@ -243,7 +285,83 @@ export class AssignmentService {
       task.goals = history.listGoals(task.id);
     } finally { history.close(); }
     this.readableResult(task, result);
-    if (!this.current(task, controller)) return;
     this.store.finishTask(task, "completed", null);
+  }
+
+  /** 会话内「允许本次 / 拒绝本次」：只绑定当前任务这一次调用，重复点击只处理第一次。 */
+  async decideCommand(taskId: string, allow: boolean): Promise<TaskRecord> {
+    const task = this.store.get(taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const review = task.commandReview;
+    if (!review || review.decision !== "waiting" || review.fence !== task.fence) {
+      throw new Error("没有等待确认的命令，或该命令已处理、已过期。");
+    }
+    const probe = localProbes.find(p => p === review.summary);
+    if (!probe) {
+      review.decision = "block"; review.reason = outOfScopeReason;
+      this.interrupt(task, "paused", outOfScopeReason);
+      return task;
+    }
+    if (!allow) {
+      review.decision = "rejected"; review.reason = "你拒绝了本次执行，任务保持暂停。";
+      this.interrupt(task, "paused", `用户拒绝执行命令：${probe}`);
+      return task;
+    }
+    // 先同步翻转终态再执行：并发或重复点击只会执行一次。
+    review.decision = "executed"; review.outcome = "已允许本次执行，正在执行…";
+    task.error = null; this.store.save(task);
+    const done = await this.runProbe(task, probe, AbortSignal.timeout(5000));
+    if (done.error) {
+      review.decision = "failed"; review.outcome = done.error; review.reason = done.error;
+      this.interrupt(task, "failed", `本地检查执行失败：${done.error}`);
+      return task;
+    }
+    review.outcome = done.output!;
+    this.store.save(task);
+    await this.completeWithResult(task, done.output!);
+    return this.store.get(taskId)!;
+  }
+
+  /** 审批模型不可用后的重试入口：就地对同一命令重新送审，通过即执行。 */
+  private readonly retrying = new Set<string>();
+  async retryCommand(taskId: string): Promise<TaskRecord> {
+    const task = this.store.get(taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    const review = task.commandReview;
+    if (!review || review.decision !== "unavailable" || review.fence !== task.fence) {
+      throw new Error("只有审批模型不可用的命令可以重试。");
+    }
+    if (this.retrying.has(taskId)) throw new Error("该命令正在重试，请稍候。");
+    const probe = localProbes.find(p => p === review.summary);
+    if (!probe) throw new Error("该命令不在执行器支持范围内。");
+    this.retrying.add(taskId);
+    try {
+      const ticket: CommandTicket = { task: task.id, id: review.id, fence: task.fence, at: Date.now(),
+        action: { tool: "shell", summary: probe, localProbe: probe,
+          digest: createHash("sha256").update(probe).digest("hex") } };
+      const next = await reviewCommand(this.settings, ticket, AbortSignal.timeout(30_000));
+      if (next.decision === "allow") {
+        await this.decideFromRetry(task, review, probe);
+      } else {
+        task.commandReview = { ...review, at: next.at, reason: next.reason, model: next.model,
+          decision: next.decision === "unavailable" ? "unavailable" : "block" };
+        this.store.save(task);
+      }
+      return task;
+    } finally { this.retrying.delete(taskId); }
+  }
+
+  private async decideFromRetry(task: TaskRecord, review: NonNullable<TaskRecord["commandReview"]>, probe: string) {
+    review.decision = "executed"; review.outcome = "审批通过，正在执行…";
+    task.error = null; this.store.save(task);
+    const done = await this.runProbe(task, probe, AbortSignal.timeout(5000));
+    if (done.error) {
+      review.decision = "failed"; review.outcome = done.error; review.reason = done.error;
+      this.interrupt(task, "failed", `本地检查执行失败：${done.error}`);
+      return;
+    }
+    review.outcome = done.output!;
+    this.store.save(task);
+    await this.completeWithResult(task, done.output!);
   }
 }

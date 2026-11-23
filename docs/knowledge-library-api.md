@@ -1,6 +1,6 @@
-# 参考资料库 · 控制面接口契约
+# 知识库 · 控制面接口契约
 
-资料导入、检索、报告引用和导出通过控制面 API 提供。「知识与经验 → 参考资料」页面接入范围选择、模型设置、索引进度、重试、重建和检索。[页面接入设计](./knowledge-library-console.md)
+资料导入、检索、报告引用和导出通过控制面 API 提供。「知识库」页面（原「知识与经验 → 参考资料」，侧栏仍归「知识与经验」组）直接管理全局共享文档：导入、两步向量化、逐份索引状态与检索。[页面接入设计](./knowledge-library-console.md)
 
 真实云端验收使用共享合成资料，本机 oMLX 返回 1024 维，硅基流动 Qwen/Qwen3-VL-Embedding-8B 返回 4096 维。两次切换均确认索引就绪，定版引用的段落和版本校验值一致。[脱敏验收记录](./evidence/knowledge-library/siliconflow-acceptance.json)
 
@@ -34,6 +34,13 @@
 2. **检索默认是混合（`mode=hybrid`）。** 关键词保住 `R-017`、`54/60` 这类精确值与 `§6.4` 这类章节地址；向量补中文同义与中英跨语言。**语义命中不会标成正文字面命中。**
 3. **索引与定版引用相互独立。** 重切分、换 embedding 模型、重建索引都不影响已有资料版本与报告引用。新引用固定「资料版本 + 原文范围 + 片段校验值 + 快照校验值」。
 4. **PDF 页码按物理页。** 早期版本按空行推算的页码无法确认，如实标 `pageBasis: "legacy-paragraph"`。
+
+「知识库」改版再追加四条（2026-11-23）：
+
+5. **导入与向量化分两步。** `POST /knowledge/materials` 只把版本索引状态登记为 `pending`（待向量化），**不排入后台队列、不发出文档嵌入请求**。只有用户动作——控制台「开始向量化」、重试、重建（`/knowledge/index/retry` / `/rebuild`）——才把版本入队。未配置模型时导入照常完成，刷新后文档仍在列表中。
+6. **`GET /knowledge/materials` 逐份带状态。** 列表条目是 `KnowledgeMaterialListItem`：资料字段 + 当前生效版本（含 `bodyStatus`）+ 该版本的 `KnowledgeVersionIndexState`。列表页据此回答「每份文档到哪一步了」，失败项可单独重试。
+7. **`rebuild` / `retry` 接受 `versionIds` 数组。** 控制台勾选多份文档一次入队；重试只动失败/未就绪的版本，已就绪的自动跳过，不整库重建。
+8. **控制台知识库首页固定为共享（全局）范围。** 从首页导入一律写 `scope: {"kind":"shared"}`，跨项目、跨任务可检索；历史委托专属资料保留原归属，已有任务引用仍按原版本回读。任务深链 `#/knowledge?taskId=…` 仍按服务端任务归属解析只读范围（供报告引用场景复用）。
 
 ---
 
@@ -76,8 +83,8 @@
 | 方法 | 路径 | 用途 | 成功码 |
 | --- | --- | --- | --- |
 | POST | `/knowledge/preview` | 预览：解析正文与切片，**不写盘** | 200 |
-| POST | `/knowledge/materials` | 导入整篇（必须显式给 `scope`） | 201 新建 / 200 复用已有版本 |
-| GET | `/knowledge/materials` | 范围内资料清单 | 200 |
+| POST | `/knowledge/materials` | 导入整篇（必须显式给 `scope`；只登记待向量化，不入队） | 201 新建 / 200 复用已有版本 |
+| GET | `/knowledge/materials` | 范围内资料清单（每份含当前生效版本与索引状态） | 200 |
 | GET | `/knowledge/materials/:materialId` | 资料详情 + 全部版本 | 200 |
 | GET | `/knowledge/materials/:materialId/versions` | 版本列表 | 200 |
 | GET | `/knowledge/materials/:materialId/versions/:versionId` | 版本详情 + 片段 + 快照状态 | 200 |
@@ -91,8 +98,8 @@
 | 方法 | 路径 | 用途 | 成功码 |
 | --- | --- | --- | --- |
 | GET | `/knowledge/index` | 范围内索引状态、模型与索引版本、降级原因 | 200 |
-| POST | `/knowledge/index/rebuild` | 重切分 + 重新向量化（可限定 `materialId` / `versionId`） | **202** |
-| POST | `/knowledge/index/retry` | 只重试失败/未就绪的版本 | **202** |
+| POST | `/knowledge/index/rebuild` | 重切分 + 重新向量化（可限定 `materialId` / `versionId` / `versionIds[]`） | **202** |
+| POST | `/knowledge/index/retry` | 只重试失败/未就绪的版本（可限定同上；入队门，已就绪自动跳过） | **202** |
 | PUT | `/settings/knowledge-embedding` | 改向量化配置（启用/服务商/本地与云端两套地址模型密钥/云端授权委托） | 200 |
 | POST | `/settings/knowledge-embedding/test` | 用固定合成短句测试所选服务，返回实测维度 | 200 |
 
@@ -187,6 +194,12 @@ type KnowledgeMaterial = {
   effectiveVersionId: string | null;  // 检索默认版本 = 最新未停用版本；全停用则 null
   versionCount: number;
 };
+
+/** GET /knowledge/materials 的列表条目：资料 + 当前生效版本 + 该版本索引状态。 */
+type KnowledgeMaterialListItem = KnowledgeMaterial & {
+  version: KnowledgeVersion | null;         // null = 全部版本已停用
+  index: KnowledgeVersionIndexState | null; // 与 version 同空：无生效版本时一并缺失
+};
 ```
 
 `chunkerVersion` / `extractionVersion` 落后于当前实现时，后端在启动或重建时**原地重切分**：只替换片段行，**不动版本号、`contentSha256`、快照与已有引用**。
@@ -219,7 +232,7 @@ type KnowledgeImportResult = {
 };
 ```
 
-**导入不等待向量化。** 响应里的 `index.state` 通常是 `"pending"`，片段与关键词检索**立即可用**；语义召回在索引灌满后生效。控制台导入成功后应展示"正在建立语义索引"，而不是报错或阻塞。
+**导入不触发向量化。** 导入只把版本索引状态登记为 `"pending"`（待向量化），**不排入后台队列、不发出文档嵌入请求**；片段与关键词检索立即可用。向量化由用户显式开始：控制台「开始向量化」把勾选版本经 `POST /knowledge/index/retry`（body 带 `versionIds`）入队，已就绪的自动跳过，因此不会每次重建整个知识库。未配置模型时导入照常完成，刷新后文档仍在列表中。控制台对 `pending` 版本应提示「可用关键词检索」，向量就绪后再提示语义检索可用。
 
 `POST /knowledge/preview` 用**同一份字段但去掉 `scope`**，返回 `KnowledgePreview`（元数据 + `contentSha256` + `sections`），不写盘、不建索引。
 
@@ -379,18 +392,19 @@ type KnowledgeIndexStatus = {
 **重试与重建**：
 
 ```bash
-# 只重试失败/未就绪的版本
+# 只重试失败/未就绪的版本（全范围，或限定 materialId / versionId / versionIds）
 curl -sS -X POST "$BASE/knowledge/index/retry?engagementId=$ENG" \
-  -H 'content-type: application/json' -d '{}'
+  -H 'content-type: application/json' -d '{"versionIds":["<versionId>","<versionId>"]}'
 # → 202 { scope, queued: ["<versionId>", ...], status: KnowledgeIndexStatus }
 
-# 重切分 + 重新向量化（可限定资料或版本）
+# 重切分 + 重新向量化（可限定资料、版本或多版本）
 curl -sS -X POST "$BASE/knowledge/index/rebuild?engagementId=$ENG" \
   -H 'content-type: application/json' -d '{"materialId":"<mid>"}'
 # → 202 { scope, versions: ["<versionId>", ...], status: KnowledgeIndexStatus }
 ```
 
-- 两者都按服务端可见范围执行；`materialId` 越界 → **404**。
+- 两者都按服务端可见范围执行；`materialId` 越界 → **404**；`versionId` / `versionIds` 中不在范围内的版本被忽略（不报错，与列表读数一致）。
+- `retry` 是「开始向量化」的入队门：只把状态不是 `ready` 的版本排进后台队列，已就绪的跳过，因此反复点击不会重复消耗 embedding 调用。
 - **重建不改资料版本**：`versionNo`、`contentSha256`、快照、已有引用全部不变。控制台可以放心提供"重建索引"按钮，并说明"不影响已定版引用"。
 - 重建只删**当前指纹**下的向量，另一套服务已建好的向量留在盘上，切回去不必重算。
 - 换模型或换服务会换 `indexKey`，旧向量留在盘上但不与新指纹混用；需要重建才会灌新索引。
@@ -709,6 +723,8 @@ curl -sS "$BASE/tasks/$TASK/report-export?snapshot=paragraph"
 13. **范围以响应里的 `scope` 为准**：切换委托时重新拉取清单/检索/摘要/索引状态，不要在前端缓存跨委托结果。
 14. **越界统一 404**：不要根据错误文案推断"该资料存在于别的委托"。
 15. **导出取舍要显示**：`snapshotScope` 决定打包整份快照还是只有引用片段；`withheld.outOfScopeCitations` 只给数量。
+16. **导入不等于开始向量化**：导入响应的 `index.state` 是 `pending` 只表示待向量化，不在后台跑。点「开始向量化」前不得出现文档嵌入请求；未配置模型时先在当前流程引导配置并保留勾选。
+17. **列表逐份状态以 `materials[].index.state` 为准**：`pending` / `unconfigured` / `disabled` → 待向量化；`indexing` → 处理中（可显示 `indexedChunks/totalChunks`）；`ready` → 已就绪；`error` / `unavailable` → 失败并展示 `lastError`，失败项单独 `retry`（带该版本 id）。
 
 ---
 
@@ -721,7 +737,7 @@ curl -sS "$BASE/tasks/$TASK/report-export?snapshot=paragraph"
 | 本地/云端 embedding 客户端、服务商指纹、测试连接 | `packages/control-plane/src/knowledge-embed.ts` |
 | 单服务向量索引存储、后台灌索引、重试/重建 | `packages/control-plane/src/knowledge-index.ts` |
 | 双服务路由、按范围授权与读数聚合 | `packages/control-plane/src/knowledge-index-pool.ts` |
-| 持久化 / 导入 / 混合检索 / 摘要 | `packages/control-plane/src/knowledge.ts` |
+| 持久化 / 导入（不自动入队）/ 列表逐份状态 / 混合检索 / 摘要 | `packages/control-plane/src/knowledge.ts` |
 | 范围解析 / 引用 / 复验 / 导出 / 路由 | `packages/control-plane/src/knowledge-api.ts` |
 | 引用密封与回读白名单 | `packages/history/src/index.ts`（`material_citations`、`recordMaterialCitation`、`readProofVersion`） |
 | 报告渲染 | `packages/history/src/report.ts`（「## 参考资料引用（定版）」，含原文范围与页码依据） |

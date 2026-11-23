@@ -3,6 +3,7 @@ import { IconChevronRight, IconList } from "@douyinfe/semi-icons";
 import { api, type HistoryPayload, type RuntimePayload, type TaskRecord } from "../api";
 import { isActiveStatus, STATUS_LABEL } from "../labels";
 import { formatDateTime, parseTime } from "../time";
+import { CommandReviewCard } from "./CommandReviewCard";
 
 const phases: Record<string, string> = { bootstrap: "初始化", explore: "执行", reason: "规划", report: "汇总", relay: "交接" };
 
@@ -80,10 +81,7 @@ export function ChatTaskProgress({ taskId }: { taskId: string }) {
       {snapshot && <span className="gy-task-name" title={snapshot.name}>{snapshot.name}</span>}
       <IconChevronRight className="gy-task-caret" size="small" /></summary>
     <div className="gy-task-content">
-        {review && <section className="gy-command-hold" role="status">
-          <h3>命令审批记录</h3><p>{review.tool} · {review.reason}
-            <small className="gy-task-date">{formatDateTime(review.at)} · {review.model || "本地策略"}</small></p>
-        </section>}
+        {review && <CommandReviewCard taskId={taskId} review={review} onDecided={() => setAttempt(n => n + 1)} />}
       {failed && <p role="status">暂时无法读取任务进展。{snapshot && "以下为上次读取的记录。"} <button type="button" onClick={() => setAttempt(n => n + 1)}>重试</button></p>}
       {!failed && !snapshot && <p role="status">正在读取任务记录…</p>}
       {snapshot && <>

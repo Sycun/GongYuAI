@@ -1,4 +1,4 @@
-import { checkCommandRun, commandProposal, recordHardDenial, reviewBeforeDispatch } from "./command-guard.js";
+import { checkCommandRun, commandProposal, recordHardDenial, reportCommandOutcome, reviewBeforeDispatch } from "./command-guard.js";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -181,7 +181,7 @@ export async function runShell(
   if (literal) return { exitCode: 0, stdout: literal[2]! + (literal[1] === "echo" ? "\n" : ""), stderr: "" };
   if (command === "pwd") return { exitCode: 0, stdout: ctx.manifest.workspaceDir + "\n", stderr: "" };
   const action = commandProposal("shell", command, [], true);
-  await reviewBeforeDispatch(ctx.manifest, action);
+  const ticketId = await reviewBeforeDispatch(ctx.manifest, action);
   checkCommandRun(ctx.manifest);
   if (!action.localProbe) throw new Error("命令需要人工处理");
   const [name, flag] = action.localProbe.split(" ");
@@ -189,6 +189,10 @@ export async function runShell(
     cwd: ctx.manifest.workspaceDir, encoding: "utf8", timeout: timeoutMs,
     env: { PATH: "/usr/bin:/bin", LC_ALL: "C" },
   });
+  if (ticketId) {
+    reportCommandOutcome(ctx.manifest, ticketId, (result.status ?? 1) === 0,
+      (result.stdout ?? result.stderr ?? "").trim());
+  }
   return {
     exitCode: result.status ?? 1,
     stdout: (result.stdout ?? "").slice(0, 32_000),

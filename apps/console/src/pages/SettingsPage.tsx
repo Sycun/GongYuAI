@@ -9,10 +9,13 @@ import {
   Col,
   Form,
   Progress,
+  Radio,
+  RadioGroup,
   Row,
   Space,
   Switch,
   Table,
+  Tag,
   Toast,
   Typography,
 } from "@douyinfe/semi-ui";
@@ -177,7 +180,7 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
   const phase = updateStatus?.phase;
   const cardStyle = { background: "var(--semi-color-bg-1)", maxWidth: 720 } as const;
 
-  if (section === "approval") return <ChatApprovalSettings catalog={catalog} />;
+  if (section === "approval") return <ChatApprovalSettings catalog={catalog} onCatalog={onCatalog} />;
 
   if (section === "model") {
     return (
@@ -464,11 +467,13 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
   }
 
   if (section === "mcp") {
-    const toggleMcp = async (id: string, enabled: boolean) => {
+    const toggleMcp = async (id: string, loadAtStartup: boolean) => {
       try {
-        const r = await api.toggleTools({ kind: "mcp", id, enabled });
+        const r = await api.toggleTools({ kind: "mcp", id, enabled: loadAtStartup });
         setSettings(r.json);
-        Toast.success(enabled ? `已启用 ${id}` : `已关闭 ${id}`);
+        Toast.success(
+          loadAtStartup ? `已设为启动时加载 ${id}` : `已设为按需加载 ${id}`,
+        );
       } catch (e) {
         Toast.error(e instanceof Error ? e.message : String(e));
       }
@@ -508,7 +513,7 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
         <Banner
           type="info"
           closeIcon={null}
-          description="全局开关是默认基线；任务内模型可用 enable_mcp 按需解锁（常开核 nmap/httpx/nuclei）。目录：mcp/builtin|user。一工具一目录，非单体 kali-mcp。"
+          description="模型可以看到全部连接器，并按任务需要选择。设为『启动时加载』的连接器会在任务开始时提前连接。"
         />
         <Space>
           <Button icon={<IconRefresh />} onClick={() => void rescan()}>
@@ -533,12 +538,42 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
               },
               { title: "传输", dataIndex: "transport", width: 80 },
               {
-                title: "模型可见",
+                title: "加载方式",
                 dataIndex: "enabled",
-                width: 90,
-                render: (v: boolean, row: McpServerPublic) => (
-                  <Switch checked={v} onChange={(on) => void toggleMcp(row.id, on)} />
-                ),
+                width: 190,
+                render: (v: boolean, row: McpServerPublic) =>
+                  row.startupForced ? (
+                    <Space spacing={4}>
+                      <RadioGroup
+                        type="button"
+                        buttonSize="small"
+                        value="startup"
+                        disabled
+                        name={`mcp-load-${row.id}`}
+                        aria-label={`${row.id} 加载方式`}
+                      >
+                        <Radio value="ondemand">按需加载</Radio>
+                        <Radio value="startup">启动时加载</Radio>
+                      </RadioGroup>
+                      <Tag size="small" color="grey">
+                        常开
+                      </Tag>
+                    </Space>
+                  ) : (
+                    <RadioGroup
+                      type="button"
+                      buttonSize="small"
+                      value={v ? "startup" : "ondemand"}
+                      onChange={(e) =>
+                        void toggleMcp(row.id, e.target.value === "startup")
+                      }
+                      name={`mcp-load-${row.id}`}
+                      aria-label={`${row.id} 加载方式`}
+                    >
+                      <Radio value="ondemand">按需加载</Radio>
+                      <Radio value="startup">启动时加载</Radio>
+                    </RadioGroup>
+                  ),
               },
               {
                 title: "",

@@ -39,6 +39,7 @@ function manifest(workspaceDir: string): WorkerManifest {
     execution: { maxConcurrentExplores: 1, maxIntentsPerReason: 4, maxIntentsPerAssetRoot: 2, exploreTimeoutMs: 900_000, reasonLeaseMs: 120_000 },
     workerId: "w0",
     workerSlot: 0,
+    commandConfirmation: "auto",
     workerCount: 1,
     mock: true,
     mcpServers: [],

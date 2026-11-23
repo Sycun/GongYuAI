@@ -3187,4 +3187,4 @@ export function openHistory(opts: OpenHistoryOptions): HistoryStore {
   return new HistoryStore(opts);
 }
 
-export { CommandLedger, hasCommandLedger, localProbes, type CommandProposal, type CommandTicket } from "./command-reviews.js";
+export { CommandLedger, hasCommandLedger, localProbes, type CommandOutcome, type CommandProposal, type CommandTicket } from "./command-reviews.js";

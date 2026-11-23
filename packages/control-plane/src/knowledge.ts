@@ -13,6 +13,7 @@ import {
   type KnowledgeIndexStatus,
   type KnowledgeMatchField,
   type KnowledgeMaterial,
+  type KnowledgeMaterialListItem,
   type KnowledgePreview,
   type KnowledgePreviewInput,
   type KnowledgeReaderScope,
@@ -512,7 +513,8 @@ export class KnowledgeStore {
         .get(row.id, contentSha256) as VersionRow | undefined;
       if (existing) {
         this.db.exec("COMMIT");
-        this.index.markPending(existing.id);
+        // 导入只登记待向量化，不入队：向量化由「开始向量化」/重试/重建显式触发。
+        this.index.markPending(existing.id, { enqueue: false });
         return {
           material: this.toMaterial(row),
           version: this.toVersion(existing, this.sectionsOf(existing.id).length),
@@ -542,7 +544,7 @@ export class KnowledgeStore {
         .run(versionId, now, row.id);
       this.db.exec("COMMIT");
 
-      this.index.markPending(versionId);
+      this.index.markPending(versionId, { enqueue: false });
       const version = this.toVersion(this.versionRow(versionId)!, extracted.sections.length);
       return {
         material: this.toMaterial(this.materialRow(row.id)!),
@@ -561,6 +563,22 @@ export class KnowledgeStore {
   list(scope: KnowledgeReaderScope): KnowledgeMaterial[] {
     const rows = this.db.prepare(`SELECT * FROM materials ORDER BY created_at`).all() as MaterialRow[];
     return rows.map((row) => this.toMaterial(row)).filter((material) => materialVisible(material, scope));
+  }
+
+  /**
+   * 范围内资料清单，逐份带当前生效版本与该版本的索引状态。
+   * 列表页用它回答「每份文档到哪一步了」；没有未停用版本时 version/index 一并为 null。
+   */
+  listItems(scope: KnowledgeReaderScope): KnowledgeMaterialListItem[] {
+    return this.list(scope).map((material) => {
+      const row = material.effectiveVersionId ? this.versionRow(material.effectiveVersionId) : undefined;
+      if (!row) return { ...material, version: null, index: null };
+      return {
+        ...material,
+        version: this.toVersion(row, this.sectionsOf(row.id).length),
+        index: this.index.versionState(row.id),
+      };
+    });
   }
 
   /** 越界一律返回 null（路由回 404），不区分“不存在”与“无权”，避免泄露存在性。 */
@@ -644,14 +662,19 @@ export class KnowledgeStore {
     return this.toVersion(this.versionRow(versionId)!, found.version.sectionCount);
   }
 
-  /** 范围内的版本 id：检索、索引计数、重建都以此为唯一入口。 */
-  private scopedVersionIds(scope: KnowledgeReaderScope, opts: { materialId?: string; versionId?: string } = {}): string[] {
+  /** 范围内的版本 id：检索、索引计数、重建都以此为唯一入口。不在范围内的 id 被忽略。 */
+  private scopedVersionIds(scope: KnowledgeReaderScope, opts: {
+    materialId?: string; versionId?: string; versionIds?: string[];
+  } = {}): string[] {
     const ids: string[] = [];
+    const wanted = opts.versionIds ? new Set(opts.versionIds) : null;
     for (const material of this.list(scope)) {
       if (opts.materialId && material.id !== opts.materialId) continue;
       const rows = opts.versionId
         ? this.versionRows(material.id).filter((row) => row.id === opts.versionId)
-        : this.versionRows(material.id);
+        : wanted
+          ? this.versionRows(material.id).filter((row) => wanted.has(row.id))
+          : this.versionRows(material.id);
       for (const row of rows) ids.push(row.id);
     }
     return ids;
@@ -669,7 +692,9 @@ export class KnowledgeStore {
    * 重建索引：按当前切分算法重切分，再重新向量化。
    * 只动片段行与向量表，资料版本号、内容 SHA-256、快照与报告引用都不变。
    */
-  rebuildIndex(scope: KnowledgeReaderScope, opts: { materialId?: string; versionId?: string } = {}): {
+  rebuildIndex(scope: KnowledgeReaderScope, opts: {
+    materialId?: string; versionId?: string; versionIds?: string[];
+  } = {}): {
     versions: string[]; status: KnowledgeIndexStatus;
   } {
     this.refreshEmbeddingConfig();
@@ -691,7 +716,9 @@ export class KnowledgeStore {
     }) };
   }
 
-  retryIndex(scope: KnowledgeReaderScope, opts: { materialId?: string; versionId?: string } = {}): {
+  retryIndex(scope: KnowledgeReaderScope, opts: {
+    materialId?: string; versionId?: string; versionIds?: string[];
+  } = {}): {
     queued: string[]; status: KnowledgeIndexStatus;
   } {
     this.refreshEmbeddingConfig();

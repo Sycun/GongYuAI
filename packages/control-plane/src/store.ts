@@ -6,7 +6,7 @@ import {
   ExecutionConfigSchema,
   goalsFromSpecs,
   isActiveTaskStatus,
-  isTerminalTaskStatus,
+  isArchivableTaskStatus,
   type CreateTaskRequest,
   type TaskRecord,
   type TerminalTaskStatus,
@@ -164,12 +164,13 @@ export class ControlStore {
     return record;
   }
 
+  /** 归档只改软隐藏标记：状态、检查点与历史一律不动，取消归档只清标记。 */
   setArchived(taskId: string, archived: boolean): TaskRecord | null {
     const t = this.get(taskId);
     if (!t) return null;
     if (archived) {
-      if (!isTerminalTaskStatus(t.status)) {
-        throw new Error("仅终态任务可归档");
+      if (!isArchivableTaskStatus(t.status)) {
+        throw new Error("仅已暂停或终态任务可归档");
       }
       if (!t.archivedAt) t.archivedAt = this.now();
     } else {

@@ -38,10 +38,10 @@ import {
   findingStatusColor,
   formatWorkerStatus,
   isActiveStatus,
+  isArchivableStatus,
   isArchivedTask,
   isPausedStatus,
   isStartableStatus,
-  isTerminalStatus,
   shortId,
   statusColor,
 } from "../labels";
@@ -51,6 +51,7 @@ import { DeliveryScorecard } from "../components/DeliveryScorecard";
 import { ReconcilePanel } from "../components/ReconcilePanel";
 import { GoalReconcileCard, type AdoptedReconcile } from "../components/GoalReconcileCard";
 import { TaskOps } from "../components/TaskOps";
+import { CommandReviewCard } from "../components/CommandReviewCard";
 import { ExecutionTrace } from "../components/ExecutionTrace";
 import { IntegrationUsage } from "../components/IntegrationUsage";
 import { formatDateTime } from "../time";
@@ -206,7 +207,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
   const paused = isPausedStatus(task.status);
   const startable = isStartableStatus(task.status);
   const archived = isArchivedTask(task);
-  const archivable = isTerminalStatus(task.status) && !archived;
+  const archivable = isArchivableStatus(task.status) && !archived;
 
   const stopTask = async () => {
     if (!active || actionBusy) return;
@@ -283,7 +284,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
     setActionBusy(true);
     try {
       await api.unarchive(task.id);
-      Toast.success("已恢复到列表");
+      Toast.success("已取消归档");
       await onRefresh();
     } catch (e) {
       Toast.error(e instanceof Error ? e.message : String(e));
@@ -492,6 +493,11 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
 
       <div style={{ marginTop: 16 }}>
         {tab === "live" && task && <TaskOps taskId={task.id} focus={focus} />}
+        {tab === "live" && task.commandReview && (
+          <div style={{ margin: "12px 0" }}>
+            <CommandReviewCard taskId={task.id} review={task.commandReview} onDecided={onRefresh} />
+          </div>
+        )}
         {tab === "live" && (
           <Row gutter={16}>
             <Col span={12}>

@@ -1,11 +1,13 @@
-import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
+import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
 import type {
   KnowledgeEmbeddingPatch,
   KnowledgeEmbeddingTestInput,
   KnowledgeEmbeddingTestResult,
   KnowledgeEmbeddingView,
+  KnowledgeImportInput,
+  KnowledgeImportResult,
   KnowledgeIndexStatus,
-  KnowledgeMaterial,
+  KnowledgeMaterialListItem,
   KnowledgeReaderScope,
   KnowledgeSearchMode,
   KnowledgeSearchResult,
@@ -73,7 +75,7 @@ export type TaskRecord = {
   };
   usage: { tokens: number; toolCalls: number; installs: number };
   error: string | null;
-  commandReview?: { at: string; tool: string; reason: string; decision: "block" | "unavailable"; model: string };
+  commandReview?: CommandReviewView;
   createdAt: string;
   updatedAt: string;
   finishedAt?: string | null;
@@ -367,6 +369,8 @@ export type McpServerPublic = {
   url?: string;
   envConfigured: boolean;
   envKeys: string[];
+  /** 系统固定在任务启动时加载（常开核），不受用户偏好影响。 */
+  startupForced: boolean;
 };
 
 export type SkillPackPublic = {
@@ -427,6 +431,20 @@ export type PublicSettings = {
 };
 
 export type KnowledgeScopeParam = { engagementId?: string | null; taskId?: string | null };
+
+/** 命中片段的原文与上下文响应：整章原文、同章相邻片段、面包屑。 */
+export type KnowledgeSectionResponse = {
+  material: KnowledgeMaterialListItem;
+  version: KnowledgeImportResult["version"];
+  section: KnowledgeImportResult["sections"][number];
+  context: {
+    headingPath: string[];
+    parentLocator: string;
+    parentText: string;
+    previous: { locator: string; text: string } | null;
+    next: { locator: string; text: string } | null;
+  };
+};
 
 /** 任务锚定优先：只传 taskId，由服务端解析委托，避免与声明冲突触发 409。 */
 function knowledgeQuery(scope: KnowledgeScopeParam, extra?: Record<string, string>): string {
@@ -553,6 +571,9 @@ export const api = {
   saveApproval: (policy: ChatApproval) => request<ChatApproval>("/settings/approval", {
     method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(policy),
   }),
+  /** 会话内处理一次待确认命令；重复点击由服务端幂等处理，只回读结果。 */
+  commandReview: (id: string, action: "approve" | "reject" | "retry") =>
+    request<{ task: TaskRecord }>(`/tasks/${encodeURIComponent(id)}/command-review/${action}`, { method: "POST" }),
   overview: () => request<Overview>("/overview"),
   tasks: (signal?: AbortSignal) => request<{ tasks: TaskRecord[] }>("/tasks", { signal }),
   task: (id: string, signal?: AbortSignal) => request<{ task: TaskRecord }>(`/tasks/${encodeURIComponent(id)}`, { signal }),
@@ -744,16 +765,24 @@ export const api = {
   knowledgeIndex: (scope: KnowledgeScopeParam, signal?: AbortSignal) =>
     probe<{ scope: KnowledgeReaderScope; index: KnowledgeIndexStatus }>(`/knowledge/index${knowledgeQuery(scope)}`, signal),
   knowledgeMaterials: (scope: KnowledgeScopeParam, signal?: AbortSignal) =>
-    probe<{ scope: KnowledgeReaderScope; materials: KnowledgeMaterial[] }>(`/knowledge/materials${knowledgeQuery(scope)}`, signal),
+    probe<{ scope: KnowledgeReaderScope; materials: KnowledgeMaterialListItem[] }>(`/knowledge/materials${knowledgeQuery(scope)}`, signal),
   knowledgeSummary: (scope: KnowledgeScopeParam, signal?: AbortSignal) =>
     probe<KnowledgeSummary>(`/knowledge/summary${knowledgeQuery(scope)}`, signal),
+  /** 导入一份本地文档。200 = 复用已有版本，201 = 新建；probe.ok 两者都算成功。 */
+  knowledgeImport: (body: KnowledgeImportInput) =>
+    probe<KnowledgeImportResult>("/knowledge/materials", undefined, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  /** 命中片段的原文与上下文（整章、同章相邻片段）。 */
+  knowledgeSection: (materialId: string, versionId: string, locator: string, scope: KnowledgeScopeParam, signal?: AbortSignal) =>
+    probe<KnowledgeSectionResponse>(`/knowledge/materials/${encodeURIComponent(materialId)}/versions/${encodeURIComponent(versionId)}/section`
+      + `${knowledgeQuery(scope, { locator })}`, signal),
   knowledgeSearch: (scope: KnowledgeScopeParam, q: string, mode: KnowledgeSearchMode, signal?: AbortSignal) =>
     probe<KnowledgeSearchResult>(`/knowledge/search${knowledgeQuery(scope, { q, mode })}`, signal),
-  knowledgeRebuild: (scope: KnowledgeScopeParam, body: { materialId?: string; versionId?: string } = {}) =>
+  knowledgeRebuild: (scope: KnowledgeScopeParam, body: { materialId?: string; versionId?: string; versionIds?: string[] } = {}) =>
     probe<{ scope: KnowledgeReaderScope; versions: string[]; status: KnowledgeIndexStatus }>(
       `/knowledge/index/rebuild${knowledgeQuery(scope)}`, undefined,
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-  knowledgeRetry: (scope: KnowledgeScopeParam, body: { materialId?: string; versionId?: string } = {}) =>
+  knowledgeRetry: (scope: KnowledgeScopeParam, body: { materialId?: string; versionId?: string; versionIds?: string[] } = {}) =>
     probe<{ scope: KnowledgeReaderScope; queued: string[]; status: KnowledgeIndexStatus }>(
       `/knowledge/index/retry${knowledgeQuery(scope)}`, undefined,
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),

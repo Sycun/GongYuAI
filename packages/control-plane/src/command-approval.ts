@@ -7,6 +7,13 @@ const instructions = `审查即将发生的工具调用，不执行工具。输�
 只输出 JSON，含 risk（low、medium、high 或 unknown）、activity（read_only、local_validation、external_action、destructive 或 unknown）和一句中文 reason。
 只对完全可判断的只读操作或可逆本地校验给出低风险。未展示完整参数、解释器、外部工具的副作用不明时应标记 unknown。不要提供执行步骤或复述敏感值。`;
 
+/** 执行器支持范围：只有固定本地检查（白名单 argv）可被放行执行。 */
+export function executorBound(action: CommandTicket["action"]) {
+  return action.tool === "shell" && localProbes.some(probe => probe === action.localProbe && probe === action.summary);
+}
+
+export const outOfScopeReason = `超出任务授权范围或执行器支持范围：当前仅支持本地只读检查（${localProbes.join("、")}），该操作已直接拦截。`;
+
 export async function reviewCommand(settings: SettingsStore, ticket: CommandTicket, signal: AbortSignal): Promise<ApprovalReceipt> {
   const { scope, reviewer } = settings.get().chatApproval;
   const id = reviewer?.profileId ?? settings.chatCatalog().defaultId;
@@ -17,8 +24,8 @@ export async function reviewCommand(settings: SettingsStore, ticket: CommandTick
   if (!profile || !selectableChatModels(profile).includes(model) || needsKey(profile)) {
     return { ...receipt, reason: "审批模型尚未配置或已不可用，请检查设置中的审批模型及接口密钥。" };
   }
-  const { tool, summary, localProbe } = ticket.action;
-  const bounded = tool === "shell" && localProbes.some(probe => probe === localProbe && probe === summary);
+  const { tool, summary } = ticket.action;
+  const bounded = executorBound(ticket.action);
   try {
     const legacy = profile.id === "existing" && !settings.get().chatProfiles.some(p => p.id === "existing");
     const response = await requestCompletion(profile, { modelId: model }, [
@@ -40,4 +47,19 @@ export async function reviewCommand(settings: SettingsStore, ticket: CommandTick
     return { ...receipt, risk: verdict.risk, decision: allowed ? "allow" : "block",
       reason: (!bounded && verdict.risk === "low" ? "执行边界无法确认该操作的副作用，需人工复核。" : verdict.reason.trim().slice(0, 320)) };
   } catch { return receipt; }
+}
+
+/** 会话内用户结论：允许本次 / 拒绝本次，只绑定当前这一次调用。 */
+export function userReceipt(settings: SettingsStore, ticket: CommandTicket, allow: boolean): ApprovalReceipt {
+  const { scope } = settings.get().chatApproval;
+  return { id: ticket.id, at: new Date().toISOString(), model: "用户", scope,
+    decision: allow ? "allow" : "block", risk: "unknown",
+    reason: allow ? "用户允许本次执行。" : "用户拒绝本次执行。", actor: "user" };
+}
+
+/** 策略拦截（范围外、超时）：不经模型、不进入等待。 */
+export function policyReceipt(settings: SettingsStore, ticket: CommandTicket, reason: string, decision: "block" | "expired" = "block"): ApprovalReceipt {
+  const { scope } = settings.get().chatApproval;
+  return { id: ticket.id, at: new Date().toISOString(), model: "", scope,
+    decision, risk: "unknown", reason, actor: "policy" };
 }

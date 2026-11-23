@@ -57,6 +57,9 @@ import { embeddingSourceOf } from "./knowledge-embed.js";
 
 const MASK = "••••••••";
 
+/** 常开核：无论用户偏好如何，任务启动时都会加载。 */
+const MCP_STARTUP_FORCED = new Set<string>(CORE_MCP_IDS);
+
 export type PublicSettings = {
   model: Omit<ModelSettings, "apiKey"> & {
     apiKeyConfigured: boolean;
@@ -75,6 +78,8 @@ export type PublicSettings = {
     Omit<McpServerConfig, "env"> & {
       envConfigured: boolean;
       envKeys: string[];
+      /** 系统固定在任务启动时加载（常开核），与用户偏好无关。 */
+      startupForced: boolean;
     }
   >;
   skillPacks: SkillPackConfig[];
@@ -249,6 +254,7 @@ export class SettingsStore {
         url: s.url,
         envConfigured: Object.keys(s.env ?? {}).length > 0,
         envKeys: Object.keys(s.env ?? {}),
+        startupForced: MCP_STARTUP_FORCED.has(s.id),
       })),
       skillPacks: this.data.skillPacks,
       assetCollectors: this.data.assetCollectors.map((c) => ({

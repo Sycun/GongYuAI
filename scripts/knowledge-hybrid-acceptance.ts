@@ -547,6 +547,8 @@ async function main() {
     `已导入 ${Object.keys(imported).length}/4：${Object.keys(imported).join(",")}`);
 
   // --- 3. 索引就绪 ---------------------------------------------------------
+  // 新契约：导入只登记待向量化，这里显式「开始向量化」（勾选全部版本）再等灌满。
+  await call(base, "POST", `/knowledge/index/retry?engagementId=${ENG}`, {});
   await plane.knowledge.index.idle(300_000);
   const indexStatus = await call(base, "GET", `/knowledge/index?engagementId=${ENG}`);
   writeFileSync(join(evidenceDir, "response-index-status.json"), JSON.stringify(indexStatus.json, null, 2));
@@ -740,6 +742,8 @@ async function main() {
         revised.status === 201 && v2.versionNo === 2 && v2.contentSha256 !== sapper.version.contentSha256
         && existsSync(join(dataRoot, sapper.version.snapshotPath)),
         `v2Id=${v2?.id} v2Sha=${v2?.contentSha256} v1SnapshotStillPresent=${existsSync(join(dataRoot, sapper.version.snapshotPath))}`);
+      // v2 也是导入后显式开始向量化
+      await call(base, "POST", `/knowledge/index/retry?engagementId=${ENG}`, { versionIds: [v2.id] });
       await plane.knowledge.index.idle(300_000);
 
       const deprecated = await call(base, "POST",
@@ -792,6 +796,9 @@ async function main() {
     "## 交接记录\n\n07:20 贝塔专属关键词出现，指挥官换任，继任者读 STATE 续接进度。");
   const shared = await isoImport({ kind: "shared" }, "团队共享交接记录",
     "## 交接记录\n\n伽马共享关键词出现，指挥官换任，继任者读 STATE 续接进度。");
+  // 隔离样本同样显式开始向量化：A/B 各一次（共享资料包含在内）
+  await call(base, "POST", `/knowledge/index/retry?engagementId=${ENG_A}`, {});
+  await call(base, "POST", `/knowledge/index/retry?engagementId=${ENG_B}`, {});
   await plane.knowledge.index.idle(300_000);
 
   const isoRows: unknown[] = [];
