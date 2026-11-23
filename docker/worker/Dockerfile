@@ -16,6 +16,7 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate \
   && pnpm install --frozen-lockfile=false \
   && pnpm -r run build
 
+LABEL org.gongyuai.command-review="1"
 WORKDIR /task
 ENV GY_MANIFEST=/task/manifest.json
 ENTRYPOINT ["node", "/opt/gongyuai/packages/worker/dist/main.js", "--manifest", "/task/manifest.json"]

@@ -1,0 +1,32 @@
+{
+  "citation": {
+    "id": "a49dd90e-550c-45aa-80aa-7af66e4a5c3b",
+    "taskId": "3eb61eb1-5d30-47e3-a514-93c343272477",
+    "engagementId": "eng-knowledge-1795404972071",
+    "materialId": "4a3bb9ea-08d8-4df7-800e-5599d1899f40",
+    "versionId": "7d2fd3ea-b2b7-4c14-bf8e-1f2fa7d05ca1",
+    "locator": "§6.4",
+    "claim": "独立分析从运行记录中追到了一次负责人换班（06:14 换任，靠 STATE 续接）",
+    "bodyFormat": "markdown",
+    "materialTitle": "SapperLens §6.4 状态与连续性",
+    "publisher": "inwpu（独立运行分析）",
+    "sourceKind": "excerpt",
+    "versionNo": 1,
+    "versionLabel": "本地 v1",
+    "sectionHeading": "6.4 状态与连续性",
+    "sectionPage": null,
+    "sectionOrdinal": 0,
+    "snapshotSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+    "createdAt": "2026-11-23T03:36:20.052Z"
+  },
+  "verification": {
+    "status": "unverifiable",
+    "reason": "sha256_mismatch",
+    "expectedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+    "recomputedSha256": "208ded743e42a963280c0178f6f571d496eeab7a17980afd5bfe24d06b734689",
+    "source": "task-seal",
+    "detail": "快照内容与引用登记的 SHA-256 不一致，无法复验"
+  },
+  "versionStatus": "deprecated",
+  "librarySnapshotAvailable": false
+}

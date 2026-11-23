@@ -1,0 +1,45 @@
+{
+  "material": {
+    "id": "aa6b9eb7-8098-4595-b1e6-c7e65e759900",
+    "scope": {
+      "kind": "engagement",
+      "engagementId": "eng-knowledge-1795411271842"
+    },
+    "scopeKey": "engagement:eng-knowledge-1795411271842",
+    "sourceKey": "https://github.com/inwpu/SapperLens#64-%E7%8A%B6%E6%80%81%E4%B8%8E%E8%BF%9E%E7%BB%AD%E6%80%A7",
+    "title": "SapperLens §6.4 状态与连续性",
+    "publisher": "inwpu（独立运行分析）",
+    "sourceKind": "excerpt",
+    "sourceUrl": "https://github.com/inwpu/SapperLens#64-状态与连续性",
+    "note": "摘录独立分析第 6.4 节，含 06:14 换任的 STATE 文件示例。",
+    "tags": [
+      "负责人换班",
+      "状态与连续性",
+      "Commander 交接"
+    ],
+    "createdAt": "2026-11-23T05:21:17.493Z",
+    "updatedAt": "2026-11-23T05:21:17.493Z",
+    "currentVersionId": "80f90dab-5bf6-403a-85db-262c52122cd4",
+    "effectiveVersionId": "80f90dab-5bf6-403a-85db-262c52122cd4",
+    "versionCount": 1
+  },
+  "versions": [
+    {
+      "id": "80f90dab-5bf6-403a-85db-262c52122cd4",
+      "materialId": "aa6b9eb7-8098-4595-b1e6-c7e65e759900",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "contentSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+      "byteSize": 2456,
+      "importedAt": "2026-11-23T05:21:17.493Z",
+      "format": "markdown",
+      "bodyStatus": "ready",
+      "sectionCount": 3,
+      "upstreamCommit": "eebd7ce31c5d6620f1e760b80de774484568c94b",
+      "status": "active",
+      "snapshotPath": "knowledge/snapshots/f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+      "chunkerVersion": 2,
+      "extractionVersion": 1
+    }
+  ]
+}

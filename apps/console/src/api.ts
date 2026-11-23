@@ -625,8 +625,10 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ goalId }),
     }),
-  evidenceFile: (id: string, path: string) =>
-    request<string>(`/tasks/${id}/evidence/file?path=${encodeURIComponent(path)}`),
+  evidenceFile: (id: string, path: string, signal?: AbortSignal) =>
+    request<string>(`/tasks/${id}/evidence/file?path=${encodeURIComponent(path)}`, { signal }),
+  corrections: (id: string) => request<{ corrections: Array<Record<string, unknown>> }>(`/tasks/${id}/corrections`),
+  snapshot: (id: string) => request<Record<string, unknown>>(`/tasks/${id}/snapshot`),
   recordCoverage: (id: string, body: CoverageReviewInput) =>
     request<{ coverage: CoverageReview }>(`/tasks/${id}/coverage`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),

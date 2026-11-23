@@ -75,7 +75,7 @@ export function ReconcilePanel({ taskId, onDone }: { taskId: string; onDone?: ()
   }
 
   return (
-    <Card title="原始材料差异核算" style={{ background: "var(--semi-color-bg-1)" }}>
+    <Card title="业务核算" style={{ background: "var(--semi-color-bg-1)" }}>
       <Form
         initValues={{ keyField: "host" }}
         onSubmit={(values) => void run(values as FormValues)}
@@ -99,6 +99,10 @@ export function ReconcilePanel({ taskId, onDone }: { taskId: string; onDone?: ()
           </Typography.Paragraph>
           <Typography.Paragraph type="tertiary" size="small">
             结果证据　{outcome.evidencePath} · SHA-256 {outcome.evidenceSha256}
+            {" · "}
+            {"reused" in outcome && (outcome as { reused?: boolean }).reused
+              ? "服务端复用了原合格结果。"
+              : "响应没有复用标记，页面不自行判断相同内容是否沿用原结果。"}
           </Typography.Paragraph>
           <Table
             size="small"

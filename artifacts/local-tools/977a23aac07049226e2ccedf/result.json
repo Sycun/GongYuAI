@@ -1,0 +1,20 @@
+{
+  "artifact_dir": "artifacts/local-tools/977a23aac07049226e2ccedf",
+  "duration_seconds": 0.915,
+  "execution_host": "Kali sudo",
+  "exit_code": 0,
+  "files": {
+    "stderr.log": {
+      "bytes": 148,
+      "sha256": "1849752895c6baf22c4e5d34a7797ebaa5344013c06a990b63b9057b329ccdac"
+    },
+    "stdout.log": {
+      "bytes": 969,
+      "sha256": "b745c2a212614095d8b1aae9d48edc8915ef6d7068228acc102d192903c723fc"
+    }
+  },
+  "project_dir": ".",
+  "status": "completed",
+  "task_id": "task-2d9839a10ecef5c2",
+  "argv_sha256": "cc476e332920e252f9f8a2a81ec77a31b131a920217350334de5edf34d5d3367"
+}

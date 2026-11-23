@@ -1,0 +1,42 @@
+[
+  {
+    "reader": "eng-knowledge-hybrid-1795410676805-alpha",
+    "ownKeywordTotal": 1,
+    "otherKeywordTotal": 0,
+    "sharedKeywordTotal": 1,
+    "sharedHybridTotal": 2,
+    "sharedHybridLeak": false,
+    "materials": 2,
+    "semanticTotal": 2,
+    "semanticLeaked": false,
+    "semanticMaterials": [
+      "50fd155b-9f47-4c2c-be63-ab65cffaa0a5",
+      "0b390394-7c58-42ae-a2c6-ced1138f5a38"
+    ],
+    "searchedVersions": 2,
+    "indexTotalChunks": 2,
+    "leakedOtherTitle": false,
+    "ownId": "50fd155b-9f47-4c2c-be63-ab65cffaa0a5",
+    "otherId": "0ffa9b78-0414-4320-9af6-002a185ca691"
+  },
+  {
+    "reader": "eng-knowledge-hybrid-1795410676805-beta",
+    "ownKeywordTotal": 1,
+    "otherKeywordTotal": 0,
+    "sharedKeywordTotal": 1,
+    "sharedHybridTotal": 2,
+    "sharedHybridLeak": false,
+    "materials": 2,
+    "semanticTotal": 2,
+    "semanticLeaked": false,
+    "semanticMaterials": [
+      "0ffa9b78-0414-4320-9af6-002a185ca691",
+      "0b390394-7c58-42ae-a2c6-ced1138f5a38"
+    ],
+    "searchedVersions": 2,
+    "indexTotalChunks": 2,
+    "leakedOtherTitle": false,
+    "ownId": "0ffa9b78-0414-4320-9af6-002a185ca691",
+    "otherId": "50fd155b-9f47-4c2c-be63-ab65cffaa0a5"
+  }
+]

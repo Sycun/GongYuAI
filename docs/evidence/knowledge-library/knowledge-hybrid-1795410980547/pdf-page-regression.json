@@ -1,0 +1,22 @@
+[
+  {
+    "key": "memgpt",
+    "fileSha256": "9f674bcff69c86f11c813dcfad613d8841f5f8ed17979e3c4df06a91df7762e0",
+    "apiPages": 13,
+    "expectedPages": 13,
+    "pageBasis": "physical-page",
+    "chunks": 81,
+    "firstPageHead": "MemGPT: Towards LLMs as Operating Systems\nCharles Packer\n1\nSarah Wooders\n1\nKevin Lin\n1\nVivian Fang\n1\nShishir G. Patil\n1\nIon Stoica\n1\nJoseph E. Gonzalez\n1\nAbstra",
+    "lastPageHead": "specified key. If a value itself is\nalso a key, return the value of that\nkey (do a nested lookup). For example,\nif the value of ’x’ is ’y’, but ’y’\nis also a ke"
+  },
+  {
+    "key": "attackpath",
+    "fileSha256": "eaa2be59c2055d2188a77731b6ee820cc2d83c04b4d8f3eccd7ef5317b048ab5",
+    "apiPages": 17,
+    "expectedPages": 17,
+    "pageBasis": "physical-page",
+    "chunks": 151,
+    "firstPageHead": "Staying on the Attack Path: Structured State for Long-Horizon Automated Penetration\nTesting\nWeizhe Wang\na\n, Yitong Zhang\na\n, Yao Zhang\na,∗\n, Xiaoqiang Di\nb,c\n, ",
+    "lastPageHead": "token context intelligence, arXiv preprint arXiv:2606.19348 (2026).\n[45] ProjectDiscovery, Vulnx: Modern cli for exploring vulnerabil-\nity data with powerful se"
+  }
+]

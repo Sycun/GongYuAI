@@ -1,0 +1,3037 @@
+{
+  "runId": "knowledge-hybrid-1795410676805",
+  "generatedAt": "2026-11-23T05:11:50.739Z",
+  "dataRoot": "/Users/sycpro/GongYuAI/out/knowledge-hybrid-1795410676805",
+  "engagementId": "eng-knowledge-hybrid-1795410676805",
+  "taskId": "bceb7dc6-ddbb-4449-9044-2eaa565475d0",
+  "embedding": {
+    "baseUrl": "http://127.0.0.1:8000/v1",
+    "model": "bge-m3-mlx-4bit",
+    "dim": 1024,
+    "ready": true,
+    "error": null
+  },
+  "totals": {
+    "steps": 57,
+    "passed": 50,
+    "failed": 7
+  },
+  "upstream": {
+    "nvwabase": {
+      "url": "https://raw.githubusercontent.com/N1nEmAn/nvwabase/master/README.md",
+      "commit": "c9ec790a99c01641d566e38d8d7d7e6c63a24bcc",
+      "bytes": 6619
+    },
+    "sapperlens": {
+      "url": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "commit": "eebd7ce31c5d6620f1e760b80de774484568c94b",
+      "bytes": 66325
+    },
+    "ledger": {
+      "url": "https://github.com/Sycun/GongYuAI/blob/main/docs/experiments/2026-11-22-ledger-relay/README.md",
+      "commit": "f0e80d23caea58942edbe1165dc1521283861dff",
+      "bytes": 4024
+    },
+    "r017": {
+      "url": "https://github.com/Sycun/GongYuAI/blob/main/docs/absorb-super-agent.md",
+      "commit": "f0e80d23caea58942edbe1165dc1521283861dff",
+      "bytes": 8473
+    }
+  },
+  "queries": [
+    {
+      "id": "Q1",
+      "query": "负责人换班",
+      "kind": "semantic",
+      "rationale": "三份原文都不含「负责人换班」整词：SapperLens 写「换任」「Commander 交接」，女娲 README 是英文 successor takes over mid-campaign，实验写「每个边界换班」。目标段落分别是 §6.4 状态与连续性、§2 The Three-Capability Foundation、§六批、五次交接。",
+      "keywordTotal": 0,
+      "hybridTotal": 12,
+      "recall": {
+        "keyword": 0,
+        "semantic": 12,
+        "semanticCutoff": 0.35
+      },
+      "degraded": false,
+      "targets": [
+        {
+          "docKey": "sapperlens",
+          "parentLocator": "§6.4",
+          "keywordRank": null,
+          "hybridRank": 3,
+          "inTop5": true
+        },
+        {
+          "docKey": "nvwabase",
+          "parentLocator": "§2",
+          "keywordRank": null,
+          "hybridRank": 11,
+          "inTop5": false
+        },
+        {
+          "docKey": "ledger",
+          "parentLocator": "§六批、五次交接",
+          "keywordRank": null,
+          "hybridRank": 9,
+          "inTop5": false
+        }
+      ],
+      "regressions": [],
+      "targetScores": [
+        {
+          "docKey": "sapperlens",
+          "chunks": [
+            {
+              "locator": "§6.4",
+              "parentLocator": "§6.4",
+              "semanticScore": 0.5154
+            },
+            {
+              "locator": "§8.6",
+              "parentLocator": "§8.6",
+              "semanticScore": 0.5116
+            },
+            {
+              "locator": "§5.3~5",
+              "parentLocator": "§5.3",
+              "semanticScore": 0.5066
+            }
+          ]
+        },
+        {
+          "docKey": "nvwabase",
+          "chunks": [
+            {
+              "locator": "§4",
+              "parentLocator": "§4",
+              "semanticScore": 0.4684
+            },
+            {
+              "locator": "§2~2",
+              "parentLocator": "§2",
+              "semanticScore": 0.4303
+            },
+            {
+              "locator": "§3~2",
+              "parentLocator": "§3",
+              "semanticScore": 0.4282
+            }
+          ]
+        },
+        {
+          "docKey": "ledger",
+          "chunks": [
+            {
+              "locator": "§两处交接改动",
+              "parentLocator": "§两处交接改动",
+              "semanticScore": 0.5371
+            },
+            {
+              "locator": "§原六题的两批回归",
+              "parentLocator": "§原六题的两批回归",
+              "semanticScore": 0.4765
+            },
+            {
+              "locator": "§六批、五次交接",
+              "parentLocator": "§六批、五次交接",
+              "semanticScore": 0.4747
+            }
+          ]
+        }
+      ],
+      "keywordTop5": [],
+      "hybridTop5": [
+        {
+          "rank": 1,
+          "title": "Relay 台账交接六批复核实验（整篇 README）",
+          "locator": "§两处交接改动",
+          "parentLocator": "§两处交接改动",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4296,
+          "keywordScore": 0,
+          "semanticScore": 0.5371,
+          "headingPath": [
+            "Relay 的台账交接能否在六批复核中省 Token",
+            "两处交接改动"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§报告交付后收到更正凭据~2",
+          "parentLocator": "§报告交付后收到更正凭据",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4229,
+          "keywordScore": 0,
+          "semanticScore": 0.5286,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "报告交付后收到更正凭据"
+          ]
+        },
+        {
+          "rank": 3,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4",
+          "parentLocator": "§6.4",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4123,
+          "keywordScore": 0,
+          "semanticScore": 0.5154,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 4,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§8.6",
+          "parentLocator": "§8.6",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4093,
+          "keywordScore": 0,
+          "semanticScore": 0.5116,
+          "headingPath": [
+            "SapperLens",
+            "8. 失败模式",
+            "8.6 范围近失：硬线在 SKILL 里，执行靠 commander 兜底"
+          ]
+        },
+        {
+          "rank": 5,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§报告交付后收到更正凭据",
+          "parentLocator": "§报告交付后收到更正凭据",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4076,
+          "keywordScore": 0,
+          "semanticScore": 0.5096,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "报告交付后收到更正凭据"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q2",
+      "query": "接任指挥后怎样续上进度",
+      "kind": "semantic",
+      "rationale": "SapperLens §6.4 明确写「下一任指挥官读取该文件，接着调度」「换任通过读 STATE 文件继续」；女娲 §2 写继任者读图接手。两处都是同义表达，不是字面命中。",
+      "keywordTotal": 0,
+      "hybridTotal": 12,
+      "recall": {
+        "keyword": 0,
+        "semantic": 12,
+        "semanticCutoff": 0.3862469743199664
+      },
+      "degraded": false,
+      "targets": [
+        {
+          "docKey": "sapperlens",
+          "parentLocator": "§6.4",
+          "keywordRank": null,
+          "hybridRank": 1,
+          "inTop5": true
+        },
+        {
+          "docKey": "nvwabase",
+          "parentLocator": "§2",
+          "keywordRank": null,
+          "hybridRank": 11,
+          "inTop5": false
+        }
+      ],
+      "regressions": [],
+      "targetScores": [
+        {
+          "docKey": "sapperlens",
+          "chunks": [
+            {
+              "locator": "§6.4",
+              "parentLocator": "§6.4",
+              "semanticScore": 0.5862
+            },
+            {
+              "locator": "§4.3",
+              "parentLocator": "§4.3",
+              "semanticScore": 0.5279
+            },
+            {
+              "locator": "§9~2",
+              "parentLocator": "§9",
+              "semanticScore": 0.5254
+            }
+          ]
+        },
+        {
+          "docKey": "nvwabase",
+          "chunks": [
+            {
+              "locator": "§4",
+              "parentLocator": "§4",
+              "semanticScore": 0.4653
+            },
+            {
+              "locator": "§2~2",
+              "parentLocator": "§2",
+              "semanticScore": 0.4496
+            },
+            {
+              "locator": "§5",
+              "parentLocator": "§5",
+              "semanticScore": 0.4354
+            }
+          ]
+        }
+      ],
+      "keywordTop5": [],
+      "hybridTop5": [
+        {
+          "rank": 1,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4",
+          "parentLocator": "§6.4",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.469,
+          "keywordScore": 0,
+          "semanticScore": 0.5862,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§报告交付后收到更正凭据~2",
+          "parentLocator": "§报告交付后收到更正凭据",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4432,
+          "keywordScore": 0,
+          "semanticScore": 0.554,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "报告交付后收到更正凭据"
+          ]
+        },
+        {
+          "rank": 3,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§吸收表~2",
+          "parentLocator": "§吸收表",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4371,
+          "keywordScore": 0,
+          "semanticScore": 0.5464,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "吸收表"
+          ]
+        },
+        {
+          "rank": 4,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§若再动手（P7 提案，非默认下一刀）",
+          "parentLocator": "§若再动手（P7 提案，非默认下一刀）",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4233,
+          "keywordScore": 0,
+          "semanticScore": 0.5292,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "若再动手（P7 提案，非默认下一刀）"
+          ]
+        },
+        {
+          "rank": 5,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§4.3",
+          "parentLocator": "§4.3",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4223,
+          "keywordScore": 0,
+          "semanticScore": 0.5279,
+          "headingPath": [
+            "SapperLens",
+            "4. 设计图",
+            "4.3 升级阶梯（6 级）"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q3",
+      "query": "R-017",
+      "kind": "exact",
+      "rationale": "R-017 用例在 docs/absorb-super-agent.md 的「报告交付后收到更正凭据」一节，字面含 R-017。",
+      "keywordTotal": 2,
+      "hybridTotal": 11,
+      "recall": {
+        "keyword": 2,
+        "semantic": 11,
+        "semanticCutoff": 0.35
+      },
+      "degraded": false,
+      "targets": [
+        {
+          "docKey": "r017",
+          "parentLocator": "§报告交付后收到更正凭据",
+          "keywordRank": 1,
+          "hybridRank": 1,
+          "inTop5": true
+        }
+      ],
+      "regressions": [],
+      "targetScores": [
+        {
+          "docKey": "r017",
+          "chunks": [
+            {
+              "locator": "§报告交付后收到更正凭据~2",
+              "parentLocator": "§报告交付后收到更正凭据",
+              "semanticScore": 0.4657
+            },
+            {
+              "locator": "§若再动手（P7 提案，非默认下一刀）",
+              "parentLocator": "§若再动手（P7 提案，非默认下一刀）",
+              "semanticScore": 0.4499
+            },
+            {
+              "locator": "§报告交付后收到更正凭据",
+              "parentLocator": "§报告交付后收到更正凭据",
+              "semanticScore": 0.4426
+            }
+          ]
+        }
+      ],
+      "keywordTop5": [
+        {
+          "rank": 1,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§报告交付后收到更正凭据~2",
+          "parentLocator": "§报告交付后收到更正凭据",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body",
+            "title"
+          ],
+          "score": 1.7621,
+          "keywordScore": 1.7621,
+          "semanticScore": null,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "报告交付后收到更正凭据"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§报告交付后收到更正凭据",
+          "parentLocator": "§报告交付后收到更正凭据",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body",
+            "title"
+          ],
+          "score": 1.7263,
+          "keywordScore": 1.7263,
+          "semanticScore": null,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "报告交付后收到更正凭据"
+          ]
+        }
+      ],
+      "hybridTop5": [
+        {
+          "rank": 1,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§报告交付后收到更正凭据~2",
+          "parentLocator": "§报告交付后收到更正凭据",
+          "retrieval": "hybrid",
+          "matchedFields": [
+            "body",
+            "title",
+            "semantic"
+          ],
+          "score": 2.1347,
+          "keywordScore": 1.7621,
+          "semanticScore": 0.4657,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "报告交付后收到更正凭据"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§报告交付后收到更正凭据",
+          "parentLocator": "§报告交付后收到更正凭据",
+          "retrieval": "hybrid",
+          "matchedFields": [
+            "body",
+            "title",
+            "semantic"
+          ],
+          "score": 2.0803,
+          "keywordScore": 1.7263,
+          "semanticScore": 0.4426,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "报告交付后收到更正凭据"
+          ]
+        },
+        {
+          "rank": 3,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§若再动手（P7 提案，非默认下一刀）",
+          "parentLocator": "§若再动手（P7 提案，非默认下一刀）",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.3599,
+          "keywordScore": 0,
+          "semanticScore": 0.4499,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "若再动手（P7 提案，非默认下一刀）"
+          ]
+        },
+        {
+          "rank": 4,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§附录 A：35447 逐题总表（63 题）~5",
+          "parentLocator": "§附录 A：35447 逐题总表（63 题）",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.3392,
+          "keywordScore": 0,
+          "semanticScore": 0.4239,
+          "headingPath": [
+            "SapperLens",
+            "附录 A：35447 逐题总表（63 题）"
+          ]
+        },
+        {
+          "rank": 5,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§附录 A：35447 逐题总表（63 题）~2",
+          "parentLocator": "§附录 A：35447 逐题总表（63 题）",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.336,
+          "keywordScore": 0,
+          "semanticScore": 0.42,
+          "headingPath": [
+            "SapperLens",
+            "附录 A：35447 逐题总表（63 题）"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q4",
+      "query": "54/60",
+      "kind": "exact",
+      "rationale": "54/60 是六批实验的正确字段数，结果表在「六批、五次交接」一节。前言与「准确率差在哪里」也字面含该值，一并记录名次。",
+      "keywordTotal": 4,
+      "hybridTotal": 14,
+      "recall": {
+        "keyword": 4,
+        "semantic": 12,
+        "semanticCutoff": 0.35
+      },
+      "degraded": false,
+      "targets": [
+        {
+          "docKey": "ledger",
+          "parentLocator": "§六批、五次交接",
+          "keywordRank": 4,
+          "hybridRank": 2,
+          "inTop5": true
+        }
+      ],
+      "regressions": [],
+      "targetScores": [
+        {
+          "docKey": "ledger",
+          "chunks": [
+            {
+              "locator": "§六批、五次交接",
+              "parentLocator": "§六批、五次交接",
+              "semanticScore": 0.4195
+            },
+            {
+              "locator": "§原六题的两批回归",
+              "parentLocator": "§原六题的两批回归",
+              "semanticScore": 0.4156
+            },
+            {
+              "locator": "§准确率差在哪里",
+              "parentLocator": "§准确率差在哪里",
+              "semanticScore": 0.4131
+            }
+          ]
+        }
+      ],
+      "keywordTop5": [
+        {
+          "rank": 1,
+          "title": "Relay 台账交接六批复核实验（整篇 README）",
+          "locator": "§Relay 的台账交接能否在六批复核中省 Token",
+          "parentLocator": "§Relay 的台账交接能否在六批复核中省 Token",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.8101,
+          "keywordScore": 1.8101,
+          "semanticScore": null,
+          "headingPath": [
+            "Relay 的台账交接能否在六批复核中省 Token"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "Relay 台账交接六批复核实验（整篇 README）",
+          "locator": "§准确率差在哪里",
+          "parentLocator": "§准确率差在哪里",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6752,
+          "keywordScore": 1.6752,
+          "semanticScore": null,
+          "headingPath": [
+            "Relay 的台账交接能否在六批复核中省 Token",
+            "准确率差在哪里"
+          ]
+        },
+        {
+          "rank": 3,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§哪些收益仍需实验",
+          "parentLocator": "§哪些收益仍需实验",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.671,
+          "keywordScore": 1.671,
+          "semanticScore": null,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "吸收表",
+            "哪些收益仍需实验"
+          ]
+        },
+        {
+          "rank": 4,
+          "title": "Relay 台账交接六批复核实验（整篇 README）",
+          "locator": "§六批、五次交接",
+          "parentLocator": "§六批、五次交接",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6493,
+          "keywordScore": 1.6493,
+          "semanticScore": null,
+          "headingPath": [
+            "Relay 的台账交接能否在六批复核中省 Token",
+            "六批、五次交接"
+          ]
+        }
+      ],
+      "hybridTop5": [
+        {
+          "rank": 1,
+          "title": "Relay 台账交接六批复核实验（整篇 README）",
+          "locator": "§准确率差在哪里",
+          "parentLocator": "§准确率差在哪里",
+          "retrieval": "hybrid",
+          "matchedFields": [
+            "body",
+            "semantic"
+          ],
+          "score": 2.0057,
+          "keywordScore": 1.6752,
+          "semanticScore": 0.4131,
+          "headingPath": [
+            "Relay 的台账交接能否在六批复核中省 Token",
+            "准确率差在哪里"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "Relay 台账交接六批复核实验（整篇 README）",
+          "locator": "§六批、五次交接",
+          "parentLocator": "§六批、五次交接",
+          "retrieval": "hybrid",
+          "matchedFields": [
+            "body",
+            "semantic"
+          ],
+          "score": 1.9849,
+          "keywordScore": 1.6493,
+          "semanticScore": 0.4195,
+          "headingPath": [
+            "Relay 的台账交接能否在六批复核中省 Token",
+            "六批、五次交接"
+          ]
+        },
+        {
+          "rank": 3,
+          "title": "Relay 台账交接六批复核实验（整篇 README）",
+          "locator": "§Relay 的台账交接能否在六批复核中省 Token",
+          "parentLocator": "§Relay 的台账交接能否在六批复核中省 Token",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.8101,
+          "keywordScore": 1.8101,
+          "semanticScore": null,
+          "headingPath": [
+            "Relay 的台账交接能否在六批复核中省 Token"
+          ]
+        },
+        {
+          "rank": 4,
+          "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+          "locator": "§哪些收益仍需实验",
+          "parentLocator": "§哪些收益仍需实验",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.671,
+          "keywordScore": 1.671,
+          "semanticScore": null,
+          "headingPath": [
+            "GongYuAI 的 Super-agent 设计与验收",
+            "吸收表",
+            "哪些收益仍需实验"
+          ]
+        },
+        {
+          "rank": 5,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§附录 C：TCH3 题目信息（xlsx 50 题）~4",
+          "parentLocator": "§附录 C：TCH3 题目信息（xlsx 50 题）",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4017,
+          "keywordScore": 0,
+          "semanticScore": 0.5022,
+          "headingPath": [
+            "SapperLens",
+            "附录 C：TCH3 题目信息（xlsx 50 题）"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q5",
+      "query": "§6.4",
+      "kind": "exact",
+      "rationale": "章节地址查询。SapperLens 原文正文并不写「§6.4」这个字面，因此按定位精确命中，如实标为 locator 命中而非正文字面命中。",
+      "keywordTotal": 2,
+      "hybridTotal": 13,
+      "recall": {
+        "keyword": 2,
+        "semantic": 12,
+        "semanticCutoff": 0.3647058549464212
+      },
+      "degraded": false,
+      "targets": [
+        {
+          "docKey": "sapperlens",
+          "parentLocator": "§6.4",
+          "keywordRank": 1,
+          "hybridRank": 1,
+          "inTop5": true
+        }
+      ],
+      "regressions": [],
+      "targetScores": [
+        {
+          "docKey": "sapperlens",
+          "chunks": [
+            {
+              "locator": "§附录 D：35447 逐题会话映射~4",
+              "parentLocator": "§附录 D：35447 逐题会话映射",
+              "semanticScore": 0.5647
+            },
+            {
+              "locator": "§6.4",
+              "parentLocator": "§6.4",
+              "semanticScore": 0.5633
+            },
+            {
+              "locator": "§附录 D：35447 逐题会话映射~3",
+              "parentLocator": "§附录 D：35447 逐题会话映射",
+              "semanticScore": 0.5529
+            }
+          ]
+        }
+      ],
+      "keywordTop5": [
+        {
+          "rank": 1,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4",
+          "parentLocator": "§6.4",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "locator"
+          ],
+          "score": 1.6,
+          "keywordScore": 1.6,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4~2",
+          "parentLocator": "§6.4",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "locator"
+          ],
+          "score": 1.6,
+          "keywordScore": 1.6,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        }
+      ],
+      "hybridTop5": [
+        {
+          "rank": 1,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4",
+          "parentLocator": "§6.4",
+          "retrieval": "hybrid",
+          "matchedFields": [
+            "locator",
+            "semantic"
+          ],
+          "score": 2.0506,
+          "keywordScore": 1.6,
+          "semanticScore": 0.5633,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4~2",
+          "parentLocator": "§6.4",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "locator"
+          ],
+          "score": 1.6,
+          "keywordScore": 1.6,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 3,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§附录 D：35447 逐题会话映射~4",
+          "parentLocator": "§附录 D：35447 逐题会话映射",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4518,
+          "keywordScore": 0,
+          "semanticScore": 0.5647,
+          "headingPath": [
+            "SapperLens",
+            "附录 D：35447 逐题会话映射"
+          ]
+        },
+        {
+          "rank": 4,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§附录 D：35447 逐题会话映射~3",
+          "parentLocator": "§附录 D：35447 逐题会话映射",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.4423,
+          "keywordScore": 0,
+          "semanticScore": 0.5529,
+          "headingPath": [
+            "SapperLens",
+            "附录 D：35447 逐题会话映射"
+          ]
+        },
+        {
+          "rank": 5,
+          "title": "Relay 台账交接六批复核实验（整篇 README）",
+          "locator": "§六批、五次交接",
+          "parentLocator": "§六批、五次交接",
+          "retrieval": "semantic",
+          "matchedFields": [
+            "semantic"
+          ],
+          "score": 0.3544,
+          "keywordScore": 0,
+          "semanticScore": 0.443,
+          "headingPath": [
+            "Relay 的台账交接能否在六批复核中省 Token",
+            "六批、五次交接"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "Q6",
+      "query": "换任",
+      "kind": "exact",
+      "rationale": "上一轮的问题查询：字面「换任」在多处出现，首条却是 §0。目标段落是 §6.4 状态与连续性。",
+      "keywordTotal": 5,
+      "hybridTotal": 16,
+      "recall": {
+        "keyword": 5,
+        "semantic": 12,
+        "semanticCutoff": 0.35
+      },
+      "degraded": false,
+      "targets": [
+        {
+          "docKey": "sapperlens",
+          "parentLocator": "§6.4",
+          "keywordRank": 1,
+          "hybridRank": 1,
+          "inTop5": true
+        }
+      ],
+      "regressions": [],
+      "targetScores": [
+        {
+          "docKey": "sapperlens",
+          "chunks": [
+            {
+              "locator": "§6.4",
+              "parentLocator": "§6.4",
+              "semanticScore": 0.4881
+            },
+            {
+              "locator": "§5.3~5",
+              "parentLocator": "§5.3",
+              "semanticScore": 0.4717
+            },
+            {
+              "locator": "§8.6",
+              "parentLocator": "§8.6",
+              "semanticScore": 0.4642
+            }
+          ]
+        }
+      ],
+      "keywordTop5": [
+        {
+          "rank": 1,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4",
+          "parentLocator": "§6.4",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.708,
+          "keywordScore": 1.708,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4~2",
+          "parentLocator": "§6.4",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6509,
+          "keywordScore": 1.6509,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 3,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§0~2",
+          "parentLocator": "§0",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6469,
+          "keywordScore": 1.6469,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "0. 提示词与运行时证据文件"
+          ]
+        },
+        {
+          "rank": 4,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§5.2",
+          "parentLocator": "§5.2",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6457,
+          "keywordScore": 1.6457,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "5. 提示词全谱",
+            "5.2 L1：Commander 标准作业程序（427 行，25,842 字符）"
+          ]
+        },
+        {
+          "rank": 5,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§9~2",
+          "parentLocator": "§9",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6379,
+          "keywordScore": 1.6379,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "9. 可复用清单（按优先级）"
+          ]
+        }
+      ],
+      "hybridTop5": [
+        {
+          "rank": 1,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4",
+          "parentLocator": "§6.4",
+          "retrieval": "hybrid",
+          "matchedFields": [
+            "body",
+            "semantic"
+          ],
+          "score": 2.0985,
+          "keywordScore": 1.708,
+          "semanticScore": 0.4881,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 2,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§6.4~2",
+          "parentLocator": "§6.4",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6509,
+          "keywordScore": 1.6509,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "6. 架构设计",
+            "6.4 状态与连续性"
+          ]
+        },
+        {
+          "rank": 3,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§0~2",
+          "parentLocator": "§0",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6469,
+          "keywordScore": 1.6469,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "0. 提示词与运行时证据文件"
+          ]
+        },
+        {
+          "rank": 4,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§5.2",
+          "parentLocator": "§5.2",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6457,
+          "keywordScore": 1.6457,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "5. 提示词全谱",
+            "5.2 L1：Commander 标准作业程序（427 行，25,842 字符）"
+          ]
+        },
+        {
+          "rank": 5,
+          "title": "SapperLens 独立运行分析（整篇 README）",
+          "locator": "§9~2",
+          "parentLocator": "§9",
+          "retrieval": "keyword",
+          "matchedFields": [
+            "body"
+          ],
+          "score": 1.6379,
+          "keywordScore": 1.6379,
+          "semanticScore": null,
+          "headingPath": [
+            "SapperLens",
+            "9. 可复用清单（按优先级）"
+          ]
+        }
+      ]
+    }
+  ],
+  "pdfPages": [
+    {
+      "key": "memgpt",
+      "fileSha256": "9f674bcff69c86f11c813dcfad613d8841f5f8ed17979e3c4df06a91df7762e0",
+      "apiPages": 13,
+      "expectedPages": 13,
+      "pageBasis": "physical-page",
+      "chunks": 52,
+      "firstPageHead": "MemGPT: Towards LLMs as Operating Systems\nCharles Packer\n1\nSarah Wooders\n1\nKevin Lin\n1\nVivian Fang\n1\nShishir G. Patil\n1\nIon Stoica\n1\nJoseph E. Gonzalez\n1\nAbstra",
+      "lastPageHead": "MemGPT: Towards LLMs as Operating Systems\nanswers]\". The questions is provided\nin the format \"QUESTION: [question]\".\nIf the LLM response contains both\nthe corre"
+    },
+    {
+      "key": "attackpath",
+      "fileSha256": "eaa2be59c2055d2188a77731b6ee820cc2d83c04b4d8f3eccd7ef5317b048ab5",
+      "apiPages": 17,
+      "expectedPages": 17,
+      "pageBasis": "physical-page",
+      "chunks": 94,
+      "firstPageHead": "Staying on the Attack Path: Structured State for Long-Horizon Automated Penetration\nTesting\nWeizhe Wang\na\n, Yitong Zhang\na\n, Yao Zhang\na,∗\n, Xiaoqiang Di\nb,c\n, ",
+      "lastPageHead": "ity data with powerful search, filtering, and analysis capabilities,\nhttps://github.com/projectdiscovery/vulnx, gitHub repository. Accessed:\nJuly 29, 2026 (2026"
+    }
+  ],
+  "steps": [
+    {
+      "id": "0.1",
+      "title": "本机真实 embedding 模型可用（bge-m3-mlx-4bit）",
+      "passed": true,
+      "detail": "baseUrl=http://127.0.0.1:8000/v1 dim=1024 密钥来源=OMLX_API_KEY 环境变量",
+      "evidence": {
+        "baseUrl": "http://127.0.0.1:8000/v1",
+        "model": "bge-m3-mlx-4bit",
+        "dim": 1024
+      }
+    },
+    {
+      "id": "1.nvwabase",
+      "title": "取整篇上游原文 nvwabase",
+      "passed": true,
+      "detail": "bytes=6619 commit=c9ec790a99c01641d566e38d8d7d7e6c63a24bcc",
+      "evidence": {
+        "url": "https://raw.githubusercontent.com/N1nEmAn/nvwabase/master/README.md",
+        "commit": "c9ec790a99c01641d566e38d8d7d7e6c63a24bcc",
+        "bytes": 6619
+      }
+    },
+    {
+      "id": "1.sapperlens",
+      "title": "取整篇上游原文 sapperlens",
+      "passed": true,
+      "detail": "bytes=66325 commit=eebd7ce31c5d6620f1e760b80de774484568c94b",
+      "evidence": {
+        "url": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+        "commit": "eebd7ce31c5d6620f1e760b80de774484568c94b",
+        "bytes": 66325
+      }
+    },
+    {
+      "id": "1.ledger",
+      "title": "取本项目整篇材料 ledger",
+      "passed": true,
+      "detail": "bytes=4024 path=docs/experiments/2026-11-22-ledger-relay/README.md"
+    },
+    {
+      "id": "1.r017",
+      "title": "取本项目整篇材料 r017",
+      "passed": true,
+      "detail": "bytes=8473 path=docs/absorb-super-agent.md"
+    },
+    {
+      "id": "2.nvwabase",
+      "title": "整篇导入 nvwabase 并按标题层级切片",
+      "passed": true,
+      "detail": "chunks=9 byteSize=6700 原文范围精确=true 被继续切分的片段数=4 sha256=bf3588b34491440f1a28cd0229027680551c004d44268cc86af350ee63cad1c1",
+      "evidence": {
+        "contentSha256": "bf3588b34491440f1a28cd0229027680551c004d44268cc86af350ee63cad1c1",
+        "chunks": 9,
+        "locators": [
+          "§nvwabase — The Nüwa Foundation",
+          "§1",
+          "§2",
+          "§2~2",
+          "§3",
+          "§3~2",
+          "§4",
+          "§5",
+          "§Credits & Author"
+        ],
+        "upstreamCommit": "c9ec790a99c01641d566e38d8d7d7e6c63a24bcc"
+      }
+    },
+    {
+      "id": "2.sapperlens",
+      "title": "整篇导入 sapperlens 并按标题层级切片",
+      "passed": true,
+      "detail": "chunks=104 byteSize=86899 原文范围精确=true 被继续切分的片段数=59 sha256=7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+      "evidence": {
+        "contentSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+        "chunks": 104,
+        "locators": [
+          "§SapperLens",
+          "§目录",
+          "§署名与说明",
+          "§为什么叫 SapperLens",
+          "§0",
+          "§0~2",
+          "§0~3",
+          "§0~4",
+          "§1",
+          "§1.1",
+          "§1.2",
+          "§2",
+          "§2.1",
+          "§2.2",
+          "§2.3",
+          "§2.4",
+          "§2.5",
+          "§2.5~2",
+          "§3",
+          "§3.1",
+          "§3.2",
+          "§3.3",
+          "§3.4",
+          "§4",
+          "§4.1",
+          "§4.2",
+          "§4.3",
+          "§4.4",
+          "§4.5",
+          "§4.6",
+          "§4.7",
+          "§5",
+          "§5.1",
+          "§5.1~2",
+          "§5.2",
+          "§5.2~2",
+          "§5.2~3",
+          "§5.3",
+          "§5.3~2",
+          "§5.3~3",
+          "§5.3~4",
+          "§5.3~5",
+          "§5.3~6",
+          "§5.4",
+          "§5.4~2",
+          "§5.4~3",
+          "§5.4~4",
+          "§5.5",
+          "§5.6",
+          "§6",
+          "§6.1",
+          "§6.1~2",
+          "§6.2",
+          "§6.3",
+          "§6.4",
+          "§6.4~2",
+          "§6.5",
+          "§6.5~2",
+          "§6.6",
+          "§6.7",
+          "§6.8",
+          "§7",
+          "§7~2",
+          "§7~3",
+          "§8",
+          "§8.1",
+          "§8.2",
+          "§8.3",
+          "§8.4",
+          "§8.5",
+          "§8.6",
+          "§8.6~2",
+          "§8.7",
+          "§8.8",
+          "§8.9",
+          "§9",
+          "§9~2",
+          "§附录 A：35447 逐题总表（63 题）",
+          "§附录 A：35447 逐题总表（63 题）~2",
+          "§附录 A：35447 逐题总表（63 题）~3",
+          "§附录 A：35447 逐题总表（63 题）~4",
+          "§附录 A：35447 逐题总表（63 题）~5",
+          "§附录 A：35447 逐题总表（63 题）~6",
+          "§附录 A：35447 逐题总表（63 题）~7",
+          "§附录 A：35447 逐题总表（63 题）~8",
+          "§附录 B：33879 逐题总表（50 题）",
+          "§附录 B：33879 逐题总表（50 题）~2",
+          "§附录 B：33879 逐题总表（50 题）~3",
+          "§附录 B：33879 逐题总表（50 题）~4",
+          "§附录 B：33879 逐题总表（50 题）~5",
+          "§附录 B：33879 逐题总表（50 题）~6",
+          "§附录 C：TCH3 题目信息（xlsx 50 题）",
+          "§附录 C：TCH3 题目信息（xlsx 50 题）~2",
+          "§附录 C：TCH3 题目信息（xlsx 50 题）~3",
+          "§附录 C：TCH3 题目信息（xlsx 50 题）~4",
+          "§附录 D：35447 逐题会话映射",
+          "§附录 D：35447 逐题会话映射~2",
+          "§附录 D：35447 逐题会话映射~3",
+          "§附录 D：35447 逐题会话映射~4",
+          "§附录 D：35447 逐题会话映射~5",
+          "§附录 E：提示词文件清单与 SHA256",
+          "§附录 F：复算方法",
+          "§附录 F：复算方法~2",
+          "§关注"
+        ],
+        "upstreamCommit": "eebd7ce31c5d6620f1e760b80de774484568c94b"
+      }
+    },
+    {
+      "id": "2.ledger",
+      "title": "整篇导入 ledger 并按标题层级切片",
+      "passed": true,
+      "detail": "chunks=6 byteSize=7078 原文范围精确=true 被继续切分的片段数=0 sha256=ec950b4f3f8527eb2cda7d06ea50dd1a58a2fd578d24977690d85f12561f2999",
+      "evidence": {
+        "contentSha256": "ec950b4f3f8527eb2cda7d06ea50dd1a58a2fd578d24977690d85f12561f2999",
+        "chunks": 6,
+        "locators": [
+          "§Relay 的台账交接能否在六批复核中省 Token",
+          "§两处交接改动",
+          "§原六题的两批回归",
+          "§六批、五次交接",
+          "§准确率差在哪里",
+          "§用量与复算"
+        ],
+        "upstreamCommit": "f0e80d23caea58942edbe1165dc1521283861dff"
+      }
+    },
+    {
+      "id": "2.r017",
+      "title": "整篇导入 r017 并按标题层级切片",
+      "passed": true,
+      "detail": "chunks=12 byteSize=16465 原文范围精确=true 被继续切分的片段数=5 sha256=0dbddfb699becb4f96ab73a68a9d7bb2b6ca2a81e7e3ab73deda3dd2c4d033a6",
+      "evidence": {
+        "contentSha256": "0dbddfb699becb4f96ab73a68a9d7bb2b6ca2a81e7e3ab73deda3dd2c4d033a6",
+        "chunks": 12,
+        "locators": [
+          "§GongYuAI 的 Super-agent 设计与验收",
+          "§结论（先读这四句）",
+          "§本轮三篇文章的结论",
+          "§早期设计参照",
+          "§吸收表",
+          "§吸收表~2",
+          "§哪些收益仍需实验",
+          "§报告交付后收到更正凭据",
+          "§报告交付后收到更正凭据~2",
+          "§报告交付后收到更正凭据~3",
+          "§明确不吸收",
+          "§若再动手（P7 提案，非默认下一刀）"
+        ],
+        "upstreamCommit": "f0e80d23caea58942edbe1165dc1521283861dff"
+      }
+    },
+    {
+      "id": "2.tags",
+      "title": "已移除与测试查询同词的人工标签",
+      "passed": true,
+      "detail": "各资料 tags=nvwabase:[] sapperlens:[] ledger:[] r017:[]"
+    },
+    {
+      "id": "2.summary",
+      "title": "四份整篇材料均已导入",
+      "passed": true,
+      "detail": "已导入 4/4：nvwabase,sapperlens,ledger,r017"
+    },
+    {
+      "id": "3.1",
+      "title": "整篇材料的向量索引灌满（真实模型）",
+      "passed": true,
+      "detail": "state=ready model=bge-m3-mlx-4bit dim=1024 indexKey=c2:bge-m3-mlx-4bit chunks=131/131 lastIndexedAt=2026-11-23T05:11:24.856Z",
+      "evidence": {
+        "state": "ready",
+        "model": "bge-m3-mlx-4bit",
+        "modelDim": 1024,
+        "provider": "http://127.0.0.1:8000/v1",
+        "chunkerVersion": 2,
+        "indexKey": "c2:bge-m3-mlx-4bit",
+        "totalChunks": 131,
+        "indexedChunks": 131,
+        "pendingChunks": 0,
+        "failedChunks": 0,
+        "degraded": false,
+        "lastIndexedAt": "2026-11-23T05:11:24.856Z"
+      }
+    },
+    {
+      "id": "4.Q1",
+      "title": "语义查询「负责人换班」召回全部目标段落（无标签、无字面命中）",
+      "passed": true,
+      "detail": "sapperlens §6.4: 关键词 未命中 → 混合 3；nvwabase §2: 关键词 未命中 → 混合 11；ledger §六批、五次交接: 关键词 未命中 → 混合 9；关键词 total=0，混合 total=12（语义召回 12，余弦门槛 0.3500）；主目标 sapperlens 名次 3；退步项=无",
+      "evidence": {
+        "id": "Q1",
+        "query": "负责人换班",
+        "kind": "semantic",
+        "rationale": "三份原文都不含「负责人换班」整词：SapperLens 写「换任」「Commander 交接」，女娲 README 是英文 successor takes over mid-campaign，实验写「每个边界换班」。目标段落分别是 §6.4 状态与连续性、§2 The Three-Capability Foundation、§六批、五次交接。",
+        "keywordTotal": 0,
+        "hybridTotal": 12,
+        "recall": {
+          "keyword": 0,
+          "semantic": 12,
+          "semanticCutoff": 0.35
+        },
+        "degraded": false,
+        "targets": [
+          {
+            "docKey": "sapperlens",
+            "parentLocator": "§6.4",
+            "keywordRank": null,
+            "hybridRank": 3,
+            "inTop5": true
+          },
+          {
+            "docKey": "nvwabase",
+            "parentLocator": "§2",
+            "keywordRank": null,
+            "hybridRank": 11,
+            "inTop5": false
+          },
+          {
+            "docKey": "ledger",
+            "parentLocator": "§六批、五次交接",
+            "keywordRank": null,
+            "hybridRank": 9,
+            "inTop5": false
+          }
+        ],
+        "regressions": [],
+        "targetScores": [
+          {
+            "docKey": "sapperlens",
+            "chunks": [
+              {
+                "locator": "§6.4",
+                "parentLocator": "§6.4",
+                "semanticScore": 0.5154
+              },
+              {
+                "locator": "§8.6",
+                "parentLocator": "§8.6",
+                "semanticScore": 0.5116
+              },
+              {
+                "locator": "§5.3~5",
+                "parentLocator": "§5.3",
+                "semanticScore": 0.5066
+              }
+            ]
+          },
+          {
+            "docKey": "nvwabase",
+            "chunks": [
+              {
+                "locator": "§4",
+                "parentLocator": "§4",
+                "semanticScore": 0.4684
+              },
+              {
+                "locator": "§2~2",
+                "parentLocator": "§2",
+                "semanticScore": 0.4303
+              },
+              {
+                "locator": "§3~2",
+                "parentLocator": "§3",
+                "semanticScore": 0.4282
+              }
+            ]
+          },
+          {
+            "docKey": "ledger",
+            "chunks": [
+              {
+                "locator": "§两处交接改动",
+                "parentLocator": "§两处交接改动",
+                "semanticScore": 0.5371
+              },
+              {
+                "locator": "§原六题的两批回归",
+                "parentLocator": "§原六题的两批回归",
+                "semanticScore": 0.4765
+              },
+              {
+                "locator": "§六批、五次交接",
+                "parentLocator": "§六批、五次交接",
+                "semanticScore": 0.4747
+              }
+            ]
+          }
+        ],
+        "keywordTop5": [],
+        "hybridTop5": [
+          {
+            "rank": 1,
+            "title": "Relay 台账交接六批复核实验（整篇 README）",
+            "locator": "§两处交接改动",
+            "parentLocator": "§两处交接改动",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4296,
+            "keywordScore": 0,
+            "semanticScore": 0.5371,
+            "headingPath": [
+              "Relay 的台账交接能否在六批复核中省 Token",
+              "两处交接改动"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§报告交付后收到更正凭据~2",
+            "parentLocator": "§报告交付后收到更正凭据",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4229,
+            "keywordScore": 0,
+            "semanticScore": 0.5286,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "报告交付后收到更正凭据"
+            ]
+          },
+          {
+            "rank": 3,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4",
+            "parentLocator": "§6.4",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4123,
+            "keywordScore": 0,
+            "semanticScore": 0.5154,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 4,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§8.6",
+            "parentLocator": "§8.6",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4093,
+            "keywordScore": 0,
+            "semanticScore": 0.5116,
+            "headingPath": [
+              "SapperLens",
+              "8. 失败模式",
+              "8.6 范围近失：硬线在 SKILL 里，执行靠 commander 兜底"
+            ]
+          },
+          {
+            "rank": 5,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§报告交付后收到更正凭据",
+            "parentLocator": "§报告交付后收到更正凭据",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4076,
+            "keywordScore": 0,
+            "semanticScore": 0.5096,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "报告交付后收到更正凭据"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "4.Q1.top5",
+      "title": "语义查询「负责人换班」全部目标段落进 Top 5",
+      "passed": false,
+      "detail": "未进 Top 5：nvwabase §2 名次 11；ledger §六批、五次交接 名次 9（已召回但名次靠后，逐条名次见 query-comparison.json）",
+      "evidence": {
+        "missedTop5": [
+          {
+            "docKey": "nvwabase",
+            "parentLocator": "§2",
+            "keywordRank": null,
+            "hybridRank": 11,
+            "inTop5": false
+          },
+          {
+            "docKey": "ledger",
+            "parentLocator": "§六批、五次交接",
+            "keywordRank": null,
+            "hybridRank": 9,
+            "inTop5": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "4.Q2",
+      "title": "语义查询「接任指挥后怎样续上进度」召回全部目标段落（无标签、无字面命中）",
+      "passed": true,
+      "detail": "sapperlens §6.4: 关键词 未命中 → 混合 1；nvwabase §2: 关键词 未命中 → 混合 11；关键词 total=0，混合 total=12（语义召回 12，余弦门槛 0.3862）；主目标 sapperlens 名次 1；退步项=无",
+      "evidence": {
+        "id": "Q2",
+        "query": "接任指挥后怎样续上进度",
+        "kind": "semantic",
+        "rationale": "SapperLens §6.4 明确写「下一任指挥官读取该文件，接着调度」「换任通过读 STATE 文件继续」；女娲 §2 写继任者读图接手。两处都是同义表达，不是字面命中。",
+        "keywordTotal": 0,
+        "hybridTotal": 12,
+        "recall": {
+          "keyword": 0,
+          "semantic": 12,
+          "semanticCutoff": 0.3862469743199664
+        },
+        "degraded": false,
+        "targets": [
+          {
+            "docKey": "sapperlens",
+            "parentLocator": "§6.4",
+            "keywordRank": null,
+            "hybridRank": 1,
+            "inTop5": true
+          },
+          {
+            "docKey": "nvwabase",
+            "parentLocator": "§2",
+            "keywordRank": null,
+            "hybridRank": 11,
+            "inTop5": false
+          }
+        ],
+        "regressions": [],
+        "targetScores": [
+          {
+            "docKey": "sapperlens",
+            "chunks": [
+              {
+                "locator": "§6.4",
+                "parentLocator": "§6.4",
+                "semanticScore": 0.5862
+              },
+              {
+                "locator": "§4.3",
+                "parentLocator": "§4.3",
+                "semanticScore": 0.5279
+              },
+              {
+                "locator": "§9~2",
+                "parentLocator": "§9",
+                "semanticScore": 0.5254
+              }
+            ]
+          },
+          {
+            "docKey": "nvwabase",
+            "chunks": [
+              {
+                "locator": "§4",
+                "parentLocator": "§4",
+                "semanticScore": 0.4653
+              },
+              {
+                "locator": "§2~2",
+                "parentLocator": "§2",
+                "semanticScore": 0.4496
+              },
+              {
+                "locator": "§5",
+                "parentLocator": "§5",
+                "semanticScore": 0.4354
+              }
+            ]
+          }
+        ],
+        "keywordTop5": [],
+        "hybridTop5": [
+          {
+            "rank": 1,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4",
+            "parentLocator": "§6.4",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.469,
+            "keywordScore": 0,
+            "semanticScore": 0.5862,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§报告交付后收到更正凭据~2",
+            "parentLocator": "§报告交付后收到更正凭据",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4432,
+            "keywordScore": 0,
+            "semanticScore": 0.554,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "报告交付后收到更正凭据"
+            ]
+          },
+          {
+            "rank": 3,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§吸收表~2",
+            "parentLocator": "§吸收表",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4371,
+            "keywordScore": 0,
+            "semanticScore": 0.5464,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "吸收表"
+            ]
+          },
+          {
+            "rank": 4,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§若再动手（P7 提案，非默认下一刀）",
+            "parentLocator": "§若再动手（P7 提案，非默认下一刀）",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4233,
+            "keywordScore": 0,
+            "semanticScore": 0.5292,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "若再动手（P7 提案，非默认下一刀）"
+            ]
+          },
+          {
+            "rank": 5,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§4.3",
+            "parentLocator": "§4.3",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4223,
+            "keywordScore": 0,
+            "semanticScore": 0.5279,
+            "headingPath": [
+              "SapperLens",
+              "4. 设计图",
+              "4.3 升级阶梯（6 级）"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "4.Q2.top5",
+      "title": "语义查询「接任指挥后怎样续上进度」全部目标段落进 Top 5",
+      "passed": false,
+      "detail": "未进 Top 5：nvwabase §2 名次 11（已召回但名次靠后，逐条名次见 query-comparison.json）",
+      "evidence": {
+        "missedTop5": [
+          {
+            "docKey": "nvwabase",
+            "parentLocator": "§2",
+            "keywordRank": null,
+            "hybridRank": 11,
+            "inTop5": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "4.Q3",
+      "title": "精确查询「R-017」目标段落名次",
+      "passed": true,
+      "detail": "r017 §报告交付后收到更正凭据: 关键词 1 → 混合 1；混合首条=§报告交付后收到更正凭据~2（body+title+semantic）；退步项=无",
+      "evidence": {
+        "id": "Q3",
+        "query": "R-017",
+        "kind": "exact",
+        "rationale": "R-017 用例在 docs/absorb-super-agent.md 的「报告交付后收到更正凭据」一节，字面含 R-017。",
+        "keywordTotal": 2,
+        "hybridTotal": 11,
+        "recall": {
+          "keyword": 2,
+          "semantic": 11,
+          "semanticCutoff": 0.35
+        },
+        "degraded": false,
+        "targets": [
+          {
+            "docKey": "r017",
+            "parentLocator": "§报告交付后收到更正凭据",
+            "keywordRank": 1,
+            "hybridRank": 1,
+            "inTop5": true
+          }
+        ],
+        "regressions": [],
+        "targetScores": [
+          {
+            "docKey": "r017",
+            "chunks": [
+              {
+                "locator": "§报告交付后收到更正凭据~2",
+                "parentLocator": "§报告交付后收到更正凭据",
+                "semanticScore": 0.4657
+              },
+              {
+                "locator": "§若再动手（P7 提案，非默认下一刀）",
+                "parentLocator": "§若再动手（P7 提案，非默认下一刀）",
+                "semanticScore": 0.4499
+              },
+              {
+                "locator": "§报告交付后收到更正凭据",
+                "parentLocator": "§报告交付后收到更正凭据",
+                "semanticScore": 0.4426
+              }
+            ]
+          }
+        ],
+        "keywordTop5": [
+          {
+            "rank": 1,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§报告交付后收到更正凭据~2",
+            "parentLocator": "§报告交付后收到更正凭据",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body",
+              "title"
+            ],
+            "score": 1.7621,
+            "keywordScore": 1.7621,
+            "semanticScore": null,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "报告交付后收到更正凭据"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§报告交付后收到更正凭据",
+            "parentLocator": "§报告交付后收到更正凭据",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body",
+              "title"
+            ],
+            "score": 1.7263,
+            "keywordScore": 1.7263,
+            "semanticScore": null,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "报告交付后收到更正凭据"
+            ]
+          }
+        ],
+        "hybridTop5": [
+          {
+            "rank": 1,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§报告交付后收到更正凭据~2",
+            "parentLocator": "§报告交付后收到更正凭据",
+            "retrieval": "hybrid",
+            "matchedFields": [
+              "body",
+              "title",
+              "semantic"
+            ],
+            "score": 2.1347,
+            "keywordScore": 1.7621,
+            "semanticScore": 0.4657,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "报告交付后收到更正凭据"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§报告交付后收到更正凭据",
+            "parentLocator": "§报告交付后收到更正凭据",
+            "retrieval": "hybrid",
+            "matchedFields": [
+              "body",
+              "title",
+              "semantic"
+            ],
+            "score": 2.0803,
+            "keywordScore": 1.7263,
+            "semanticScore": 0.4426,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "报告交付后收到更正凭据"
+            ]
+          },
+          {
+            "rank": 3,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§若再动手（P7 提案，非默认下一刀）",
+            "parentLocator": "§若再动手（P7 提案，非默认下一刀）",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.3599,
+            "keywordScore": 0,
+            "semanticScore": 0.4499,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "若再动手（P7 提案，非默认下一刀）"
+            ]
+          },
+          {
+            "rank": 4,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§附录 A：35447 逐题总表（63 题）~5",
+            "parentLocator": "§附录 A：35447 逐题总表（63 题）",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.3392,
+            "keywordScore": 0,
+            "semanticScore": 0.4239,
+            "headingPath": [
+              "SapperLens",
+              "附录 A：35447 逐题总表（63 题）"
+            ]
+          },
+          {
+            "rank": 5,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§附录 A：35447 逐题总表（63 题）~2",
+            "parentLocator": "§附录 A：35447 逐题总表（63 题）",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.336,
+            "keywordScore": 0,
+            "semanticScore": 0.42,
+            "headingPath": [
+              "SapperLens",
+              "附录 A：35447 逐题总表（63 题）"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "4.Q4",
+      "title": "精确查询「54/60」目标段落名次",
+      "passed": true,
+      "detail": "ledger §六批、五次交接: 关键词 4 → 混合 2；混合首条=§准确率差在哪里（body+semantic）；退步项=无",
+      "evidence": {
+        "id": "Q4",
+        "query": "54/60",
+        "kind": "exact",
+        "rationale": "54/60 是六批实验的正确字段数，结果表在「六批、五次交接」一节。前言与「准确率差在哪里」也字面含该值，一并记录名次。",
+        "keywordTotal": 4,
+        "hybridTotal": 14,
+        "recall": {
+          "keyword": 4,
+          "semantic": 12,
+          "semanticCutoff": 0.35
+        },
+        "degraded": false,
+        "targets": [
+          {
+            "docKey": "ledger",
+            "parentLocator": "§六批、五次交接",
+            "keywordRank": 4,
+            "hybridRank": 2,
+            "inTop5": true
+          }
+        ],
+        "regressions": [],
+        "targetScores": [
+          {
+            "docKey": "ledger",
+            "chunks": [
+              {
+                "locator": "§六批、五次交接",
+                "parentLocator": "§六批、五次交接",
+                "semanticScore": 0.4195
+              },
+              {
+                "locator": "§原六题的两批回归",
+                "parentLocator": "§原六题的两批回归",
+                "semanticScore": 0.4156
+              },
+              {
+                "locator": "§准确率差在哪里",
+                "parentLocator": "§准确率差在哪里",
+                "semanticScore": 0.4131
+              }
+            ]
+          }
+        ],
+        "keywordTop5": [
+          {
+            "rank": 1,
+            "title": "Relay 台账交接六批复核实验（整篇 README）",
+            "locator": "§Relay 的台账交接能否在六批复核中省 Token",
+            "parentLocator": "§Relay 的台账交接能否在六批复核中省 Token",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.8101,
+            "keywordScore": 1.8101,
+            "semanticScore": null,
+            "headingPath": [
+              "Relay 的台账交接能否在六批复核中省 Token"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "Relay 台账交接六批复核实验（整篇 README）",
+            "locator": "§准确率差在哪里",
+            "parentLocator": "§准确率差在哪里",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6752,
+            "keywordScore": 1.6752,
+            "semanticScore": null,
+            "headingPath": [
+              "Relay 的台账交接能否在六批复核中省 Token",
+              "准确率差在哪里"
+            ]
+          },
+          {
+            "rank": 3,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§哪些收益仍需实验",
+            "parentLocator": "§哪些收益仍需实验",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.671,
+            "keywordScore": 1.671,
+            "semanticScore": null,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "吸收表",
+              "哪些收益仍需实验"
+            ]
+          },
+          {
+            "rank": 4,
+            "title": "Relay 台账交接六批复核实验（整篇 README）",
+            "locator": "§六批、五次交接",
+            "parentLocator": "§六批、五次交接",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6493,
+            "keywordScore": 1.6493,
+            "semanticScore": null,
+            "headingPath": [
+              "Relay 的台账交接能否在六批复核中省 Token",
+              "六批、五次交接"
+            ]
+          }
+        ],
+        "hybridTop5": [
+          {
+            "rank": 1,
+            "title": "Relay 台账交接六批复核实验（整篇 README）",
+            "locator": "§准确率差在哪里",
+            "parentLocator": "§准确率差在哪里",
+            "retrieval": "hybrid",
+            "matchedFields": [
+              "body",
+              "semantic"
+            ],
+            "score": 2.0057,
+            "keywordScore": 1.6752,
+            "semanticScore": 0.4131,
+            "headingPath": [
+              "Relay 的台账交接能否在六批复核中省 Token",
+              "准确率差在哪里"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "Relay 台账交接六批复核实验（整篇 README）",
+            "locator": "§六批、五次交接",
+            "parentLocator": "§六批、五次交接",
+            "retrieval": "hybrid",
+            "matchedFields": [
+              "body",
+              "semantic"
+            ],
+            "score": 1.9849,
+            "keywordScore": 1.6493,
+            "semanticScore": 0.4195,
+            "headingPath": [
+              "Relay 的台账交接能否在六批复核中省 Token",
+              "六批、五次交接"
+            ]
+          },
+          {
+            "rank": 3,
+            "title": "Relay 台账交接六批复核实验（整篇 README）",
+            "locator": "§Relay 的台账交接能否在六批复核中省 Token",
+            "parentLocator": "§Relay 的台账交接能否在六批复核中省 Token",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.8101,
+            "keywordScore": 1.8101,
+            "semanticScore": null,
+            "headingPath": [
+              "Relay 的台账交接能否在六批复核中省 Token"
+            ]
+          },
+          {
+            "rank": 4,
+            "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+            "locator": "§哪些收益仍需实验",
+            "parentLocator": "§哪些收益仍需实验",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.671,
+            "keywordScore": 1.671,
+            "semanticScore": null,
+            "headingPath": [
+              "GongYuAI 的 Super-agent 设计与验收",
+              "吸收表",
+              "哪些收益仍需实验"
+            ]
+          },
+          {
+            "rank": 5,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§附录 C：TCH3 题目信息（xlsx 50 题）~4",
+            "parentLocator": "§附录 C：TCH3 题目信息（xlsx 50 题）",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4017,
+            "keywordScore": 0,
+            "semanticScore": 0.5022,
+            "headingPath": [
+              "SapperLens",
+              "附录 C：TCH3 题目信息（xlsx 50 题）"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "4.Q5",
+      "title": "精确查询「§6.4」目标段落名次",
+      "passed": true,
+      "detail": "sapperlens §6.4: 关键词 1 → 混合 1；混合首条=§6.4（locator+semantic）；退步项=无",
+      "evidence": {
+        "id": "Q5",
+        "query": "§6.4",
+        "kind": "exact",
+        "rationale": "章节地址查询。SapperLens 原文正文并不写「§6.4」这个字面，因此按定位精确命中，如实标为 locator 命中而非正文字面命中。",
+        "keywordTotal": 2,
+        "hybridTotal": 13,
+        "recall": {
+          "keyword": 2,
+          "semantic": 12,
+          "semanticCutoff": 0.3647058549464212
+        },
+        "degraded": false,
+        "targets": [
+          {
+            "docKey": "sapperlens",
+            "parentLocator": "§6.4",
+            "keywordRank": 1,
+            "hybridRank": 1,
+            "inTop5": true
+          }
+        ],
+        "regressions": [],
+        "targetScores": [
+          {
+            "docKey": "sapperlens",
+            "chunks": [
+              {
+                "locator": "§附录 D：35447 逐题会话映射~4",
+                "parentLocator": "§附录 D：35447 逐题会话映射",
+                "semanticScore": 0.5647
+              },
+              {
+                "locator": "§6.4",
+                "parentLocator": "§6.4",
+                "semanticScore": 0.5633
+              },
+              {
+                "locator": "§附录 D：35447 逐题会话映射~3",
+                "parentLocator": "§附录 D：35447 逐题会话映射",
+                "semanticScore": 0.5529
+              }
+            ]
+          }
+        ],
+        "keywordTop5": [
+          {
+            "rank": 1,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4",
+            "parentLocator": "§6.4",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "locator"
+            ],
+            "score": 1.6,
+            "keywordScore": 1.6,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4~2",
+            "parentLocator": "§6.4",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "locator"
+            ],
+            "score": 1.6,
+            "keywordScore": 1.6,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          }
+        ],
+        "hybridTop5": [
+          {
+            "rank": 1,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4",
+            "parentLocator": "§6.4",
+            "retrieval": "hybrid",
+            "matchedFields": [
+              "locator",
+              "semantic"
+            ],
+            "score": 2.0506,
+            "keywordScore": 1.6,
+            "semanticScore": 0.5633,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4~2",
+            "parentLocator": "§6.4",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "locator"
+            ],
+            "score": 1.6,
+            "keywordScore": 1.6,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 3,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§附录 D：35447 逐题会话映射~4",
+            "parentLocator": "§附录 D：35447 逐题会话映射",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4518,
+            "keywordScore": 0,
+            "semanticScore": 0.5647,
+            "headingPath": [
+              "SapperLens",
+              "附录 D：35447 逐题会话映射"
+            ]
+          },
+          {
+            "rank": 4,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§附录 D：35447 逐题会话映射~3",
+            "parentLocator": "§附录 D：35447 逐题会话映射",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.4423,
+            "keywordScore": 0,
+            "semanticScore": 0.5529,
+            "headingPath": [
+              "SapperLens",
+              "附录 D：35447 逐题会话映射"
+            ]
+          },
+          {
+            "rank": 5,
+            "title": "Relay 台账交接六批复核实验（整篇 README）",
+            "locator": "§六批、五次交接",
+            "parentLocator": "§六批、五次交接",
+            "retrieval": "semantic",
+            "matchedFields": [
+              "semantic"
+            ],
+            "score": 0.3544,
+            "keywordScore": 0,
+            "semanticScore": 0.443,
+            "headingPath": [
+              "Relay 的台账交接能否在六批复核中省 Token",
+              "六批、五次交接"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "4.Q6",
+      "title": "精确查询「换任」目标段落名次",
+      "passed": true,
+      "detail": "sapperlens §6.4: 关键词 1 → 混合 1；混合首条=§6.4（body+semantic）；退步项=无",
+      "evidence": {
+        "id": "Q6",
+        "query": "换任",
+        "kind": "exact",
+        "rationale": "上一轮的问题查询：字面「换任」在多处出现，首条却是 §0。目标段落是 §6.4 状态与连续性。",
+        "keywordTotal": 5,
+        "hybridTotal": 16,
+        "recall": {
+          "keyword": 5,
+          "semantic": 12,
+          "semanticCutoff": 0.35
+        },
+        "degraded": false,
+        "targets": [
+          {
+            "docKey": "sapperlens",
+            "parentLocator": "§6.4",
+            "keywordRank": 1,
+            "hybridRank": 1,
+            "inTop5": true
+          }
+        ],
+        "regressions": [],
+        "targetScores": [
+          {
+            "docKey": "sapperlens",
+            "chunks": [
+              {
+                "locator": "§6.4",
+                "parentLocator": "§6.4",
+                "semanticScore": 0.4881
+              },
+              {
+                "locator": "§5.3~5",
+                "parentLocator": "§5.3",
+                "semanticScore": 0.4717
+              },
+              {
+                "locator": "§8.6",
+                "parentLocator": "§8.6",
+                "semanticScore": 0.4642
+              }
+            ]
+          }
+        ],
+        "keywordTop5": [
+          {
+            "rank": 1,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4",
+            "parentLocator": "§6.4",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.708,
+            "keywordScore": 1.708,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4~2",
+            "parentLocator": "§6.4",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6509,
+            "keywordScore": 1.6509,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 3,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§0~2",
+            "parentLocator": "§0",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6469,
+            "keywordScore": 1.6469,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "0. 提示词与运行时证据文件"
+            ]
+          },
+          {
+            "rank": 4,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§5.2",
+            "parentLocator": "§5.2",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6457,
+            "keywordScore": 1.6457,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "5. 提示词全谱",
+              "5.2 L1：Commander 标准作业程序（427 行，25,842 字符）"
+            ]
+          },
+          {
+            "rank": 5,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§9~2",
+            "parentLocator": "§9",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6379,
+            "keywordScore": 1.6379,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "9. 可复用清单（按优先级）"
+            ]
+          }
+        ],
+        "hybridTop5": [
+          {
+            "rank": 1,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4",
+            "parentLocator": "§6.4",
+            "retrieval": "hybrid",
+            "matchedFields": [
+              "body",
+              "semantic"
+            ],
+            "score": 2.0985,
+            "keywordScore": 1.708,
+            "semanticScore": 0.4881,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 2,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§6.4~2",
+            "parentLocator": "§6.4",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6509,
+            "keywordScore": 1.6509,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "6. 架构设计",
+              "6.4 状态与连续性"
+            ]
+          },
+          {
+            "rank": 3,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§0~2",
+            "parentLocator": "§0",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6469,
+            "keywordScore": 1.6469,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "0. 提示词与运行时证据文件"
+            ]
+          },
+          {
+            "rank": 4,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§5.2",
+            "parentLocator": "§5.2",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6457,
+            "keywordScore": 1.6457,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "5. 提示词全谱",
+              "5.2 L1：Commander 标准作业程序（427 行，25,842 字符）"
+            ]
+          },
+          {
+            "rank": 5,
+            "title": "SapperLens 独立运行分析（整篇 README）",
+            "locator": "§9~2",
+            "parentLocator": "§9",
+            "retrieval": "keyword",
+            "matchedFields": [
+              "body"
+            ],
+            "score": 1.6379,
+            "keywordScore": 1.6379,
+            "semanticScore": null,
+            "headingPath": [
+              "SapperLens",
+              "9. 可复用清单（按优先级）"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "4.regress",
+      "title": "「换任」不再以 §0 摘要为首条（上一轮问题）",
+      "passed": true,
+      "detail": "SapperLens首个命中=§6.4（父章节 §6.4），命中字段=body+semantic",
+      "evidence": {
+        "locator": "§6.4",
+        "parentLocator": "§6.4",
+        "score": 2.098510066339405
+      }
+    },
+    {
+      "id": "5.memgpt",
+      "title": "PDF 物理页码回归 memgpt：应为 13 页",
+      "passed": true,
+      "detail": "API 页数=13（不同页号 13 个）期望=13；独立核对 /Type/Page=13 /Count=13；首段 p.1 末段 p.13；chunks=52",
+      "evidence": {
+        "fileSha256": "9f674bcff69c86f11c813dcfad613d8841f5f8ed17979e3c4df06a91df7762e0",
+        "apiPages": 13,
+        "expectedPages": 13,
+        "independentPageObjects": 13,
+        "independentCount": 13,
+        "firstPageHead": "MemGPT: Towards LLMs as Operating Systems\nCharles Packer\n1\nSarah Wooders\n1\nKevin Lin\n1\nVivian Fang\n1",
+        "lastPageHead": "MemGPT: Towards LLMs as Operating Systems\nanswers]\". The questions is provided\nin the format \"QUESTI"
+      }
+    },
+    {
+      "id": "5.memgpt.search",
+      "title": "PDF 正文可检索且页码不超过物理页数 memgpt",
+      "passed": true,
+      "detail": "locator=p.5 page=5 pageBasis=physical-page matchedFields=body+title"
+    },
+    {
+      "id": "5.attackpath",
+      "title": "PDF 物理页码回归 attackpath：应为 17 页",
+      "passed": true,
+      "detail": "API 页数=17（不同页号 17 个）期望=17；独立核对 /Type/Page=压缩对象流，见 /Count /Count=无；首段 p.1 末段 p.17；chunks=94",
+      "evidence": {
+        "fileSha256": "eaa2be59c2055d2188a77731b6ee820cc2d83c04b4d8f3eccd7ef5317b048ab5",
+        "apiPages": 17,
+        "expectedPages": 17,
+        "independentPageObjects": null,
+        "independentCount": null,
+        "firstPageHead": "Staying on the Attack Path: Structured State for Long-Horizon Automated Penetration\nTesting\nWeizhe W",
+        "lastPageHead": "ity data with powerful search, filtering, and analysis capabilities,\nhttps://github.com/projectdisco"
+      }
+    },
+    {
+      "id": "5.attackpath.search",
+      "title": "PDF 正文可检索且页码不超过物理页数 attackpath",
+      "passed": true,
+      "detail": "locator=p.12~2 page=12 pageBasis=physical-page matchedFields=body+title"
+    },
+    {
+      "id": "6.1",
+      "title": "前端可直接用命中片段的定位字段创建定版引用",
+      "passed": true,
+      "detail": "citationId=4b270341-5bbf-46a6-afdf-63a619579ac7 pinKind=range range=[31973,32899) chunkSha=992a7fd51fdcdcfd4efbbd4980a87b8cd7adf66736d770e41305654b192bb2c6 locator=§6.4",
+      "evidence": {
+        "id": "4b270341-5bbf-46a6-afdf-63a619579ac7",
+        "taskId": "bceb7dc6-ddbb-4449-9044-2eaa565475d0",
+        "engagementId": "eng-knowledge-hybrid-1795410676805",
+        "materialId": "4ae1a978-1ee6-4e0e-9c30-c6df32ffdb5f",
+        "versionId": "914d5d02-450e-4bac-9f9e-fd1d740b3f85",
+        "locator": "§6.4",
+        "claim": "独立分析从运行记录中追到了一次负责人换班（06:14 换任，靠 STATE 续接）",
+        "snapshotSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+        "bodyFormat": "markdown",
+        "materialTitle": "SapperLens 独立运行分析（整篇 README）",
+        "publisher": "inwpu（独立运行分析）",
+        "sourceKind": "original",
+        "versionNo": 1,
+        "versionLabel": "本地 v1",
+        "sectionHeading": "6.4 状态与连续性",
+        "sectionPage": null,
+        "sectionOrdinal": 54,
+        "createdAt": "2026-11-23T05:11:25.350Z",
+        "pinKind": "range",
+        "charStart": 31973,
+        "charEnd": 32899,
+        "chunkSha256": "992a7fd51fdcdcfd4efbbd4980a87b8cd7adf66736d770e41305654b192bb2c6",
+        "headingPath": [
+          "SapperLens",
+          "6. 架构设计",
+          "6.4 状态与连续性"
+        ],
+        "pageBasis": null
+      }
+    },
+    {
+      "id": "6.2",
+      "title": "定版引用立即回读命中段落原文",
+      "passed": true,
+      "detail": "verification=verified chars=[31973,32899) length=926 与原文切片一致=true"
+    },
+    {
+      "id": "6.3",
+      "title": "重建索引后引用回读同一段、片段校验值一致",
+      "passed": true,
+      "detail": "chunkSha一致=true length=926"
+    },
+    {
+      "id": "6.4",
+      "title": "导入整篇 v2 并保留 v1 快照",
+      "passed": true,
+      "detail": "v2Id=332fad90-2ae4-4d9e-9b19-4824524ed0d5 v2Sha=75b31ae47b24943bd7147a854fe1f54233d8bd155d847aa77e4c9e7f3369532c v1SnapshotStillPresent=true"
+    },
+    {
+      "id": "6.5",
+      "title": "停用 v1",
+      "passed": true,
+      "detail": "status=deprecated deprecatedAt=2026-11-23T05:11:33.475Z"
+    },
+    {
+      "id": "6.6",
+      "title": "v1 停用后默认检索只返回有效版 v2",
+      "passed": true,
+      "detail": "命中 4 条，全部 versionNo=2"
+    },
+    {
+      "id": "6.7",
+      "title": "v2 生效后旧引用仍离线复验 v1 同一段",
+      "passed": true,
+      "detail": "versionStatus=deprecated chunkSha一致=true"
+    },
+    {
+      "id": "7.1",
+      "title": "关键词与语义两路双向不泄露，共享资料两边可见，计数按范围",
+      "passed": true,
+      "detail": "[{\"reader\":\"eng-knowledge-hybrid-1795410676805-alpha\",\"kwOwn\":1,\"kwOther\":0,\"sharedKw\":1,\"sharedHybrid\":2,\"sharedLeak\":false,\"materials\":2,\"semTotal\":2,\"semLeaked\":false,\"searchedVersions\":2,\"indexChunks\":2},{\"reader\":\"eng-knowledge-hybrid-1795410676805-beta\",\"kwOwn\":1,\"kwOther\":0,\"sharedKw\":1,\"sharedHybrid\":2,\"sharedLeak\":false,\"materials\":2,\"semTotal\":2,\"semLeaked\":false,\"searchedVersions\":2,\"indexChunks\":2}]",
+      "evidence": [
+        {
+          "reader": "eng-knowledge-hybrid-1795410676805-alpha",
+          "ownKeywordTotal": 1,
+          "otherKeywordTotal": 0,
+          "sharedKeywordTotal": 1,
+          "sharedHybridTotal": 2,
+          "sharedHybridLeak": false,
+          "materials": 2,
+          "semanticTotal": 2,
+          "semanticLeaked": false,
+          "semanticMaterials": [
+            "50fd155b-9f47-4c2c-be63-ab65cffaa0a5",
+            "0b390394-7c58-42ae-a2c6-ced1138f5a38"
+          ],
+          "searchedVersions": 2,
+          "indexTotalChunks": 2,
+          "leakedOtherTitle": false,
+          "ownId": "50fd155b-9f47-4c2c-be63-ab65cffaa0a5",
+          "otherId": "0ffa9b78-0414-4320-9af6-002a185ca691"
+        },
+        {
+          "reader": "eng-knowledge-hybrid-1795410676805-beta",
+          "ownKeywordTotal": 1,
+          "otherKeywordTotal": 0,
+          "sharedKeywordTotal": 1,
+          "sharedHybridTotal": 2,
+          "sharedHybridLeak": false,
+          "materials": 2,
+          "semanticTotal": 2,
+          "semanticLeaked": false,
+          "semanticMaterials": [
+            "0ffa9b78-0414-4320-9af6-002a185ca691",
+            "0b390394-7c58-42ae-a2c6-ced1138f5a38"
+          ],
+          "searchedVersions": 2,
+          "indexTotalChunks": 2,
+          "leakedOtherTitle": false,
+          "ownId": "0ffa9b78-0414-4320-9af6-002a185ca691",
+          "otherId": "50fd155b-9f47-4c2c-be63-ab65cffaa0a5"
+        }
+      ]
+    },
+    {
+      "id": "7.2",
+      "title": "已知 ID 直读资料/版本/段落与越界重建一律 404，且不泄露标题",
+      "passed": true,
+      "detail": "[{\"reader\":\"eng-knowledge-hybrid-1795410676805-beta\",\"detail\":404,\"versions\":404,\"version\":404,\"section\":404,\"rebuild\":404,\"leakedTitle\":false},{\"reader\":\"eng-knowledge-hybrid-1795410676805-alpha\",\"detail\":404,\"versions\":404,\"version\":404,\"section\":404,\"rebuild\":404,\"leakedTitle\":false}]",
+      "evidence": [
+        {
+          "reader": "eng-knowledge-hybrid-1795410676805-beta",
+          "detail": 404,
+          "versions": 404,
+          "version": 404,
+          "section": 404,
+          "rebuild": 404,
+          "leakedTitle": false
+        },
+        {
+          "reader": "eng-knowledge-hybrid-1795410676805-alpha",
+          "detail": 404,
+          "versions": 404,
+          "version": 404,
+          "section": 404,
+          "rebuild": 404,
+          "leakedTitle": false
+        }
+      ]
+    },
+    {
+      "id": "7.3",
+      "title": "跨委托创建引用双向被拒",
+      "passed": true,
+      "detail": "B→A=404 A→B=404"
+    },
+    {
+      "id": "7.4",
+      "title": "报告导出双向不泄露另一委托的材料 ID 与关键词",
+      "passed": true,
+      "detail": "A citations=2 B citations=2 snapshotScope=full-version"
+    },
+    {
+      "id": "7.5",
+      "title": "客户端 engagementId 只能定位：冲突拒绝，任务归属以服务端为准",
+      "passed": true,
+      "detail": "冲突=409/409；taskId 锚定 resolvedFrom=task"
+    },
+    {
+      "id": "7.6",
+      "title": "单操作者环境的权限验证边界已如实记录",
+      "passed": true,
+      "detail": "本运行环境无认证层：已验收委托边界（两路范围校验、越界 404、导出不泄露）；用户级权限（谁能声明哪个委托）未验证。",
+      "evidence": {
+        "engagementId": "eng-knowledge-hybrid-1795410676805-alpha",
+        "resolvedFrom": "task",
+        "operatorModel": "single-operator",
+        "userLevelPermissionVerified": false
+      }
+    },
+    {
+      "id": "8.run",
+      "title": "断网且停用向量化的子进程重启服务",
+      "passed": true,
+      "detail": "exit=0"
+    },
+    {
+      "id": "8.0",
+      "title": "正对照：本阶段出站访问确实被拒，且向量化已停用",
+      "passed": true,
+      "detail": "上游 fetch 失败：OFFLINE: 拒绝出站 fetch raw.githubusercontent.com"
+    },
+    {
+      "id": "8.1",
+      "title": "断网 + 无向量重启后，按原文范围回读同一段且校验值一致",
+      "passed": true,
+      "detail": "verification=verified snapshotSha=一致 chunkSha=一致 range=[31973,32899) versionStatus=deprecated",
+      "evidence": {
+        "expectedSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+        "recomputedSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+        "chunkSha256": "992a7fd51fdcdcfd4efbbd4980a87b8cd7adf66736d770e41305654b192bb2c6",
+        "charStart": 31973,
+        "charEnd": 32899,
+        "paragraphHead": "### 6.4 状态与连续性\n\n| 机制 | 实现 | 观测证据 |\n|---|---|---|\n| 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | 255 次 `sapper fact`、198 次 `sapper graph`"
+      }
+    },
+    {
+      "id": "8.2",
+      "title": "无向量时关键词检索仍可用并如实标降级",
+      "passed": true,
+      "detail": "total=6 degraded=true reason=向量化已在设置中停用，本次检索只用关键词"
+    },
+    {
+      "id": "8.3",
+      "title": "v1 停用后默认检索返回有效版 v2",
+      "passed": true,
+      "detail": "topVersionNo=2 versionId=332fad90-2ae4-4d9e-9b19-4824524ed0d5 expectedV2=332fad90-2ae4-4d9e-9b19-4824524ed0d5"
+    },
+    {
+      "id": "8.4",
+      "title": "旧报告仍含 v1 快照校验值与停用提示",
+      "passed": true,
+      "detail": "reportBytes=1261 containsV1Sha=true"
+    },
+    {
+      "id": "8.5",
+      "title": "离线导出打包整份定版快照，校验值可复算",
+      "passed": true,
+      "detail": "snapshotScope=full-version bytes=86899 recomputedMatches=true"
+    },
+    {
+      "id": "8.6",
+      "title": "只打包引用片段的导出：字节等于被引用段落，校验值等于片段校验值",
+      "passed": true,
+      "detail": "bytes=1354 chunkShaMatches=true"
+    },
+    {
+      "id": "8.7",
+      "title": "知识库快照缺失时旧引用仍可由任务侧密封件复验",
+      "passed": true,
+      "detail": "verification=verified librarySnapshotAvailable=false"
+    },
+    {
+      "id": "8.8",
+      "title": "密封快照损坏时返回 sha256_mismatch 无法复验",
+      "passed": true,
+      "detail": "reason=sha256_mismatch"
+    },
+    {
+      "id": "8.9",
+      "title": "密封快照缺失时返回 snapshot_missing 无法复验",
+      "passed": true,
+      "detail": "reason=snapshot_missing"
+    },
+    {
+      "id": "9.1",
+      "title": "取到升级前 v1 原文字节（上一轮报告附件）",
+      "passed": true,
+      "detail": "bytes=2456 sha256=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 与引用登记值一致=true"
+    },
+    {
+      "id": "9.2",
+      "title": "记录升级前 §6.4 回读基准（旧切分整章）",
+      "passed": true,
+      "detail": "chars=[0,1910) length=1910 chunkSha=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+      "evidence": {
+        "charStart": 0,
+        "charEnd": 1910,
+        "chunkSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "head": "### 6.4 状态与连续性\n\n| 机制 | 实现 | 观测证据 |\n|---|---|---|\n| 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | "
+      }
+    },
+    {
+      "id": "9.3",
+      "title": "确认这条引用来自升级前的库结构（没有原文范围与片段元数据列）",
+      "passed": true,
+      "detail": "material_citations 列=id,task_id,engagement_id,material_id,version_id,locator,claim,body_format,material_title,publisher,source_kind,version_no,version_label,section_heading,section_page,section_ordinal,sha256,created_at；含 pin_kind=false 含 char_start=false"
+    },
+    {
+      "id": "9.4",
+      "title": "新代码在旧数据根上原地迁移：版本号与内容 SHA-256 不变",
+      "passed": false,
+      "detail": "versions=2 chunkerVersions=2,0 v1ShaStillPresent=true"
+    },
+    {
+      "id": "9.3b",
+      "title": "迁移后这条引用仍是 locator 定版（未被改写成范围定版）",
+      "passed": false,
+      "detail": "pinKind=undefined charStart=undefined chunkSha256=undefined"
+    },
+    {
+      "id": "9.5",
+      "title": "升级后旧 locator 引用回读的是同一段，原文范围与校验值完全一致",
+      "passed": false,
+      "detail": "verification=undefined pinKind=undefined chars=[undefined,undefined) length=undefined chunkSha一致=false",
+      "evidence": {
+        "before": {
+          "charStart": 0,
+          "charEnd": 1910,
+          "chunkSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59"
+        },
+        "after": null
+      }
+    },
+    {
+      "id": "9.6",
+      "title": "重建索引后旧引用仍回读同一段",
+      "passed": false,
+      "detail": "chunkSha一致=false length=undefined"
+    },
+    {
+      "id": "9.7",
+      "title": "新切分确实改变了库内片段，但旧引用不受影响",
+      "passed": false,
+      "detail": "新 §6.4 首片长度=1910 旧整章长度=1910 旧引用仍读整章=false"
+    }
+  ]
+}

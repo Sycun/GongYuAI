@@ -1,0 +1,42 @@
+{
+  "citation": {
+    "id": "cae746c7-15cf-4cfa-b77a-5b53dcd87bcf",
+    "taskId": "a0f831cc-14fe-4eb0-9495-9e41bc5807ca",
+    "engagementId": "eng-knowledge-hybrid-1795410980547",
+    "materialId": "d76f41c2-0a4b-4c2a-bc3c-1b8f2451d0ae",
+    "versionId": "bf711bcb-5ca7-4168-b5fc-fddcdb4755f3",
+    "locator": "§6.4~2",
+    "claim": "独立分析从运行记录中追到了一次负责人换班（06:14 换任，靠 STATE 续接）",
+    "bodyFormat": "markdown",
+    "materialTitle": "SapperLens 独立运行分析（整篇 README）",
+    "publisher": "inwpu（独立运行分析）",
+    "sourceKind": "original",
+    "versionNo": 1,
+    "versionLabel": "本地 v1",
+    "sectionHeading": "6.4 状态与连续性",
+    "sectionPage": null,
+    "sectionOrdinal": 69,
+    "snapshotSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+    "createdAt": "2026-11-23T05:16:29.732Z",
+    "pinKind": "range",
+    "charStart": 32670,
+    "charEnd": 32899,
+    "chunkSha256": "58649efc82a9417b33f7489302e9206ef44b4493719a22199791877d645d8293",
+    "headingPath": [
+      "SapperLens",
+      "6. 架构设计",
+      "6.4 状态与连续性"
+    ],
+    "pageBasis": null
+  },
+  "verification": {
+    "status": "unverifiable",
+    "reason": "sha256_mismatch",
+    "expectedSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+    "recomputedSha256": "208ded743e42a963280c0178f6f571d496eeab7a17980afd5bfe24d06b734689",
+    "source": "task-seal",
+    "detail": "快照内容与引用登记的 SHA-256 不一致，无法复验"
+  },
+  "versionStatus": "deprecated",
+  "librarySnapshotAvailable": false
+}

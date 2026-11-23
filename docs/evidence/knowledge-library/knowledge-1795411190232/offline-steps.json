@@ -1,0 +1,74 @@
+[
+  {
+    "id": "6.0a",
+    "title": "正对照：本阶段出站访问确实被拒",
+    "passed": true,
+    "detail": "上游 fetch 失败：OFFLINE: 拒绝出站 fetch raw.githubusercontent.com"
+  },
+  {
+    "id": "6.1",
+    "title": "断网重启后按引用回读 v1 段落并复算原 SHA-256",
+    "passed": false,
+    "detail": "status=200 verification=verified recomputed=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 expected=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 versionStatus=deprecated",
+    "evidence": {
+      "expectedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+      "recomputedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+      "locator": "§6.4",
+      "paragraphHead": "### 6.4 状态与连续性\n\n| 机制 | 实现 | 观测证据 |\n|---|---|---|\n| 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | 255 次 `sapper fact`、198 次 `sapper graph`"
+    }
+  },
+  {
+    "id": "6.2",
+    "title": "断网下检索默认返回有效版 v2",
+    "passed": false,
+    "detail": "total=4 topVersionNo=1 topVersionId=af0612a2-3f1e-447e-b9e7-3905f99c3078"
+  },
+  {
+    "id": "6.3",
+    "title": "断网下旧报告仍含 v1 SHA-256 与停用提示",
+    "passed": true,
+    "detail": "reportBytes=1241 containsV1Sha=true"
+  },
+  {
+    "id": "7.1",
+    "title": "离线导出打包定版快照与校验信息",
+    "passed": true,
+    "detail": "citations=1 snapshotBytes=2456 recomputed=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+    "evidence": {
+      "reportSha256": "f12d3c3a31a6875d5790bccdcb57afce84386d8f7f00443db94a8efb062cc164",
+      "snapshotSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59"
+    }
+  },
+  {
+    "id": "7.2",
+    "title": "知识库快照缺失时旧报告仍可由任务侧密封件复验",
+    "passed": true,
+    "detail": "verification=verified librarySnapshotAvailable=false"
+  },
+  {
+    "id": "7.3",
+    "title": "密封快照损坏时返回 sha256_mismatch 无法复验",
+    "passed": true,
+    "detail": "reason=sha256_mismatch expected=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 recomputed=208ded743e42a963280c0178f6f571d496eeab7a17980afd5bfe24d06b734689",
+    "evidence": {
+      "status": "unverifiable",
+      "reason": "sha256_mismatch",
+      "expectedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+      "recomputedSha256": "208ded743e42a963280c0178f6f571d496eeab7a17980afd5bfe24d06b734689",
+      "source": "task-seal",
+      "detail": "快照内容与引用登记的 SHA-256 不一致，无法复验"
+    }
+  },
+  {
+    "id": "7.4",
+    "title": "损坏快照的离线导出同样标记无法复验",
+    "passed": true,
+    "detail": "exportReason=sha256_mismatch"
+  },
+  {
+    "id": "7.5",
+    "title": "密封快照缺失时返回 snapshot_missing 无法复验",
+    "passed": true,
+    "detail": "reason=snapshot_missing"
+  }
+]

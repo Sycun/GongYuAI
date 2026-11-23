@@ -70,6 +70,8 @@ Finding 一等公民（tentative/verified/retested/accepted/retracted + findings
 
 ### P7 Super-agent 调度经济 🔨（第九轮：角色分层与供应商韧性契约级落地，真实路由待验证）
 
+报告交付后，带任务和记录编号的来件已有人工指定归属的入口。自动识别来件应归哪项工作，要用误挂率和节省的人工查找时间检验。模型选择要在相同材料上另测正确率、费用和耗时。两篇 DeepSeek 架构解读讨论同一项设计，公开原型与路由论文分别提供领域模型和实验假设。[来源与验证边界](./absorb-super-agent.md)
+
 三层模型路由（派单便宜/推理强/执行快，`execution.models`）；slot 0 指挥官自接力核对；偏航审计者（轻模型只写 `source=auditor` Hint，看门狗零策略不破）；Observe 事件两级过滤。脑手分离已由相位工具面结构性保证（Octop 0/5 委派教训的正面论据）。**差分协议已定**：中难度带 8 题子集、≥3 重复、配对差 CI、非劣界 -5pp（[absorb-eval-methodology.md](./absorb-eval-methodology.md)）。详见 [absorb-super-agent.md](./absorb-super-agent.md)。
 
 ### P8 记忆层：项目记忆 × 全局记忆 🔨（第九轮：全局记忆/档案索引/注入后端 + 记忆图 API；控制台与自动蒸馏未做）
@@ -129,7 +131,7 @@ pi-durable（Experimental，锁版本+适配层）：reset(handoff)/compaction/s
 已落地：P0–P5 + 并发扩容 + 证据复核 + 技能路由修复 + P9-F1
 第九轮后端：委托边界 / 持久作业 / 24h 求助 / handoff / 材料语义 / 覆盖矩阵 / 四图 API / 全局记忆 / 冻结评测 / 角色与韧性（契约级）
 仍未做：会话管理器、隧道/浏览器、凭据表、parser lane 真格式、速率硬闸、事件哈希链、真实供应商与真实生产盲评
-建议顺序：F1 记分卡(无依赖) → P6 E1 → P8 M1 → G1 双图 → P11 S1 会话+作业
+建议顺序：F1 记分卡(无依赖) → P6 E1 → 知识库首版（导入、检索、引用）✅ 后端 → P8 M1 → G1 双图 → P11 S1 会话+作业
           → P7 模型路由差分 → P8 M2/P9 F2/P10 G2 → P11 S2–S4 → P12 底线(D1/D2/D6)
 依赖：P6 E1 是 P8/P9/P10-G2/P12-D8 的原料；P11 S1 与 E2 元数据联动；P7 路由是飞轮执行器
 原则：每刀同预算差分验收；提案不升默认直到差分证明；契约变了才同步 long-run-contract
@@ -158,7 +160,7 @@ pi-durable（Experimental，锁版本+适配层）：reset(handoff)/compaction/s
 
 | 层 | 文档 |
 | --- | --- |
-| 总纲 | 本文件 · [README.md](./README.md) · [design-atlas.html](./design-atlas.html) · [demos/](./demos/)（六个分册交互演示，独立 HTML） |
+| 总纲 | 本文件 · [README.md](./README.md) · [design-atlas.html](./design-atlas.html)（单文件离线设计导览） |
 | 信仰 | [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) |
 | 架构 | [architecture.md](./architecture.md) · [asset-inventory.md](./asset-inventory.md) · [console-research.md](./console-research.md) |
 | 契约 | [long-run-contract.md](./long-run-contract.md) · [evidence-review.md](./evidence-review.md) |

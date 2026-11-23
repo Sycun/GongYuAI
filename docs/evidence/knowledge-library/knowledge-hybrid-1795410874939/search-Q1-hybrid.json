@@ -1,0 +1,543 @@
+{
+  "query": "负责人换班",
+  "scope": {
+    "engagementId": "eng-knowledge-hybrid-1795410874939",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "mode": "hybrid",
+  "total": 12,
+  "materials": 4,
+  "searchedVersions": 4,
+  "limit": 200,
+  "truncated": false,
+  "hits": [
+    {
+      "materialId": "fbd0c4e9-1f1b-43d9-805c-5fbc7b327694",
+      "versionId": "e32ba525-b7f9-4ecf-babb-1074c3a0c13b",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "Relay 台账交接六批复核实验（整篇 README）",
+      "publisher": "GongYuAI（本项目实验）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/experiments/2026-11-22-ledger-relay/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§两处交接改动",
+      "heading": "两处交接改动",
+      "page": null,
+      "ordinal": 1,
+      "context": "## 两处交接改动 复核人发出撤回意见时，现在分别记录意见编号 `notice`、被撤回的原记录编号 `subject` 和生效范围 `scope`。例如 R017 的 F4 发布撤回意见，撤回对象为 F2。对迁移旧账，`recorded` 保存历史日志载明的目标状态，`recheck` 单独写当前能否凭原版复验。LEGACY 可以同时记录历史已通过（`passed`）和原版无法复验（`unve",
+      "headingPath": [
+        "Relay 的台账交接能否在六批复核中省 Token",
+        "两处交接改动"
+      ],
+      "parentLocator": "§两处交接改动",
+      "charStart": 240,
+      "charEnd": 738,
+      "chunkSha256": "f2607d9eb38439d92bc9f27d12ce66b9a331343c448e4a817d436525e9040872",
+      "lineStart": 5,
+      "lineEnd": 9,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.42964843211801257,
+      "keywordScore": 0,
+      "semanticScore": 0.5370605401475157
+    },
+    {
+      "materialId": "c2915c8f-efb5-409e-a417-e7680e91cbee",
+      "versionId": "76911332-fc28-4da3-85fc-f07a0fb47dca",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+      "publisher": "GongYuAI（本项目合成验收）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/absorb-super-agent.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§报告交付后收到更正凭据~2",
+      "heading": "报告交付后收到更正凭据",
+      "page": null,
+      "ordinal": 8,
+      "context": "| 步骤 | 操作 | 预期结果与核对依据 | | --- | --- | --- | | 1. 定位原任务 | 操作员收到注明任务 ID 和 R-017 的更正回函。通过 `GET /tasks/<id>/history` 核对目标和 A、B 的记录编号，用 `gy evidence <id> --path review/R-017.json --file 回函.json` 导入。 | 回函写明",
+      "headingPath": [
+        "GongYuAI 的 Super-agent 设计与验收",
+        "报告交付后收到更正凭据"
+      ],
+      "parentLocator": "§报告交付后收到更正凭据",
+      "charStart": 5844,
+      "charEnd": 7078,
+      "chunkSha256": "c99803e911d95aa9ecb70da3469a6644de142f769f3e509c939076a3093973bf",
+      "lineStart": 70,
+      "lineEnd": 76,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.4228657070067212,
+      "keywordScore": 0,
+      "semanticScore": 0.5285821337584015
+    },
+    {
+      "materialId": "af0996bb-738e-4b0f-ad2b-51e3db419686",
+      "versionId": "46cdcaef-a75e-4cec-890c-29cde2d37b50",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§6.4",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 54,
+      "context": "### 6.4 状态与连续性 | 机制 | 实现 | 观测证据 | |---|---|---| | 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | 255 次 `sapper fact`、198 次 `sapper graph`、195 次 `sapper status` | | 跨 pane 共享 | w",
+      "headingPath": [
+        "SapperLens",
+        "6. 架构设计",
+        "6.4 状态与连续性"
+      ],
+      "parentLocator": "§6.4",
+      "charStart": 31973,
+      "charEnd": 32899,
+      "chunkSha256": "992a7fd51fdcdcfd4efbbd4980a87b8cd7adf66736d770e41305654b192bb2c6",
+      "lineStart": 723,
+      "lineEnd": 736,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.4122983997273324,
+      "keywordScore": 0,
+      "semanticScore": 0.5153729996591655
+    },
+    {
+      "materialId": "af0996bb-738e-4b0f-ad2b-51e3db419686",
+      "versionId": "46cdcaef-a75e-4cec-890c-29cde2d37b50",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§8.6",
+      "heading": "8.6 范围近失：硬线在 SKILL 里，执行靠 commander 兜底",
+      "page": null,
+      "ordinal": 70,
+      "context": "### 8.6 范围近失：硬线在 SKILL 里，执行靠 commander 兜底 这是本次审计最需要纠正的一条“漂亮话”。 **事实链（A 级，+08）：** | 时间 | 会话 | 行为 | |---|---|---| | 04:38:37 | b-01 w1 | 通过边缘 `tunnel.php` 扫 `172.19.0.1-5` 的 22/80/3306 | | 04:38:54 |",
+      "headingPath": [
+        "SapperLens",
+        "8. 失败模式",
+        "8.6 范围近失：硬线在 SKILL 里，执行靠 commander 兜底"
+      ],
+      "parentLocator": "§8.6",
+      "charStart": 41609,
+      "charEnd": 42385,
+      "chunkSha256": "bcad2e28ecfe0037838e829e939cf500cc118bee0c681a512e86c8854826a547",
+      "lineStart": 921,
+      "lineEnd": 936,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.40928229608887456,
+      "keywordScore": 0,
+      "semanticScore": 0.5116028701110932
+    },
+    {
+      "materialId": "c2915c8f-efb5-409e-a417-e7680e91cbee",
+      "versionId": "76911332-fc28-4da3-85fc-f07a0fb47dca",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+      "publisher": "GongYuAI（本项目合成验收）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/absorb-super-agent.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§报告交付后收到更正凭据",
+      "heading": "报告交付后收到更正凭据",
+      "page": null,
+      "ordinal": 7,
+      "context": "## 报告交付后收到更正凭据 **验收目的。** 报告已交付、原会话已结束。操作员次日仅凭任务编号和回函修订原报告。另一位读者拿到修订报告及其附件后，应能指出哪条判断被撤回、哪条已另行复核、哪个目标仍缺材料，并能查回首次交付版本。 **初始材料。** 使用离线合成台账 R-017。任务状态为 `incomplete`，目标为收件归属 `ownership` 与签收人 `signature`。已",
+      "headingPath": [
+        "GongYuAI 的 Super-agent 设计与验收",
+        "报告交付后收到更正凭据"
+      ],
+      "parentLocator": "§报告交付后收到更正凭据",
+      "charStart": 5446,
+      "charEnd": 5842,
+      "chunkSha256": "70ad362cb18390f90bdec3f3e447688f4b406875522c951ba56bf46246868d96",
+      "lineStart": 64,
+      "lineEnd": 68,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.40764902079787624,
+      "keywordScore": 0,
+      "semanticScore": 0.5095612759973452
+    },
+    {
+      "materialId": "c2915c8f-efb5-409e-a417-e7680e91cbee",
+      "versionId": "76911332-fc28-4da3-85fc-f07a0fb47dca",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+      "publisher": "GongYuAI（本项目合成验收）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/absorb-super-agent.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§早期设计参照",
+      "heading": "早期设计参照",
+      "page": null,
+      "ordinal": 3,
+      "context": "## 早期设计参照 | 篇 | 要点 | | --- | --- | | Cairn×ARTEX 分析 | 四条改造路线：A*/MCTS 候选 Intent 前瞻排序、POMDP 形式化（观测历史≠信念状态）、事件溯源+CQRS（Intent 生命周期改不可变事件重建）、State–Intent 二原语压缩。核心转向「以信息为本质」：Fact 加语义坐标（来源/时间/主体/情境/关系），区域/关",
+      "headingPath": [
+        "GongYuAI 的 Super-agent 设计与验收",
+        "早期设计参照"
+      ],
+      "parentLocator": "§早期设计参照",
+      "charStart": 2408,
+      "charEnd": 3147,
+      "chunkSha256": "c9ae74c5b649946c4cb76522b55cf63baea49ddba764ca77c947676b4a6240ae",
+      "lineStart": 28,
+      "lineEnd": 34,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.4068624870750938,
+      "keywordScore": 0,
+      "semanticScore": 0.5085781088438672
+    },
+    {
+      "materialId": "af0996bb-738e-4b0f-ad2b-51e3db419686",
+      "versionId": "46cdcaef-a75e-4cec-890c-29cde2d37b50",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§5.3~5",
+      "heading": "5.3 L2：Worker mission（172 次出现 / 81 条唯一；172 次出现的平均长度 954 字符）",
+      "page": null,
+      "ordinal": 41,
+      "context": "> “w3 FRESH WORKER on b-01 (w1 recycled; general b-01-g1 also on code). READ FACT f011 AND ITS DOC FIRST (`sapper show fact f011`) — it is the full handoff: SSH brute running locally (`/tmp/ssh_brute3",
+      "headingPath": [
+        "SapperLens",
+        "5. 提示词全谱",
+        "5.3 L2：Worker mission（172 次出现 / 81 条唯一；172 次出现的平均长度 954 字符）"
+      ],
+      "parentLocator": "§5.3",
+      "charStart": 22679,
+      "charEnd": 23423,
+      "chunkSha256": "3f0396a7fc805f09f6f6f506d63db71d3d13b0826aa529d08bd7c87d585f3d98",
+      "lineStart": 571,
+      "lineEnd": 575,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.40530594584108015,
+      "keywordScore": 0,
+      "semanticScore": 0.5066324323013501
+    },
+    {
+      "materialId": "fbd0c4e9-1f1b-43d9-805c-5fbc7b327694",
+      "versionId": "e32ba525-b7f9-4ecf-babb-1074c3a0c13b",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "Relay 台账交接六批复核实验（整篇 README）",
+      "publisher": "GongYuAI（本项目实验）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/experiments/2026-11-22-ledger-relay/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§原六题的两批回归",
+      "heading": "原六题的两批回归",
+      "page": null,
+      "ordinal": 2,
+      "context": "## 原六题的两批回归 同一批材料、同一评分器，六题各重复两次，每题五个字段。新一轮三组全部重新调用模型。bare 和 DAG 的第一批请求摘要与原实验逐题相同；Relay 改用新交接格式。 | 两批条件 | 字段正确 | 整题全对 | 撤回对象 | 历史通过状态 | 输入 Token | 输出 Token | 总 Token | | --- | ---: | ---: | ---: | --",
+      "headingPath": [
+        "Relay 的台账交接能否在六批复核中省 Token",
+        "原六题的两批回归"
+      ],
+      "parentLocator": "§原六题的两批回归",
+      "charStart": 740,
+      "charEnd": 1515,
+      "chunkSha256": "c7e91bd4894940a9d53eafc4386d4c6701ff12455ea6355f6b7aaf1470b21590",
+      "lineStart": 11,
+      "lineEnd": 22,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.38122586327997027,
+      "keywordScore": 0,
+      "semanticScore": 0.4765323290999628
+    },
+    {
+      "materialId": "fbd0c4e9-1f1b-43d9-805c-5fbc7b327694",
+      "versionId": "e32ba525-b7f9-4ecf-babb-1074c3a0c13b",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "Relay 台账交接六批复核实验（整篇 README）",
+      "publisher": "GongYuAI（本项目实验）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/experiments/2026-11-22-ledger-relay/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§六批、五次交接",
+      "heading": "六批、五次交接",
+      "page": null,
+      "ordinal": 3,
+      "context": "## 六批、五次交接 三组收到相同的六批数据。每批都有事实记录，原有例行归档行分散到各批。bare 和 DAG 保留此前往返消息；两个图组都能按本批引用读取已到达的祖先。Relay 每个边界换班，累计读回已保存的各代交接。 | 六批组别 | 字段正确率 | 整题全对 | 撤回对象 | 历史通过状态 | 输入 Token | 输出 Token | 总 Token | | --- | ---: |",
+      "headingPath": [
+        "Relay 的台账交接能否在六批复核中省 Token",
+        "六批、五次交接"
+      ],
+      "parentLocator": "§六批、五次交接",
+      "charStart": 1517,
+      "charEnd": 2531,
+      "chunkSha256": "188f17c84994d2afdaee92dc09a8b64a2faf55bbf620ab7759511dc827e696f0",
+      "lineStart": 24,
+      "lineEnd": 43,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.37972890726814723,
+      "keywordScore": 0,
+      "semanticScore": 0.474661134085184
+    },
+    {
+      "materialId": "e03245e6-b0e0-4275-a52c-3b18edd70e7d",
+      "versionId": "941f34e9-6bad-4ce1-833e-5c8d660187aa",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "nvwabase — The Nüwa Foundation（整篇 README）",
+      "publisher": "N1nEmAn · VarFusion Lab（上游作者）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/N1nEmAn/nvwabase/master/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§4",
+      "heading": "4. Quick Start",
+      "page": null,
+      "ordinal": 6,
+      "context": "## 4. Quick Start ```bash bash install.sh # installs fgc + nvwa CLI (stdlib only, zero deps) # History: start a graph nvwa setup --goal \"your long-horizon goal\" --agents nvwa st",
+      "headingPath": [
+        "nvwabase — The Nüwa Foundation",
+        "4. Quick Start"
+      ],
+      "parentLocator": "§4",
+      "charStart": 4558,
+      "charEnd": 5542,
+      "chunkSha256": "487d234262ee389dd6e8bfc040710cbe61483934a79fa17110ffed48ffc98feb",
+      "lineStart": 94,
+      "lineEnd": 118,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.3747343682386603,
+      "keywordScore": 0,
+      "semanticScore": 0.46841796029832533
+    },
+    {
+      "materialId": "e03245e6-b0e0-4275-a52c-3b18edd70e7d",
+      "versionId": "941f34e9-6bad-4ce1-833e-5c8d660187aa",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "nvwabase — The Nüwa Foundation（整篇 README）",
+      "publisher": "N1nEmAn · VarFusion Lab（上游作者）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/N1nEmAn/nvwabase/master/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§2~2",
+      "heading": "2. The Three-Capability Foundation",
+      "page": null,
+      "ordinal": 3,
+      "context": "History has three layers: **title / summary / evidence document** — read the title for the gist, drill down when needed, like using a library. Once knowledge is externalized, **individual AI sessions ",
+      "headingPath": [
+        "nvwabase — The Nüwa Foundation",
+        "2. The Three-Capability Foundation"
+      ],
+      "parentLocator": "§2",
+      "charStart": 2492,
+      "charEnd": 3297,
+      "chunkSha256": "6ce5401f7f7e7489ab50df3b227a372f4e5a346d5e3a87909913c549997903c2",
+      "lineStart": 55,
+      "lineEnd": 65,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.34425369799190836,
+      "keywordScore": 0,
+      "semanticScore": 0.4303171224898854
+    },
+    {
+      "materialId": "e03245e6-b0e0-4275-a52c-3b18edd70e7d",
+      "versionId": "941f34e9-6bad-4ce1-833e-5c8d660187aa",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "nvwabase — The Nüwa Foundation（整篇 README）",
+      "publisher": "N1nEmAn · VarFusion Lab（上游作者）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/N1nEmAn/nvwabase/master/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 0,
+      "locator": "§3~2",
+      "heading": "3. What's Inside",
+      "page": null,
+      "ordinal": 5,
+      "context": "- **Layered memory**: title / description / doc — prompts get the summary layer only; depth is opt-in via `fgc doc <id>` — context-bloat resistant - **Typed facts**: `fgc fact ... -k host/service/cr",
+      "headingPath": [
+        "nvwabase — The Nüwa Foundation",
+        "3. What's Inside"
+      ],
+      "parentLocator": "§3",
+      "charStart": 3518,
+      "charEnd": 4556,
+      "chunkSha256": "4103630ff2a181014d876a008c95d45873b26235d5190b35caa56c8d44c79839",
+      "lineStart": 75,
+      "lineEnd": 92,
+      "pageBasis": null,
+      "retrieval": "semantic",
+      "score": 0.34255129513756316,
+      "keywordScore": 0,
+      "semanticScore": 0.42818911892195394
+    }
+  ],
+  "recall": {
+    "keyword": 0,
+    "semantic": 12,
+    "semanticCutoff": 0.35
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "chunkerVersion": 2,
+    "indexKey": "c2:bge-m3-mlx-4bit",
+    "totalChunks": 131,
+    "indexedChunks": 131,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "degraded": false,
+    "lastIndexedAt": "2026-11-23T05:14:43.857Z"
+  }
+}

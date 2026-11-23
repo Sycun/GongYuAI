@@ -1,0 +1,36 @@
+{"ts":"2026-11-23T09:30:29.287Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":0,"auth":{"present":false,"matchesExpected":null},"inputs":["GongYuAI 向量化连通性探测 synthetic embedding probe"]}
+{"ts":"2026-11-23T09:30:41.189Z","service":"cloud-A","kind":"control","delayMs":3000,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:30:41.203Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":3000,"auth":{"present":false,"matchesExpected":null},"inputs":["GongYuAI 向量化连通性探测 synthetic embedding probe"]}
+{"ts":"2026-11-23T09:30:44.207Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":2,"dim":12,"delayMs":3000,"auth":{"present":false,"matchesExpected":null},"inputs":["交接记录\n## 交接记录\n\n06:14 换任，继任者读 STATE 续接进度。","值班表\n## 值班表\n\n负责人换班按 STATE 交接，gy-a-marker-2。"]}
+{"ts":"2026-11-23T09:30:47.210Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":2,"dim":12,"delayMs":3000,"auth":{"present":false,"matchesExpected":null},"inputs":["备注\n## 备注\n\n交接完成后更新进度，gy-a-marker-3。","附注\n## 附注\n\n换任凭据登记在 STATE，gy-a-marker-4。"]}
+{"ts":"2026-11-23T09:30:50.214Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":3000,"auth":{"present":false,"matchesExpected":null},"inputs":["交接记录\n## 交接记录\n\n06:14 换任，继任者读 STATE 续接进度。"]}
+{"ts":"2026-11-23T09:30:58.790Z","service":"cloud-A","kind":"control","delayMs":5000,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:32:34.272Z","service":"cloud-A","kind":"control","holdCall":1,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:32:34.296Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":2,"dim":12,"delayMs":0,"held":true,"auth":{"present":false,"matchesExpected":null},"inputs":["交接机制\n## 交接机制\n\n06:14 换任，继任者读 STATE 续接进度。","值班交接\n## 值班交接\n\n负责人换班按 STATE 文件执行，凭据登记在 STATE。"]}
+{"ts":"2026-11-23T09:32:55.085Z","service":"cloud-A","kind":"release","held":1}
+{"ts":"2026-11-23T09:32:55.085Z","service":"cloud-A","kind":"control","holdCall":2,"release":true,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:32:55.088Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":2,"dim":12,"delayMs":0,"held":true,"auth":{"present":false,"matchesExpected":null},"inputs":["交接记录\n## 交接记录\n\n06:14 换任，继任者读 STATE 续接进度。","值班表\n## 值班表\n\n负责人换班按 STATE 交接，gy-a-marker-2。"]}
+{"ts":"2026-11-23T09:33:49.525Z","service":"cloud-A","kind":"release","held":1}
+{"ts":"2026-11-23T09:33:49.526Z","service":"cloud-A","kind":"control","release":true,"holdCall":0,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:38:20.706Z","service":"cloud-A","kind":"release","held":0}
+{"ts":"2026-11-23T09:38:20.706Z","service":"cloud-A","kind":"control","delayMs":0,"holdCall":0,"release":true,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:38:41.233Z","service":"cloud-A","kind":"control","holdCall":2,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:39:47.851Z","service":"cloud-A","kind":"control","holdCall":2,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:44:12.541Z","service":"cloud-A","kind":"control","holdCall":2,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:44:12.562Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":0,"held":false,"auth":{"present":false,"matchesExpected":null},"inputs":["GongYuAI 向量化连通性探测 synthetic embedding probe"]}
+{"ts":"2026-11-23T09:44:12.565Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":2,"dim":12,"delayMs":0,"held":true,"auth":{"present":false,"matchesExpected":null},"inputs":["交接机制\n## 交接机制\n\n06:14 换任，继任者读 STATE 续接进度。","值班交接\n## 值班交接\n\n负责人换班按 STATE 文件执行，凭据登记在 STATE。"]}
+{"ts":"2026-11-23T09:45:53.361Z","service":"cloud-A","kind":"release","held":1}
+{"ts":"2026-11-23T09:45:53.361Z","service":"cloud-A","kind":"control","release":true,"holdCall":0,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:45:53.364Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":0,"held":false,"auth":{"present":false,"matchesExpected":null},"inputs":["交接记录\n## 交接记录\n\n06:14 换任，继任者读 STATE 续接进度。"]}
+{"ts":"2026-11-23T09:47:23.985Z","service":"cloud-A","kind":"control","holdCall":4,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:47:23.997Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":2,"dim":12,"delayMs":0,"held":true,"auth":{"present":false,"matchesExpected":null},"inputs":["交接机制\n## 交接机制\n\n06:14 换任，继任者读 STATE 续接进度。","值班交接\n## 值班交接\n\n负责人换班按 STATE 文件执行，凭据登记在 STATE。"]}
+{"ts":"2026-11-23T09:47:41.377Z","service":"cloud-A","kind":"release","held":1}
+{"ts":"2026-11-23T09:47:41.378Z","service":"cloud-A","kind":"control","holdCall":5,"release":true,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:47:41.380Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":2,"dim":12,"delayMs":0,"held":true,"auth":{"present":false,"matchesExpected":null},"inputs":["交接记录\n## 交接记录\n\n06:14 换任，继任者读 STATE 续接进度。","值班表\n## 值班表\n\n负责人换班按 STATE 交接，gy-a-marker-2。"]}
+{"ts":"2026-11-23T09:48:12.170Z","service":"cloud-A","kind":"release","held":1}
+{"ts":"2026-11-23T09:48:12.170Z","service":"cloud-A","kind":"control","release":true,"holdCall":0,"expectedKeyLogged":false}
+{"ts":"2026-11-23T09:52:33.387Z","service":"cloud-A","kind":"control","expectedKey":"acc-key-A","expectedKeyLogged":true}
+{"ts":"2026-11-23T09:52:58.266Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":0,"held":false,"auth":{"present":true,"matchesExpected":true},"inputs":["GongYuAI 向量化连通性探测 synthetic embedding probe"]}
+{"ts":"2026-11-23T09:54:35.416Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":0,"held":false,"auth":{"present":false,"matchesExpected":false},"inputs":["GongYuAI 向量化连通性探测 synthetic embedding probe"]}
+{"ts":"2026-11-23T09:54:53.678Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":0,"held":false,"auth":{"present":true,"matchesExpected":true},"inputs":["GongYuAI 向量化连通性探测 synthetic embedding probe"]}
+{"ts":"2026-11-23T09:55:09.129Z","service":"cloud-A","kind":"embeddings","model":"stub-cloud-12dim","n":1,"dim":12,"delayMs":0,"held":false,"auth":{"present":false,"matchesExpected":false},"inputs":["GongYuAI 向量化连通性探测 synthetic embedding probe"]}

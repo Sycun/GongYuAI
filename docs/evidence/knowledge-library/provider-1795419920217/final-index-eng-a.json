@@ -1,0 +1,40 @@
+{
+  "scope": {
+    "engagementId": "eng-a",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "index": {
+    "state": "ready",
+    "model": "stub-local-8dim",
+    "modelDim": 8,
+    "provider": "http://127.0.0.1:8898/v1",
+    "providerKind": "local",
+    "chunkerVersion": 2,
+    "indexKey": "c2|local|http://127.0.0.1:8898/v1|stub-local-8dim",
+    "totalChunks": 6,
+    "indexedChunks": 6,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "blockedChunks": 0,
+    "services": [
+      {
+        "provider": "local",
+        "baseUrl": "http://127.0.0.1:8898/v1",
+        "model": "stub-local-8dim",
+        "modelDim": 8,
+        "indexKey": "c2|local|http://127.0.0.1:8898/v1|stub-local-8dim",
+        "state": "ready",
+        "versions": 2,
+        "totalChunks": 6,
+        "indexedChunks": 6,
+        "pendingChunks": 0,
+        "failedChunks": 0,
+        "allowed": true
+      }
+    ],
+    "degraded": false,
+    "lastIndexedAt": "2026-11-23T07:52:48.587Z"
+  }
+}

@@ -1,0 +1,57 @@
+{
+ "citation": {
+  "id": "e49ee6c5-236c-4f45-908b-969c294edc99",
+  "taskId": "fb661671-0631-4a20-9daf-fa162439038b",
+  "engagementId": "eng-a",
+  "materialId": "7a5fd27d-5131-449a-a2ba-38ab2e922db3",
+  "versionId": "aff3bbed-cd38-47e2-825a-f2f966172790",
+  "locator": "§值班交接",
+  "claim": "独立分析观察到一次负责人换班（真实 oMLX 向量召回）",
+  "bodyFormat": "markdown",
+  "materialTitle": "共享交接机制（真实 oMLX 验收）",
+  "publisher": "验收合成材料",
+  "sourceKind": "original",
+  "versionNo": 1,
+  "versionLabel": "本地 v1",
+  "sectionHeading": "值班交接",
+  "sectionPage": null,
+  "sectionOrdinal": 1,
+  "snapshotSha256": "b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d",
+  "createdAt": "2026-11-23T09:59:11.586Z",
+  "pinKind": "range",
+  "charStart": 36,
+  "charEnd": 75,
+  "chunkSha256": "cfdf186709fc32f81576b7609090ccb2d89c704eb853ab7890cd2ea4b17cca3c",
+  "headingPath": [
+   "值班交接"
+  ],
+  "pageBasis": null
+ },
+ "verification": {
+  "status": "verified",
+  "expectedSha256": "b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d",
+  "recomputedSha256": "b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d",
+  "source": "task-seal"
+ },
+ "paragraph": {
+  "ordinal": 1,
+  "locator": "§值班交接",
+  "heading": "值班交接",
+  "page": null,
+  "charStart": 36,
+  "charEnd": 75,
+  "headingPath": [
+   "值班交接"
+  ],
+  "parentLocator": "§值班交接",
+  "chunkSha256": "cfdf186709fc32f81576b7609090ccb2d89c704eb853ab7890cd2ea4b17cca3c",
+  "chunkIndex": 0,
+  "chunkCount": 1,
+  "lineStart": 5,
+  "lineEnd": 7,
+  "pageBasis": null,
+  "text": "## 值班交接\n\n负责人换班按 STATE 文件执行，凭据登记在 STATE。"
+ },
+ "versionStatus": "active",
+ "librarySnapshotAvailable": true
+}

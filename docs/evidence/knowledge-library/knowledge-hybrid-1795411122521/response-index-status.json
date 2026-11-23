@@ -1,0 +1,22 @@
+{
+  "scope": {
+    "engagementId": "eng-knowledge-hybrid-1795411122521",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "chunkerVersion": 2,
+    "indexKey": "c2:bge-m3-mlx-4bit",
+    "totalChunks": 175,
+    "indexedChunks": 175,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "degraded": false,
+    "lastIndexedAt": "2026-11-23T05:18:50.873Z"
+  }
+}

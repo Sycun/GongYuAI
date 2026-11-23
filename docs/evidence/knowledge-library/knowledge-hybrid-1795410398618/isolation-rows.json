@@ -1,0 +1,38 @@
+[
+  {
+    "reader": "eng-knowledge-hybrid-1795410398618-alpha",
+    "ownKeywordTotal": 1,
+    "otherKeywordTotal": 0,
+    "sharedTotal": 2,
+    "materials": 2,
+    "semanticTotal": 2,
+    "semanticLeaked": false,
+    "semanticMaterials": [
+      "a151cc22-0b7f-4dd1-b412-8bdcb6e7a945",
+      "079a4634-e0d8-48a2-bb63-5db639bc4fce"
+    ],
+    "searchedVersions": 2,
+    "indexTotalChunks": 2,
+    "leakedOtherTitle": false,
+    "ownId": "a151cc22-0b7f-4dd1-b412-8bdcb6e7a945",
+    "otherId": "daee8382-b2a0-40a8-96ad-518e3a5b39f3"
+  },
+  {
+    "reader": "eng-knowledge-hybrid-1795410398618-beta",
+    "ownKeywordTotal": 1,
+    "otherKeywordTotal": 0,
+    "sharedTotal": 2,
+    "materials": 2,
+    "semanticTotal": 2,
+    "semanticLeaked": false,
+    "semanticMaterials": [
+      "daee8382-b2a0-40a8-96ad-518e3a5b39f3",
+      "079a4634-e0d8-48a2-bb63-5db639bc4fce"
+    ],
+    "searchedVersions": 2,
+    "indexTotalChunks": 2,
+    "leakedOtherTitle": false,
+    "ownId": "daee8382-b2a0-40a8-96ad-518e3a5b39f3",
+    "otherId": "a151cc22-0b7f-4dd1-b412-8bdcb6e7a945"
+  }
+]

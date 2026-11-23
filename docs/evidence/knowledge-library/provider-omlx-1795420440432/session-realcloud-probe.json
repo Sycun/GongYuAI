@@ -1,0 +1,68 @@
+{
+  "runId": "1795422629910",
+  "outDir": "/Users/sycpro/GongYuAI/out/knowledge-provider-console-1795422629910",
+  "dataRoot": "/Users/sycpro/GongYuAI/out/knowledge-provider-console-1795422629910/data",
+  "localMode": "omlx",
+  "planeUrl": "http://127.0.0.1:8879",
+  "consoleUrl": "http://127.0.0.1:5174/#/knowledge",
+  "localService": {
+    "baseUrl": "http://127.0.0.1:8000/v1",
+    "model": "bge-m3-mlx-4bit",
+    "kind": "真实本机模型（oMLX）"
+  },
+  "cloudService": {
+    "baseUrl": "http://127.0.0.1:8899/v1",
+    "model": "stub-cloud-12dim",
+    "kind": "本机兼容测试服务（云端替身）"
+  },
+  "callLogs": {
+    "local": null,
+    "cloud": "/Users/sycpro/GongYuAI/out/knowledge-provider-console-1795422629910/cloud-calls.jsonl"
+  },
+  "engagements": {
+    "a": "eng-a",
+    "b": "eng-b"
+  },
+  "tasks": {
+    "a": "44332a20-059d-422f-bf02-e8a480395c59",
+    "b": "5d49492e-cae4-4fd2-a386-62c5c0d1930b"
+  },
+  "materials": {
+    "shared": {
+      "id": "8bf8e02b-185b-4a30-b045-da7f918e4d38",
+      "versionId": "b389a0f9-f942-4b2a-b13b-0645b656f88d",
+      "chunks": 4,
+      "contentSha256": "effc084f6670b957f96f26f7a27f6ee32a43a6de63ed405c57134c452c683d66"
+    },
+    "a": {
+      "id": "27c881b8-a1cc-473d-baa0-749328eaa7db",
+      "versionId": "03755405-cf3e-432c-9c00-d0c2c1472087",
+      "chunks": 2,
+      "contentSha256": "e208e039abc3ce9cda99c24b4233c3099130bc21aebc99a63e295e67b0380e75"
+    },
+    "b": {
+      "id": "5e599917-83e2-4902-95b0-52f45e939027",
+      "versionId": "88c5a3f7-463d-4c70-9ff6-c2e96690227c",
+      "chunks": 2,
+      "contentSha256": "9d5466b7755e410b35e0f2948fb49bb77b45b252e79a006f6333e5296ebad9d6"
+    }
+  },
+  "articles": {
+    "shared": {
+      "sha256": "effc084f6670b957f96f26f7a27f6ee32a43a6de63ed405c57134c452c683d66",
+      "text": "# 团队共享运行分析\n\n## 6. 架构设计\n\n### 6.4 状态与连续性\n\n| 机制 | 实现 | 观测证据 |\n|---|---|---|\n| Commander 交接 | commander-state.md | 2 任 commander，06:14 换任，靠 STATE 续接 |\n\n换任通过读 STATE 文件继续。\n\n### 6.5 自我修复\n\nagent 改了自己的工具。"
+    },
+    "a": {
+      "sha256": "e208e039abc3ce9cda99c24b4233c3099130bc21aebc99a63e295e67b0380e75",
+      "text": "# 委托A专属交接记录\n\n## 现场交接\n\n06:14 换任，继任者读 STATE 文件续接进度。R-017 要求把更正回函并入既有证据链。"
+    },
+    "b": {
+      "sha256": "9d5466b7755e410b35e0f2948fb49bb77b45b252e79a006f6333e5296ebad9d6",
+      "text": "# 委托B专属交接记录\n\n## 现场交接\n\n07:20 换班，下一任读 STATE 继续未完成的进度核对。"
+    }
+  },
+  "stubControl": {
+    "failCloudPath": "/Users/sycpro/GongYuAI/out/knowledge-provider-console-1795422629910/cloud-fail",
+    "failLocalPath": "/Users/sycpro/GongYuAI/out/knowledge-provider-console-1795422629910/local-fail"
+  }
+}

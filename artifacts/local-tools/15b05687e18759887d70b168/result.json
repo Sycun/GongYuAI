@@ -1,0 +1,20 @@
+{
+  "artifact_dir": "artifacts/local-tools/15b05687e18759887d70b168",
+  "duration_seconds": 0.679,
+  "execution_host": "Kali",
+  "exit_code": 0,
+  "files": {
+    "stderr.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stdout.log": {
+      "bytes": 8,
+      "sha256": "6b95743f7339e0aff16c1d1b9f453711ffcdc3fed9b6787af264f9601c4e2961"
+    }
+  },
+  "project_dir": ".",
+  "status": "completed",
+  "task_id": "task-2d9839a10ecef5c2",
+  "argv_sha256": "60b2c16b60e7ecb15664811b769ef66dc69452d0b7496ac5bf181405b7e3a294"
+}

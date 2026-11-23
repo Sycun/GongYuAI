@@ -1,0 +1,32 @@
+{
+  "citation": {
+    "id": "44e47d6a-449e-407a-9bdf-efc7fab23413",
+    "taskId": "74d42c3d-d84d-42b9-b473-1efc25ca7682",
+    "engagementId": "eng-knowledge-hybrid-1795410874939",
+    "materialId": "af0996bb-738e-4b0f-ad2b-51e3db419686",
+    "versionId": "46cdcaef-a75e-4cec-890c-29cde2d37b50",
+    "locator": "§6.4",
+    "claim": "独立分析从运行记录中追到了一次负责人换班（06:14 换任，靠 STATE 续接）",
+    "snapshotSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+    "bodyFormat": "markdown",
+    "materialTitle": "SapperLens 独立运行分析（整篇 README）",
+    "publisher": "inwpu（独立运行分析）",
+    "sourceKind": "original",
+    "versionNo": 1,
+    "versionLabel": "本地 v1",
+    "sectionHeading": "6.4 状态与连续性",
+    "sectionPage": null,
+    "sectionOrdinal": 54,
+    "createdAt": "2026-11-23T05:14:44.350Z",
+    "pinKind": "range",
+    "charStart": 31973,
+    "charEnd": 32899,
+    "chunkSha256": "992a7fd51fdcdcfd4efbbd4980a87b8cd7adf66736d770e41305654b192bb2c6",
+    "headingPath": [
+      "SapperLens",
+      "6. 架构设计",
+      "6.4 状态与连续性"
+    ],
+    "pageBasis": null
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "enabled": true,
+  "provider": "local",
+  "cloudEngagements": [],
+  "local": {
+    "baseUrl": "http://127.0.0.1:8000/v1",
+    "model": "bge-m3-mlx-4bit",
+    "apiKeyEnv": "OMLX_API_KEY",
+    "batchSize": 16,
+    "timeoutMs": 120000,
+    "apiKeyConfigured": false,
+    "apiKeyMask": ""
+  },
+  "cloud": {
+    "baseUrl": "http://127.0.0.1:8899/v1",
+    "model": "stub-cloud-12dim",
+    "apiKeyEnv": "",
+    "batchSize": 16,
+    "timeoutMs": 30000,
+    "apiKeyConfigured": true,
+    "apiKeyMask": "clou••••••••-key"
+  }
+}

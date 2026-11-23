@@ -1,0 +1,16 @@
+{
+  "taskId": "a0f831cc-14fe-4eb0-9495-9e41bc5807ca",
+  "engagementId": "eng-knowledge-hybrid-1795410980547",
+  "materialId": "d76f41c2-0a4b-4c2a-bc3c-1b8f2451d0ae",
+  "citationId": "cae746c7-15cf-4cfa-b77a-5b53dcd87bcf",
+  "v1Id": "bf711bcb-5ca7-4168-b5fc-fddcdb4755f3",
+  "v2Id": "d9f38186-7a8a-4b3c-addb-174c7eb615e8",
+  "v1Sha": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+  "v2Sha": "75b31ae47b24943bd7147a854fe1f54233d8bd155d847aa77e4c9e7f3369532c",
+  "v1SnapshotPath": "knowledge/snapshots/7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+  "pinnedText": "经与作者沟通确认，Commander 交接发生在指挥官与指挥官之间，用于处理 8 小时长时运行的上下文容量约束：系统设置 90% 自动压缩，指挥官在 85% 时主动写 `commander-state.md`，记录分配、弃置、队列、情报和下一步；下一任指挥官读取该文件，接着调度。\n\n**STATE 文件示例（06:14 换任时，[`commander_state_0614.md`](prompts/commander_state_0614.md)）：**",
+  "pinnedChunkSha": "58649efc82a9417b33f7489302e9206ef44b4493719a22199791877d645d8293",
+  "charStart": 32670,
+  "charEnd": 32899,
+  "locator": "§6.4~2"
+}

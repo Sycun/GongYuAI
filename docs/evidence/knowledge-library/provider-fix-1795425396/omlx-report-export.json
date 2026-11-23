@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "kind": "knowledge-report-export",
+  "taskId": "fb661671-0631-4a20-9daf-fa162439038b",
+  "engagementId": "eng-a",
+  "exportedAt": "2026-11-23T09:59:23.988Z",
+  "scope": {
+    "engagementId": "eng-a",
+    "resolvedFrom": "task",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "snapshotScope": "paragraph",
+  "report": {
+    "path": "report.md",
+    "sha256": "0bd65ad2f1a048757cbcd9df69e55775af35e35325be616619149c658e338ba3",
+    "markdown": "# GongYuAI Report\n\nTask: fb661671-0631-4a20-9daf-fa162439038b\nStatus: completed\nTargets: provider.invalid\nAuthorization: 虚构材料，仅用于工程验收\n排除范围　未列出\n\n## 平台用量\n\n- 累计 Token　用量 0，上限 不限\n- 累计工具调用　用量 0，上限 不限\n- 累计安装　用量 0，上限 不限\n- 本轮墙钟（毫秒）　用量 未知，上限 不限\n\n## Skill 与 MCP 调用\n\n此任务没有逐次调用统计。\n\n## Findings\n\n- （无已验证 finding；tentative 线索不进交付）\n\n\n\n## 覆盖与当前支持\n\n统计时点　2026-11-23T09:59:11.588Z（实时读数；不可变凭据以交付快照 SHA-256 为准）\n分母　本次约定目标总数 0（不适用：无目标）\n\n- 历史通过　0 / 0\n- 当前证据足以支持　0 / 0\n- 原依据归属未知　0 / 0\n- 已撤回依据引用（条数，非目标数）　0\n\n人工覆盖（五类互斥，合计等于分母）\n\n- 已测 0、部分覆盖 0、受阻 0、未测 0、未登记 0\n\n说明：当前证据支持与人工覆盖是两个维度；覆盖充分不代表有发现，零发现也不证明覆盖。\n\n\n## 逐项目标复核\n\n\n## 参考资料引用（定版）\n\n- 引用 #1（2026-11-23T09:59:11.586Z）· 共享交接机制（真实 oMLX 验收） · 原文 · 本地 v1 · §值班交接\n  支持的表述：独立分析观察到一次负责人换班（真实 oMLX 向量召回）\n  发布者：验收合成材料　段落：值班交接\n  定版快照：[knowledge/b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d](report-evidence/b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d) · SHA-256 b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d\n  原文范围：[36, 75)　片段 SHA-256 cfdf186709fc32f81576b7609090ccb2d89c704eb853ab7890cd2ea4b17cca3c\n\n"
+  },
+  "citations": [
+    {
+      "citation": {
+        "id": "e49ee6c5-236c-4f45-908b-969c294edc99",
+        "taskId": "fb661671-0631-4a20-9daf-fa162439038b",
+        "engagementId": "eng-a",
+        "materialId": "7a5fd27d-5131-449a-a2ba-38ab2e922db3",
+        "versionId": "aff3bbed-cd38-47e2-825a-f2f966172790",
+        "locator": "§值班交接",
+        "claim": "独立分析观察到一次负责人换班（真实 oMLX 向量召回）",
+        "bodyFormat": "markdown",
+        "materialTitle": "共享交接机制（真实 oMLX 验收）",
+        "publisher": "验收合成材料",
+        "sourceKind": "original",
+        "versionNo": 1,
+        "versionLabel": "本地 v1",
+        "sectionHeading": "值班交接",
+        "sectionPage": null,
+        "sectionOrdinal": 1,
+        "snapshotSha256": "b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d",
+        "createdAt": "2026-11-23T09:59:11.586Z",
+        "pinKind": "range",
+        "charStart": 36,
+        "charEnd": 75,
+        "chunkSha256": "cfdf186709fc32f81576b7609090ccb2d89c704eb853ab7890cd2ea4b17cca3c",
+        "headingPath": [
+          "值班交接"
+        ],
+        "pageBasis": null
+      },
+      "verification": {
+        "status": "verified",
+        "expectedSha256": "b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d",
+        "recomputedSha256": "b2d1c2fc8b1d2a4e3d80f61eefa805beb5e2895d6316272a291c35cd5567950d",
+        "source": "task-seal"
+      },
+      "paragraph": {
+        "ordinal": 1,
+        "locator": "§值班交接",
+        "heading": "值班交接",
+        "page": null,
+        "charStart": 36,
+        "charEnd": 75,
+        "headingPath": [
+          "值班交接"
+        ],
+        "parentLocator": "§值班交接",
+        "chunkSha256": "cfdf186709fc32f81576b7609090ccb2d89c704eb853ab7890cd2ea4b17cca3c",
+        "chunkIndex": 0,
+        "chunkCount": 1,
+        "lineStart": 5,
+        "lineEnd": 7,
+        "pageBasis": null,
+        "text": "## 值班交接\n\n负责人换班按 STATE 文件执行，凭据登记在 STATE。"
+      },
+      "snapshot": {
+        "sha256": "cfdf186709fc32f81576b7609090ccb2d89c704eb853ab7890cd2ea4b17cca3c",
+        "byteSize": 81,
+        "bytesBase64": "IyMg5YC854+t5Lqk5o6lCgrotJ/otKPkurrmjaLnj63mjIkgU1RBVEUg5paH5Lu25omn6KGM77yM5Yet5o2u55m76K6w5ZyoIFNUQVRF44CC"
+      }
+    }
+  ],
+  "withheld": {
+    "outOfScopeCitations": 0
+  }
+}

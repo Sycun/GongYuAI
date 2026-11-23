@@ -1,7 +1,8 @@
-# 吸收对照：Super-agent（DeepSeek / Octop / Cairn×ARTEX 分析）
+# GongYuAI 的 Super-agent 设计与验收
 
 调研日：2026-11-22。  
-原文三篇：
+早期设计材料见以下三篇。新增的两份 DeepSeek 原型解读与混合路由论文列在下文。
+
 - [基于对 Cairn 和 ARTEX 的分析所产生的一些思考](https://mp.weixin.qq.com/s/0AVOqclcynj4lXbEF3Y4wg)（正文题「关于 Cairn 和 ARTEX 的一些分析」）
 - [用 Super-agent 的理念，拆解 Octop 团队模式](https://mp.weixin.qq.com/s/5r_EhRzdgRgzg8kWmZDyRQ)（Jubaoliang，Octop 负责人）
 - [Super-agent 设计探索：迈向更自主的 Agent 系统](https://mp.weixin.qq.com/s/zoS7GlReWPhfCjENGxXCdg)（DeepSeek Harness 团队，Yujia Qiao 执笔）
@@ -11,34 +12,54 @@
 
 ## 结论（先读这四句）
 
-1. **Super-agent 是调度经济层，不是新图**。三层基座分工：女娲管活下来（lease/Relay/分层史），DAG 管走得对（无因探索禁令/证据闸），Super-agent 管花得省（脑手分离/模型分层/异步派单）。前两层本仓已硬化；第三层是配置 + 小协议补丁，不是重写。
+1. **Super-agent 同时降低人工协调和计算开销。** 女娲的 lease、checkpoint 和 Relay 支撑接班，Fact–Intent DAG 与证据判据保存每个结论的依据。Super-agent 还要解决一个操作者能感知的问题：报告交付后，能否凭任务和记录编号补交材料，在原任务里取回修订结果？[报告交付后收到更正凭据](#报告交付后收到更正凭据)
 2. **Octop 教训是本仓相位隔离的正面论据**：主 Agent 保留执行工具时，提示词无法保证分工（其 5 次测试 0 次委派）。本仓 `graph-phase.ts` 在 reason/bootstrap 相位**物理没收 shell/MCP**，比提示词分工硬一个量级——保持，勿回退。
-3. **模型分层要拆三层，不是两层**：派单/路由便宜（甚至纯代码）、战术推理强（Reason/Bootstrap/收卷）、执行验证快（Explore）。sapper 指挥贵/兵便宜与 DeepSeek Router 便宜/Worker 贵并不矛盾——拆的轴不同。经济性主张须过本仓同预算差分才算数。
+3. **任务归属、工作类型和模型选择是三个决定。** 已带任务编号的复核意见可由程序投递。需要识别意图时，再判断用户要补材料、查询还是申请新工作。某一步是否适合轻量模型，要在同样材料和预算下实测。
 4. **Watchdog 零策略军规不破**：DeepSeek 的「独立 Watchdog Session 用模型查偏航」吸收为**可选审计者**——产出只写 Hint（建议层），不派 Intent、不改 Goal、不保活。推荐≠授权。
 
-## 三篇文章在说什么
+## 本轮三篇文章的结论
+
+| 阅读材料 | 作者讨论的问题 | 对 GongYuAI 的取舍 |
+| --- | --- | --- |
+| DeepSeekAgent.io 架构指南 | 持续接收事件的系统要区分消息归属与授权。公开原型用 Ticket 保存工作项，Assignment 表示一次派工，Mandate 限定范围。订阅线程可把后续消息送回原工单，消息本身不扩大权限。 | 报告复核沿用原任务、原授权版本和证据引用。一次会话结束后，操作员仍能回到同一项工作。[指南](https://deepseekagent.io/guides/deepseek-super-agent-architecture) · [原型领域模型](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/main/docs/001-domain.md) · [授权规则](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/main/docs/002-authorization.md) |
+| MacOpenClaw 架构拆解 | 已订阅的事件可以直达原工作项，耗时工作的结果可稍后返回。近期信息留在上下文，长材料保存在外部，按引用逐层读回（Inline & Spill、链式召回）。文章还讨论了云端状态、本地执行和判断偏航的 Watchdog。 | 任务摘要应指回原件；换班时保留记录编号、证据版本和待复核项。这篇与上一篇解读同一项 DeepSeek 设计。团队说明公开原型经过改编，部分设计尚未实现。[文章](https://macopenclaw.com/super-agent/super-agent-architecture/) · [原型说明](https://github.com/deepseek-ai/dsh-superagent-prototype) |
+| *Toward Super Agent System with Hybrid AI Routers* | 意图路由选择处理哪类工作，模型路由在质量、延迟和费用约束下选择模型。端云选择还受数据可外发范围和设备资源约束。作者把端到端基准列为后续研究。 | 论文给 P7 提供了实验假设。一次明确指向原任务的更正不需要模型猜测归属。若采用端云分流，先按材料允许的处理位置筛选，再比较可用模型。[论文 §3–§5](https://arxiv.org/html/2504.10519v2) |
+
+## 早期设计参照
 
 | 篇 | 要点 |
 | --- | --- |
 | Cairn×ARTEX 分析 | 四条改造路线：A*/MCTS 候选 Intent 前瞻排序、POMDP 形式化（观测历史≠信念状态）、事件溯源+CQRS（Intent 生命周期改不可变事件重建）、State–Intent 二原语压缩。核心转向「以信息为本质」：Fact 加语义坐标（来源/时间/主体/情境/关系），区域/关联/语境切片「点亮」候选；**点亮≠证实，原始观测≠解释判断**；证据缺口生成下一轮 Intent；多前提共同支持结论不能拆成独立支持边 |
 | Octop 团队模式 | 主持人 Agent 只有查看成员/派单/检索记忆等轻量工具；专家 Agent 独立目录/模型/记忆/会话流；**分派即返回、后台并发、成果异步回填**；长材料截断归档、主持人只读节选摘要；任务线增量直达原 Worker。教训：主脑留执行工具→0/5 委派；敏感操作人工确认（最长等 30 分钟）；内存收件箱重启丢任务（已知短板） |
-| DeepSeek Super-agent | Router（轻模型、无 Bash、全局序点）+ Worker（强模型、上下文隔离）；事件两级过滤（代码 Fast Path + LLM Slow Path）；Thread 订阅直通；**Inline & Spill 把上下文当 Cache 管理**；**链式召回**（对象带 ID 构成引用图，按需逐跳展开）；异步 start()/stop() 全双工；存算分离 + 脑手分离；独立 Watchdog Session 用模型判断实质推进/偏航（进程监控抓不到逻辑死循环）。数字（其设定）：p50/p95 = 12.4/15.7 分钟 vs 单 Session p95 29.5；直通省 Router 37% token；批处理单决定推理 6.4s→1.6s |
+| DeepSeek 团队设计探索 | Router 负责沟通和派工，Worker 保留任务上下文；团队讨论了订阅直通、链式召回、异步执行和独立偏航审计。原设计报告的 p50/p95 为 12.4/15.7 分钟，单 Session 的 p95 为 29.5 分钟；直通节省 37% Router Token。这些数字对应其消息负载。公开原型对主会话另有工具和后台作业约定。[原型执行说明](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/main/docs/003-execution.md) |
 
 ## 吸收表
 
 | 机制 | 本仓落点 | 状态 |
 | --- | --- | --- |
+| 任务内补证与复核 | 通过任务 ID 和 Fact ID 向原任务提交署名复核；终态收到意见后重出报告，发布前保留旧版字节。复核引用的附件按 SHA-256 留存。[复核接口](../packages/control-plane/src/server.ts) · [报告发布](../packages/history/src/report.ts) | **已有**。操作员明确指定任务，首次交付和修订结果均可核对 |
+| 后续消息归属与授权分开 | 已知任务和记录编号时直接定位；消息缺少归属或引用冲突时，请提交者明确任务。外部来件作为待核材料，范围变更沿用专门的授权入口。[任务范围管理](../packages/control-plane/src/runner.ts) | **值得吸收**。已有显式任务入口；跨渠道订阅、自动匹配和消息重放去重属于后续设计 |
 | 脑手分离（主脑无执行工具） | `graph-phase.ts` 相位工具面：reason/bootstrap 无 shell/MCP | **已有**，结构性硬闸，勿回退成提示词分工 |
 | 分派即返回 / 异步回填 | 多 Explore CAS claim + stigmergy：图就是异步回填通道，无内存收件箱 | **已有**；Octop 重启丢任务反衬 durable checkpoint 价值 |
-| 链式召回 / Inline & Spill | title→summary→evidence 按需下钻 + 同 Intent 邻域（P5）；上下文当 Cache ≈ 会话内全量、边界压 π | **已有**；不做 chat/π 向量 RAG |
+| 链式召回与交接 | 从标题、摘要下钻到证据，沿图读回前驱；Session Relay 传递接班摘要。报告凭原始材料、保存的版本和复核意见支持结论。[证据复核](./evidence-review.md) | **已有项目内对应机制**。交接时分别保留撤回意见编号和被撤回的记录编号，便于下一班核实 |
 | 主持人只读节选摘要 | Observe 只注入 Goals + title 层 + open Intents | **已有** |
-| 三层模型路由 | `execution.models: { reason, explore, bootstrap }`（提案）；slot 0 leader 强模型、Explore 快模型 | **P7 提案**，配置项非架构改动 |
+| 相位级模型路由与端云选择 | Pi 主模型目前取任务配置。P7 提议按相位选模型。端云放置是另一项选择，涉及材料处理位置。[Pi 模型配置](../packages/worker/src/pi-loop.ts) · [实施台账](./implementation-ledger.md) | **待实验**。相位路由仍是提案；端云自动切换没有本仓效果数据 |
 | 事件两级过滤 | Observe 先代码过滤（新 Fact/open Intent/未吸收 Hint）再进 LLM | **P7 可选**；现 Observe 已部分覆盖 |
 | 独立偏航审计 | 可选审计者会话：轻模型读图判「实质推进/逻辑死循环」，产出**只写 Hint** | **P7 可选**，非默认；保活看门狗保持纯脚本 |
 | 指挥官自写交接接力自己 | slot 0 Reason/Report leader 的会话边界也走 π（sapper 同款） | **P7 待核对**：现 Relay 文档只写 Worker 边界 |
 | 「点亮≠证实」/ 双图分离 | P6 E1 `tentative/verified` finding 状态 + 既有复核撤回语义 | 见 [pentest-enhancements.md](./pentest-enhancements.md)；不另建第二张图 |
 | 多前提共同支持结论 | `sourceFactIds[]` 已支持多前驱；报告渲染保持「共同支持」语义 | **已有**，prompt 纪律即可 |
 | `ask` 人工审批门 | 能力阶梯之上可选（Octop 人工确认同族） | 非本刀；8h 无人值守路线不默认开 |
+
+### 哪些收益仍需实验
+
+六份合成台账各重复两次，分六批交付。只用 DAG 时，模型答对 34/60 个字段、6/12 道整题，用了 90,316 Token；加入 Relay 后是 54/60、7/12 和 71,017 Token。保留完整对话的基线有 9/12 道整题全对。三组使用同一个模型，缓存命中情况也不同。这组数据能衡量固定换班条件下的交付质量与 Token 用量。模型路由收益和实际账单还需单独测量。[实验条件、逐题结果与缓存计量](./experiments/2026-11-22-ledger-relay/README.md)
+
+| 待判断的问题 | 对照与读数 |
+| --- | --- |
+| 自动判断消息归属能否节省人工 | 用已标注的单任务、跨任务同号、缺编号和重复来件回放。以操作员明确指定任务为对照，分别记录错误归入、需澄清数、人工查找次数和完成一次更正的时间。 |
+| 模型路由能否降低费用并保住质量 | 同一批离线材料、同一提示、同一预算，在固定模型与候选路由之间逐题配对。分别报整题正确、撤回对象错误、耗时及包含缓存计价的费用。沿用 P7 既定的重复次数与非劣界，缺少账单时仅报告用量。[P7 差分协议](./absorb-eval-methodology.md) |
+| 模型审计者能否找出值得复核的结论 | 对同一批已标注报告，比较仅用现有规则与附加只读审计提示。记录遗漏的撤回影响、误报和人工复核时间。现有 Watchdog 继续负责租约与进程恢复。[Watchdog](../packages/control-plane/src/watchdog.ts) |
 
 ## 报告交付后收到更正凭据
 

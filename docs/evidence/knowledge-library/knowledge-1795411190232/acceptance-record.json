@@ -1,0 +1,495 @@
+{
+  "runId": "knowledge-1795411190232",
+  "generatedAt": "2026-11-23T05:19:57.104Z",
+  "dataRoot": "/Users/sycpro/GongYuAI/out/knowledge-1795411190232",
+  "engagementId": "eng-knowledge-1795411190232",
+  "taskId": "297204b2-70d7-4392-b4ab-9b5b8bfdf9d2",
+  "totals": {
+    "steps": 40,
+    "passed": 36,
+    "failed": 4
+  },
+  "upstream": {
+    "nvwabase": {
+      "url": "https://raw.githubusercontent.com/N1nEmAn/nvwabase/master/README.md",
+      "commit": "c9ec790a99c01641d566e38d8d7d7e6c63a24bcc",
+      "bytes": 6619
+    },
+    "sapperlens": {
+      "url": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "commit": "eebd7ce31c5d6620f1e760b80de774484568c94b",
+      "bytes": 66325
+    },
+    "dsh": {
+      "url": "https://raw.githubusercontent.com/deepseek-ai/dsh-superagent-prototype/main/docs/001-domain.md",
+      "commit": "8c32a9dc5d72c033816c6a8110b37f40cf94fba4",
+      "bytes": 12223
+    }
+  },
+  "localCommit": "f0e80d23caea58942edbe1165dc1521283861dff",
+  "steps": [
+    {
+      "id": "1.nvwabase",
+      "title": "取上游原文 nvwabase",
+      "passed": true,
+      "detail": "bytes=6619 commit=c9ec790a99c01641d566e38d8d7d7e6c63a24bcc",
+      "evidence": {
+        "url": "https://raw.githubusercontent.com/N1nEmAn/nvwabase/master/README.md",
+        "commit": "c9ec790a99c01641d566e38d8d7d7e6c63a24bcc"
+      }
+    },
+    {
+      "id": "1.sapperlens",
+      "title": "取上游原文 sapperlens",
+      "passed": true,
+      "detail": "bytes=66325 commit=eebd7ce31c5d6620f1e760b80de774484568c94b",
+      "evidence": {
+        "url": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+        "commit": "eebd7ce31c5d6620f1e760b80de774484568c94b"
+      }
+    },
+    {
+      "id": "1.dsh",
+      "title": "取上游原文 dsh",
+      "passed": true,
+      "detail": "bytes=12223 commit=8c32a9dc5d72c033816c6a8110b37f40cf94fba4",
+      "evidence": {
+        "url": "https://raw.githubusercontent.com/deepseek-ai/dsh-superagent-prototype/main/docs/001-domain.md",
+        "commit": "8c32a9dc5d72c033816c6a8110b37f40cf94fba4"
+      }
+    },
+    {
+      "id": "1.local",
+      "title": "取本项目真实材料（六批交接实验 / R-017 用例）",
+      "passed": true,
+      "detail": "ledgerBytes=4024 r017Bytes=8473 upstreamCommit=f0e80d23caea58942edbe1165dc1521283861dff"
+    },
+    {
+      "id": "2.nvwabase",
+      "title": "导入女娲底座 README 的 History 段",
+      "passed": true,
+      "detail": "materialId=6755a9a2-2af9-43b4-abef-dd97f47ac525 versionId=885763a7-8c29-4be6-996b-8624ce71486e sha256=e6468119f014c738c6cd70eeccf5caed09e24c805bd4b2ca3083be5f15ad8d41 sections=3",
+      "evidence": {
+        "sha256": "e6468119f014c738c6cd70eeccf5caed09e24c805bd4b2ca3083be5f15ad8d41",
+        "locators": [
+          "§2",
+          "§2~2",
+          "§2~3"
+        ],
+        "upstreamCommit": "c9ec790a99c01641d566e38d8d7d7e6c63a24bcc"
+      }
+    },
+    {
+      "id": "2.sapperlens",
+      "title": "导入 SapperLens §6.4「状态与连续性」",
+      "passed": true,
+      "detail": "materialId=19dcda03-0613-48e3-a335-91efed8a2046 versionId=a78a3d73-0e6e-4a14-bd37-8762114d31f1 sha256=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 locators=§6.4,§6.4~2,§6.4~3",
+      "evidence": {
+        "sha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "upstreamCommit": "eebd7ce31c5d6620f1e760b80de774484568c94b"
+      }
+    },
+    {
+      "id": "2.ledger",
+      "title": "导入六批交接实验的「六批、五次交接」",
+      "passed": true,
+      "detail": "materialId=fcf5b004-a967-4a27-a578-75308cea8fcb sha256=188f17c84994d2afdaee92dc09a8b64a2faf55bbf620ab7759511dc827e696f0 含54/60=true",
+      "evidence": {
+        "sha256": "188f17c84994d2afdaee92dc09a8b64a2faf55bbf620ab7759511dc827e696f0"
+      }
+    },
+    {
+      "id": "2.dsh",
+      "title": "导入 DeepSeek 原型领域模型（工作项/派工/授权）",
+      "passed": true,
+      "detail": "materialId=0241ff13-9d08-4fa6-9dbc-d9e31007ffa4 sha256=c21da8eda06d00b551a350a5756fd635be655216be17e8e37216f53bb02ae888 含Ticket=true 含派工=true",
+      "evidence": {
+        "sha256": "c21da8eda06d00b551a350a5756fd635be655216be17e8e37216f53bb02ae888",
+        "upstreamCommit": "8c32a9dc5d72c033816c6a8110b37f40cf94fba4"
+      }
+    },
+    {
+      "id": "2.r017",
+      "title": "导入本项目 R-017 补证用例",
+      "passed": true,
+      "detail": "materialId=2fdea09a-2adc-49e2-bce7-8fecf53ca690 sha256=4b6c0158549cf4b3c8da0a6c1d51f357017f10652f924e648a7da7a0100ea1de 含更正回函=true",
+      "evidence": {
+        "sha256": "4b6c0158549cf4b3c8da0a6c1d51f357017f10652f924e648a7da7a0100ea1de"
+      }
+    },
+    {
+      "id": "2.editorial",
+      "title": "编辑导读单独成条并标明来源类型",
+      "passed": true,
+      "detail": "sourceKind=editorial（不计入真实文章验收）"
+    },
+    {
+      "id": "2.summary",
+      "title": "三份必需真实资料均已导入",
+      "passed": true,
+      "detail": "已导入 3/3；缺项见各条 FAIL"
+    },
+    {
+      "id": "2.pdf.memgpt",
+      "title": "真实 PDF 正文提取 memgpt",
+      "passed": true,
+      "detail": "status=201 bodyStatus=ready pages=81 firstLocator=p.1 fileSha256=9f674bcff69c86f11c813dcfad613d8841f5f8ed17979e3c4df06a91df7762e0",
+      "evidence": {
+        "fileSha256": "9f674bcff69c86f11c813dcfad613d8841f5f8ed17979e3c4df06a91df7762e0",
+        "contentSha256": "0462e44f10cd43862890d1e55ec6e58049dca216f287f7b790edbab4e3478e29",
+        "pages": 81
+      }
+    },
+    {
+      "id": "2.pdf.memgpt.search",
+      "title": "PDF 正文可检索并按页定位 memgpt",
+      "passed": true,
+      "detail": "total=55 matchedFields=body,title locator=p.2~7 page=2"
+    },
+    {
+      "id": "2.pdf.attackpath",
+      "title": "真实 PDF 正文提取 attackpath",
+      "passed": true,
+      "detail": "status=201 bodyStatus=ready pages=151 firstLocator=p.1 fileSha256=eaa2be59c2055d2188a77731b6ee820cc2d83c04b4d8f3eccd7ef5317b048ab5",
+      "evidence": {
+        "fileSha256": "eaa2be59c2055d2188a77731b6ee820cc2d83c04b4d8f3eccd7ef5317b048ab5",
+        "contentSha256": "3db5ecc317ce6f19c1cc3c3cd421007065fc63d98c6e109885a77ed42ad45622",
+        "pages": 151
+      }
+    },
+    {
+      "id": "2.pdf.attackpath.search",
+      "title": "PDF 正文可检索并按页定位 attackpath",
+      "passed": true,
+      "detail": "total=5 matchedFields=body,title locator=p.12~4 page=12"
+    },
+    {
+      "id": "3.1",
+      "title": "搜「负责人换班」命中三种真实来源并可逐条打开",
+      "passed": true,
+      "detail": "total=4 materials=4 真实来源命中=3（另有编辑导读 1 条）",
+      "evidence": [
+        {
+          "title": "编辑导读 · 三种来源怎样区分负责人换班",
+          "sourceKind": "editorial",
+          "matchedFields": [
+            "body",
+            "title",
+            "tags"
+          ],
+          "tagOnly": false,
+          "locator": "§导读",
+          "sectionStatus": 200,
+          "heading": "导读",
+          "paragraphHead": "## 导读\n\n负责人换班在三份材料里含义不同：女娲底座是作者设计，SapperLens 是独立分析观察到的实际换任，本项目实验只覆盖六批合成台账。"
+        },
+        {
+          "title": "SapperLens §6.4 状态与连续性",
+          "sourceKind": "excerpt",
+          "matchedFields": [
+            "tags"
+          ],
+          "tagOnly": true,
+          "locator": "§6.4",
+          "sectionStatus": 200,
+          "heading": "6.4 状态与连续性",
+          "paragraphHead": "### 6.4 状态与连续性\n\n| 机制 | 实现 | 观测证据 |\n|---|---|---|\n| 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | "
+        },
+        {
+          "title": "女娲底座 README · History 分层说明",
+          "sourceKind": "excerpt",
+          "matchedFields": [
+            "tags"
+          ],
+          "tagOnly": true,
+          "locator": "§2",
+          "sectionStatus": 200,
+          "heading": "2. The Three-Capability Foundation",
+          "paragraphHead": "## 2. The Three-Capability Foundation\n\n| Capability | Implementation | Civilization's counterpart |\n|---|---|---|\n| **Cr"
+        },
+        {
+          "title": "本项目六批交接实验 · 六批、五次交接",
+          "sourceKind": "excerpt",
+          "matchedFields": [
+            "tags"
+          ],
+          "tagOnly": true,
+          "locator": "§六批、五次交接",
+          "sectionStatus": 200,
+          "heading": "六批、五次交接",
+          "paragraphHead": "## 六批、五次交接\n\n三组收到相同的六批数据。每批都有事实记录，原有例行归档行分散到各批。bare 和 DAG 保留此前往返消息；两个图组都能按本批引用读取已到达的祖先。Relay 每个边界换班，累计读回已保存的各代交接。\n\n| 六批组别"
+        }
+      ]
+    },
+    {
+      "id": "3.2",
+      "title": "命中字段如实标识：正文未出现该词时只标标签命中",
+      "passed": true,
+      "detail": "三份真实原文正文均不含「负责人换班」整词（SapperLens 用「换任」、实验用「换班」），故全部为标签命中；编辑导读为正文字面命中",
+      "evidence": [
+        {
+          "title": "SapperLens §6.4 状态与连续性",
+          "matchedFields": [
+            "tags"
+          ],
+          "tagOnly": true
+        },
+        {
+          "title": "女娲底座 README · History 分层说明",
+          "matchedFields": [
+            "tags"
+          ],
+          "tagOnly": true
+        },
+        {
+          "title": "本项目六批交接实验 · 六批、五次交接",
+          "matchedFields": [
+            "tags"
+          ],
+          "tagOnly": true
+        }
+      ]
+    },
+    {
+      "id": "3.3",
+      "title": "正文字面命中可验证：换任 → SapperLens，换班 54/60 → 本项目实验",
+      "passed": false,
+      "detail": "换任 total=4 fields=body；换班 54/60 total=1 title=本项目六批交接实验 · 六批、五次交接",
+      "evidence": {
+        "sapperContext": "## 导读 负责人换班在三份材料里含义不同：女娲底座是作者设计，SapperLens 是独立分析观察到的实际换任，本项目实验只覆盖六批合成台账。",
+        "ledgerContext": "…行归档行分散到各批。bare 和 DAG 保留此前往返消息；两个图组都能按本批引用读取已到达的祖先。Relay 每个边界换班，累计读回已保存的各代交接。 | 六批组别 | 字段正确率 | 整题全对 | 撤回对象 | 历史通过状态 | 输入 Token | 输出 Token | 总 Token | | --- | ---:…"
+      }
+    },
+    {
+      "id": "4.1",
+      "title": "搜「更正回函」：本项目用例定位到 R-017 验收，原型定位到工作项定义",
+      "passed": true,
+      "detail": "total=2；R-017 命中字段=body,tags（正文字面含「更正回函」），原型命中字段=tags（标签命中，正文为英文 Ticket/工单）",
+      "evidence": {
+        "titles": [
+          "本项目 R-017 补证用例 · 报告交付后收到更正凭据",
+          "DeepSeek Super-agent 原型 · 领域模型与术语表"
+        ],
+        "r017Locator": "§报告交付后收到更正凭据~2",
+        "dshLocator": "§Concepts"
+      }
+    },
+    {
+      "id": "4.2",
+      "title": "原型可下钻到工作项（Ticket/工单）、派工、授权定义",
+      "passed": false,
+      "detail": "locator=§Glossary status=200 含工单=false 含派工=false 含授权=false"
+    },
+    {
+      "id": "5.1",
+      "title": "重放相同导入（含 3 次并发）版本数不增加",
+      "passed": true,
+      "detail": "reused=true,true,true versionCount=1"
+    },
+    {
+      "id": "5.2",
+      "title": "通过报告引用 API 固定 §6.4 到 v1",
+      "passed": true,
+      "detail": "citationId=ac317a35-e50c-4f89-a357-5012ecc2aed2 snapshotSha256=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 versionLabel=本地 v1",
+      "evidence": {
+        "id": "ac317a35-e50c-4f89-a357-5012ecc2aed2",
+        "taskId": "297204b2-70d7-4392-b4ab-9b5b8bfdf9d2",
+        "engagementId": "eng-knowledge-1795411190232",
+        "materialId": "19dcda03-0613-48e3-a335-91efed8a2046",
+        "versionId": "a78a3d73-0e6e-4a14-bd37-8762114d31f1",
+        "locator": "§6.4",
+        "claim": "独立分析从运行记录中追到了一次负责人换班（06:14 换任，靠 STATE 续接）",
+        "snapshotSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "bodyFormat": "markdown",
+        "materialTitle": "SapperLens §6.4 状态与连续性",
+        "publisher": "inwpu（独立运行分析）",
+        "sourceKind": "excerpt",
+        "versionNo": 1,
+        "versionLabel": "本地 v1",
+        "sectionHeading": "6.4 状态与连续性",
+        "sectionPage": null,
+        "sectionOrdinal": 0,
+        "createdAt": "2026-11-23T05:19:56.853Z",
+        "pinKind": "range",
+        "charStart": 0,
+        "charEnd": 695,
+        "chunkSha256": "c913cecd70b365deca458c4b3ceca209184d2ff8dad6a79176c6925b6afe2f22",
+        "headingPath": [
+          "6.4 状态与连续性"
+        ],
+        "pageBasis": null
+      }
+    },
+    {
+      "id": "5.3",
+      "title": "导入明确标记为验收修订的 v2 并保留 v1 快照",
+      "passed": true,
+      "detail": "v2Id=f19e69c7-3fac-41e3-a5f3-2573ec91c20b v2Sha=72ee09b33dbcbb5f54bb99a70ac93ccb60b9486ccd0e30ffc996761baaabce7d v1Sha=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 v1SnapshotStillPresent=true",
+      "evidence": {
+        "v1Sha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "v2Sha256": "72ee09b33dbcbb5f54bb99a70ac93ccb60b9486ccd0e30ffc996761baaabce7d",
+        "v1SnapshotPath": "knowledge/snapshots/f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59"
+      }
+    },
+    {
+      "id": "5.4",
+      "title": "停用 v1",
+      "passed": true,
+      "detail": "status=deprecated deprecatedAt=2026-11-23T05:19:56.858Z"
+    },
+    {
+      "id": "6.0",
+      "title": "断网子进程重启服务（出站连接一律抛错）",
+      "passed": true,
+      "detail": "exit=0"
+    },
+    {
+      "id": "6.0a",
+      "title": "正对照：本阶段出站访问确实被拒",
+      "passed": true,
+      "detail": "上游 fetch 失败：OFFLINE: 拒绝出站 fetch raw.githubusercontent.com"
+    },
+    {
+      "id": "6.1",
+      "title": "断网重启后按引用回读 v1 段落并复算原 SHA-256",
+      "passed": false,
+      "detail": "status=200 verification=verified recomputed=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 expected=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 versionStatus=deprecated",
+      "evidence": {
+        "expectedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "recomputedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "locator": "§6.4",
+        "paragraphHead": "### 6.4 状态与连续性\n\n| 机制 | 实现 | 观测证据 |\n|---|---|---|\n| 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | 255 次 `sapper fact`、198 次 `sapper graph`"
+      }
+    },
+    {
+      "id": "6.2",
+      "title": "断网下检索默认返回有效版 v2",
+      "passed": false,
+      "detail": "total=4 topVersionNo=1 topVersionId=af0612a2-3f1e-447e-b9e7-3905f99c3078"
+    },
+    {
+      "id": "6.3",
+      "title": "断网下旧报告仍含 v1 SHA-256 与停用提示",
+      "passed": true,
+      "detail": "reportBytes=1241 containsV1Sha=true"
+    },
+    {
+      "id": "7.1",
+      "title": "离线导出打包定版快照与校验信息",
+      "passed": true,
+      "detail": "citations=1 snapshotBytes=2456 recomputed=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+      "evidence": {
+        "reportSha256": "f12d3c3a31a6875d5790bccdcb57afce84386d8f7f00443db94a8efb062cc164",
+        "snapshotSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59"
+      }
+    },
+    {
+      "id": "7.2",
+      "title": "知识库快照缺失时旧报告仍可由任务侧密封件复验",
+      "passed": true,
+      "detail": "verification=verified librarySnapshotAvailable=false"
+    },
+    {
+      "id": "7.3",
+      "title": "密封快照损坏时返回 sha256_mismatch 无法复验",
+      "passed": true,
+      "detail": "reason=sha256_mismatch expected=f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59 recomputed=208ded743e42a963280c0178f6f571d496eeab7a17980afd5bfe24d06b734689",
+      "evidence": {
+        "status": "unverifiable",
+        "reason": "sha256_mismatch",
+        "expectedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "recomputedSha256": "208ded743e42a963280c0178f6f571d496eeab7a17980afd5bfe24d06b734689",
+        "source": "task-seal",
+        "detail": "快照内容与引用登记的 SHA-256 不一致，无法复验"
+      }
+    },
+    {
+      "id": "7.4",
+      "title": "损坏快照的离线导出同样标记无法复验",
+      "passed": true,
+      "detail": "exportReason=sha256_mismatch"
+    },
+    {
+      "id": "7.5",
+      "title": "密封快照缺失时返回 snapshot_missing 无法复验",
+      "passed": true,
+      "detail": "reason=snapshot_missing"
+    },
+    {
+      "id": "8.1",
+      "title": "检索与计数双向不泄露，共享资料两边可见",
+      "passed": true,
+      "detail": "[{\"reader\":\"eng-knowledge-1795411190232-alpha\",\"ownTotal\":1,\"otherTotal\":0,\"sharedTotal\":1,\"materials\":2},{\"reader\":\"eng-knowledge-1795411190232-beta\",\"ownTotal\":1,\"otherTotal\":0,\"sharedTotal\":1,\"materials\":2}]",
+      "evidence": [
+        {
+          "reader": "eng-knowledge-1795411190232-alpha",
+          "ownTotal": 1,
+          "otherTotal": 0,
+          "sharedTotal": 1,
+          "materials": 2
+        },
+        {
+          "reader": "eng-knowledge-1795411190232-beta",
+          "ownTotal": 1,
+          "otherTotal": 0,
+          "sharedTotal": 1,
+          "materials": 2
+        }
+      ]
+    },
+    {
+      "id": "8.2",
+      "title": "已知 ID 直接读取资料/版本/段落一律 404，且不泄露标题",
+      "passed": true,
+      "detail": "[{\"reader\":\"eng-knowledge-1795411190232-beta\",\"detail\":404,\"versions\":404,\"version\":404,\"section\":404,\"leakedTitle\":false},{\"reader\":\"eng-knowledge-1795411190232-alpha\",\"detail\":404,\"versions\":404,\"version\":404,\"section\":404,\"leakedTitle\":false}]",
+      "evidence": [
+        {
+          "reader": "eng-knowledge-1795411190232-beta",
+          "detail": 404,
+          "versions": 404,
+          "version": 404,
+          "section": 404,
+          "leakedTitle": false
+        },
+        {
+          "reader": "eng-knowledge-1795411190232-alpha",
+          "detail": 404,
+          "versions": 404,
+          "version": 404,
+          "section": 404,
+          "leakedTitle": false
+        }
+      ]
+    },
+    {
+      "id": "8.3",
+      "title": "跨委托创建引用双向被拒",
+      "passed": true,
+      "detail": "B→A=404 A→B=404"
+    },
+    {
+      "id": "8.4",
+      "title": "报告导出双向不泄露另一委托的材料 ID 与关键词",
+      "passed": true,
+      "detail": "A citations=2 B citations=2；A 含 B 关键词=false；B 含 A 关键词=false"
+    },
+    {
+      "id": "8.5",
+      "title": "客户端 engagementId 只能定位：冲突拒绝，任务归属以服务端为准",
+      "passed": true,
+      "detail": "冲突=409/409；taskId 锚定 resolvedFrom=task engagementId=eng-knowledge-1795411190232-alpha"
+    },
+    {
+      "id": "9.1",
+      "title": "单操作者环境的权限验证边界已如实记录",
+      "passed": true,
+      "detail": "本运行环境无认证层：委托边界按服务端任务归属与声明上下文验收；用户级权限（谁能声明哪个委托）未验证，已在契约与本记录中标明。",
+      "evidence": {
+        "engagementId": "eng-knowledge-1795411190232-alpha",
+        "resolvedFrom": "task",
+        "operatorModel": "single-operator",
+        "userLevelPermissionVerified": false
+      }
+    }
+  ]
+}

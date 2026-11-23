@@ -1,0 +1,35 @@
+{
+  "query": "接任指挥后怎样续上进度",
+  "scope": {
+    "engagementId": "eng-knowledge-hybrid-1795410398618",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "mode": "keyword",
+  "total": 0,
+  "materials": 0,
+  "searchedVersions": 4,
+  "limit": 200,
+  "truncated": false,
+  "hits": [],
+  "recall": {
+    "keyword": 0,
+    "semantic": 0
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "chunkerVersion": 2,
+    "indexKey": "c2:bge-m3-mlx-4bit",
+    "totalChunks": 131,
+    "indexedChunks": 131,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "degraded": true,
+    "lastIndexedAt": "2026-11-23T05:06:48.345Z",
+    "degradedReason": "本次请求指定只用关键词检索"
+  }
+}

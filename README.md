@@ -1,8 +1,9 @@
 # GongYuAI
 
-AI-native **long-running** authorized pentest agent，产品面定位为 **Mission Control**（不是裸 API、也不是聊天壳）。
+AI-native **long-running** authorized pentest agent，Web 端用 Semi Design 提供对话首页和长程任务控制台。
 
-- **Web 控制台**：Overview / Tasks / Live / Goals / History / Evidence / Report / Logs
+- **工作区任务入口**接收任务说明和附件，提交到 `POST /tasks/submit`，返回可追踪的任务 ID。服务端保存材料和结果，刷新可恢复进度。工作区处理材料分析与有限的本地只读检查，需要其他执行能力时显示待处理原因。
+- **命令审批**位于执行边界。工具目录、材料和状态读取无需送审。模型用于审查命令摘要，服务端同时执行本地策略。命令被拦截或审批不可用时保留检查点，关联会话显示原因。`/model` 选择任务模型，「设置与功能 → 命令审批」独立选择审批模型。
 - **Pi Durable** worker（OpenAI 兼容回退；图相位 Bootstrap→Explore→Reason）
 - **分层 History（Fact / Intent / Goal）** + **证据闸门**
 - **Control plane + Watchdog**：lease / 崩溃恢复 / 每任务 Docker 或 local worker
@@ -38,7 +39,7 @@ AI-native **long-running** authorized pentest agent，产品面定位为 **Missi
 | 交付记录 | [docs/delivery-record.md](docs/delivery-record.md) §0 · [浏览器验收读数](docs/evidence/round8/kali-console-acceptance.json) |
 | 复核最短路径 | [docs/review-checklist.md](docs/review-checklist.md) §0 |
 
-文档入口：[docs/README.md](docs/README.md)。后续开发按 [docs/dev-handbook.md](docs/dev-handbook.md)。
+项目介绍可直接打开[单文件设计导览](docs/design-atlas.html)。文档入口：[docs/README.md](docs/README.md)。后续开发按 [docs/dev-handbook.md](docs/dev-handbook.md)。
 
 > Authorized testing only. You must supply an explicit authorization note and target allow-list.
 

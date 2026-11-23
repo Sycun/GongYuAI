@@ -1,0 +1,205 @@
+{
+  "query": "54/60",
+  "scope": {
+    "engagementId": "eng-knowledge-hybrid-1795410586564",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "mode": "keyword",
+  "total": 4,
+  "materials": 2,
+  "searchedVersions": 4,
+  "limit": 200,
+  "truncated": false,
+  "hits": [
+    {
+      "materialId": "8a41820d-c837-4f2a-b929-3a53b4709280",
+      "versionId": "646fd982-43f9-43e5-aa1a-fa29aa7d8f6c",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "Relay 台账交接六批复核实验（整篇 README）",
+      "publisher": "GongYuAI（本项目实验）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/experiments/2026-11-22-ledger-relay/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410586564"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 3,
+      "locator": "§Relay 的台账交接能否在六批复核中省 Token",
+      "heading": "Relay 的台账交接能否在六批复核中省 Token",
+      "page": null,
+      "ordinal": 0,
+      "context": "…六批 DAG 相比，DAG + Relay 少用 19,299 Token（21.4%），正确字段从 34/60 增至 54/60，整题全对从 6/12 增至 7/12，达到了预先约定的三个条件。** 与六批 bare 相比，Relay 少用 9,770 Token（12.1%），多答对 5 个字段，但整题全对少了 2 次。交付…",
+      "headingPath": [
+        "Relay 的台账交接能否在六批复核中省 Token"
+      ],
+      "parentLocator": "§Relay 的台账交接能否在六批复核中省 Token",
+      "charStart": 0,
+      "charEnd": 238,
+      "chunkSha256": "b0dea4566d9aef369fa73093c60b4b134e87bb78396738940716ced532e61d82",
+      "lineStart": 1,
+      "lineEnd": 3,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.8100840336134454,
+      "keywordScore": 1.8100840336134454,
+      "semanticScore": null
+    },
+    {
+      "materialId": "8a41820d-c837-4f2a-b929-3a53b4709280",
+      "versionId": "646fd982-43f9-43e5-aa1a-fa29aa7d8f6c",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "Relay 台账交接六批复核实验（整篇 README）",
+      "publisher": "GongYuAI（本项目实验）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/experiments/2026-11-22-ledger-relay/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410586564"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 3,
+      "locator": "§准确率差在哪里",
+      "heading": "准确率差在哪里",
+      "page": null,
+      "ordinal": 4,
+      "context": "…原始单号 P-63。两次 LEGACY 的历史通过状态均正确。从两批增加到六批，Relay 自身也从 59/60 降到 54/60。 六批共写入 60 份 Relay 交接，59 份通过结构检查。RECHECK 有一份把 `notice` 和 `subject` 都填为 F4，按约定保留为带标记的原文。在 12 个 Relay…",
+      "headingPath": [
+        "Relay 的台账交接能否在六批复核中省 Token",
+        "准确率差在哪里"
+      ],
+      "parentLocator": "§准确率差在哪里",
+      "charStart": 2533,
+      "charEnd": 3198,
+      "chunkSha256": "d6f01201483387fbc7005c60002c2a0e837ab3ad6d652f002346d94742f7f7e2",
+      "lineStart": 45,
+      "lineEnd": 53,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6751879699248122,
+      "keywordScore": 1.6751879699248122,
+      "semanticScore": null
+    },
+    {
+      "materialId": "e499c899-754d-4149-ba16-0054b99a18f5",
+      "versionId": "54faf1c6-b040-4e0b-87ee-e581bc961bda",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+      "publisher": "GongYuAI（本项目合成验收）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/absorb-super-agent.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410586564"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 1,
+      "locator": "§哪些收益仍需实验",
+      "heading": "哪些收益仍需实验",
+      "page": null,
+      "ordinal": 6,
+      "context": "…用 DAG 时，模型答对 34/60 个字段、6/12 道整题，用了 90,316 Token；加入 Relay 后是 54/60、7/12 和 71,017 Token。保留完整对话的基线有 9/12 道整题全对。三组使用同一个模型，缓存命中情况也不同。这组数据能衡量固定换班条件下的交付质量与 Token 用量。模型路由收益和…",
+      "headingPath": [
+        "GongYuAI 的 Super-agent 设计与验收",
+        "吸收表",
+        "哪些收益仍需实验"
+      ],
+      "parentLocator": "§哪些收益仍需实验",
+      "charStart": 4740,
+      "charEnd": 5444,
+      "chunkSha256": "4386257240fa35d6775ad29168b592f86fc1ce0dbd9e82f4b4c19bd6ba156ba8",
+      "lineStart": 54,
+      "lineEnd": 62,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6710227272727274,
+      "keywordScore": 1.6710227272727274,
+      "semanticScore": null
+    },
+    {
+      "materialId": "8a41820d-c837-4f2a-b929-3a53b4709280",
+      "versionId": "646fd982-43f9-43e5-aa1a-fa29aa7d8f6c",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "Relay 台账交接六批复核实验（整篇 README）",
+      "publisher": "GongYuAI（本项目实验）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/experiments/2026-11-22-ledger-relay/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410586564"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 3,
+      "locator": "§六批、五次交接",
+      "heading": "六批、五次交接",
+      "page": null,
+      "ordinal": 3,
+      "context": "…/12 | 4/8 | 1/2 | 84,074 | 6,242 | 90,316 | | DAG + Relay | 54/60（90.0%） | 7/12 | 6/8 | 2/2 | 64,461 | 6,556 | 71,017 | 每格给出两次重复合计的正确字段数及总 Token。两轮中 Relay 均为 27/30。…",
+      "headingPath": [
+        "Relay 的台账交接能否在六批复核中省 Token",
+        "六批、五次交接"
+      ],
+      "parentLocator": "§六批、五次交接",
+      "charStart": 1517,
+      "charEnd": 2531,
+      "chunkSha256": "188f17c84994d2afdaee92dc09a8b64a2faf55bbf620ab7759511dc827e696f0",
+      "lineStart": 24,
+      "lineEnd": 43,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6493096646942802,
+      "keywordScore": 1.6493096646942802,
+      "semanticScore": null
+    }
+  ],
+  "recall": {
+    "keyword": 4,
+    "semantic": 0,
+    "semanticCutoff": null
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "chunkerVersion": 2,
+    "indexKey": "c2:bge-m3-mlx-4bit",
+    "totalChunks": 131,
+    "indexedChunks": 131,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "degraded": true,
+    "lastIndexedAt": "2026-11-23T05:09:54.573Z",
+    "degradedReason": "本次请求指定只用关键词检索"
+  }
+}

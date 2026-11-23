@@ -1,0 +1,41 @@
+{
+  "scope": {
+    "engagementId": null,
+    "resolvedFrom": "shared-only",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "index": {
+    "state": "pending",
+    "model": "text-embedding-3-small",
+    "modelDim": null,
+    "provider": "https://api.deepseek.com/v1",
+    "providerKind": "cloud",
+    "chunkerVersion": 2,
+    "indexKey": "c2|cloud|https://api.deepseek.com/v1|text-embedding-3-small",
+    "totalChunks": 4,
+    "indexedChunks": 0,
+    "pendingChunks": 4,
+    "failedChunks": 0,
+    "blockedChunks": 0,
+    "services": [
+      {
+        "provider": "cloud",
+        "baseUrl": "https://api.deepseek.com/v1",
+        "model": "text-embedding-3-small",
+        "modelDim": null,
+        "indexKey": "c2|cloud|https://api.deepseek.com/v1|text-embedding-3-small",
+        "state": "pending",
+        "versions": 2,
+        "totalChunks": 4,
+        "indexedChunks": 0,
+        "pendingChunks": 4,
+        "failedChunks": 0,
+        "allowed": true,
+        "degradedReason": "向量索引尚未就绪，本次检索只用关键词"
+      }
+    ],
+    "degraded": false,
+    "lastIndexedAt": "2026-11-23T09:51:47.290Z"
+  }
+}

@@ -1,0 +1,70 @@
+[
+  {
+    "id": "8.0",
+    "title": "正对照：本阶段出站访问确实被拒，且向量化已停用",
+    "passed": true,
+    "detail": "上游 fetch 失败：OFFLINE: 拒绝出站 fetch raw.githubusercontent.com"
+  },
+  {
+    "id": "8.1",
+    "title": "断网 + 无向量重启后，按原文范围回读同一段且校验值一致",
+    "passed": true,
+    "detail": "verification=verified snapshotSha=一致 chunkSha=一致 range=[31973,32899) versionStatus=deprecated",
+    "evidence": {
+      "expectedSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+      "recomputedSha256": "7d95a450fa690281a9503b794268398bd162e7f7c66d866b1849edf3c0a721aa",
+      "chunkSha256": "992a7fd51fdcdcfd4efbbd4980a87b8cd7adf66736d770e41305654b192bb2c6",
+      "charStart": 31973,
+      "charEnd": 32899,
+      "paragraphHead": "### 6.4 状态与连续性\n\n| 机制 | 实现 | 观测证据 |\n|---|---|---|\n| 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | 255 次 `sapper fact`、198 次 `sapper graph`"
+    }
+  },
+  {
+    "id": "8.2",
+    "title": "无向量时关键词检索仍可用并如实标降级",
+    "passed": true,
+    "detail": "total=6 degraded=true reason=向量化已在设置中停用，本次检索只用关键词"
+  },
+  {
+    "id": "8.3",
+    "title": "v1 停用后默认检索返回有效版 v2",
+    "passed": true,
+    "detail": "topVersionNo=2 versionId=16546ac4-2ca8-41a9-82a6-ee16a249e33a expectedV2=16546ac4-2ca8-41a9-82a6-ee16a249e33a"
+  },
+  {
+    "id": "8.4",
+    "title": "旧报告仍含 v1 快照校验值与停用提示",
+    "passed": true,
+    "detail": "reportBytes=1261 containsV1Sha=true"
+  },
+  {
+    "id": "8.5",
+    "title": "离线导出打包整份定版快照，校验值可复算",
+    "passed": true,
+    "detail": "snapshotScope=full-version bytes=86899 recomputedMatches=true"
+  },
+  {
+    "id": "8.6",
+    "title": "只打包引用片段的导出：字节等于被引用段落，校验值等于片段校验值",
+    "passed": true,
+    "detail": "bytes=1354 chunkShaMatches=true"
+  },
+  {
+    "id": "8.7",
+    "title": "知识库快照缺失时旧引用仍可由任务侧密封件复验",
+    "passed": true,
+    "detail": "verification=verified librarySnapshotAvailable=false"
+  },
+  {
+    "id": "8.8",
+    "title": "密封快照损坏时返回 sha256_mismatch 无法复验",
+    "passed": true,
+    "detail": "reason=sha256_mismatch"
+  },
+  {
+    "id": "8.9",
+    "title": "密封快照缺失时返回 snapshot_missing 无法复验",
+    "passed": true,
+    "detail": "reason=snapshot_missing"
+  }
+]

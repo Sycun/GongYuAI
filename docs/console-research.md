@@ -1,6 +1,8 @@
 # GongYuAI 控制台定位调研
 
-## 结论
+当前 Web 首页参考 [DSH Web 的会话模型菜单](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/client/ui-model-selection)，按工作区组织会话，输入框可选择模型和思考强度，右侧详情可回看各轮记录，左下角「设置与功能」提供下文所列控制台页面的入口。以下记录早期控制台布局的调研依据。
+
+## 早期调研结论
 
 产品面应定位为 **Mission Control（长程任务控制台）**，而不是对话页或 JSON API。  
 市面高星渗透/Agent 产品几乎都是：**左侧导航 + 总览 KPI + 任务深潜多面板 + 实时输出**。

@@ -4,6 +4,20 @@
 
 真实云端验收使用共享合成资料，本机 oMLX 返回 1024 维，硅基流动 Qwen/Qwen3-VL-Embedding-8B 返回 4096 维。两次切换均确认索引就绪，定版引用的段落和版本校验值一致。[脱敏验收记录](./evidence/knowledge-library/siliconflow-acceptance.json)
 
+真实响应落盘（可直接对照）：
+[检索 Q1 混合](./evidence/knowledge-library/knowledge-hybrid-1795411122521/search-Q1-hybrid.json) ·
+[检索 Q1 关键词](./evidence/knowledge-library/knowledge-hybrid-1795411122521/search-Q1-keyword.json) ·
+[索引状态](./evidence/knowledge-library/knowledge-hybrid-1795411122521/response-index-status.json) ·
+[建引用](./evidence/knowledge-library/knowledge-hybrid-1795411122521/response-citation-created.json) ·
+[重启后回读](./evidence/knowledge-library/knowledge-hybrid-1795411122521/response-resolve-after-restart.json) ·
+[升级前旧引用回读](./evidence/knowledge-library/knowledge-hybrid-1795411122521/response-legacy-upgrade-resolve.json) ·
+[无法复验](./evidence/knowledge-library/knowledge-hybrid-1795411122521/response-resolve-unverifiable.json) ·
+[离线导出](./evidence/knowledge-library/knowledge-hybrid-1795411122521/offline-report-export.json) ·
+[PDF 页码回归](./evidence/knowledge-library/knowledge-hybrid-1795411122521/pdf-page-regression.json) ·
+[逐查询名次对比](./evidence/knowledge-library/knowledge-hybrid-1795411122521/query-comparison.json)
+
+历史验收记录包括[混合检索](./evidence/knowledge-library/knowledge-hybrid-1795411122521/acceptance-record.md)和[关键词基线](./evidence/knowledge-library/knowledge-1795411271842/acceptance-record.md)。
+
 类型定义由 `@gongyuai/contracts` 包根导出。[知识库类型](../packages/contracts/src/knowledge.ts)
 
 ---
@@ -741,4 +755,4 @@ OMLX_API_KEY=$(cat ~/.omlx/api-key) pnpm knowledge:hybrid-acceptance   # 57 项
 ```
 
 `knowledge:hybrid-acceptance` 的数据根隔离在 `out/knowledge-hybrid-<runId>/`，不触碰正式 `.gongyuai`；证据写入 `docs/evidence/knowledge-library/<runId>/`。它会把上一轮真实数据根**复制一份**再升级，用来验证旧引用回读一致性，不改动原始运行数据。断网阶段在子进程里清除环境代理、按主机名拒绝非回环出站，并**停用向量化**，证明定版回读连本地 embedding 服务都不需要。
-文章验收脚本使用上游文章、本机模型以及两份 PDF。运行前在本地准备 `docs/2310.08560v2.pdf`（MemGPT v2）。升级验收还需要首轮保留的 `out/knowledge-1795404972071/` 数据根。知识库单元和 HTTP 回归测试使用隔离的合成样本。
+文章验收脚本使用上游文章、本机模型以及两份 PDF。仓库中的验收样本为 `docs/2310.08560v2.pdf`（MemGPT v2）。升级验收还需要首轮保留的 `out/knowledge-1795404972071/` 数据根。知识库单元和 HTTP 回归测试使用隔离的合成样本。

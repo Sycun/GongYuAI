@@ -1,0 +1,122 @@
+{
+  "query": "R-017",
+  "scope": {
+    "engagementId": "eng-knowledge-hybrid-1795410398618",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "mode": "hybrid",
+  "total": 2,
+  "materials": 1,
+  "searchedVersions": 4,
+  "limit": 200,
+  "truncated": false,
+  "hits": [
+    {
+      "materialId": "5a6d19c7-153f-48c1-90ee-26a585be52f6",
+      "versionId": "041930cc-6849-429b-8af7-9dc050c5a2f4",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+      "publisher": "GongYuAI（本项目合成验收）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/absorb-super-agent.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410398618"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body",
+        "title",
+        "semantic"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 2,
+      "locator": "§报告交付后收到更正凭据~2",
+      "heading": "报告交付后收到更正凭据",
+      "page": null,
+      "ordinal": 8,
+      "context": "…预期结果与核对依据 | | --- | --- | --- | | 1. 定位原任务 | 操作员收到注明任务 ID 和 R-017 的更正回函。通过 `GET /tasks/<id>/history` 核对目标和 A、B 的记录编号，用 `gy evidence <id> --path review/R-017.json --f…",
+      "headingPath": [
+        "GongYuAI 的 Super-agent 设计与验收",
+        "报告交付后收到更正凭据"
+      ],
+      "parentLocator": "§报告交付后收到更正凭据",
+      "charStart": 5844,
+      "charEnd": 7078,
+      "chunkSha256": "c99803e911d95aa9ecb70da3469a6644de142f769f3e509c939076a3093973bf",
+      "lineStart": 70,
+      "lineEnd": 76,
+      "pageBasis": null,
+      "retrieval": "hybrid",
+      "score": 2.134671537123113,
+      "keywordScore": 1.7620745542949758,
+      "semanticScore": 0.4657462285351714
+    },
+    {
+      "materialId": "5a6d19c7-153f-48c1-90ee-26a585be52f6",
+      "versionId": "041930cc-6849-429b-8af7-9dc050c5a2f4",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "GongYuAI Super-agent 设计与验收（含 R-017 用例全文）",
+      "publisher": "GongYuAI（本项目合成验收）",
+      "sourceKind": "original",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/absorb-super-agent.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410398618"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body",
+        "title"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 2,
+      "locator": "§报告交付后收到更正凭据",
+      "heading": "报告交付后收到更正凭据",
+      "page": null,
+      "ordinal": 7,
+      "context": "…能指出哪条判断被撤回、哪条已另行复核、哪个目标仍缺材料，并能查回首次交付版本。 **初始材料。** 使用离线合成台账 R-017。任务状态为 `incomplete`，目标为收件归属 `ownership` 与签收人 `signature`。已封存的收件原件在 `archive/receipt.json`，归属栏为 B。初核员…",
+      "headingPath": [
+        "GongYuAI 的 Super-agent 设计与验收",
+        "报告交付后收到更正凭据"
+      ],
+      "parentLocator": "§报告交付后收到更正凭据",
+      "charStart": 5446,
+      "charEnd": 5842,
+      "chunkSha256": "70ad362cb18390f90bdec3f3e447688f4b406875522c951ba56bf46246868d96",
+      "lineStart": 64,
+      "lineEnd": 68,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.7262626262626264,
+      "keywordScore": 1.7262626262626264,
+      "semanticScore": null
+    }
+  ],
+  "recall": {
+    "keyword": 2,
+    "semantic": 1
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "chunkerVersion": 2,
+    "indexKey": "c2:bge-m3-mlx-4bit",
+    "totalChunks": 131,
+    "indexedChunks": 131,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "degraded": false,
+    "lastIndexedAt": "2026-11-23T05:06:48.345Z"
+  }
+}

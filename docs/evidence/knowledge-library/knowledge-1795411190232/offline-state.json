@@ -1,0 +1,12 @@
+{
+  "taskId": "297204b2-70d7-4392-b4ab-9b5b8bfdf9d2",
+  "engagementId": "eng-knowledge-1795411190232",
+  "citationId": "ac317a35-e50c-4f89-a357-5012ecc2aed2",
+  "v1Id": "a78a3d73-0e6e-4a14-bd37-8762114d31f1",
+  "v2Id": "f19e69c7-3fac-41e3-a5f3-2573ec91c20b",
+  "v1Sha": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+  "v2Sha": "72ee09b33dbcbb5f54bb99a70ac93ccb60b9486ccd0e30ffc996761baaabce7d",
+  "v1SnapshotPath": "knowledge/snapshots/f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+  "v1Marker": "换任通过读 STATE 文件继续。",
+  "v2Marker": "验收修订 v2"
+}

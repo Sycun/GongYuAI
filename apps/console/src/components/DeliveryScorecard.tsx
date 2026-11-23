@@ -121,6 +121,10 @@ export function DeliveryScorecard({ taskId, refreshKey }: { taskId: string; refr
       <Typography.Paragraph type="tertiary" size="small" style={{ marginTop: 8 }}>
         统计时点是实时读数，每次刷新都会变；不可变凭据以快照文件的 SHA-256 为准。
         当前证据支持与人工覆盖是两个维度：覆盖充分不代表有发现，零发现也不证明覆盖。
+        {card.coverage.unregistered > 0 ? ` 人工覆盖未登记 ${card.coverage.unregistered} 个目标。` : " 当前没有「人工覆盖未登记」的目标。"}
+        {card.coverage.tested > 0 && card.findings.verified + card.findings.tentative === 0
+          ? " 已测、零发现：覆盖记为已测，发现台账里没有已验证或线索。"
+          : ""}
       </Typography.Paragraph>
       <Table
         size="small"
@@ -144,9 +148,14 @@ export function DeliveryScorecard({ taskId, refreshKey }: { taskId: string; refr
             render: (value: string) => VERDICT_LABEL[value] ?? value,
           },
           {
+            title: "依据归属未知",
+            dataIndex: "missingAttribution",
+            render: (value: boolean) => (value ? <Tag color="orange" size="small">未知</Tag> : <Tag size="small">已归属</Tag>),
+          },
+          {
             title: "人工覆盖",
             dataIndex: "coverage",
-            render: (value: string) => COVERAGE_LABEL[value] ?? value,
+            render: (value: string) => value === "unregistered" ? "人工覆盖未登记" : (COVERAGE_LABEL[value] ?? value),
           },
         ]}
       />

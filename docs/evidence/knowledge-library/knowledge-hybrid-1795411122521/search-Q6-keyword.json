@@ -1,0 +1,293 @@
+{
+  "query": "换任",
+  "scope": {
+    "engagementId": "eng-knowledge-hybrid-1795411122521",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "mode": "keyword",
+  "total": 6,
+  "materials": 1,
+  "searchedVersions": 4,
+  "limit": 200,
+  "truncated": false,
+  "hits": [
+    {
+      "materialId": "fe2bd5ce-3fd7-4e34-9f9c-c7b750eabbda",
+      "versionId": "dd644e44-053c-43a1-98a8-feec552d7972",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795411122521"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 6,
+      "locator": "§6.4~2",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 69,
+      "context": "…md`，记录分配、弃置、队列、情报和下一步；下一任指挥官读取该文件，接着调度。 **STATE 文件示例（06:14 换任时，[`commander_state_0614.md`](prompts/commander_state_0614.md)）：**",
+      "headingPath": [
+        "SapperLens",
+        "6. 架构设计",
+        "6.4 状态与连续性"
+      ],
+      "parentLocator": "§6.4",
+      "charStart": 32670,
+      "charEnd": 32899,
+      "chunkSha256": "58649efc82a9417b33f7489302e9206ef44b4493719a22199791877d645d8293",
+      "lineStart": 734,
+      "lineEnd": 736,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.818340611353712,
+      "keywordScore": 1.818340611353712,
+      "semanticScore": null
+    },
+    {
+      "materialId": "fe2bd5ce-3fd7-4e34-9f9c-c7b750eabbda",
+      "versionId": "dd644e44-053c-43a1-98a8-feec552d7972",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795411122521"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 6,
+      "locator": "§0~4",
+      "heading": "0. 提示词与运行时证据文件",
+      "page": null,
+      "ordinal": 7,
+      "context": "…tate_0614.md`](prompts/commander_state_0614.md) | Commander 换任 STATE 示例：理解跨会话连续性 | 38 行 | session 2556853 读取 `/work/runs/commander-state.md` | | [`prompts/board_e…",
+      "headingPath": [
+        "SapperLens",
+        "0. 提示词与运行时证据文件"
+      ],
+      "parentLocator": "§0",
+      "charStart": 3204,
+      "charEnd": 3815,
+      "chunkSha256": "050f41cf608f6bee447db96989c3cae5958e3e04c3750886a52b3825f8cded36",
+      "lineStart": 73,
+      "lineEnd": 76,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6818330605564649,
+      "keywordScore": 1.6818330605564649,
+      "semanticScore": null
+    },
+    {
+      "materialId": "fe2bd5ce-3fd7-4e34-9f9c-c7b750eabbda",
+      "versionId": "dd644e44-053c-43a1-98a8-feec552d7972",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795411122521"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 6,
+      "locator": "§6.4",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 68,
+      "context": "…ander-state.md` <150 行 | 2 任 commander（1148 + 1153 步），06:14 换任，靠 STATE 续接 | | Worker 上下文续接 | 续接会话 2577360 | a-03 决胜提交就在续接会话里（184 步，07:15:56 提交） | | 看门狗 | key 轮换、p…",
+      "headingPath": [
+        "SapperLens",
+        "6. 架构设计",
+        "6.4 状态与连续性"
+      ],
+      "parentLocator": "§6.4",
+      "charStart": 31973,
+      "charEnd": 32668,
+      "chunkSha256": "c913cecd70b365deca458c4b3ceca209184d2ff8dad6a79176c6925b6afe2f22",
+      "lineStart": 723,
+      "lineEnd": 732,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6719424460431656,
+      "keywordScore": 1.6719424460431656,
+      "semanticScore": null
+    },
+    {
+      "materialId": "fe2bd5ce-3fd7-4e34-9f9c-c7b750eabbda",
+      "versionId": "dd644e44-053c-43a1-98a8-feec552d7972",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795411122521"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 6,
+      "locator": "§5.2~2",
+      "heading": "5.2 L1：Commander 标准作业程序（427 行，25,842 字符）",
+      "page": null,
+      "ordinal": 40,
+      "context": "…1–4.10 | | §5 自我管理 | 上下文压缩/STATE 交接 | 85/90 协议；STATE <150 行；换任先读 STATE | | §6 失败处理 | exit 3/4、pane 死、key 轮换、半场审计、终局 | 半场 generals 使用率 <20% 就压 smart 火力 | | §7 战略 c…",
+      "headingPath": [
+        "SapperLens",
+        "5. 提示词全谱",
+        "5.2 L1：Commander 标准作业程序（427 行，25,842 字符）"
+      ],
+      "parentLocator": "§5.2",
+      "charStart": 17338,
+      "charEnd": 18092,
+      "chunkSha256": "34148d1a7f203dda9171410c08074dcc5edf469877d5d682a41110f89349c8a5",
+      "lineStart": 493,
+      "lineEnd": 503,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6663129973474802,
+      "keywordScore": 1.6663129973474802,
+      "semanticScore": null
+    },
+    {
+      "materialId": "fe2bd5ce-3fd7-4e34-9f9c-c7b750eabbda",
+      "versionId": "dd644e44-053c-43a1-98a8-feec552d7972",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795411122521"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 6,
+      "locator": "§6.4~3",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 70,
+      "context": "…录了资源上限、比分、分配表、家族 playbook、以及一个工具 bug（`--general` 不自动升级模型）。**换任通过读 STATE 文件继续。**",
+      "headingPath": [
+        "SapperLens",
+        "6. 架构设计",
+        "6.4 状态与连续性"
+      ],
+      "parentLocator": "§6.4",
+      "charStart": 32901,
+      "charEnd": 33883,
+      "chunkSha256": "4c4852b46cab479e843df728c867b206470c6109b24c358fdebe928df5620bba",
+      "lineStart": 738,
+      "lineEnd": 759,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6509164969450103,
+      "keywordScore": 1.6509164969450103,
+      "semanticScore": null
+    },
+    {
+      "materialId": "fe2bd5ce-3fd7-4e34-9f9c-c7b750eabbda",
+      "versionId": "dd644e44-053c-43a1-98a8-feec552d7972",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795411122521"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 6,
+      "locator": "§9~2",
+      "heading": "9. 可复用清单（按优先级）",
+      "page": null,
+      "ordinal": 98,
+      "context": "…TERATIONS/DEADLINE/CAPS/SCORE/Allocation/Parked/Queue/Intel；换任、压缩、pane 重启都靠它。 11. **错误前提要标证据强度**：事实图里“已排除”必须写“基于什么证据、置信度多少”；a-03 的 4.5 小时就是“500 by design”这个未验证前提的…",
+      "headingPath": [
+        "SapperLens",
+        "9. 可复用清单（按优先级）"
+      ],
+      "parentLocator": "§9",
+      "charStart": 44656,
+      "charEnd": 45976,
+      "chunkSha256": "2e1cdcdaa1c5e311711f53b451b466ac6d0976d7b4b9e1da6385c1f80cf3fdb3",
+      "lineStart": 982,
+      "lineEnd": 997,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.637878787878788,
+      "keywordScore": 1.637878787878788,
+      "semanticScore": null
+    }
+  ],
+  "recall": {
+    "keyword": 6,
+    "semantic": 0,
+    "semanticCutoff": null
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "chunkerVersion": 2,
+    "indexKey": "c2:bge-m3-mlx-4bit",
+    "totalChunks": 175,
+    "indexedChunks": 175,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "degraded": true,
+    "lastIndexedAt": "2026-11-23T05:18:50.873Z",
+    "degradedReason": "本次请求指定只用关键词检索"
+  }
+}

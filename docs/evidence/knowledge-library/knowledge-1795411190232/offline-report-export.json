@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "kind": "knowledge-report-export",
+  "taskId": "297204b2-70d7-4392-b4ab-9b5b8bfdf9d2",
+  "engagementId": "eng-knowledge-1795411190232",
+  "exportedAt": "2026-11-23T05:19:57.043Z",
+  "scope": {
+    "engagementId": "eng-knowledge-1795411190232",
+    "resolvedFrom": "task",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "snapshotScope": "full-version",
+  "report": {
+    "path": "report.md",
+    "sha256": "f12d3c3a31a6875d5790bccdcb57afce84386d8f7f00443db94a8efb062cc164",
+    "markdown": "# GongYuAI Report\n\nTask: 297204b2-70d7-4392-b4ab-9b5b8bfdf9d2\nStatus: completed\nTargets: knowledge-acceptance.invalid\nAuthorization: 知识库首版后端验收，靶标为虚构地址\n排除范围　未列出\n\n## 平台用量\n\n- 累计 Token　用量 0，上限 不限\n- 累计工具调用　用量 0，上限 不限\n- 累计安装　用量 0，上限 不限\n- 本轮墙钟（毫秒）　用量 未知，上限 不限\n\n## Skill 与 MCP 调用\n\n此任务没有逐次调用统计。\n\n## Findings\n\n- （无已验证 finding；tentative 线索不进交付）\n\n\n\n## 覆盖与当前支持\n\n统计时点　2026-11-23T05:19:56.859Z（实时读数；不可变凭据以交付快照 SHA-256 为准）\n分母　本次约定目标总数 1\n\n- 历史通过　0 / 1\n- 当前证据足以支持　0 / 1\n- 原依据归属未知　0 / 1\n- 已撤回依据引用（条数，非目标数）　0\n\n人工覆盖（五类互斥，合计等于分母）\n\n- 已测 0、部分覆盖 0、受阻 0、未测 0、未登记 1\n\n说明：当前证据支持与人工覆盖是两个维度；覆盖充分不代表有发现，零发现也不证明覆盖。\n\n\n## 逐项目标复核\n\n### 参考资料定版引用（g1）· 未验证\n\n旧报告可按定版回读\n\n- 人工覆盖记录　未登记（没有覆盖意见，不等于已验证覆盖）\n- 尚缺可通过验收的材料。所需路径：knowledge/\\*.json\n\n\n## 参考资料引用（定版）\n\n- 引用 #1（2026-11-23T05:19:56.853Z）· SapperLens §6.4 状态与连续性 · 摘录 · 本地 v1 · §6.4\n  支持的表述：独立分析从运行记录中追到了一次负责人换班（06:14 换任，靠 STATE 续接）\n  发布者：inwpu（独立运行分析）　段落：6.4 状态与连续性\n  定版快照：[knowledge/f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59](report-evidence/f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59) · SHA-256 f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59\n  原文范围：[0, 695)　片段 SHA-256 c913cecd70b365deca458c4b3ceca209184d2ff8dad6a79176c6925b6afe2f22\n  该版本已停用；本引用仍按当时定版回读，当前检索默认给有效版。\n\n"
+  },
+  "citations": [
+    {
+      "citation": {
+        "id": "ac317a35-e50c-4f89-a357-5012ecc2aed2",
+        "taskId": "297204b2-70d7-4392-b4ab-9b5b8bfdf9d2",
+        "engagementId": "eng-knowledge-1795411190232",
+        "materialId": "19dcda03-0613-48e3-a335-91efed8a2046",
+        "versionId": "a78a3d73-0e6e-4a14-bd37-8762114d31f1",
+        "locator": "§6.4",
+        "claim": "独立分析从运行记录中追到了一次负责人换班（06:14 换任，靠 STATE 续接）",
+        "bodyFormat": "markdown",
+        "materialTitle": "SapperLens §6.4 状态与连续性",
+        "publisher": "inwpu（独立运行分析）",
+        "sourceKind": "excerpt",
+        "versionNo": 1,
+        "versionLabel": "本地 v1",
+        "sectionHeading": "6.4 状态与连续性",
+        "sectionPage": null,
+        "sectionOrdinal": 0,
+        "snapshotSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "createdAt": "2026-11-23T05:19:56.853Z",
+        "pinKind": "range",
+        "charStart": 0,
+        "charEnd": 695,
+        "chunkSha256": "c913cecd70b365deca458c4b3ceca209184d2ff8dad6a79176c6925b6afe2f22",
+        "headingPath": [
+          "6.4 状态与连续性"
+        ],
+        "pageBasis": null
+      },
+      "verification": {
+        "status": "verified",
+        "expectedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "recomputedSha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "source": "task-seal"
+      },
+      "paragraph": {
+        "ordinal": 0,
+        "locator": "§6.4",
+        "heading": "6.4 状态与连续性",
+        "page": null,
+        "charStart": 0,
+        "charEnd": 695,
+        "headingPath": [
+          "6.4 状态与连续性"
+        ],
+        "parentLocator": "§6.4",
+        "chunkSha256": "c913cecd70b365deca458c4b3ceca209184d2ff8dad6a79176c6925b6afe2f22",
+        "chunkIndex": 0,
+        "chunkCount": 3,
+        "lineStart": 1,
+        "lineEnd": 10,
+        "pageBasis": null,
+        "text": "### 6.4 状态与连续性\n\n| 机制 | 实现 | 观测证据 |\n|---|---|---|\n| 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | 255 次 `sapper fact`、198 次 `sapper graph`、195 次 `sapper status` |\n| 跨 pane 共享 | w2+ 挂 `.sapper` symlink | b-02 5 个 pane、a-03 16 个会话共享同一图 |\n| Commander 交接 | `/work/runs/commander-state.md` <150 行 | 2 任 commander（1148 + 1153 步），06:14 换任，靠 STATE 续接 |\n| Worker 上下文续接 | 续接会话 2577360 | a-03 决胜提交就在续接会话里（184 步，07:15:56 提交） |\n| 看门狗 | key 轮换、pane `--continue` 重启、重发 mission、5 分钟冷却 | drive.log 的 `[watch]` 行（[`drive_log_watchdog_excerpt.txt`](prompts/drive_log_watchdog_excerpt.txt)） |\n| 会话记忆 | `~/.claude/projects/-work-runs-<code>/memory/` | a-03-w3 写 `a03-solve.md` 并更新 `MEMORY.md` |"
+      },
+      "snapshot": {
+        "sha256": "f8d78d0ffe8c0b8b2b2f4a5a8215d31550574e7ef7f049d8816c0ad12487cd59",
+        "byteSize": 2456,
+        "bytesBase64": "IyMjIDYuNCDnirbmgIHkuI7ov57nu63mgKcKCnwg5py65Yi2IHwg5a6e546wIHwg6KeC5rWL6K+B5o2uIHwKfC0tLXwtLS18LS0tfAp8IOavj+mimOS6i+WunuWbviB8IGAuc2FwcGVyL2ZhY3RzLyouanNvbmDvvIx0eXBlZCBmYWN0cyArIGRvYyArIGhpbnRzICsgaW50ZW50cyB8IDI1NSDmrKEgYHNhcHBlciBmYWN0YOOAgTE5OCDmrKEgYHNhcHBlciBncmFwaGDjgIExOTUg5qyhIGBzYXBwZXIgc3RhdHVzYCB8Cnwg6LeoIHBhbmUg5YWx5LqrIHwgdzIrIOaMgiBgLnNhcHBlcmAgc3ltbGluayB8IGItMDIgNSDkuKogcGFuZeOAgWEtMDMgMTYg5Liq5Lya6K+d5YWx5Lqr5ZCM5LiA5Zu+IHwKfCBDb21tYW5kZXIg5Lqk5o6lIHwgYC93b3JrL3J1bnMvY29tbWFuZGVyLXN0YXRlLm1kYCA8MTUwIOihjCB8IDIg5Lu7IGNvbW1hbmRlcu+8iDExNDggKyAxMTUzIOatpe+8ie+8jDA2OjE0IOaNouS7u++8jOmdoCBTVEFURSDnu63mjqUgfAp8IFdvcmtlciDkuIrkuIvmlofnu63mjqUgfCDnu63mjqXkvJror50gMjU3NzM2MCB8IGEtMDMg5Yaz6IOc5o+Q5Lqk5bCx5Zyo57ut5o6l5Lya6K+d6YeM77yIMTg0IOatpe+8jDA3OjE1OjU2IOaPkOS6pO+8iSB8Cnwg55yL6Zeo54uXIHwga2V5IOi9ruaNouOAgXBhbmUgYC0tY29udGludWVgIOmHjeWQr+OAgemHjeWPkSBtaXNzaW9u44CBNSDliIbpkp/lhrfljbQgfCBkcml2ZS5sb2cg55qEIGBbd2F0Y2hdYCDooYzvvIhbYGRyaXZlX2xvZ193YXRjaGRvZ19leGNlcnB0LnR4dGBdKHByb21wdHMvZHJpdmVfbG9nX3dhdGNoZG9nX2V4Y2VycHQudHh0Ke+8iSB8Cnwg5Lya6K+d6K6w5b+GIHwgYH4vLmNsYXVkZS9wcm9qZWN0cy8td29yay1ydW5zLTxjb2RlPi9tZW1vcnkvYCB8IGEtMDMtdzMg5YaZIGBhMDMtc29sdmUubWRgIOW5tuabtOaWsCBgTUVNT1JZLm1kYCB8Cgrnu4/kuI7kvZzogIXmsp/pgJrnoa7orqTvvIxDb21tYW5kZXIg5Lqk5o6l5Y+R55Sf5Zyo5oyH5oyl5a6Y5LiO5oyH5oyl5a6Y5LmL6Ze077yM55So5LqO5aSE55CGIDgg5bCP5pe26ZW/5pe26L+Q6KGM55qE5LiK5LiL5paH5a656YeP57qm5p2f77ya57O757uf6K6+572uIDkwJSDoh6rliqjljovnvKnvvIzmjIfmjKXlrpjlnKggODUlIOaXtuS4u+WKqOWGmSBgY29tbWFuZGVyLXN0YXRlLm1kYO+8jOiusOW9leWIhumFjeOAgeW8g+e9ruOAgemYn+WIl+OAgeaDheaKpeWSjOS4i+S4gOatpe+8m+S4i+S4gOS7u+aMh+aMpeWumOivu+WPluivpeaWh+S7tu+8jOaOpeedgOiwg+W6puOAggoKKipTVEFURSDmlofku7bnpLrkvovvvIgwNjoxNCDmjaLku7vml7bvvIxbYGNvbW1hbmRlcl9zdGF0ZV8wNjE0Lm1kYF0ocHJvbXB0cy9jb21tYW5kZXJfc3RhdGVfMDYxNC5tZCnvvInvvJoqKgoKYGBgdGV4dApJVEVSQVRJT05TOiAxMTIKREVBRExJTkU6IDAyOjMwOjA0ICgyMDI2LTEwLTE4KSAgfCAgYnVkZ2V0X2xlZnQgfjRoMThtICB8ICBDQVBTOiBpbnN0YW5jZXMgMi8zLCBwYW5lcyA1LzgsIGdlbmVyYWxzIDIKU0NPUkU6IDYxLzYzIGNvZGVzLCA4MSBmbGFncy4gTGVmdDogYS0wMygwLzEpLCBiLTAyKDQvNikgPSAzIGZsYWdzIG91dHN0YW5kaW5nLgoKIyMgQWxsb2NhdGlvbgp8IGNvZGUgfCBwYW5lcyB8IHN0YXRlIHwKfCBhLTAzIHwgdzEgR0VORVJBTCB8IHNlc3Npb24tZm9yZ2UgY3JhY2tlciA0MTJrL3MuLi4gfAp8IGItMDIgfCB3MiBHRU5FUkFMICsgdzMsdzQsdzUgZHMgfCA0LzYuIHc1ID0gU1NILUJSVVRFIFBMQVlCT09LIGZyb20gYi0wMSAuLi4gfAoKIyMgYi0wMSBTT0xWRUQgKDExNDBwdHMpIGZpbmFsIGNoYWluCi0gTEZJIHNlcnZpY2VzLnBocD9sYW5nPSAuLi4gLT4gbG9nIHBvaXNvbmluZyAtPiBSQ0Ugd2Vic2hlbGwgL3AucGhwCi0gcGFuZWwgMTcyLjE5LjAuMyBvcGVyYXRvcjpQYXNzd29yZCAtPiBmbGFnMiArIGNvcmUtem9uZSBpbnRlbAotIGp1bXAgMTcyLjE5LjAuMiBTU0ggZGV2b3BzOkFkbWluMTIzIC0+IGZsYWczL2ZsYWc0IGluIGNvcmUgem9uZQoKIyMgQ1JJVElDQUwgTUVDSEFOSUNTCi0gYC0tZ2VuZXJhbGAgQUxPTkUgZG9lcyBOT1QgdXBncmFkZSBtb2RlbCDigJQgQUxXQVlTIC0tbW9kZWwgImdsbS01LjNbMW1dIiArIHZlcmlmeS4KLSB3MisgcGFuZXMgc2hhcmUgdGhlIGNvZGUncyBncmFwaCB2aWEgLnNhcHBlciBzeW1saW5rLiBraWxsIDxjb2RlPiAtLWNsb3NlIGluIE9ORSBjYWxsLgotIEhpbnRzIGNvc3QgMTAlLiBiLWZhbWlseSA9IHBpdm90IGNoYWlucy4gYi0wMyBzb2x2ZWQgNC80LgpgYGAKCui/meS7vSBTVEFURSDlkIzml7bmmK/igJzmnrbmnoTnmoTor4Hmja7igJ3vvJrlroPorrDlvZXkuobotYTmupDkuIrpmZDjgIHmr5TliIbjgIHliIbphY3ooajjgIHlrrbml48gcGxheWJvb2vjgIHku6Xlj4rkuIDkuKrlt6XlhbcgYnVn77yIYC0tZ2VuZXJhbGAg5LiN6Ieq5Yqo5Y2H57qn5qih5Z6L77yJ44CCKirmjaLku7vpgJrov4for7sgU1RBVEUg5paH5Lu257un57ut44CCKio="
+      }
+    }
+  ],
+  "withheld": {
+    "outOfScopeCitations": 0
+  }
+}

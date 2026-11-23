@@ -5,20 +5,19 @@
 > **实施台账**：[implementation-ledger.md](./implementation-ledger.md)（P0–P12→代码/入口/证据/差距，阶段 1–7 实际状态）。  
 > **交付记录**：[delivery-record.md](./delivery-record.md)（发布提交/SHA、测试与验收、Kali 部署与一致性证据、复核清单）。
 > **总体设计原始稿**：[MASTER-DESIGN.md](./MASTER-DESIGN.md)（愿景/用户定调/P0–P12 全景/契约/路线图/待决策）。  
-> **交互全图（可独立交付）**：[design-atlas.html](./design-atlas.html)——中文、可点击/缩放/搜索/思路导览，全部思路串联一图，双击浏览器打开即可。  
-> **分册交互演示**：[demos/](./demos/)——六个独立 HTML（零依赖、自带明暗主题），与下列提案文档一一对应。
+> **单文件介绍版**　[打开 GongYuAI 项目设计导览](./design-atlas.html)。下载这一份 HTML 即可离线讲解。演示模式按讲解点翻页，目录和搜索可直接定位到专题。
 
-## 交互演示索引（docs/demos/，均可双击独立打开）
+## 讲解章节
 
-| 演示 | 对应文档 | 看什么 |
-| --- | --- | --- |
-| [design-atlas.html](./design-atlas.html) | MASTER-DESIGN | 全部思路一图：65 节点、18 站导览、定调日志/路线图侧栏 |
-| [demos/architecture-flow.html](./demos/architecture-flow.html) | architecture / long-run-contract | 三层基座 + 任务生命周期全链路，节点点开看规范 |
-| [demos/memory-graph.html](./demos/memory-graph.html) | memory-layer（P8） | 项目记忆×全局记忆双层、溯源/注入/反馈边 |
-| [demos/data-flywheel.html](./demos/data-flywheel.html) | data-flywheel（P9） | 五环飞轮 + 中心质量闸 |
-| [demos/graph-views.html](./demos/graph-views.html) | graph-views（P10） | 资产/攻击面/执行/记忆四视图切换，同 ID 贯穿 |
-| [demos/ops-lifecycle.html](./demos/ops-lifecycle.html) | pentest-ops-design（P11） | 生命周期状态机 + 暂停保活对象 + 模型求助回路 |
-| [demos/attack-chain.html](./demos/attack-chain.html) | attack-chain-graph（P10 扩展） | 点击漏洞上下闭包聚焦整链；oos 链可见利用被拒 |
+| 章节入口 | 适合讲什么 |
+| --- | --- |
+| [架构分工](./design-atlas.html#architecture) | 一封更正回函分别由谁接住，哪些机制参考了上游 |
+| [三周交接](./design-atlas.html#receipt-weeks) | R-017 的原件、撤回、下游影响和签收缺口 |
+| [全局记忆](./design-atlas.html#memory) | 本次证据留在哪里，哪条经验可由下一项委托复用 |
+| [经验评测](./design-atlas.html#flywheel) | 五个环节和交付记分卡怎样检验改进效果 |
+| [四种视图](./design-atlas.html#graph-views) · [发现与溯源](./design-atlas.html#attack-chain) | 同一条记录从不同角度呈现，依据撤回后如何追查 |
+| [任务生命周期](./design-atlas.html#ops-lifecycle) | 暂停、等件、恢复和交付后更正 |
+| [设计全景](./design-atlas.html#atlas) | 按职责查看原总图的 65 个节点、来源、实现状态与阶段路线 |
 
 ## 文档地图
 
@@ -28,7 +27,10 @@
 | [architecture.md](./architecture.md) | **架构**：问题、图原语、控制面/Worker、包职责、数据布局、差异化 | 改结构 / 对新人讲系统 |
 | [asset-inventory.md](./asset-inventory.md) | **资产清单**：seed↔发现双向投影、CIDR/通配自动准入、控制台与 Observe 同表 | 靶标回流 / 资产 Tab / FOFA 发现 |
 | [parallel-explore-scaling.md](./parallel-explore-scaling.md) | **Explore 并发**：智能推荐 3–10、按资产数动态扩容（只扩不缩）、非战术纪律 | 改并发 / runner / watchdog 调度前读 |
-| [memory-layer.md](./memory-layer.md) | **记忆层（P8 提案）**：项目记忆×全局记忆两级、繁衍闭环、记忆图溯源、档案索引、控制台 Memory 页 | 改记忆 / 经验传承 / Memory 画布前读 |
+| [memory-layer.md](./memory-layer.md) | **记忆层（P8）**：项目记忆×全局记忆两级、繁衍闭环、记忆图溯源、档案索引、控制台 Memory 页；知识库首版后端已落地 | 改记忆 / 经验传承 / Memory 画布前读 |
+| [knowledge-library-api.md](./knowledge-library-api.md) | **参考资料库接口契约（✅ 后端）**：路由、请求响应类型、委托上下文传递、状态与错误、最小调用示例 | 控制台对接知识库 / 改引用与导出前读 |
+| [knowledge-library-console.md](./knowledge-library-console.md) | **知识与经验控制台接入设计**，含文章样本、定版引用、旧报告离线复验、双向委托隔离与向量化服务切换签收单 | 控制台接线及浏览器验收前读 |
+| [向量化服务切换验收记录](./evidence/knowledge-library/provider-1795419920217/acceptance-record.md) | **本地/云端互切 + 重试缺陷修复（✅ 页面）**：真实页面读数、逐请求授权隔离、真实本机 1024 维模型、当轮云端使用测试服务；后续[真实云端验收](./evidence/knowledge-library/siliconflow-acceptance.json) | 复跑服务切换 / 排查重试与索引归属前读 |
 | [data-flywheel.md](./data-flywheel.md) | **数据飞轮（P9 提案）**：采集→评测→蒸馏→改进→验证五环、质量闸、提案收件箱、越用越好用 | 改记分卡 / 趋势 / 自动蒸馏 / 晋升闸前读 |
 | [graph-views.md](./graph-views.md) | **图视图族（P10 提案）**：资产/攻击面/执行/记忆四图投影、跨图导航、图提示、Graph workspace | 改控制台图视图 / 投影 / 跨图跳转前读 |
 | [pentest-ops-design.md](./pentest-ops-design.md) | **渗透执行层与委托规则（P11 提案）**：会话管理器、后台作业异步回流、隧道/Chromium、时间窗/RoE/速率自判/模型求助、任务生命周期 | 改会话 / 作业 / 生命周期 / 委托契约前读 |
@@ -75,6 +77,8 @@
 - [owner-unverified-r9.md](./owner-unverified-r9.md) — 未验证清单：工程缺项 / 缺真实供应商 / 缺真实材料
 
 ## 事实复核与验收
+
+[三周怎样接手一份台账](./evidence-review.md#receipt-weeks)用 R-017 说明状态写在哪里、上轮来不及交班时怎么查、缺签收时如何交付。[按周查看同一例子](./design-atlas.html#receipt-weeks)可以对照封存的凭据与后来被覆盖的工作副本。
 
 [女娲、DAG 与证据复核](./evidence-review.md)说明复核入口、证据版本、报告判读和离线验收用例。
 

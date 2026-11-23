@@ -1,0 +1,123 @@
+{
+  "query": "§6.4",
+  "scope": {
+    "engagementId": "eng-knowledge-hybrid-1795410874939",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "mode": "keyword",
+  "total": 2,
+  "materials": 1,
+  "searchedVersions": 4,
+  "limit": 200,
+  "truncated": false,
+  "hits": [
+    {
+      "materialId": "af0996bb-738e-4b0f-ad2b-51e3db419686",
+      "versionId": "46cdcaef-a75e-4cec-890c-29cde2d37b50",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "locator"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 2,
+      "locator": "§6.4",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 54,
+      "context": "### 6.4 状态与连续性 | 机制 | 实现 | 观测证据 | |---|---|---| | 每题事实图 | `.sapper/facts/*.json`，typed facts + doc + hints + intents | 255 次 `sapper fact`、198 次 `sapper graph`、195 次 `sapper status` | | 跨 pane 共享 | w",
+      "headingPath": [
+        "SapperLens",
+        "6. 架构设计",
+        "6.4 状态与连续性"
+      ],
+      "parentLocator": "§6.4",
+      "charStart": 31973,
+      "charEnd": 32899,
+      "chunkSha256": "992a7fd51fdcdcfd4efbbd4980a87b8cd7adf66736d770e41305654b192bb2c6",
+      "lineStart": 723,
+      "lineEnd": 736,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6,
+      "keywordScore": 1.6,
+      "semanticScore": null
+    },
+    {
+      "materialId": "af0996bb-738e-4b0f-ad2b-51e3db419686",
+      "versionId": "46cdcaef-a75e-4cec-890c-29cde2d37b50",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410874939"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "locator"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 2,
+      "locator": "§6.4~2",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 55,
+      "context": "```text ITERATIONS: 112 DEADLINE: 02:30:04 (2026-10-18) | budget_left ~4h18m | CAPS: instances 2/3, panes 5/8, generals 2 SCORE: 61/63 codes, 81 flags. Left: a-03(0/1), b-02(4/6) = 3 flags outstan",
+      "headingPath": [
+        "SapperLens",
+        "6. 架构设计",
+        "6.4 状态与连续性"
+      ],
+      "parentLocator": "§6.4",
+      "charStart": 32901,
+      "charEnd": 33883,
+      "chunkSha256": "4c4852b46cab479e843df728c867b206470c6109b24c358fdebe928df5620bba",
+      "lineStart": 738,
+      "lineEnd": 759,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6,
+      "keywordScore": 1.6,
+      "semanticScore": null
+    }
+  ],
+  "recall": {
+    "keyword": 2,
+    "semantic": 0,
+    "semanticCutoff": null
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "chunkerVersion": 2,
+    "indexKey": "c2:bge-m3-mlx-4bit",
+    "totalChunks": 131,
+    "indexedChunks": 131,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "degraded": true,
+    "lastIndexedAt": "2026-11-23T05:14:43.857Z",
+    "degradedReason": "本次请求指定只用关键词检索"
+  }
+}

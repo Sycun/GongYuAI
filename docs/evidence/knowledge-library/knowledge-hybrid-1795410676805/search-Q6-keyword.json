@@ -1,0 +1,250 @@
+{
+  "query": "换任",
+  "scope": {
+    "engagementId": "eng-knowledge-hybrid-1795410676805",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "mode": "keyword",
+  "total": 5,
+  "materials": 1,
+  "searchedVersions": 4,
+  "limit": 200,
+  "truncated": false,
+  "hits": [
+    {
+      "materialId": "4ae1a978-1ee6-4e0e-9c30-c6df32ffdb5f",
+      "versionId": "914d5d02-450e-4bac-9f9e-fd1d740b3f85",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410676805"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 5,
+      "locator": "§6.4",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 54,
+      "context": "…ander-state.md` <150 行 | 2 任 commander（1148 + 1153 步），06:14 换任，靠 STATE 续接 | | Worker 上下文续接 | 续接会话 2577360 | a-03 决胜提交就在续接会话里（184 步，07:15:56 提交） | | 看门狗 | key 轮换、p…",
+      "headingPath": [
+        "SapperLens",
+        "6. 架构设计",
+        "6.4 状态与连续性"
+      ],
+      "parentLocator": "§6.4",
+      "charStart": 31973,
+      "charEnd": 32899,
+      "chunkSha256": "992a7fd51fdcdcfd4efbbd4980a87b8cd7adf66736d770e41305654b192bb2c6",
+      "lineStart": 723,
+      "lineEnd": 736,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.7079913606911448,
+      "keywordScore": 1.7079913606911448,
+      "semanticScore": null
+    },
+    {
+      "materialId": "4ae1a978-1ee6-4e0e-9c30-c6df32ffdb5f",
+      "versionId": "914d5d02-450e-4bac-9f9e-fd1d740b3f85",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410676805"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 5,
+      "locator": "§6.4~2",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 55,
+      "context": "…录了资源上限、比分、分配表、家族 playbook、以及一个工具 bug（`--general` 不自动升级模型）。**换任通过读 STATE 文件继续。**",
+      "headingPath": [
+        "SapperLens",
+        "6. 架构设计",
+        "6.4 状态与连续性"
+      ],
+      "parentLocator": "§6.4",
+      "charStart": 32901,
+      "charEnd": 33883,
+      "chunkSha256": "4c4852b46cab479e843df728c867b206470c6109b24c358fdebe928df5620bba",
+      "lineStart": 738,
+      "lineEnd": 759,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6509164969450103,
+      "keywordScore": 1.6509164969450103,
+      "semanticScore": null
+    },
+    {
+      "materialId": "4ae1a978-1ee6-4e0e-9c30-c6df32ffdb5f",
+      "versionId": "914d5d02-450e-4bac-9f9e-fd1d740b3f85",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410676805"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 5,
+      "locator": "§0~2",
+      "heading": "0. 提示词与运行时证据文件",
+      "page": null,
+      "ordinal": 5,
+      "context": "…tate_0614.md`](prompts/commander_state_0614.md) | Commander 换任 STATE 示例：理解跨会话连续性 | 38 行 | session 2556853 读取 `/work/runs/commander-state.md` | | [`prompts/board_e…",
+      "headingPath": [
+        "SapperLens",
+        "0. 提示词与运行时证据文件"
+      ],
+      "parentLocator": "§0",
+      "charStart": 2879,
+      "charEnd": 3945,
+      "chunkSha256": "6e08941a7b1315cc4d36a54d99ec2bc814f2fe869ba61b7cf1de3152500417b3",
+      "lineStart": 71,
+      "lineEnd": 79,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6469043151969982,
+      "keywordScore": 1.6469043151969982,
+      "semanticScore": null
+    },
+    {
+      "materialId": "4ae1a978-1ee6-4e0e-9c30-c6df32ffdb5f",
+      "versionId": "914d5d02-450e-4bac-9f9e-fd1d740b3f85",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410676805"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 5,
+      "locator": "§5.2",
+      "heading": "5.2 L1：Commander 标准作业程序（427 行，25,842 字符）",
+      "page": null,
+      "ordinal": 34,
+      "context": "…1–4.10 | | §5 自我管理 | 上下文压缩/STATE 交接 | 85/90 协议；STATE <150 行；换任先读 STATE | | §6 失败处理 | exit 3/4、pane 死、key 轮换、半场审计、终局 | 半场 generals 使用率 <20% 就压 smart 火力 | | §7 战略 c…",
+      "headingPath": [
+        "SapperLens",
+        "5. 提示词全谱",
+        "5.2 L1：Commander 标准作业程序（427 行，25,842 字符）"
+      ],
+      "parentLocator": "§5.2",
+      "charStart": 17232,
+      "charEnd": 18326,
+      "chunkSha256": "e163475223c8230880e31750062877a5004be79da4fe5d9878112eb33eb25a77",
+      "lineStart": 489,
+      "lineEnd": 509,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.6457038391224863,
+      "keywordScore": 1.6457038391224863,
+      "semanticScore": null
+    },
+    {
+      "materialId": "4ae1a978-1ee6-4e0e-9c30-c6df32ffdb5f",
+      "versionId": "914d5d02-450e-4bac-9f9e-fd1d740b3f85",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens 独立运行分析（整篇 README）",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "original",
+      "sourceUrl": "https://raw.githubusercontent.com/inwpu/SapperLens/main/README.md",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-hybrid-1795410676805"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "body"
+      ],
+      "matchedTags": [],
+      "tagOnly": false,
+      "matchCount": 5,
+      "locator": "§9~2",
+      "heading": "9. 可复用清单（按优先级）",
+      "page": null,
+      "ordinal": 76,
+      "context": "…TERATIONS/DEADLINE/CAPS/SCORE/Allocation/Parked/Queue/Intel；换任、压缩、pane 重启都靠它。 11. **错误前提要标证据强度**：事实图里“已排除”必须写“基于什么证据、置信度多少”；a-03 的 4.5 小时就是“500 by design”这个未验证前提的…",
+      "headingPath": [
+        "SapperLens",
+        "9. 可复用清单（按优先级）"
+      ],
+      "parentLocator": "§9",
+      "charStart": 44656,
+      "charEnd": 45976,
+      "chunkSha256": "2e1cdcdaa1c5e311711f53b451b466ac6d0976d7b4b9e1da6385c1f80cf3fdb3",
+      "lineStart": 982,
+      "lineEnd": 997,
+      "pageBasis": null,
+      "retrieval": "keyword",
+      "score": 1.637878787878788,
+      "keywordScore": 1.637878787878788,
+      "semanticScore": null
+    }
+  ],
+  "recall": {
+    "keyword": 5,
+    "semantic": 0,
+    "semanticCutoff": null
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "chunkerVersion": 2,
+    "indexKey": "c2:bge-m3-mlx-4bit",
+    "totalChunks": 131,
+    "indexedChunks": 131,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "degraded": true,
+    "lastIndexedAt": "2026-11-23T05:11:24.856Z",
+    "degradedReason": "本次请求指定只用关键词检索"
+  }
+}

@@ -1,0 +1,178 @@
+{
+ "local-slow": {
+  "requests": 8,
+  "authPresent": [
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false
+  ],
+  "authMatchesExpected": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "dims": [
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8
+  ],
+  "ns": [
+   1,
+   1,
+   2,
+   1,
+   1,
+   4,
+   1,
+   1
+  ],
+  "heldCount": 0
+ },
+ "cloud-A": {
+  "requests": 16,
+  "authPresent": [
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   false,
+   true,
+   false,
+   true,
+   false
+  ],
+  "authMatchesExpected": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   true,
+   false,
+   true,
+   false
+  ],
+  "dims": [
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12,
+   12
+  ],
+  "ns": [
+   1,
+   1,
+   2,
+   2,
+   1,
+   2,
+   2,
+   1,
+   2,
+   1,
+   2,
+   2,
+   1,
+   1,
+   1,
+   1
+  ],
+  "heldCount": 5
+ },
+ "cloud-B": {
+  "requests": 2,
+  "authPresent": [
+   false,
+   false
+  ],
+  "authMatchesExpected": [
+   false,
+   false
+  ],
+  "dims": [
+   16,
+   16
+  ],
+  "ns": [
+   1,
+   1
+  ],
+  "heldCount": 0
+ },
+ "dim-broken": {
+  "requests": 6,
+  "authPresent": [
+   false,
+   false,
+   false,
+   false,
+   false,
+   false
+  ],
+  "authMatchesExpected": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "dims": [
+   12,
+   3,
+   3,
+   3,
+   3,
+   3
+  ],
+  "ns": [
+   1,
+   2,
+   1,
+   2,
+   2,
+   1
+  ],
+  "heldCount": 0
+ }
+}

@@ -1,0 +1,41 @@
+{
+ "materialId": "7a5fd27d-5131-449a-a2ba-38ab2e922db3",
+ "versionId": "aff3bbed-cd38-47e2-825a-f2f966172790",
+ "versionNo": 1,
+ "versionLabel": "本地 v1",
+ "versionStatus": "active",
+ "title": "共享交接机制（真实 oMLX 验收）",
+ "publisher": "验收合成材料",
+ "sourceKind": "original",
+ "sourceUrl": "https://example.invalid/omlx-handover",
+ "scope": {
+  "kind": "shared"
+ },
+ "bodyStatus": "ready",
+ "matchedFields": [
+  "body",
+  "semantic"
+ ],
+ "matchedTags": [],
+ "tagOnly": false,
+ "matchCount": 1,
+ "locator": "§值班交接",
+ "heading": "值班交接",
+ "page": null,
+ "ordinal": 1,
+ "context": "## 值班交接 负责人换班按 STATE 文件执行，凭据登记在 STATE。",
+ "headingPath": [
+  "值班交接"
+ ],
+ "parentLocator": "§值班交接",
+ "charStart": 36,
+ "charEnd": 75,
+ "chunkSha256": "cfdf186709fc32f81576b7609090ccb2d89c704eb853ab7890cd2ea4b17cca3c",
+ "lineStart": 5,
+ "lineEnd": 7,
+ "pageBasis": null,
+ "retrieval": "hybrid",
+ "score": 2.415080010754577,
+ "keywordScore": 1.85,
+ "semanticScore": 0.706350013443221
+}

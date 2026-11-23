@@ -1,0 +1,134 @@
+{
+  "query": "负责人换班",
+  "scope": {
+    "engagementId": "eng-knowledge-1795404972071",
+    "resolvedFrom": "declared",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "total": 4,
+  "materials": 4,
+  "searchedVersions": 8,
+  "limit": 20,
+  "truncated": false,
+  "hits": [
+    {
+      "materialId": "ae7a602f-2eed-4fa2-98e0-884f9f3bdc82",
+      "versionId": "d92cdccf-6bc5-4c72-a603-0cee4987f751",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "女娲底座 README · History 分层说明",
+      "publisher": "N1nEmAn · VarFusion Lab（上游作者）",
+      "sourceKind": "excerpt",
+      "sourceUrl": "https://github.com/N1nEmAn/nvwabase#2-the-three-capability-foundation",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-1795404972071"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "tags"
+      ],
+      "matchedTags": [
+        "负责人换班"
+      ],
+      "tagOnly": true,
+      "matchCount": 0,
+      "locator": "§2",
+      "heading": "2. The Three-Capability Foundation",
+      "page": null,
+      "ordinal": 0,
+      "context": "仅标签命中：负责人换班。正文未出现该查询词。"
+    },
+    {
+      "materialId": "4a3bb9ea-08d8-4df7-800e-5599d1899f40",
+      "versionId": "7d2fd3ea-b2b7-4c14-bf8e-1f2fa7d05ca1",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "SapperLens §6.4 状态与连续性",
+      "publisher": "inwpu（独立运行分析）",
+      "sourceKind": "excerpt",
+      "sourceUrl": "https://github.com/inwpu/SapperLens#64-状态与连续性",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-1795404972071"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "tags"
+      ],
+      "matchedTags": [
+        "负责人换班"
+      ],
+      "tagOnly": true,
+      "matchCount": 0,
+      "locator": "§6.4",
+      "heading": "6.4 状态与连续性",
+      "page": null,
+      "ordinal": 0,
+      "context": "仅标签命中：负责人换班。正文未出现该查询词。"
+    },
+    {
+      "materialId": "338c9f08-72ec-4d71-96d3-ed668bfb1305",
+      "versionId": "bb27d3a7-8532-4e66-9223-c7d637170d0c",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "本项目六批交接实验 · 六批、五次交接",
+      "publisher": "GongYuAI（本项目实验）",
+      "sourceKind": "excerpt",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/experiments/2026-11-22-ledger-relay/README.md#六批五次交接",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-1795404972071"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "tags"
+      ],
+      "matchedTags": [
+        "负责人换班"
+      ],
+      "tagOnly": true,
+      "matchCount": 0,
+      "locator": "§六批、五次交接",
+      "heading": "六批、五次交接",
+      "page": null,
+      "ordinal": 0,
+      "context": "仅标签命中：负责人换班。正文未出现该查询词。"
+    },
+    {
+      "materialId": "52f09ea4-3ab4-4979-9500-f4425da25e04",
+      "versionId": "de4a6210-a61c-43b5-8b54-cccd4f207446",
+      "versionNo": 1,
+      "versionLabel": "本地 v1",
+      "versionStatus": "active",
+      "title": "编辑导读 · 三种来源怎样区分负责人换班",
+      "publisher": "GongYuAI 验收编辑（导读，非原文）",
+      "sourceKind": "editorial",
+      "sourceUrl": "https://github.com/Sycun/GongYuAI/blob/main/docs/memory-layer.md#knowledge-library",
+      "scope": {
+        "kind": "engagement",
+        "engagementId": "eng-knowledge-1795404972071"
+      },
+      "bodyStatus": "ready",
+      "matchedFields": [
+        "title",
+        "body",
+        "tags"
+      ],
+      "matchedTags": [
+        "负责人换班"
+      ],
+      "tagOnly": false,
+      "matchCount": 1,
+      "locator": "§导读",
+      "heading": "导读",
+      "page": null,
+      "ordinal": 0,
+      "context": "## 导读 负责人换班在三份材料里含义不同：女娲底座是作者设计，SapperLens 是独立分析观察到的实际换任，本项目实验只覆盖六批合成台账。"
+    }
+  ]
+}

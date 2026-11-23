@@ -1,0 +1,40 @@
+{
+  "scope": {
+    "engagementId": null,
+    "resolvedFrom": "shared-only",
+    "operatorModel": "single-operator",
+    "userLevelPermissionVerified": false
+  },
+  "index": {
+    "state": "ready",
+    "model": "bge-m3-mlx-4bit",
+    "modelDim": 1024,
+    "provider": "http://127.0.0.1:8000/v1",
+    "providerKind": "local",
+    "chunkerVersion": 2,
+    "indexKey": "c2|local|http://127.0.0.1:8000/v1|bge-m3-mlx-4bit",
+    "totalChunks": 2,
+    "indexedChunks": 2,
+    "pendingChunks": 0,
+    "failedChunks": 0,
+    "blockedChunks": 0,
+    "services": [
+      {
+        "provider": "local",
+        "baseUrl": "http://127.0.0.1:8000/v1",
+        "model": "bge-m3-mlx-4bit",
+        "modelDim": 1024,
+        "indexKey": "c2|local|http://127.0.0.1:8000/v1|bge-m3-mlx-4bit",
+        "state": "ready",
+        "versions": 1,
+        "totalChunks": 2,
+        "indexedChunks": 2,
+        "pendingChunks": 0,
+        "failedChunks": 0,
+        "allowed": true
+      }
+    ],
+    "degraded": false,
+    "lastIndexedAt": "2026-11-23T09:57:30.818Z"
+  }
+}
