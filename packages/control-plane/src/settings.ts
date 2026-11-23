@@ -19,6 +19,12 @@ import {
   ToggleToolsItemSchema,
   ToolsSettingsPatchSchema,
   assetCollectorEnvNames,
+  chatPresets,
+  modelBaseUrl,
+  selectableChatModels,
+  type ChatCatalog,
+  type ChatConnection,
+  type ChatProfile,
   mergeAssetCollectors,
   mergeMcpServers,
   mergeSkillPacks,
@@ -214,6 +220,78 @@ export class SettingsStore {
       })),
       version,
     };
+  }
+
+  chatProfiles(): ChatProfile[] {
+    const profiles = new Map(chatPresets.map((profile) => [profile.id, profile]));
+    const legacy = this.data.model;
+    if (
+      legacy.apiKey ||
+      legacy.visionModelId ||
+      legacy.modelId !== "gpt-4.1-mini" ||
+      legacy.baseUrl !== "https://api.openai.com/v1" ||
+      process.env.OPENAI_API_KEY
+    ) {
+      const env = this.workerEnv();
+      profiles.set("existing", {
+        id: "existing",
+        name: "已有配置",
+        protocol: "openai",
+        modelId: env.GY_MODEL!,
+        baseUrl: env.OPENAI_BASE_URL!,
+        apiKey: env.OPENAI_API_KEY!,
+        visionModelId: legacy.visionModelId,
+        models: [],
+      });
+    }
+    for (const profile of this.data.chatProfiles) {
+      const previous = profiles.get(profile.id);
+      profiles.set(profile.id, { ...profile, visionModelId: profile.visionModelId ?? previous?.visionModelId });
+    }
+    return [...profiles.values()];
+  }
+
+  saveChatApproval(policy: AppSettings["chatApproval"]) {
+    if (policy.reviewer) {
+      const { profileId, modelId } = policy.reviewer;
+      const profile = this.chatProfiles().find((item) => item.id === profileId);
+      if (!profile || !selectableChatModels(profile).includes(modelId)) throw new Error("请选择已配置的审批模型。");
+    }
+    this.write({ ...this.data, chatApproval: policy });
+    return policy;
+  }
+
+  chatCatalog(): ChatCatalog {
+    const profiles = this.chatProfiles();
+    return {
+      profiles: profiles.map(({ apiKey, ...profile }) => ({ ...profile, hasKey: Boolean(apiKey) })),
+      defaultId: this.data.defaultChatProfile ?? (profiles.some((profile) => profile.id === "existing") ? "existing" : "deepseek"),
+    };
+  }
+
+  chatKey(connection: ChatConnection): string {
+    if (connection.apiKey) return connection.apiKey;
+    const saved = this.chatProfiles().find((profile) => profile.id === connection.id);
+    if (
+      saved &&
+      saved.protocol === connection.protocol &&
+      modelBaseUrl(saved.baseUrl, saved.protocol) === modelBaseUrl(connection.baseUrl, connection.protocol)
+    ) {
+      return saved.apiKey;
+    }
+    return "";
+  }
+
+  saveChatProfile(input: ChatProfile, makeDefault: boolean): ChatCatalog {
+    const previous = this.chatProfiles().find((profile) => profile.id === input.id);
+    const profile = { ...input, apiKey: this.chatKey(input), visionModelId: input.visionModelId ?? previous?.visionModelId };
+    const profiles = this.data.chatProfiles.filter((item) => item.id !== profile.id);
+    this.write({
+      ...this.data,
+      chatProfiles: [...profiles, profile],
+      defaultChatProfile: makeDefault ? profile.id : this.chatCatalog().defaultId,
+    });
+    return this.chatCatalog();
   }
 
   patchModel(patch: ModelSettingsPatch): PublicSettings {

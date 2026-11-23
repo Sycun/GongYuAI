@@ -8,10 +8,13 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      "/chat": "http://127.0.0.1:8877",
       "/health": "http://127.0.0.1:8877",
       "/overview": "http://127.0.0.1:8877",
       "/tasks": "http://127.0.0.1:8877",
       "/settings": "http://127.0.0.1:8877",
+      "/today": "http://127.0.0.1:8877",
+      "/memory": "http://127.0.0.1:8877",
     },
   },
   build: {

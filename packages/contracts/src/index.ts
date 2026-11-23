@@ -1,4 +1,8 @@
 import { z } from "zod";
+import { ChatProfileSchema } from "./chat-models.js";
+export * from "./chat-models.js";
+export * from "./chat-input.js";
+export { selectableChatModels, chatThinkingEfforts, isDeepSeekThinkingModel } from "./chat-model-options.js";
 import { CoverageStatusSchema } from "./coverage-audit.js";
 import {
   BUSINESS_RECONCILE_KIND,
@@ -538,6 +542,22 @@ export const TaskRecordSchema = z.object({
   containerIds: z.array(z.string()).default([]),
   dataDir: z.string(),
   error: z.string().nullable(),
+  assignment: z.object({
+    requestId: z.string(),
+    inputHash: z.string(),
+    model: z.string(),
+    ownerPid: z.number().optional(),
+    ownerHost: z.string().optional(),
+  }).optional(),
+  commandReview: z.object({
+    id: z.string(),
+    fence: z.number().optional(),
+    tool: z.string(),
+    at: z.string(),
+    reason: z.string(),
+    decision: z.enum(["block", "unavailable"]),
+    model: z.string(),
+  }).optional(),
   /** Cumulative counters at the start of this operator-initiated run. */
   runStartUsage: UsageCountersSchema.optional(),
   /** Counters previously visible only in a sidecar or the control record. */
@@ -1041,7 +1061,15 @@ export function mergeSkillPacks(
   return out;
 }
 
+export const ChatApprovalSchema = z.object({
+  scope: z.enum(["read-only", "local-validation"]),
+  reviewer: z.object({ profileId: z.string().min(1).max(80), modelId: z.string().min(1).max(256) }).strict().nullable(),
+}).strict();
+
 export const AppSettingsSchema = z.object({
+  chatApproval: ChatApprovalSchema.default({ scope: "read-only", reviewer: null }),
+  chatProfiles: z.array(ChatProfileSchema).default([]),
+  defaultChatProfile: z.string().optional(),
   model: ModelSettingsSchema.default({
     provider: "openai",
     modelId: "gpt-4.1-mini",

@@ -119,43 +119,6 @@ body {
   background: var(--semi-color-fill-0);
 }
 
-.semi-navigation-header-text {
-  font-weight: 650 !important;
-  letter-spacing: 0.02em;
-}
-
-.gy-shell {
-  height: 100vh;
-  height: 100dvh;
-  background: var(--semi-color-bg-0);
-}
-
-.gy-sider {
-  background: var(--semi-color-bg-1);
-  border-right: 1px solid var(--semi-color-border);
-}
-
-.gy-main { min-width: 0; }
-
-.gy-shell-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 64px;
-  padding: 0 24px;
-  background: var(--semi-color-bg-1);
-  border-bottom: 1px solid var(--semi-color-border);
-}
-
-.gy-shell-header .gy-menu-toggle { display: none; }
-.gy-page-title { flex: 1; min-width: 0; }
-
-.gy-shell-content {
-  min-width: 0;
-  padding: 24px;
-  overflow: auto;
-}
-
 .gy-task-heading {
   display: flex;
   flex-wrap: wrap;
@@ -266,8 +229,6 @@ body {
 .gy-dag-detail dd { margin: 0; color: var(--semi-color-text-1); font-family: ui-monospace, monospace; }
 
 @media (max-width: 760px) {
-  .gy-sider { display: none; }
-  .gy-shell-header .gy-menu-toggle { display: inline-flex; }
   .gy-shell-header { padding: 0 14px; gap: 8px; }
   .gy-shell-content { padding: 16px 12px; }
   .gy-dag-toolbar, .gy-dag-legend { padding-inline: 12px; }

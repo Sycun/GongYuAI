@@ -345,6 +345,24 @@ export class PlatformStore {
     return row ? this.nodeFromJson(row.json) : null;
   }
 
+  /** 复核前的委托归属。只返回委托编号，不返回标题、正文或复核内容。 */
+  memoryOwnership(id: string): { engagementIds: string[] } | null {
+    const row = this.db.prepare(`SELECT json FROM memory_nodes WHERE id = ?`).get(id) as
+      | JsonRow
+      | undefined;
+    if (!row) return null;
+    let parsed: { provenance?: Array<{ engagementId?: unknown }> };
+    try {
+      parsed = JSON.parse(row.json) as { provenance?: Array<{ engagementId?: unknown }> };
+    } catch {
+      return null;
+    }
+    const engagementIds = (parsed.provenance ?? [])
+      .map((item) => item.engagementId)
+      .filter((value): value is string => typeof value === "string" && value.length > 0);
+    return { engagementIds };
+  }
+
   /**
    * 复核：confirm 只允许 draft→confirmed（已是 confirmed 幂等返回，不重写复核人）；
    * retract 允许 draft/confirmed→retracted，节点与原因都保留，不删除。

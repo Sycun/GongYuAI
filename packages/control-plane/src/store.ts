@@ -75,6 +75,7 @@ export class ControlStore {
         id TEXT PRIMARY KEY,
         json TEXT NOT NULL
       );
+      CREATE UNIQUE INDEX IF NOT EXISTS submission_key ON tasks(json_extract(json,'$.assignment.requestId')) WHERE json_extract(json,'$.assignment.requestId') IS NOT NULL;
     `);
   }
 
@@ -82,7 +83,15 @@ export class ControlStore {
     return new Date().toISOString();
   }
 
-  createTask(req: CreateTaskRequest): TaskRecord {
+  findSubmission(key: string): TaskRecord | undefined {
+    const row = this.db.prepare("SELECT json FROM tasks WHERE json_extract(json,'$.assignment.requestId')=?").get(key) as
+      | { json: string }
+      | undefined;
+    if (row) return this.normalize(JSON.parse(String(row.json)) as TaskRecord);
+    return undefined;
+  }
+
+  createTask(req: CreateTaskRequest, assignment?: TaskRecord["assignment"]): TaskRecord {
     const id = randomUUID();
     const dataDir = taskDataDir(this.dataRoot, id);
     mkdirSync(dataDir, { recursive: true });
@@ -93,6 +102,7 @@ export class ControlStore {
     const now = this.now();
     const record: TaskRecord = {
       id,
+      ...(assignment ? { assignment } : {}),
       tenantId: req.tenantId ?? "default",
       name: req.name,
       engagementId: req.engagementId ?? id,

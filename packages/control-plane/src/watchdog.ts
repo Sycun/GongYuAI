@@ -81,7 +81,7 @@ export class Watchdog {
 
   private async handle(taskId: string): Promise<void> {
     const task = this.store.get(taskId);
-    if (!task || !isActiveTaskStatus(task.status)) return;
+    if (!task || task.assignment || !isActiveTaskStatus(task.status)) return;
     // Draining states are owned by the operator action (pause/stop). The
     // watchdog neither restarts nor promotes them.
     if (isDrainingTaskStatus(task.status)) return;

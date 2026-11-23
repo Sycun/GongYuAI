@@ -1,10 +1,12 @@
 import { Card, Col, Row, Typography } from "@douyinfe/semi-ui";
 import type { Overview } from "../api";
 import { TaskTable } from "../components/TaskTable";
+import { TodayWork } from "../components/TodayWork";
 
 type Props = {
   overview: Overview | null;
   onSelect: (taskId: string) => void;
+  onOpen: (href: string) => void;
 };
 
 function Stat({ label, value }: { label: string; value: number }) {
@@ -22,7 +24,7 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
-export function OverviewPage({ overview, onSelect }: Props) {
+export function OverviewPage({ overview, onSelect, onOpen }: Props) {
   const o = overview ?? { total: 0, active: 0, byStatus: {}, recent: [] };
   const s = o.byStatus;
 
@@ -42,6 +44,7 @@ export function OverviewPage({ overview, onSelect }: Props) {
           <Stat label="全部任务" value={o.total} />
         </Col>
       </Row>
+      <TodayWork onOpen={onOpen} />
       <Card
         title="最近任务"
         style={{ background: "var(--semi-color-bg-1)" }}

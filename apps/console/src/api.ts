@@ -1,4 +1,4 @@
-import type { CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
+import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
 
 export type TaskRecord = {
   id: string;
@@ -60,6 +60,7 @@ export type TaskRecord = {
   };
   usage: { tokens: number; toolCalls: number; installs: number };
   error: string | null;
+  commandReview?: { at: string; tool: string; reason: string; decision: "block" | "unavailable"; model: string };
   createdAt: string;
   updatedAt: string;
   finishedAt?: string | null;
@@ -296,6 +297,32 @@ export type EvidenceList = {
   files: Array<{ path: string; size: number; mtime: string }>;
 };
 
+export type Probe<T> =
+  | { ok: true; status: number; json: T; text: string; kind: "ok" }
+  | { ok: false; status: number; error: string; kind: "unregistered" | "forbidden" | "failed" | "aborted" };
+
+export async function probe<T>(path: string, signal?: AbortSignal, init?: RequestInit): Promise<Probe<T>> {
+  try {
+    const res = await fetch(path, { ...init, signal });
+    const text = await res.text();
+    let json = null as T | null;
+    try { json = text ? JSON.parse(text) as T : null; } catch { /* 非 JSON */ }
+    if (res.status === 404) return { ok: false, status: 404, error: (json as { error?: string } | null)?.error || "未注册", kind: "unregistered" };
+    if (res.status === 401 || res.status === 403) {
+      const body = json as { message?: string; error?: string } | null;
+      return { ok: false, status: res.status, error: body?.message || body?.error || "无权查看", kind: "forbidden" };
+    }
+    if (!res.ok) {
+      const error = (json as { error?: string } | null)?.error || text || res.statusText || "读取失败";
+      return { ok: false, status: res.status, error, kind: "failed" };
+    }
+    return { ok: true, status: res.status, json: (json ?? ({} as T)), text, kind: "ok" };
+  } catch (err) {
+    if (signal?.aborted) return { ok: false, status: 0, error: "", kind: "aborted" };
+    return { ok: false, status: 0, error: err instanceof Error ? err.message : "读取失败", kind: "failed" };
+  }
+}
+
 async function request<T>(path: string, opts?: RequestInit): Promise<{ json: T; text: string }> {
   const res = await fetch(path, opts);
   const text = await res.text();
@@ -490,8 +517,20 @@ export type CreateTaskBody = {
 
 export const api = {
   health: () => request<{ ok: boolean }>("/health"),
+  chatModels: () => request<ChatCatalog>("/chat/models"),
+  saveChatProfile: (profile: ChatProfile, makeDefault: boolean) => request<ChatCatalog>("/settings/chat-models", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ profile, makeDefault }),
+  }),
+  queryChatModels: (connection: ChatConnection) => request<{ models: string[] }>("/settings/chat-models/query", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(connection),
+  }),
+  approval: () => request<ChatApproval>("/settings/approval"),
+  saveApproval: (policy: ChatApproval) => request<ChatApproval>("/settings/approval", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(policy),
+  }),
   overview: () => request<Overview>("/overview"),
-  tasks: () => request<{ tasks: TaskRecord[] }>("/tasks"),
+  tasks: (signal?: AbortSignal) => request<{ tasks: TaskRecord[] }>("/tasks", { signal }),
+  task: (id: string, signal?: AbortSignal) => request<{ task: TaskRecord }>(`/tasks/${encodeURIComponent(id)}`, { signal }),
   createTask: (body: CreateTaskBody) =>
     request<{ task: TaskRecord }>("/tasks", {
       method: "POST",
@@ -508,7 +547,7 @@ export const api = {
     request<{ task: TaskRecord }>(`/tasks/${id}/archive`, { method: "POST" }),
   unarchive: (id: string) =>
     request<{ task: TaskRecord }>(`/tasks/${id}/unarchive`, { method: "POST" }),
-  history: (id: string) => request<HistoryPayload>(`/tasks/${id}/history`),
+  history: (id: string, signal?: AbortSignal) => request<HistoryPayload>(`/tasks/${encodeURIComponent(id)}/history`, { signal }),
   assets: (id: string) => request<{ assets: AssetRecord[] }>(`/tasks/${id}/assets`),
   hints: (id: string) => request<{ hints: HintRecord[] }>(`/tasks/${id}/hints`),
   createHint: (id: string, body: { text: string; source?: string; tags?: string[] }) =>
@@ -517,12 +556,18 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }),
-  runtime: (id: string) => request<RuntimePayload>(`/tasks/${id}/runtime`),
+  runtime: (id: string, signal?: AbortSignal) => request<RuntimePayload>(`/tasks/${encodeURIComponent(id)}/runtime`, { signal }),
   executionTrace: (id: string, before: number) =>
     request<ExecutionTracePage>(`/tasks/${id}/trace?before=${before}`),
   executionStepCalls: (id: string, stepId: string, signal: AbortSignal) =>
     request<{ calls: ShellTraceCall[] }>(`/tasks/${id}/trace/${encodeURIComponent(stepId)}`, { signal }),
   evidence: (id: string) => request<EvidenceList>(`/tasks/${id}/evidence`),
+  saveEvidence: (id: string, body: { path: string; content: string }) =>
+    request<{ path: string }>(`/tasks/${id}/evidence`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   /** 导入或替换一份原始材料（同一路径即替换）。 */
   writeEvidence: (id: string, body: { path: string; content: string }) =>
     request<{ path: string; sha256: string; replaced: boolean }>(`/tasks/${id}/evidence`, {

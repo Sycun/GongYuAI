@@ -21,6 +21,9 @@ import {
   type TaskIntegrationUsage,
   type TaskRecord,
   ToolsSettingsPatchSchema,
+  ChatApprovalSchema,
+  ChatConnectionSchema,
+  ChatProfileSchema,
   UpdateScopeRequestSchema,
   UpdateSettingsPatchSchema,
 } from "@gongyuai/contracts";
@@ -39,6 +42,8 @@ import {
   writeEvidenceFile,
   writeTaskReport,
 } from "@gongyuai/history";
+import { AssignmentService } from "./assignments.js";
+import { queryChatModels } from "./chat-provider.js";
 import { deliverySummary } from "./delivery.js";
 import { handleOpsRoute } from "./routes-ops.js";
 import type { JobRunner } from "./jobs.js";
@@ -84,10 +89,14 @@ export type ServerOptions = {
   jobs: JobRunner;
 };
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unknown> {
   const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buf.length;
+    if (size > maxBytes) throw new Error("任务材料超出大小限制");
+    chunks.push(buf);
   }
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw) return {};
@@ -164,6 +173,7 @@ function tryStatic(pathname: string, res: ServerResponse): boolean {
 
 export function startControlServer(opts: ServerOptions) {
   const { store, runner, settings, updater, version, platform, jobs } = opts;
+  const assignments = new AssignmentService(store, settings);
 
   const server = createServer(async (req, res) => {
     try {
@@ -181,6 +191,38 @@ export function startControlServer(opts: ServerOptions) {
 
       if (method === "GET" && url.pathname === "/health") {
         return send(res, 200, { ok: true, version });
+      }
+
+      if (url.pathname === "/settings/approval") {
+        if (method === "GET") return send(res, 200, settings.get().chatApproval);
+        if (method === "PUT") return send(res, 200, settings.saveChatApproval(ChatApprovalSchema.parse(await readJson(req))));
+      }
+      if (method === "GET" && url.pathname === "/chat/models") {
+        return send(res, 200, settings.chatCatalog());
+      }
+      if (method === "PUT" && url.pathname === "/settings/chat-models") {
+        const body = await readJson(req) as { profile?: unknown; makeDefault?: boolean };
+        const profile = ChatProfileSchema.parse(body?.profile);
+        return send(res, 200, settings.saveChatProfile(profile, body.makeDefault === true));
+      }
+      if (method === "POST" && url.pathname === "/settings/chat-models/query") {
+        if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
+          return send(res, 415, { error: "请使用 JSON 请求。" });
+        }
+        const connection = ChatConnectionSchema.parse(await readJson(req));
+        connection.apiKey = settings.chatKey(connection);
+        return send(res, 200, { models: await queryChatModels(connection) });
+      }
+      if (method === "POST" && url.pathname === "/tasks/submit") {
+        if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
+          return send(res, 415, { error: "请使用 JSON 提交任务。" });
+        }
+        return send(res, 202, await assignments.accept(await readJson(req, 8 * 1024 * 1024)));
+      }
+      const submission = url.pathname.match(/^\/tasks\/submissions\/([a-f\d]{32})$/);
+      if (method === "GET" && submission) {
+        const task = store.findSubmission(submission[1]!);
+        return task ? send(res, 200, assignments.view(task)) : send(res, 404, { error: "服务器尚无该提交记录" });
       }
 
       if (method === "GET" && url.pathname === "/settings") {
@@ -377,6 +419,16 @@ export function startControlServer(opts: ServerOptions) {
         const rest = taskMatch[2] ?? "";
         const task = store.get(taskId);
         if (!task) return send(res, 404, { error: "not found" });
+        if (task.assignment) {
+          if (method === "GET" && rest === "/assignment") return send(res, 200, assignments.view(task));
+          if (method === "POST" && (rest === "/pause" || rest === "/stop")) {
+            if (!isActiveTaskStatus(task.status)) return send(res, 409, { error: "任务当前未在执行" });
+            return send(res, 200, { task: assignments.interrupt(task, rest === "/pause" ? "paused" : "stopped", "操作员已中断任务") });
+          }
+          if (method === "POST" && (rest === "/start" || rest === "/resume")) {
+            return send(res, 200, { task: assignments.start(task) });
+          }
+        }
         // Post-terminal changes (retest / client decision / retraction /
         // correction) keep History authoritative; the report is re-rendered
         // from it, preserving the previous delivered version on disk.
@@ -1236,6 +1288,7 @@ export function startControlServer(opts: ServerOptions) {
         url: `http://${opts.host}:${port}`,
         close: () =>
           new Promise((r, j) => {
+            assignments.close();
             server.close((e) => (e ? j(e) : r()));
           }),
       });

@@ -9,6 +9,14 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./chat-input": {
+      "types": "./dist/chat-input.d.ts",
+      "import": "./dist/chat-input.js"
+    },
+    "./chat-model-options": {
+      "types": "./dist/chat-model-options.d.ts",
+      "import": "./dist/chat-model-options.js"
+    },
     "./coverage": {
       "types": "./dist/coverage.d.ts",
       "import": "./dist/coverage.js"

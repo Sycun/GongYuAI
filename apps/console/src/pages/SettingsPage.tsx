@@ -1,3 +1,6 @@
+import { ChatApprovalSettings } from "../components/ChatApprovalSettings";
+import type { ChatCatalog } from "@gongyuai/contracts";
+import { ChatModelSettings } from "../components/ChatModelSettings";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Banner,
@@ -14,7 +17,7 @@ import {
   Typography,
 } from "@douyinfe/semi-ui";
 import type { FormApi } from "@douyinfe/semi-ui/lib/es/form/interface";
-import { IconRefresh, IconSave, IconLink, IconDelete, IconPlus } from "@douyinfe/semi-icons";
+import { IconDownloadStroked, IconBox, IconRefresh, IconSave, IconDelete, IconPlus } from "@douyinfe/semi-icons";
 import {
   api,
   type AssetCollectorPublic,
@@ -34,11 +37,10 @@ function formatNum(n: number): string {
   return n.toLocaleString("zh-CN");
 }
 
-export function SettingsPage({ section }: { section: SettingsSection }) {
+export function SettingsPage({ section, catalog, onCatalog, profileId }: { profileId?: string | null; section: SettingsSection; catalog: ChatCatalog | null; onCatalog: (value: ChatCatalog) => void }) {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateJobStatus | null>(null);
   const updateFormApi = useRef<FormApi | null>(null);
@@ -119,26 +121,6 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
     return <Typography.Text type="tertiary">加载设置…</Typography.Text>;
   }
 
-  const saveModel = async (values: Record<string, unknown>) => {
-    setSaving(true);
-    try {
-      const r = await api.saveModel({
-        provider: String(values.provider ?? "openai"),
-        modelId: String(values.modelId ?? ""),
-        baseUrl: String(values.baseUrl ?? ""),
-        apiKey: String(values.apiKey ?? ""),
-        visionEnabled: Boolean(values.visionEnabled),
-        visionModelId: String(values.visionModelId ?? ""),
-      });
-      setSettings(r.json);
-      Toast.success("模型配置已保存");
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const saveUpdateCfg = async (
     values: Record<string, unknown>,
     opts?: { quiet?: boolean },
@@ -154,22 +136,6 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
     } catch (e) {
       Toast.error(e instanceof Error ? e.message : String(e));
       throw e;
-    }
-  };
-
-  const testModel = async () => {
-    setTesting(true);
-    try {
-      const r = await api.testModel();
-      if (r.json.ok) {
-        Toast.success(`连通正常 · ${r.json.modelId} · 视觉${r.json.visionEnabled ? "开" : "关"}`);
-      } else {
-        Toast.error(r.json.error || `失败 ${r.json.status}`);
-      }
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setTesting(false);
     }
   };
 
@@ -211,74 +177,14 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
   const phase = updateStatus?.phase;
   const cardStyle = { background: "var(--semi-color-bg-1)", maxWidth: 720 } as const;
 
+  if (section === "approval") return <ChatApprovalSettings catalog={catalog} />;
+
   if (section === "model") {
     return (
-      <Card title="模型配置" style={cardStyle}>
-        <Banner
-          type="info"
-          closeIcon={null}
-          description="OpenAI 兼容 API（含中转）。开启视觉后，Pi / 后续截图类工具可走 image 输入；Key 仅存本机 settings.json。"
-          style={{ marginBottom: 16 }}
-        />
-        <Form
-          labelPosition="left"
-          labelWidth={110}
-          initValues={{
-            provider: settings.model.provider,
-            modelId: settings.model.modelId,
-            baseUrl: settings.model.baseUrl,
-            apiKey: settings.model.apiKeyConfigured ? settings.model.apiKeyMask : "",
-            visionEnabled: settings.model.visionEnabled,
-            visionModelId: settings.model.visionModelId,
-          }}
-          onSubmit={(v) => void saveModel(v)}
-        >
-          <Form.Input
-            field="provider"
-            label="Provider"
-            placeholder="openai"
-            rules={[{ required: true, message: "必填" }]}
-          />
-          <Form.Input
-            field="baseUrl"
-            label="Base URL"
-            placeholder="https://api.x5m5x.com/v1"
-            rules={[{ required: true, message: "必填" }]}
-            extraText="须带 /v1"
-          />
-          <Form.Input
-            field="modelId"
-            label="主模型"
-            placeholder="gpt-4.1-mini"
-            rules={[{ required: true, message: "必填" }]}
-          />
-          <Form.Input
-            field="apiKey"
-            label="API Key"
-            mode="password"
-            placeholder={settings.model.apiKeyConfigured ? "已配置（留空或掩码则不改）" : "sk-…"}
-          />
-          <Form.Switch
-            field="visionEnabled"
-            label="视觉能力"
-            extraText="启用后支持 Pi image 输入；API 需为视觉模型"
-          />
-          <Form.Input
-            field="visionModelId"
-            label="视觉模型"
-            placeholder="可选，留空则同主模型"
-            extraText="例如 gpt-4o / gpt-6-astra 等支持 image 的模型 id"
-          />
-          <Space style={{ marginTop: 8 }}>
-            <Button htmlType="submit" theme="solid" icon={<IconSave />} loading={saving}>
-              保存
-            </Button>
-            <Button icon={<IconLink />} loading={testing} onClick={() => void testModel()}>
-              测试连通
-            </Button>
-          </Space>
-        </Form>
-      </Card>
+      <div className="gy-settings-stack">
+        {catalog ? <ChatModelSettings key={profileId} catalog={catalog} initialId={profileId} onSaved={onCatalog} /> :
+          <Button onClick={() => void api.chatModels().then(r => onCatalog(r.json)).catch(() => Toast.error("无法读取模型配置"))}>重新读取对话模型</Button>}
+      </div>
     );
   }
 
@@ -413,7 +319,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
               />
               <Form.Input
                 field="baseUrl"
-                label="Base URL"
+                label="服务地址"
                 placeholder={c.baseUrl}
                 extraText={
                   c.kind === "fofa"
@@ -497,7 +403,7 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
             />
             <Form.Input
               field="baseUrl"
-              label="Base URL"
+              label="服务地址"
               placeholder="https://recon.example.com/api/search"
               rules={[{ required: true, message: "必填" }]}
             />
@@ -852,90 +758,39 @@ export function SettingsPage({ section }: { section: SettingsSection }) {
 
   if (section === "update") {
     const showProgress = updating || phase === "failed" || phase === "done" || phase === "restarting";
-    return (
-      <Card title="一键更新" style={cardStyle}>
-        <Typography.Paragraph type="tertiary" style={{ marginTop: 0 }}>
-          填 GitHub 仓库地址即可。Mac 推送后点此同步：优先 git 硬同步，保留 .gongyuai /
-          模型配置，构建后自动重启。公开库无需凭据；私有库走本机 git / gh auth。
-        </Typography.Paragraph>
-        <Form
-          labelPosition="left"
-          labelWidth={90}
-          getFormApi={(api) => {
-            updateFormApi.current = api;
-          }}
-          initValues={{
-            githubUrl: settings.update.githubUrl,
-            branch: settings.update.branch,
-          }}
-          onSubmit={(v) => void saveUpdateCfg(v)}
-        >
-          <Form.Input
-            field="githubUrl"
-            label="仓库"
-            placeholder="https://github.com/Sycun/GongYuAI"
-          />
-          <Form.Input field="branch" label="分支" placeholder="main" />
-          <Space>
-            <Button htmlType="submit" type="tertiary">
-              保存更新源
-            </Button>
-            <Button theme="solid" loading={updating} onClick={() => void runSilentUpdate()}>
-              {updating ? "更新中…" : "一键更新"}
-            </Button>
-          </Space>
-        </Form>
-        {showProgress && (
-          <div style={{ marginTop: 16 }}>
-            <Progress
-              percent={
-                phase === "done"
-                  ? 100
-                  : phase === "failed"
-                    ? 100
-                    : phase === "restarting"
-                      ? 90
-                      : phase === "building"
-                        ? 70
-                        : phase === "overlay"
-                          ? 50
-                          : phase === "extracting"
-                            ? 30
-                            : 15
-              }
-              showInfo
-              aria-label="update"
-            />
-            <Typography.Text type="tertiary" size="small">
-              {updateStatus?.message || "…"}
-              {updateStatus?.commit ? ` · ${updateStatus.commit}` : ""}
-            </Typography.Text>
-            {phase === "failed" && updateStatus?.error ? (
-              <Typography.Paragraph
-                type="danger"
-                style={{
-                  marginTop: 8,
-                  whiteSpace: "pre-wrap",
-                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 12,
-                  maxHeight: 240,
-                  overflow: "auto",
-                }}
-              >
-                {updateStatus.error}
-              </Typography.Paragraph>
-            ) : null}
+    const progress: Record<string, number> = { done: 100, failed: 100, restarting: 90, building: 70, overlay: 50, extracting: 30 };
+    return <div className="gy-settings-stack gy-update-page">
+      <section className="gy-config-card gy-release">
+        <div className="gy-release-line">
+          <div className="gy-release-icon"><IconBox size="extra-large" aria-hidden="true" /></div>
+          <div className="gy-release-version"><span>当前版本</span><h2>GongYuAI <strong>v{settings.version}</strong></h2></div>
+          <Button theme="solid" icon={<IconDownloadStroked />} loading={updating}
+            onClick={() => void runSilentUpdate()}>{updating ? "正在更新" : "一键更新"}</Button>
+        </div>
+        <p className="gy-release-note">从指定分支获取更新，完成后自动重启服务。</p>
+        {(settings.update.lastUpdatedAt || settings.update.lastCommit) && <div className="gy-release-meta">
+          {settings.update.lastUpdatedAt && <span>上次更新　{formatDateTime(settings.update.lastUpdatedAt, true)}</span>}
+          {settings.update.lastCommit && <span>提交　<code>{settings.update.lastCommit.slice(0, 12)}</code></span>}
+        </div>}
+        {showProgress && <div className="gy-release-status" role="status">
+          <Progress percent={progress[phase ?? ""] ?? 15} showInfo aria-label="更新进度" />
+          <span>{updateStatus?.message || "准备更新…"} {updateStatus?.commit?.slice(0, 12)}</span>
+          {phase === "failed" && updateStatus?.error && <pre>{updateStatus.error}</pre>}
+        </div>}
+      </section>
+      <section className="gy-config-card gy-source">
+        <h2>更新来源</h2>
+        <Form labelPosition="top" getFormApi={form => { updateFormApi.current = form; }}
+          initValues={{ githubUrl: settings.update.githubUrl, branch: settings.update.branch }}
+          onSubmit={v => { void saveUpdateCfg(v).catch(() => {}); }}>
+          <div className="gy-update-fields">
+            <Form.Input field="githubUrl" label="仓库地址" placeholder="https://github.com/Sycun/GongYuAI" />
+            <Form.Input field="branch" label="分支" placeholder="main" />
           </div>
-        )}
-        <Typography.Text type="quaternary" size="small" style={{ display: "block", marginTop: 12 }}>
-          当前版本 {settings.version}
-          {settings.update.lastUpdatedAt
-            ? ` · 上次更新 ${formatDateTime(settings.update.lastUpdatedAt, true)}`
-            : ""}
-          {settings.update.lastCommit ? ` · ${settings.update.lastCommit}` : ""}
-        </Typography.Text>
-      </Card>
-    );
+          <Button htmlType="submit" type="tertiary" disabled={updating}>保存更新源</Button>
+        </Form>
+      </section>
+    </div>;
   }
 
   return (

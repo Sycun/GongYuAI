@@ -50,6 +50,7 @@ import { GoalCoverage } from "../components/GoalCoverage";
 import { DeliveryScorecard } from "../components/DeliveryScorecard";
 import { ReconcilePanel } from "../components/ReconcilePanel";
 import { GoalReconcileCard, type AdoptedReconcile } from "../components/GoalReconcileCard";
+import { TaskOps } from "../components/TaskOps";
 import { ExecutionTrace } from "../components/ExecutionTrace";
 import { IntegrationUsage } from "../components/IntegrationUsage";
 import { formatDateTime } from "../time";
@@ -61,9 +62,11 @@ type Props = {
   tab: DetailTab;
   onTabChange: (tab: DetailTab) => void;
   onRefresh: () => Promise<void>;
+  focus?: Record<string, string>;
+  refreshNonce?: number;
 };
 
-export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
+export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refreshNonce = 0 }: Props) {
   const [history, setHistory] = useState<HistoryPayload | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [runtime, setRuntime] = useState<RuntimePayload | null>(null);
@@ -137,7 +140,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [task?.id, task?.status, tab, historyTick]);
+  }, [task?.id, task?.status, tab, historyTick, refreshNonce]);
 
   // 运行中自动刷新运行态 / 步骤，保持与任务状态一致
   useEffect(() => {
@@ -488,6 +491,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh }: Props) {
       />
 
       <div style={{ marginTop: 16 }}>
+        {tab === "live" && task && <TaskOps taskId={task.id} focus={focus} />}
         {tab === "live" && (
           <Row gutter={16}>
             <Col span={12}>

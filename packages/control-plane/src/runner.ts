@@ -143,6 +143,7 @@ export class WorkerRunner {
   async start(taskId: string): Promise<TaskRecord> {
     const task = this.store.get(taskId);
     if (!task) throw new Error(`task not found: ${taskId}`);
+    if (task.assignment) throw new Error("此任务由工作区任务处理器执行");
 
     if (this.isAlive(task)) {
       throw new Error("任务已在运行中");

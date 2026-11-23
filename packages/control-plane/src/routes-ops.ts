@@ -61,6 +61,7 @@ import {
   causalityTrace,
 } from "./graphs.js";
 import { simulateRoleWork } from "./roles.js";
+import { MEMORY_READ_UNAVAILABLE, beginMemoryReview, memoryReadAllowed, memoryReviewEngagementMatches, verifiedIdentityFromRequest } from "./memory-access.js";
 import { taskPaths } from "./paths.js";
 
 export type OpsRouteDeps = {
@@ -641,21 +642,9 @@ export async function handleOpsRoute(
             jobs: history.ops.listJobs(taskId),
           });
         } else if (view === "memory") {
-          const injections = platform.listInjections({ taskId });
-          const referenced = new Set(injections.map((injection) => injection.memoryId));
-          // 记忆图展示 draft/confirmed/retracted 全部状态（带徽章），但只限本委托可见的来源。
-          const nodes = platform
-            .listNodes({})
-            .filter((node) => memoryVisible(node, { tenantId: task.tenantId, engagementId: task.engagementId, mode: "engagement" }, store))
-            .filter((node) => referenced.has(node.id) || node.provenance.some((pointer) => pointer.taskId === taskId));
-          graph = buildMemoryGraph({
-            taskId,
-            engagementId: task.engagementId,
-            generatedAt: now,
-            nodes,
-            injections,
-            available: true,
-          });
+          // 没有可核验身份时不组装图，避免把节点标题放进响应。
+          memoryReadAllowed(verifiedIdentityFromRequest());
+          return send(res, 403, MEMORY_READ_UNAVAILABLE), true;
         } else {
           return send(res, 404, { error: `unknown-graph-view:${view}` }), true;
         }
@@ -817,9 +806,8 @@ export async function handleOpsRoute(
     }
 
     if (group === "memory") {
-      if (method === "GET" && rest === "") {
-        const injections = platform.listInjections({ taskId });
-        return send(res, 200, { injections }), true;
+      if (!memoryReadAllowed(verifiedIdentityFromRequest())) {
+        return send(res, 403, MEMORY_READ_UNAVAILABLE), true;
       }
       if (method === "POST" && rest === "/inject") {
         const body = (await readJson(req)) as { asset?: string; familyKey?: string; cwes?: string[]; techniques?: string[] };
@@ -875,11 +863,6 @@ export async function handleOpsRoute(
       const history = open(task, true);
       try {
         const hints = history.listHints(taskId, 20);
-        const injections = platform.listInjections({ taskId });
-        const nodes = platform
-          .listNodes({ status: "confirmed" })
-          .filter((node) => memoryVisible(node, { tenantId: task.tenantId, engagementId: task.engagementId, mode: "engagement" }, store))
-          .filter((node) => injections.some((injection) => injection.memoryId === node.id));
         return send(res, 200, {
           authenticity: "simulated",
           billing: "none",
@@ -887,7 +870,8 @@ export async function handleOpsRoute(
           payload: {
             task: { id: task.id, name: task.name, scopeVersion: task.scopeVersion, targets: task.auth.targets },
             hints: hints.map((hint) => ({ id: hint.id, source: hint.source, tags: hint.tags, text: hint.text })),
-            memory: nodes.map((node) => ({ id: node.id, title: node.title, kind: node.kind })),
+            memory: [],
+            memoryAccess: MEMORY_READ_UNAVAILABLE,
             facts: history.listFacts(taskId).slice(0, 20).map((fact) => ({ id: fact.id, title: fact.title })),
           },
         }), true;
@@ -923,6 +907,11 @@ async function handlePlatformRoute(
       ? true
       : memoryVisible(node, { tenantId, engagementId, mode: engagementParam ? "engagement" : "tenant" }, store);
   try {
+    if (path.startsWith("/memory/nodes") && method === "GET") {
+      if (!memoryReadAllowed(verifiedIdentityFromRequest())) {
+        return send(res, 403, MEMORY_READ_UNAVAILABLE), true;
+      }
+    }
     if (path === "/memory/nodes" && method === "GET") {
       const status = url.searchParams.get("status") ?? undefined;
       const kind = url.searchParams.get("kind") ?? undefined;
@@ -943,6 +932,19 @@ async function handlePlatformRoute(
     if (nodeMatch) {
       const id = decodeURIComponent(nodeMatch[1]!);
       const action = nodeMatch[2] ?? "";
+      if (method === "POST" && action === "/review") {
+        // 身份、复核权限和委托都要先成立。未获准时不读取节点、不写复核、不返回正文。
+        const gate = beginMemoryReview(verifiedIdentityFromRequest(req));
+        if (!gate.proceed) return send(res, gate.status, gate.body), true;
+        const ownership = platform.memoryOwnership(id);
+        if (!ownership) return send(res, 404, { error: "memory-not-found" }), true;
+        if (!memoryReviewEngagementMatches(ownership, gate.identity)) {
+          return send(res, 403, { error: "engagement-mismatch" }), true;
+        }
+        const input = ReviewMemorySchema.parse(await readJson(req));
+        const updated = platform.reviewNode(id, input, new Date().toISOString());
+        return send(res, 200, { node: updated }), true;
+      }
       const node = platform.getNode(id);
       if (!node) return send(res, 404, { error: "memory-not-found" }), true;
       if (!visible(node)) {
@@ -954,11 +956,6 @@ async function handlePlatformRoute(
       }
       if (method === "GET" && action === "/events") {
         return send(res, 200, { events: platform.listMemoryEvents(id) }), true;
-      }
-      if (method === "POST" && action === "/review") {
-        const input = ReviewMemorySchema.parse(await readJson(req));
-        const updated = platform.reviewNode(id, input, new Date().toISOString());
-        return send(res, 200, { node: updated }), true;
       }
     }
 
