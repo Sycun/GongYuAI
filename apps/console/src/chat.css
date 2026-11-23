@@ -345,7 +345,7 @@ body {
 .gy-graph-frame .is-selected rect { stroke: #4465ed; stroke-width: 2; }
 .gy-graph-placeholder, .gy-graph-missing, .is-unknown { color: var(--gy-muted); font-size: 13px; }
 .gy-graph-placeholder { display: grid; place-items: center; text-align: center; padding: 8px; }
-.gy-plan-card { position: sticky; top: 0; z-index: 2; margin-bottom: 16px; white-space: pre-wrap; }
+.gy-plan-card { margin-bottom: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .gy-plan-card header span, .gy-notice { color: #3d4d73; font-size: 13px; }
 .gy-notice { padding: 8px 10px; background: #f7f8ff; border-radius: 8px; }
 .gy-question-link, .gy-today-row { display: grid; width: 100%; text-align: left; border: 0; background: transparent; font: inherit; cursor: pointer; padding: 6px 0; }
