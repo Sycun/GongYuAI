@@ -25,6 +25,13 @@ import {
   type ChatCatalog,
   type ChatConnection,
   type ChatProfile,
+  type KnowledgeEmbeddingPatch,
+  type KnowledgeEmbeddingService,
+  type KnowledgeEmbeddingServicePatch,
+  type KnowledgeEmbeddingServiceView,
+  type KnowledgeEmbeddingSettings,
+  type KnowledgeEmbeddingTestInput,
+  type KnowledgeEmbeddingView,
   mergeAssetCollectors,
   mergeMcpServers,
   mergeSkillPacks,
@@ -46,6 +53,7 @@ import {
   type WorkerSkillPack,
 } from "@gongyuai/contracts";
 import { discoverMcpCatalog, discoverSkillCatalog } from "./catalog-discover.js";
+import { embeddingSourceOf } from "./knowledge-embed.js";
 
 const MASK = "••••••••";
 
@@ -78,6 +86,7 @@ export type PublicSettings = {
       apiKeyMask: string;
     }
   >;
+  knowledgeEmbedding: KnowledgeEmbeddingView;
   version: string;
 };
 
@@ -90,6 +99,50 @@ function maskSecret(value: string): string {
 function isMaskedOrEmpty(value: string | undefined): boolean {
   if (value == null || value === "") return true;
   return value.includes("••••") || value === MASK;
+}
+
+function embeddingServiceView(service: KnowledgeEmbeddingService): KnowledgeEmbeddingServiceView {
+  return {
+    baseUrl: service.baseUrl,
+    model: service.model,
+    apiKeyEnv: service.apiKeyEnv,
+    batchSize: service.batchSize,
+    timeoutMs: service.timeoutMs,
+    apiKeyConfigured: Boolean(service.apiKey),
+    apiKeyMask: maskSecret(service.apiKey),
+  };
+}
+
+function knowledgeEmbeddingView(settings: KnowledgeEmbeddingSettings): KnowledgeEmbeddingView {
+  return {
+    enabled: settings.enabled,
+    provider: settings.provider,
+    cloudEngagements: settings.cloudEngagements,
+    local: embeddingServiceView(settings.local),
+    cloud: embeddingServiceView(settings.cloud),
+  };
+}
+
+/**
+ * 合并一套服务配置：掩码或留空的密钥沿用已存密钥，其余字段按草稿覆盖。
+ * 地址换到**不同来源**（origin 不同）时视作换了服务商：留空/掩码的密钥不再沿用已存值，
+ * 与旧地址相同的密钥环境变量也被清空——新服务不得自动继承旧服务的凭据。
+ */
+function mergeEmbeddingService(
+  saved: KnowledgeEmbeddingService,
+  patch: KnowledgeEmbeddingServicePatch | undefined,
+): KnowledgeEmbeddingService {
+  if (!patch) return saved;
+  const next = { ...saved, ...patch };
+  const sourceSwitched = patch.baseUrl !== undefined && patch.baseUrl.trim() !== ""
+    && embeddingSourceOf(patch.baseUrl) !== embeddingSourceOf(saved.baseUrl);
+  if (sourceSwitched) {
+    if (isMaskedOrEmpty(patch.apiKey)) next.apiKey = "";
+    next.apiKeyEnv = patch.apiKeyEnv !== undefined && patch.apiKeyEnv !== saved.apiKeyEnv ? patch.apiKeyEnv : "";
+    return next;
+  }
+  if (isMaskedOrEmpty(patch.apiKey)) next.apiKey = saved.apiKey;
+  return next;
 }
 
 export class SettingsStore {
@@ -219,6 +272,7 @@ export class SettingsStore {
         apiKeyMask: maskSecret(c.apiKey),
       })),
       version,
+      knowledgeEmbedding: knowledgeEmbeddingView(this.data.knowledgeEmbedding),
     };
   }
 
@@ -310,6 +364,32 @@ export class SettingsStore {
     }
     this.write({ ...this.data, update: AppSettingsSchema.shape.update.parse(next) });
     return this.publicView(process.env.npm_package_version ?? "0.1.0");
+  }
+
+  /** 向量化配置。两套服务分别保号：掩码回传不覆盖该服务已存的密钥，也不影响另一套。 */
+  patchKnowledgeEmbedding(patch: KnowledgeEmbeddingPatch): PublicSettings {
+    const saved = this.data.knowledgeEmbedding;
+    const next = {
+      ...saved,
+      ...patch,
+      local: mergeEmbeddingService(saved.local, patch.local),
+      cloud: mergeEmbeddingService(saved.cloud, patch.cloud),
+    };
+    this.write({ ...this.data, knowledgeEmbedding: AppSettingsSchema.shape.knowledgeEmbedding.parse(next) });
+    return this.publicView(process.env.npm_package_version ?? "0.1.0");
+  }
+
+  /**
+   * 测试连接用的临时配置：草稿覆盖所选服务，不写盘、不动另一套服务。
+   * 停用时也允许测试，因此这里强制 enabled。
+   */
+  knowledgeEmbeddingForTest(input: KnowledgeEmbeddingTestInput): KnowledgeEmbeddingSettings {
+    const saved = this.data.knowledgeEmbedding;
+    return {
+      ...saved,
+      enabled: true,
+      [input.provider]: mergeEmbeddingService(saved[input.provider], input.service),
+    };
   }
 
   patchTools(patch: ToolsSettingsPatch): PublicSettings {

@@ -34,7 +34,10 @@
     "acceptance:r9:flywheel": "tsx scripts/acceptance-r9-flywheel.ts",
     "acceptance:r9": "pnpm acceptance:r9:ops && pnpm acceptance:r9:flywheel",
     "restore:selftest": "tsx scripts/restore-isolation.ts selftest",
-    "restore:isolation": "tsx scripts/restore-isolation.ts"
+    "restore:isolation": "tsx scripts/restore-isolation.ts",
+    "knowledge:acceptance": "tsx scripts/knowledge-acceptance.ts",
+    "knowledge:hybrid-acceptance": "tsx scripts/knowledge-hybrid-acceptance.ts",
+    "knowledge:provider-console": "tsx scripts/knowledge-provider-console.ts"
   },
   "dependencies": {
     "@gongyuai/contracts": "workspace:*",

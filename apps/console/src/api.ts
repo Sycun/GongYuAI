@@ -1,8 +1,21 @@
 import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
+import type {
+  KnowledgeEmbeddingPatch,
+  KnowledgeEmbeddingTestInput,
+  KnowledgeEmbeddingTestResult,
+  KnowledgeEmbeddingView,
+  KnowledgeIndexStatus,
+  KnowledgeMaterial,
+  KnowledgeReaderScope,
+  KnowledgeSearchMode,
+  KnowledgeSearchResult,
+  KnowledgeSummary,
+} from "@gongyuai/contracts";
 
 export type TaskRecord = {
   id: string;
   name: string;
+  engagementId: string;
   status: string;
   mock: boolean;
   scopeVersion?: number;
@@ -409,8 +422,20 @@ export type PublicSettings = {
   mcpServers: McpServerPublic[];
   skillPacks: SkillPackPublic[];
   assetCollectors: AssetCollectorPublic[];
+  knowledgeEmbedding: KnowledgeEmbeddingView;
   version: string;
 };
+
+export type KnowledgeScopeParam = { engagementId?: string | null; taskId?: string | null };
+
+/** 任务锚定优先：只传 taskId，由服务端解析委托，避免与声明冲突触发 409。 */
+function knowledgeQuery(scope: KnowledgeScopeParam, extra?: Record<string, string>): string {
+  const params = new URLSearchParams(extra);
+  if (scope.taskId) params.set("taskId", scope.taskId);
+  else if (scope.engagementId) params.set("engagementId", scope.engagementId);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
 
 export type UsageStats = {
   integrations?: ProjectIntegrationUsage;
@@ -702,4 +727,32 @@ export const api = {
     request<PublicSettings>(`/settings/asset-collectors/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+  saveKnowledgeEmbedding: (patch: KnowledgeEmbeddingPatch) =>
+    request<PublicSettings>("/settings/knowledge-embedding", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    }),
+  testKnowledgeEmbedding: (input: KnowledgeEmbeddingTestInput) =>
+    probe<KnowledgeEmbeddingTestResult>("/settings/knowledge-embedding/test", undefined, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  knowledgeIndex: (scope: KnowledgeScopeParam, signal?: AbortSignal) =>
+    probe<{ scope: KnowledgeReaderScope; index: KnowledgeIndexStatus }>(`/knowledge/index${knowledgeQuery(scope)}`, signal),
+  knowledgeMaterials: (scope: KnowledgeScopeParam, signal?: AbortSignal) =>
+    probe<{ scope: KnowledgeReaderScope; materials: KnowledgeMaterial[] }>(`/knowledge/materials${knowledgeQuery(scope)}`, signal),
+  knowledgeSummary: (scope: KnowledgeScopeParam, signal?: AbortSignal) =>
+    probe<KnowledgeSummary>(`/knowledge/summary${knowledgeQuery(scope)}`, signal),
+  knowledgeSearch: (scope: KnowledgeScopeParam, q: string, mode: KnowledgeSearchMode, signal?: AbortSignal) =>
+    probe<KnowledgeSearchResult>(`/knowledge/search${knowledgeQuery(scope, { q, mode })}`, signal),
+  knowledgeRebuild: (scope: KnowledgeScopeParam, body: { materialId?: string; versionId?: string } = {}) =>
+    probe<{ scope: KnowledgeReaderScope; versions: string[]; status: KnowledgeIndexStatus }>(
+      `/knowledge/index/rebuild${knowledgeQuery(scope)}`, undefined,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  knowledgeRetry: (scope: KnowledgeScopeParam, body: { materialId?: string; versionId?: string } = {}) =>
+    probe<{ scope: KnowledgeReaderScope; queued: string[]; status: KnowledgeIndexStatus }>(
+      `/knowledge/index/retry${knowledgeQuery(scope)}`, undefined,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
 };

@@ -3,6 +3,8 @@ import { ChatProfileSchema } from "./chat-models.js";
 export * from "./chat-models.js";
 export * from "./chat-input.js";
 export { selectableChatModels, chatThinkingEfforts, isDeepSeekThinkingModel } from "./chat-model-options.js";
+export * from "./knowledge.js";
+import { KnowledgeEmbeddingSettingsSchema } from "./knowledge.js";
 import { CoverageStatusSchema } from "./coverage-audit.js";
 import {
   BUSINESS_RECONCILE_KIND,
@@ -701,6 +703,7 @@ export const HistoryEventKindSchema = z.enum([
   "provider_fault_handled",
   "evaluation_recorded",
   "graph_projected",
+  "material_citation_recorded",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 
@@ -1091,6 +1094,27 @@ export const AppSettingsSchema = z.object({
   mcpServers: z.array(McpServerConfigSchema).default([]),
   skillPacks: z.array(SkillPackConfigSchema).default([]),
   assetCollectors: z.array(AssetCollectorConfigSchema).default([]),
+  knowledgeEmbedding: KnowledgeEmbeddingSettingsSchema.default({
+    enabled: true,
+    provider: "local",
+    local: {
+      baseUrl: "http://127.0.0.1:8000/v1",
+      model: "bge-m3-mlx-4bit",
+      apiKeyEnv: "OMLX_API_KEY",
+      apiKey: "",
+      batchSize: 16,
+      timeoutMs: 30_000,
+    },
+    cloud: {
+      baseUrl: "",
+      model: "",
+      apiKeyEnv: "GY_CLOUD_EMBEDDING_API_KEY",
+      apiKey: "",
+      batchSize: 16,
+      timeoutMs: 30_000,
+    },
+    cloudEngagements: [],
+  }),
 });
 export type AppSettings = z.infer<typeof AppSettingsSchema>;
 

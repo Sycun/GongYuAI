@@ -26,6 +26,8 @@ import {
   ChatProfileSchema,
   UpdateScopeRequestSchema,
   UpdateSettingsPatchSchema,
+  KnowledgeEmbeddingPatchSchema,
+  KnowledgeEmbeddingTestSchema,
 } from "@gongyuai/contracts";
 import {
   computeScorecard,
@@ -46,6 +48,9 @@ import { AssignmentService } from "./assignments.js";
 import { queryChatModels } from "./chat-provider.js";
 import { deliverySummary } from "./delivery.js";
 import { handleOpsRoute } from "./routes-ops.js";
+import { KnowledgeStore } from "./knowledge.js";
+import { resolveEmbeddingRuntime, testEmbeddingConnection } from "./knowledge-embed.js";
+import { routeKnowledge, scopeFromTask } from "./knowledge-api.js";
 import type { JobRunner } from "./jobs.js";
 import type { PlatformStore } from "./platform.js";
 import { projectIntegrationUsage } from "./integration-usage.js";
@@ -87,6 +92,7 @@ export type ServerOptions = {
   /** 第九轮：平台记忆/飞轮库与持久作业执行器。 */
   platform: PlatformStore;
   jobs: JobRunner;
+  knowledge: KnowledgeStore;
 };
 
 async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unknown> {
@@ -172,7 +178,7 @@ function tryStatic(pathname: string, res: ServerResponse): boolean {
 }
 
 export function startControlServer(opts: ServerOptions) {
-  const { store, runner, settings, updater, version, platform, jobs } = opts;
+  const { store, runner, settings, updater, version, platform, jobs, knowledge } = opts;
   const assignments = new AssignmentService(store, settings);
 
   const server = createServer(async (req, res) => {
@@ -192,6 +198,8 @@ export function startControlServer(opts: ServerOptions) {
       if (method === "GET" && url.pathname === "/health") {
         return send(res, 200, { ok: true, version });
       }
+
+      if (await routeKnowledge({ method, url, req, res, store, knowledge, send, readJson })) return;
 
       if (url.pathname === "/settings/approval") {
         if (method === "GET") return send(res, 200, settings.get().chatApproval);
@@ -239,6 +247,20 @@ export function startControlServer(opts: ServerOptions) {
       if (method === "PUT" && url.pathname === "/settings/update") {
         const patch = UpdateSettingsPatchSchema.parse(await readJson(req));
         return send(res, 200, settings.patchUpdate(patch));
+      }
+
+      if (method === "PUT" && url.pathname === "/settings/knowledge-embedding") {
+        const patch = KnowledgeEmbeddingPatchSchema.parse(await readJson(req));
+        const view = settings.patchKnowledgeEmbedding(patch);
+        knowledge.refreshEmbeddingConfig();
+        return send(res, 200, view);
+      }
+
+      // 测试连接：只用固定合成短句请求所选服务，不写索引、不触发重建。
+      if (method === "POST" && url.pathname === "/settings/knowledge-embedding/test") {
+        const input = KnowledgeEmbeddingTestSchema.parse(await readJson(req));
+        const draft = settings.knowledgeEmbeddingForTest(input);
+        return send(res, 200, await testEmbeddingConnection(resolveEmbeddingRuntime(draft, input.provider)));
       }
 
       if (method === "POST" && url.pathname === "/settings/model/test") {
@@ -437,7 +459,9 @@ export function startControlServer(opts: ServerOptions) {
           writeTaskReport(
             { taskId: task.id, dataDir: task.dataDir, auth: task.auth },
             history,
-            { status: task.status, reason: task.error ?? undefined, accounting: task },
+            { status: task.status, reason: task.error ?? undefined, accounting: task,
+              materialVersionStatus: (versionId, materialId) =>
+                knowledge.version(materialId, versionId, scopeFromTask(task))?.version.status },
           );
         };
 
@@ -880,7 +904,9 @@ export function startControlServer(opts: ServerOptions) {
             catch (err) { return send(res, 400, { error: String(err) }); }
             if (isTerminalTaskStatus(task.status)) {
               writeTaskReport({ taskId: task.id, dataDir: task.dataDir, auth: task.auth }, history,
-                { status: task.status, reason: task.error ?? undefined, accounting: task });
+                { status: task.status, reason: task.error ?? undefined, accounting: task,
+              materialVersionStatus: (versionId, materialId) =>
+                knowledge.version(materialId, versionId, scopeFromTask(task))?.version.status });
             }
             return send(res, 201, { review });
           } finally {
