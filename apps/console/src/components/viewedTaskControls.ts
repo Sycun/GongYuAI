@@ -12,6 +12,7 @@ export type TaskControlSnapshot = {
   taskId: string | null;
   taskName: string;
   status: string;
+  reason: string;
   note: string;
   busy: "" | TaskAction;
 };
@@ -22,14 +23,15 @@ export type TaskControlFace = {
   taskName: string;
   subject: string;
   statusText: string;
+  pauseReason: string;
   note: string;
   pause: ControlButton | null;
   resume: ControlButton | null;
 };
 
-type Receipt = { status: string; note: string; requestId: string };
+type Receipt = { status: string; reason: string; note: string; requestId: string };
 type Outcome =
-  | { ok: true; status: string; confirmed: boolean }
+  | { ok: true; status: string; reason: string; confirmed: boolean }
   | { ok: false; message: string };
 
 const ACTIVE = new Set(["queued", "running", "initializing"]);
@@ -48,6 +50,7 @@ export function controlFace(
     taskName: snapshot.taskName,
     subject: snapshot.taskId ? `任务 ${snapshot.taskId}` : "尚未选择",
     statusText,
+    pauseReason: snapshot.status === "paused" ? snapshot.reason : "",
     note: snapshot.note,
     pause: snapshot.taskId && ACTIVE.has(snapshot.status)
       ? { shown: true, busy: snapshot.busy === "pause", label: snapshot.busy === "pause" ? "正在请求" : "暂停" }
@@ -68,7 +71,7 @@ export class ViewedTaskControlsController {
   private readonly epochs = new Map<string, number>();
   private readonly listeners = new Set<() => void>();
 
-  constructor(private readonly fetchImpl: typeof fetch = fetch) {}
+  constructor(private readonly fetchImpl: typeof fetch = globalThis.fetch.bind(globalThis)) {}
 
   snapshot(): TaskControlSnapshot {
     const saved = this.taskId ? this.receipts.get(this.taskId) : undefined;
@@ -76,6 +79,7 @@ export class ViewedTaskControlsController {
       taskId: this.taskId,
       taskName: this.taskName,
       status: saved?.status ?? "",
+      reason: saved?.reason ?? "",
       note: saved?.note ?? "",
       busy: this.taskId ? this.busy.get(this.taskId) ?? "" : "",
     };
@@ -97,13 +101,14 @@ export class ViewedTaskControlsController {
   }
 
   /** 状态轮询只更新自己请求的任务，且不能盖过仍在飞行或更新的操作。 */
-  applyPolledStatus(requested: string, status: string, responseTaskId: string, epoch: number): void {
+  applyPolledStatus(requested: string, status: string, responseTaskId: string, epoch: number, reason = ""): void {
     if (responseTaskId !== requested) return;
     if ((this.epochs.get(requested) ?? 0) !== epoch) return;
     if (this.busy.has(requested)) return;
     const current = this.receipts.get(requested);
     this.receipts.set(requested, {
       status,
+      reason,
       note: current?.note ?? "",
       requestId: current?.requestId ?? "",
     });
@@ -121,6 +126,7 @@ export class ViewedTaskControlsController {
     const previous = this.receipts.get(requested);
     this.receipts.set(requested, {
       status: previous?.status ?? "",
+      reason: previous?.reason ?? "",
       note: `实际请求：POST ${path}`,
       requestId,
     });
@@ -131,9 +137,9 @@ export class ViewedTaskControlsController {
       const body = await res.json().catch(() => ({})) as { task?: { status?: string }; error?: string };
       if (!res.ok) throw new Error(body.error || "任务操作失败");
       const again = await this.fetchImpl(`/tasks/${encodeURIComponent(requested)}`);
-      const read = await again.json().catch(() => ({})) as { task?: { id?: string; status?: string } };
+      const read = await again.json().catch(() => ({})) as { task?: { id?: string; status?: string; error?: string | null } };
       const next = String(read?.task?.status ?? body?.task?.status ?? "");
-      outcome = { ok: true, status: next, confirmed: read?.task?.id === requested };
+      outcome = { ok: true, status: next, reason: read?.task?.error ?? "", confirmed: again.ok && read?.task?.id === requested };
     } catch (error) {
       outcome = { ok: false, message: error instanceof Error ? error.message : "任务操作失败" };
     } finally {
@@ -141,11 +147,13 @@ export class ViewedTaskControlsController {
         this.receipts.set(requested, outcome.ok
           ? {
             status: outcome.confirmed ? outcome.status : (previous?.status ?? ""),
+            reason: outcome.confirmed ? outcome.reason : (previous?.reason ?? ""),
             note: `实际请求：POST ${path}。回读 ${requested} 的状态：${outcome.status || "未记录"}`,
             requestId,
           }
           : {
             status: previous?.status ?? "",
+            reason: previous?.reason ?? "",
             note: `实际请求：POST ${path}。${outcome.message}`,
             requestId,
           });

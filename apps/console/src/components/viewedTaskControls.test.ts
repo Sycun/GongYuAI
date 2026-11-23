@@ -37,6 +37,28 @@ async function until(ready: () => boolean): Promise<void> {
   assert.equal(ready(), true);
 }
 
+test("the default transport uses the browser fetch receiver for the action and status read", async (t) => {
+  const calls: string[] = [];
+  t.mock.method(globalThis, "fetch", function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+    if (this !== globalThis) throw new TypeError("Illegal invocation");
+    calls.push(`${init?.method ?? "GET"} ${input}`);
+    return Promise.resolve(jsonResponse({ task: { id: taskA, status: "paused", error: "操作员已暂停" } }));
+  });
+  const controller = new ViewedTaskControlsController();
+  controller.show(taskA, nameA);
+  await controller.act("pause");
+  assert.deepEqual(calls, [`POST /tasks/${taskA}/pause`, `GET /tasks/${taskA}`]);
+  assert.equal(faceOf(controller).statusText, "已暂停");
+  assert.equal(faceOf(controller).pauseReason, "操作员已暂停");
+  controller.show(taskB, nameB);
+  assert.equal(faceOf(controller).pauseReason, "");
+  controller.show(taskA, nameA);
+  controller.applyPolledStatus(taskA, "paused", taskA, controller.pollEpoch(taskA), "缺少待核对的材料");
+  assert.equal(faceOf(controller).pauseReason, "缺少待核对的材料");
+  controller.applyPolledStatus(taskA, "running", taskA, controller.pollEpoch(taskA));
+  assert.equal(faceOf(controller).pauseReason, "");
+});
+
 test("a delayed success for A is kept on A and does not change B", async () => {
   const read = gate();
   let switched = false;
@@ -69,6 +91,7 @@ test("a delayed success for A is kept on A and does not change B", async () => {
     taskName: nameB,
     subject: `任务 ${taskB}`,
     statusText: "运行完成",
+    pauseReason: "",
     note: "",
     pause: null,
     resume: null,
@@ -115,6 +138,7 @@ test("a delayed failure for A is kept on A and does not change B", async () => {
     taskName: nameB,
     subject: `任务 ${taskB}`,
     statusText: "运行完成",
+    pauseReason: "",
     note: "",
     pause: null,
     resume: null,

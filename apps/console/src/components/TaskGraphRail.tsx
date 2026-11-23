@@ -58,7 +58,7 @@ function useViewedTaskControls(taskId: string | null, taskName: string) {
         const res = await fetch(`/tasks/${encodeURIComponent(requested)}`, { signal: ac.signal });
         const body = await res.json().catch(() => ({}));
         if (ac.signal.aborted) return;
-        api.applyPolledStatus(requested, String(body?.task?.status ?? ""), String(body?.task?.id ?? ""), epoch);
+        api.applyPolledStatus(requested, String(body?.task?.status ?? ""), String(body?.task?.id ?? ""), epoch, body?.task?.error ?? "");
       } catch { /* 下一次刷新再读。 */ }
     };
     void pull();
@@ -77,6 +77,7 @@ function ViewedTaskControls({ face, onAct }: { face: TaskControlFace; onAct: (ac
       <span>当前任务操作</span>
       <strong>操作对象：{face.subject}</strong>
       <span role="status">任务状态：{face.statusText}</span>
+      {face.pauseReason && <p role="status">暂停原因：{face.pauseReason}</p>}
       {face.note && <p role="status">{face.note}</p>}
       {face.pause && <Button size="small" loading={face.pause.busy} onClick={() => void onAct("pause")}>{face.pause.label}</Button>}
       {face.resume && <Button size="small" loading={face.resume.busy} onClick={() => void onAct("resume")}>{face.resume.label}</Button>}
