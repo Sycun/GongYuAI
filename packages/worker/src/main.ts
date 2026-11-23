@@ -4,6 +4,8 @@ import { WorkerManifestSchema } from "@gongyuai/contracts";
 import { runBareLoop } from "./bare-loop.js";
 import { runMockLoop } from "./mock-loop.js";
 import { runPiLoop } from "./pi-loop.js";
+import { closeExecRuntime } from "./exec-runtime.js";
+import { closeOastListeners } from "./oast-tools.js";
 
 function parseArgs(argv: string[]): { manifest: string } {
   const idx = argv.indexOf("--manifest");
@@ -38,12 +40,19 @@ async function main(): Promise<void> {
   console.log(
     `[gy-worker] task=${manifest.taskId} slot=${manifest.workerSlot}/${manifest.workerCount} mock=${manifest.mock} harness=${harness}`,
   );
-  if (harness === "bare") {
-    await runBareLoop(manifest);
-  } else if (manifest.mock) {
-    await runMockLoop(manifest);
-  } else {
-    await runPiLoop(manifest);
+  try {
+    if (harness === "bare") {
+      await runBareLoop(manifest);
+    } else if (manifest.mock) {
+      await runMockLoop(manifest);
+    } else {
+      await runPiLoop(manifest);
+    }
+  } finally {
+    // P14-B4: PTY sessions detach and survive restarts; only listeners are closed.
+    // 后台作业按设计继续跑，等下一次 poll 收口。
+    closeExecRuntime({ keepSessions: true });
+    await closeOastListeners();
   }
   console.log(
     `[gy-worker] finished task=${manifest.taskId} slot=${manifest.workerSlot}`,

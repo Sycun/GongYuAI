@@ -130,6 +130,7 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   evidence: { title: "证据", subtitle: "证据文件" },
   report: { title: "报告", subtitle: "任务报告" },
   logs: { title: "日志", subtitle: "执行节点日志" },
+  p14: { title: "P14 能力", subtitle: "事务证据 · 计划 · 凭据 · 复测 · 带外回调" },
   settings: { title: "设置", subtitle: "模型 · 资产 · MCP · Skill · Token · 更新" },
   "settings-model": { title: "模型配置", subtitle: "OpenAI 兼容 API · 视觉能力" },
   "settings-approval": { title: "命令审批", subtitle: "审批模型与风险范围" },
@@ -162,6 +163,7 @@ export const DETAIL_TABS = [
   { key: "evidence", label: "证据" },
   { key: "report", label: "报告" },
   { key: "logs", label: "日志" },
+  { key: "p14", label: "P14" },
 ] as const;
 
 export const FINDING_STATUS_LABEL: Record<string, string> = {

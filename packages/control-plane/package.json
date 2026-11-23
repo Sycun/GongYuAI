@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@gongyuai/contracts": "workspace:*",
+    "@gongyuai/exec": "workspace:*",
     "@gongyuai/history": "workspace:*"
   },
   "devDependencies": {

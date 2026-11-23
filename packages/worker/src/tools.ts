@@ -1,4 +1,6 @@
 import { checkCommandRun, commandProposal, recordHardDenial, reportCommandOutcome, reviewBeforeDispatch } from "./command-guard.js";
+import { authorizeCommand, extractHosts as execExtractHosts } from "@gongyuai/exec";
+import { execRuntimeFor } from "./exec-runtime.js";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -66,13 +68,6 @@ export type ToolContext = {
   usage: { toolCalls: number; installs: number };
 };
 
-/** Host-network / proxy mutations — always denied (lab VPN must be pre-connected). */
-const HOST_NETWORK_DENY =
-  /\b(route\s+(add|delete|change|flush)|ip\s+route\s+(add|del|change|replace)|networksetup\b|scutil\s+--nc|pfctl\b|iptables\b|ip6tables\b|nft\s+|sysctl\s+.*\bnet\.|launchctl\s+(load|unload).*vpn|osascript[^\n]*Viscosity|viscosity\s+(connect|disconnect)|set\s+system\s+proxy|networksetup\s+-set(web|secureweb|socks)proxy|mitmproxy\s+--mode\s+local|proxychains|tsocks\b)/i;
-
-const DESTRUCTIVE_DENY =
-  /\b(rm\s+-rf\s+\/|mkfs\.|dd\s+if=.*of=\/dev\/|diskutil\s+erase|shutdown\b|reboot\b|halt\b)\b/i;
-
 /** Formal scope match (CIDR / wildcard / suffix / *) — see @gongyuai/contracts scope. */
 export function hostInTargets(
   targets: string[],
@@ -83,46 +78,22 @@ export function hostInTargets(
 }
 
 export function extractHosts(command: string): string[] {
-  const hosts = new Set<string>();
-  const patterns = [
-    /https?:\/\/([^/\s:]+)/gi,
-    /\b(?:curl|wget|nc|ncat|nmap|ffuf|httpx)\b[^\n]*?\s(?:-H\s+\S+\s+)*['"]?(?:https?:\/\/)?(\d{1,3}(?:\.\d{1,3}){3})(?:[:/\s'"]|$)/gi,
-    /\b(?:curl|wget)\s+[^\n]*?\s(\d{1,3}(?:\.\d{1,3}){3})(?:[:/\s]|$)/gi,
-  ];
-  for (const re of patterns) {
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(command))) {
-      const host = m[1]?.toLowerCase();
-      if (host && host !== "localhost" && host !== "127.0.0.1") hosts.add(host);
-    }
-  }
-  return [...hosts];
+  return execExtractHosts(command).filter((h) => h !== "localhost" && h !== "127.0.0.1");
 }
 
 export function assertCommandAllowed(manifest: WorkerManifest, command: string): void {
   assertCapabilityAllows(manifest, "shell");
-  if (HOST_NETWORK_DENY.test(command)) {
+  const verdict = authorizeCommand(manifest.auth, command);
+  if (verdict.allowed) return;
+  if (verdict.klass === "host-network") {
     throw new Error(
       "denied: host network/VPN/proxy mutation is forbidden; connect lab VPN before the task",
     );
   }
-  if (DESTRUCTIVE_DENY.test(command)) {
-    throw new Error("denied: destructive host command");
-  }
-
-  const targets = manifest.auth.targets;
-  if (!targets.length) {
-    throw new Error("auth.targets is empty");
-  }
-
-  const hosts = extractHosts(command);
-  const outOfScope = manifest.auth.outOfScope ?? [];
-  for (const host of hosts) {
-    if (!hostInTargets(targets, host, outOfScope)) {
-      throw new Error(`target host ${host} not in auth.targets`);
-    }
-  }
+  if (verdict.klass === "destructive") throw new Error("denied: destructive host command");
+  const oos = verdict.outOfScopeHits[0];
+  if (oos) throw new Error(`target host ${oos} not in auth.targets`);
+  throw new Error(`denied: ${verdict.reason}`);
 }
 
 /**
@@ -171,33 +142,58 @@ export async function runShell(
   exitCode: number;
   stdout: string;
   stderr: string;
+  timedOut?: boolean;
+  durationMs?: number;
 }> {
-  gateTool(ctx, "shell", () => {
+  const verdict = gateTool(ctx, "shell", () => {
     assertCommandAllowed(ctx.manifest, command);
     chargeToolCall(ctx);
+    return authorizeCommand(ctx.manifest.auth, command);
   });
   checkCommandRun(ctx.manifest);
-  const literal = /^(printf|echo) ([a-zA-Z0-9_.]+)$/.exec(command);
-  if (literal) return { exitCode: 0, stdout: literal[2]! + (literal[1] === "echo" ? "\n" : ""), stderr: "" };
-  if (command === "pwd") return { exitCode: 0, stdout: ctx.manifest.workspaceDir + "\n", stderr: "" };
-  const action = commandProposal("shell", command, [], true);
-  const ticketId = await reviewBeforeDispatch(ctx.manifest, action);
-  checkCommandRun(ctx.manifest);
-  if (!action.localProbe) throw new Error("命令需要人工处理");
-  const [name, flag] = action.localProbe.split(" ");
-  const result = spawnSync(name === "date" ? "/bin/date" : "/usr/bin/uname", [flag!], {
-    cwd: ctx.manifest.workspaceDir, encoding: "utf8", timeout: timeoutMs,
-    env: { PATH: "/usr/bin:/bin", LC_ALL: "C" },
-  });
-  if (ticketId) {
-    reportCommandOutcome(ctx.manifest, ticketId, (result.status ?? 1) === 0,
-      (result.stdout ?? result.stderr ?? "").trim());
-  }
-  return {
-    exitCode: result.status ?? 1,
-    stdout: (result.stdout ?? "").slice(0, 32_000),
-    stderr: (result.stderr ?? "").slice(0, 8_000),
+  const proposal = {
+    ...commandProposal("shell", command, [], true),
+    summary: verdict.hosts.length ? verdict.hosts.join(",").slice(0, 80) : "本地命令",
+    command,
+    hosts: verdict.hosts,
+    need: verdict.need,
   };
+  const ticketId = ctx.manifest.commandFence ? await reviewBeforeDispatch(ctx.manifest, proposal) : null;
+  checkCommandRun(ctx.manifest);
+  const runtime = execRuntimeFor(ctx.manifest);
+  try {
+    const result = await runtime.run(command, {
+      cwd: ctx.manifest.workspaceDir,
+      timeoutMs,
+      maxBytes: 400_000,
+    });
+    if (ticketId) {
+      reportCommandOutcome(
+        ctx.manifest,
+        ticketId,
+        (result.exitCode ?? 1) === 0 && !result.timedOut,
+        (result.stdout || result.stderr || "").slice(0, 200),
+      );
+    }
+    // 每条命令留一份可复核记录（命令、退出码、耗时、范围裁决）；输出截断另行标注。
+    const evidenceDir = join(ctx.manifest.evidenceDir, "exec");
+    mkdirSync(evidenceDir, { recursive: true });
+    const file = join(evidenceDir, `cmd-${Date.now().toString(36)}.md`);
+    writeFileSync(
+      file,
+      `# 命令执行\n\n- 命令：\`${command}\`\n- 目录：${ctx.manifest.workspaceDir}\n- 退出码：${result.exitCode}\n- 超时：${result.timedOut}\n- 耗时：${result.durationMs}ms\n- 范围：${verdict.reason}\n\n## stdout\n\n\`\`\`\n${result.stdout.slice(0, 32_000)}\n\`\`\`\n\n## stderr\n\n\`\`\`\n${result.stderr.slice(0, 8_000)}\n\`\`\`\n`,
+      { mode: 0o600 },
+    );
+    return {
+      exitCode: result.exitCode ?? (result.timedOut ? 124 : 1),
+      stdout: result.stdout,
+      stderr: result.stderr,
+      timedOut: result.timedOut,
+      durationMs: result.durationMs,
+    };
+  } finally {
+    /* 运行时按运行复用，不在这里关闭 */
+  }
 }
 
 export function writeEvidence(
@@ -231,7 +227,12 @@ export async function installTool(
       detail: err instanceof Error ? err.message : String(err),
     };
   }
-  await reviewBeforeDispatch(ctx.manifest, commandProposal("install_tool", name, [method, pkg]));
+  await reviewBeforeDispatch(ctx.manifest, {
+    ...commandProposal("install_tool", name, [method, pkg]),
+    command: `${method} install ${pkg}`,
+    hosts: [],
+    need: "scan",
+  });
   const which = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(name)}`], {
     encoding: "utf8",
   });

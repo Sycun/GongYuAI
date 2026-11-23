@@ -7,7 +7,7 @@ import { api } from "../api";
 import { prepareFile, type DraftFile } from "../chat/attachments";
 import { confirmationLabel, confirmationDescription } from "../approvalPolicy";
 
-export const decisions = { allow: "审批通过", block: "审批拦截", unavailable: "审批未完成", expired: "已过期" };
+export const decisions: Record<ApprovalReceipt["decision"], string> = { allow: "审批通过", block: "审批拦截", ask: "待确认", unavailable: "审批未完成", expired: "已过期" };
 const risks = { low: "低风险", medium: "中风险", high: "高风险", unknown: "风险未确定" };
 export function ReviewRecord({ review }: { review: ApprovalReceipt }) {
   return <details className={'gy-review-record gy-review-' + review.decision}>

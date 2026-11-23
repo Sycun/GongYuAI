@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ChatProfileSchema } from "./chat-models.js";
+import { OastConfigSchema, PivotPolicySchema } from "./scope.js";
 export * from "./chat-models.js";
 export * from "./chat-input.js";
 export { selectableChatModels, chatThinkingEfforts, isDeepSeekThinkingModel } from "./chat-model-options.js";
@@ -218,15 +219,32 @@ export const AuthScopeSchema = z.object({
   outOfScope: z.array(z.string()).default([]),
   /** Default lowest rung; raise explicitly per task. */
   capability: AuthCapabilitySchema.default("observe"),
+  /**
+   * P14-B0 — free-form pacing guidance from RoE ("production <10 req/s, avoid WAF").
+   * Injected into the worker prompt; the model self-judges. Never a hard bucket.
+   */
+  rateGuidance: z.string().trim().max(2000).optional(),
+  /** P14-B2 — out-of-band callback channel; absent = OAST unavailable. */
+  oast: OastConfigSchema.optional(),
+  /** P14-B4 — internal pivot admission; absent = off, operator-written only. */
+  pivotPolicy: PivotPolicySchema.optional(),
 });
 export type AuthScope = z.infer<typeof AuthScopeSchema>;
 
 export * from "./scope.js";
+export * from "./credentials.js";
 export * from "./fanout.js";
 export * from "./family-key.js";
 export * from "./finding.js";
+export * from "./http.js";
+export * from "./oast.js";
+export * from "./plan.js";
+export * from "./host-profile.js";
+export * from "./tool-output.js";
 /** 第九轮：委托边界 / 持久作业 / 人工求助 / 证据语义 / 四图 / 记忆 / 角色与韧性。 */
 export * from "./ops.js";
+export * from "./authorization.js";
+import { AuthorizationRecordSchema } from "./authorization.js";
 import { FindingsGateSchema } from "./finding.js";
 
 /** Graph-driven worker phases (P2). Crash recovery still uses Durable; Relay ≠ crash. */
@@ -525,6 +543,12 @@ export const TaskRecordSchema = z.object({
   engagementId: z.string().default(""),
   status: TaskStatusSchema,
   auth: AuthScopeSchema,
+  /** Chat thread this task belongs to; resume binds a follow-up message to it. */
+  threadId: z.string().default(""),
+  /** Task this run continues (resume / authorization follow-up), if any. */
+  parentTaskId: z.string().nullable().default(null),
+  /** Authorization ledger record in force for this task (projection; `auth` stays authoritative). */
+  authorization: AuthorizationRecordSchema.nullable().default(null),
   goals: z.array(GoalStateSchema),
   budget: BudgetSchema,
   execution: ExecutionConfigSchema.default({
@@ -719,6 +743,15 @@ export const HistoryEventKindSchema = z.enum([
   "evaluation_recorded",
   "graph_projected",
   "material_citation_recorded",
+  /** P14：凭据、事务、带外、计划、复测。 */
+  "credential_recorded",
+  "credential_reused",
+  "http_transaction_recorded",
+  "oast_token_issued",
+  "oast_hit",
+  "plan_updated",
+  "finding_retest_concluded",
+  "host_profile_recorded",
 ]);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 
@@ -956,6 +989,8 @@ export function assetCollectorEnvNames(id: string): {
 
 export const WorkerManifestSchema = z.object({
   taskId: z.string().uuid(),
+  /** Delegation id (consultations / change ledger scope). Defaults to taskId. */
+  engagementId: z.string().optional(),
   dataDir: z.string(),
   historyDb: z.string(),
   durableDb: z.string(),

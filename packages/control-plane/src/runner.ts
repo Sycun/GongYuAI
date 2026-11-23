@@ -21,7 +21,7 @@ import {
   type WorkerManifest,
 } from "@gongyuai/contracts";
 import { CommandLedger, hasCommandLedger, openHistory, writeTaskReport, type CommandTicket } from "@gongyuai/history";
-import { executorBound, outOfScopeReason, policyReceipt, userReceipt, reviewCommand } from "./command-approval.js";
+import { executorBound, outOfScopeFor, outOfScopeReason, policyReceipt, userReceipt, reviewCommand } from "./command-approval.js";
 import type { ApprovalReceipt } from "@gongyuai/contracts";
 import { durableDbForSlot, manifestPathForSlot, taskPaths } from "./paths.js";
 import { exhaustedCounter, mergeUsageFromDisk, refreshTaskUsage } from "./usage.js";
@@ -84,7 +84,9 @@ function writeManifestForSlot(
     }
   }
   const manifest: WorkerManifest = {
-    taskId: task.id, commandFence: task.fence,
+    taskId: task.id,
+    engagementId: task.engagementId,
+    commandFence: task.fence,
     commandConfirmation: settings.get().chatApproval.confirmation,
     dataDir: task.dataDir,
     historyDb: paths.historyDb,
@@ -156,6 +158,8 @@ export class WorkerRunner {
     if (receipt.decision === "expired") return "expired";
     if (receipt.decision === "unavailable") return "unavailable";
     if (receipt.actor === "user" && receipt.decision === "block") return "rejected";
+    // "ask" should never be settled (it moves the ticket to awaiting_user); if a
+    // legacy path ever settles it, fail closed.
     return "block";
   }
 
@@ -220,9 +224,13 @@ export class WorkerRunner {
           // worker 存活才维持「审批处理中」；否则交回 watchdog 重启流程。
           return this.isAlive(task);
         }
-        // 1) 先判断「能否执行」：超出授权范围或执行器支持范围直接拦截，不调模型、不等待。
-        if (!executorBound(pending.action)) {
-          ledger.settle(pending, policyReceipt(this.settings, pending, outOfScopeReason));
+        // 1) 先判断「能否执行」：按任务授权裁决真实命令，越界直接拦截，不调模型、不等待。
+        //    有 command 的提案用 task.auth 判定（与 worker 同一个闸），没有命令的旧提案仍按探针白名单。
+        if (!executorBound(pending.action, task.auth)) {
+          const reason = pending.action.tool === "shell" && pending.action.command
+            ? outOfScopeFor(task.auth, pending.action.command)
+            : outOfScopeReason;
+          ledger.settle(pending, policyReceipt(this.settings, pending, reason));
           return true;
         }
         // 2) 逐次确认：转入待用户确认，任务继续运行，worker 长等待回执。
@@ -241,12 +249,28 @@ export class WorkerRunner {
         if (!this.reviews.has(key)) {
           const controller = new AbortController();
           this.reviews.set(key, controller);
-          void reviewCommand(this.settings, pending, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]))
+          void reviewCommand(this.settings, pending, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), task.auth)
             .then(receipt => {
               if (this.disposed) return;
               const target = new CommandLedger(task.dataDir);
               try {
-                if (target.active(task.id, task.fence)) target.settle(pending, receipt);
+                if (!target.active(task.id, task.fence)) return;
+                if (receipt.decision === "ask") {
+                  // P14-B7 — the judge cannot confirm the side effects: move the
+                  // ticket to awaiting_user and surface it in the task view. The
+                  // worker keeps waiting for a receipt (bounded by its deadline).
+                  if (target.awaitUser(pending)) {
+                    const record = this.store.get(task.id);
+                    if (record && record.fence === task.fence) {
+                      record.commandReview = this.waitingReview(pending, task.fence);
+                      this.store.save(record);
+                    }
+                  } else {
+                    target.settle(pending, { ...receipt, decision: "block" });
+                  }
+                  return;
+                }
+                target.settle(pending, receipt);
               } finally { target.close(); }
             }).catch(() => { /* The worker deadline also fails closed. */ })
             .finally(() => this.reviews.delete(key));

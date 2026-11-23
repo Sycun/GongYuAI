@@ -1,4 +1,4 @@
-import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, ExecutionTracePage, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
+import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, HttpTransaction, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
 import type {
   KnowledgeEmbeddingPatch,
   KnowledgeEmbeddingTestInput,
@@ -312,6 +312,66 @@ export type EvidenceList = {
   files: Array<{ path: string; size: number; mtime: string }>;
 };
 
+/** P14 本地隧道（pivot）元数据；只绑 127.0.0.1。 */
+export type TunnelMeta = {
+  id: string;
+  kind: "socat" | "ssh-local" | "ssh-socks" | "chisel-socks";
+  targetHost: string;
+  targetPort: number | null;
+  localPort: number;
+  pid: number | null;
+  status: "running" | "closed" | "error";
+  command: string;
+  logPath: string;
+  createdAt: string;
+  updatedAt: string;
+  via?: string;
+  error?: string;
+};
+
+/** P14 只读投影：事务、计划、凭据（secretRef 已脱敏）、复测、带外回调与隧道。 */
+export type TaskP14Payload = {
+  transactions: HttpTransaction[];
+  plan: PlanStep[];
+  credentials: Credential[];
+  retests: FindingRetest[];
+  oastTokens: OastToken[];
+  oastHits: OastHit[];
+  tunnels?: TunnelMeta[];
+};
+
+export type AssetHistoryHit = {
+  taskId: string;
+  name: string;
+  engagementId: string;
+  status: string;
+  createdAt: string;
+  assets: Array<{
+    address: string;
+    kind: string;
+    assetType: string | null;
+    weight: number;
+    createdAt: string;
+  }>;
+  findings: Array<{
+    id: string;
+    title: string;
+    severity: string;
+    status: string;
+    asset: string;
+    endpoint: string | null;
+    vulnClass: string;
+    verifiedAt: string | null;
+  }>;
+};
+
+/** 跨任务「历史接触」：只作线索，不是本次授权，也不写入当前图。 */
+export type AssetHistoryPayload = {
+  host: string;
+  hits: AssetHistoryHit[];
+  note: string;
+};
+
 export type Probe<T> =
   | { ok: true; status: number; json: T; text: string; kind: "ok" }
   | { ok: false; status: number; error: string; kind: "unregistered" | "forbidden" | "failed" | "aborted" };
@@ -594,6 +654,15 @@ export const api = {
   unarchive: (id: string) =>
     request<{ task: TaskRecord }>(`/tasks/${id}/unarchive`, { method: "POST" }),
   history: (id: string, signal?: AbortSignal) => request<HistoryPayload>(`/tasks/${encodeURIComponent(id)}/history`, { signal }),
+  /** P14 只读能力投影；凭据只返回脱敏后的 secretRef。 */
+  getTaskP14: (id: string, signal?: AbortSignal) =>
+    request<TaskP14Payload>(`/tasks/${encodeURIComponent(id)}/p14`, { signal }),
+  /** 跨任务历史接触（只读线索）；address 可为 host 或 URL。 */
+  getAssetHistory: (id: string, address: string, signal?: AbortSignal) =>
+    request<AssetHistoryPayload>(
+      `/tasks/${encodeURIComponent(id)}/asset-history?address=${encodeURIComponent(address)}`,
+      { signal },
+    ),
   assets: (id: string) => request<{ assets: AssetRecord[] }>(`/tasks/${id}/assets`),
   hints: (id: string) => request<{ hints: HintRecord[] }>(`/tasks/${id}/hints`),
   createHint: (id: string, body: { text: string; source?: string; tags?: string[] }) =>

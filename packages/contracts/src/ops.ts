@@ -9,7 +9,7 @@
  *   分别表达，不允许静默升级为 verified。
  */
 import { z } from "zod";
-import { normalizeHost, targetAllows } from "./scope.js";
+import { normalizeEndpointAddress, normalizeHost, targetAllows } from "./scope.js";
 
 /* ------------------------------------------------------------------ *
  * 1. 委托边界（客户 / 委托 / 任务 / 材料 同一套可见性规则）
@@ -551,6 +551,8 @@ export type CoverageCell = z.infer<typeof CoverageCellSchema>;
 
 export type CoverageInput = {
   assets: readonly string[];
+  /** P14-B3 — endpoint-level surface units (full URLs); cells keep the path. */
+  endpoints?: readonly string[];
   techniques: readonly string[];
   materials: ReadonlyArray<{ asset: string | null; kind: MaterialKind | null; status: MaterialStatus; materialPath: string; sha256: string }>;
   findings: ReadonlyArray<{
@@ -559,6 +561,8 @@ export type CoverageInput = {
     vulnClass: string;
     status: string;
     evidence: ReadonlyArray<{ path: string; sha256: string }>;
+    /** P14-B3 — finding endpoint (full URL) for endpoint-level cells. */
+    endpoint?: string | null;
   }>;
   intents: ReadonlyArray<{ technique: string | null; asset: string | null; status: string }>;
   manual: ReadonlyArray<{ asset: string; technique: string; state: "manual" | "verified"; evidenceRefs: readonly string[] }>;
@@ -660,6 +664,45 @@ export function deriveCoverageMatrix(input: CoverageInput): CoverageCell[] {
           freshManual.length,
         ),
         notes,
+      });
+    }
+  }
+
+  // P14-B3 — endpoint rows: a Web path is a surface unit of its own. Only
+  // findings/evidence testify here; intents still anchor at the host level.
+  for (const rawEndpoint of input.endpoints ?? []) {
+    const endpoint = normalizeEndpointAddress(rawEndpoint);
+    if (!endpoint) continue;
+    for (const technique of input.techniques) {
+      const findings = input.findings.filter(
+        (finding) =>
+          finding.endpoint != null &&
+          normalizeEndpointAddress(finding.endpoint) === endpoint &&
+          finding.vulnClass === technique,
+      );
+      if (!findings.length) continue;
+      const verifiedFindings = findings.filter((finding) =>
+        ["verified", "retested", "accepted"].includes(finding.status),
+      );
+      const evidenceEntries = verifiedFindings.flatMap((finding) => finding.evidence);
+      const freshEvidence = evidenceEntries
+        .filter((ev) => !retracted.has(ev.path) && !retracted.has(ev.sha256))
+        .map((ev) => ev.path);
+      const retractedFindings = findings.filter((finding) => finding.status === "retracted");
+      const retractedOnlyFinding = verifiedFindings.length > 0 && freshEvidence.length === 0;
+      let state: CoverageState = "unknown";
+      if (verifiedFindings.length > 0 && !retractedOnlyFinding) state = "verified";
+      else if (retractedOnlyFinding || retractedFindings.length > 0) state = "retracted";
+      cells.push({
+        asset: endpoint,
+        technique,
+        state,
+        materialRefs: [],
+        findingIds: findings.map((finding) => finding.id),
+        manualRefs: [],
+        retractedOnly: retractedOnlyFinding,
+        independentSupport: retractedOnlyFinding ? 0 : freshEvidence.length,
+        notes: [retractedOnlyFinding ? "端点唯一证据已撤回" : ""].filter(Boolean),
       });
     }
   }

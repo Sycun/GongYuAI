@@ -54,6 +54,7 @@ import { TaskOps } from "../components/TaskOps";
 import { CommandReviewCard } from "../components/CommandReviewCard";
 import { ExecutionTrace } from "../components/ExecutionTrace";
 import { IntegrationUsage } from "../components/IntegrationUsage";
+import { P14Panel } from "../components/P14Panel";
 import { formatDateTime } from "../time";
 
 const FactIntentDag = lazy(() => import("../components/dag/FactIntentDag"));
@@ -1298,6 +1299,8 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
             <pre className="gy-mono">{paneText || "加载中…"}</pre>
           </Card>
         )}
+
+        {tab === "p14" && <P14Panel taskId={task.id} />}
       </div>
     </div>
   );

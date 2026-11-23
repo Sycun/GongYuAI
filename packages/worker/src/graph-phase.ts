@@ -7,6 +7,7 @@ import {
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
   DEFAULT_MAX_INTENTS_PER_REASON,
   DEFAULT_REASON_LEASE_MS,
+  PlanSetInputSchema,
 } from "@gongyuai/contracts";
 import type { ConcludeFactInput, FanoutPolicy, HistoryStore } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
@@ -36,6 +37,12 @@ const ALWAYS = new Set([
   "disable_skill",
   "phase_set",
   "relay",
+  "operator_consult",
+  "credential_list",
+  "change_list",
+  "plan_list",
+  "oast_hits",
+  "host_profile_list",
 ]);
 
 const BOOTSTRAP = new Set([
@@ -58,9 +65,23 @@ const EXPLORE = new Set([
   "finding_record",
   "finding_verify",
   "finding_retract",
+  "finding_retest_context",
+  "finding_retest_conclude",
   "write_evidence",
   "asset_search",
   "shell",
+  "shell_job",
+  "shell_session",
+  "c2",
+  "http_request",
+  "oast_issue",
+  "host_profile_record",
+  "tunnel_open",
+  "tunnel_list",
+  "tunnel_close",
+  "parse_tool_output",
+  "change_record",
+  "credential_record",
   "install_tool",
   "assert_goal",
   "enable_mcp",
@@ -70,6 +91,8 @@ const EXPLORE = new Set([
 
 const REASON = new Set([
   ...ALWAYS,
+  "plan_set",
+  "plan_update",
   "history_append_fact",
   "intent_propose",
   "technique_transfer",
@@ -125,11 +148,11 @@ export function phaseDirective(
     );
   } else if (p === "explore") {
     lines.push(
-      "Explore（验证影响）：一次只 claim 一个 Intent → 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro）才可进交付。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。有 open Explore 时禁止进入 Reason。",
+      "Explore（验证影响）：拿到 foothold 先 host_profile_record（OS/域/用户/权限/服务/共享），再按 T1046/T1069/T1087/T1135/T1021/T1550 族验证内网推进；一次只 claim 一个 Intent → 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro）才可进交付。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。有 open Explore 时禁止进入 Reason。",
     );
   } else if (p === "reason") {
     lines.push(
-      "Reason（战役调度）：读资产清单 + Hint + transferable + Findings 台账 → 扇出跨资产 Intent / technique_transfer / 更新 engagement 叙事。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。交付叙述只引用 verified finding。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
+      "Reason（战役调度）：读资产清单 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 有 ready 步骤时 intent_propose 必须带 planStepId（计划≠授权）→ 扇出跨资产 Intent / technique_transfer / 更新 engagement 叙事。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。交付叙述只引用 verified finding。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
     );
   }
   return lines.join("\n");
@@ -189,6 +212,9 @@ export const GRAPH_PHASE_TOOLS = [
           title: { type: "string" },
           summary: { type: "string" },
           sourceFactIds: { type: "string" },
+          technique: { type: "string" },
+          assetRoot: { type: "string" },
+          planStepId: { type: "string" },
         },
         required: ["title", "sourceFactIds"],
       },
@@ -319,6 +345,73 @@ export const GRAPH_PHASE_TOOLS = [
       },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "finding_retest_context",
+      description:
+        "P14 复测：读取单个 finding 的原始证据、repro、状态与历史复测（只复测这一条，不扩面）。",
+      parameters: {
+        type: "object",
+        properties: { findingId: { type: "string" } },
+        required: ["findingId"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "finding_retest_conclude",
+      description:
+        "P14 复测结论：verdict=reproduced|fixed|inconclusive。fixed 需 repro+证据；一次请求失败不能证明已修复；只有 fixed 会推进 finding 状态。",
+      parameters: {
+        type: "object",
+        properties: {
+          findingId: { type: "string" },
+          verdict: { type: "string" },
+          evidencePaths: { type: "string" },
+          repro: { type: "string" },
+          note: { type: "string" },
+          reviewer: { type: "string" },
+        },
+        required: ["findingId", "verdict"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "plan_set",
+      description:
+        "P14 计划链：用有序步骤替换任务计划（最多 20 步）。每步可声明 needsFactIds/needsIntentIds/needsFindingIds；只有依赖已满足的最小步骤可派单。计划≠授权。",
+      parameters: {
+        type: "object",
+        properties: { stepsJson: { type: "string" } },
+        required: ["stepsJson"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "plan_update",
+      description: "改计划步骤的标题/备注（状态由系统派生，不接受自报完成）。",
+      parameters: {
+        type: "object",
+        properties: { stepId: { type: "string" }, title: { type: "string" }, summary: { type: "string" } },
+        required: ["stepId"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "plan_list",
+      description: "列出当前计划步骤与派生状态（ready 才是可派单的下一步）。",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+
 ];
 
 function parseFactIds(raw: string): string[] {
@@ -420,6 +513,9 @@ export function handleGraphTool(
         title: args.title ?? "untitled",
         summary: args.summary ?? "",
         sourceFactIds,
+        ...(args.technique ? { technique: args.technique } : {}),
+        ...(args.assetRoot ? { assetRoot: args.assetRoot } : {}),
+        ...(args.planStepId ? { planStepId: args.planStepId } : {}),
         rejectOosOnly: true,
         fanout: inReason ? fanout : undefined,
       });
@@ -427,6 +523,73 @@ export function handleGraphTool(
     } catch (err) {
       return `错误: ${err instanceof Error ? err.message : String(err)}`;
     }
+  }
+
+  if (name === "finding_retest_context") {
+    const finding = ctx.history.getFinding(ctx.taskId, args.findingId ?? "");
+    if (!finding) return `错误: unknown finding ${args.findingId ?? ""}`;
+    return JSON.stringify({
+      finding,
+      retests: ctx.history.listFindingRetests(ctx.taskId, finding.id),
+      transactions: ctx.history
+        .listHttpTransactions(ctx.taskId, 100)
+        .filter((tx) => tx.host === finding.asset)
+        .slice(0, 10),
+      note: "只复测这一条；证据用 http:<id> 或 evidence 文件；一次失败≠已修复。",
+    });
+  }
+
+  if (name === "finding_retest_conclude") {
+    const verdictRaw = (args.verdict ?? "").trim().toLowerCase();
+    const verdict =
+      verdictRaw === "reproduced" || verdictRaw === "still-present" ? "reproduced"
+        : verdictRaw === "fixed" || verdictRaw === "still-fixed" ? "fixed"
+          : verdictRaw === "inconclusive" ? "inconclusive"
+            : null;
+    if (!verdict) return `错误: verdict must be reproduced|fixed|inconclusive`;
+    try {
+      const { retest, finding } = ctx.history.recordFindingRetest(
+        ctx.taskId,
+        args.findingId ?? "",
+        {
+          verdict,
+          evidencePaths: parseFactIds(args.evidencePaths ?? ""),
+          repro: args.repro ?? "",
+          note: args.note ?? "",
+          reviewer: args.reviewer || ctx.workerId || "worker",
+        },
+      );
+      return JSON.stringify({ ok: true, retest, finding });
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (name === "plan_set") {
+    try {
+      const parsed = JSON.parse(args.stepsJson ?? "[]") as unknown;
+      const input = PlanSetInputSchema.parse({ steps: parsed });
+      const plan = ctx.history.setPlan(ctx.taskId, input.steps);
+      return JSON.stringify({ ok: true, steps: plan });
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (name === "plan_update") {
+    try {
+      const step = ctx.history.updatePlanStep(ctx.taskId, args.stepId ?? "", {
+        ...(args.title ? { title: args.title } : {}),
+        ...(args.summary ? { summary: args.summary } : {}),
+      });
+      return JSON.stringify(step);
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (name === "plan_list") {
+    return JSON.stringify(ctx.history.listPlan(ctx.taskId));
   }
 
   if (name === "intent_claim") {

@@ -27,6 +27,17 @@ import type {
   ReconcileResult,
   ReconcileRevision,
   BusinessReconcileConfig,
+  Credential,
+  CredentialKind,
+  HttpTransaction,
+  OastHit,
+  OastToken,
+  PlanStep,
+  PlanStepDraftInput,
+  FindingRetest,
+  RetestVerdict,
+  HostProfile,
+  HostProfileDraftInput,
 } from "@gongyuai/contracts";
 import {
   ASSET_KIND_RANK,
@@ -46,9 +57,15 @@ import {
   normalizeFamilyKey,
   normalizeHost,
   normalizeTargetPattern,
+  normalizeEndpointAddress,
+  normalizeServiceAddress,
   parseAssetAddrFromTags,
   parseAssetKindFromTags,
   parseAssetSourceFromTags,
+  parseAssetTypeFromTags,
+  parseAssetParentFromTags,
+  parseAssetWeightFromTags,
+  type AssetType,
   suggestFamilyKey,
   businessConfigFromRequest,
   nextReconcileRevisionId,
@@ -187,6 +204,8 @@ export type ConcludeFactInput = {
   tags?: string[];
 };
 
+type Row = Record<string, unknown>;
+
 export type OpenHistoryOptions = {
   readOnly?: boolean;
   dbPath: string;
@@ -229,7 +248,19 @@ export class HistoryStore {
     this.db.exec("PRAGMA journal_mode = WAL;");
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.migrate();
+    this.migrateColumns();
     this.ops = new TaskOperations(this.db);
+  }
+
+  /** Additive column migrations for DBs created by earlier P14 builds. */
+  private migrateColumns(): void {
+    const columns = new Set(
+      (this.db.prepare("PRAGMA table_info(credentials)").all() as Array<Record<string, unknown>>)
+        .map((row) => String(row.name)),
+    );
+    if (!columns.has("fact_id")) {
+      this.db.exec("ALTER TABLE credentials ADD COLUMN fact_id TEXT");
+    }
   }
 
   close(): void {
@@ -350,6 +381,125 @@ export class HistoryStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_hints_task ON hints(task_id, created_at);
+
+      -- P14-B4：foothold 主机画像（每任务每资产一行，字段仍须证据支撑）。
+      CREATE TABLE IF NOT EXISTS host_profiles (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        asset TEXT NOT NULL,
+        hostname TEXT,
+        os TEXT,
+        domain TEXT,
+        users_json TEXT NOT NULL DEFAULT '[]',
+        privileges_json TEXT NOT NULL DEFAULT '[]',
+        services_json TEXT NOT NULL DEFAULT '[]',
+        shares_json TEXT NOT NULL DEFAULT '[]',
+        av_json TEXT NOT NULL DEFAULT '[]',
+        evidence_path TEXT,
+        source TEXT NOT NULL DEFAULT 'worker',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_host_profiles_unique ON host_profiles(task_id, asset);
+
+      -- P14-B6：复测结论（append-only；只有 fixed 推进 finding 状态）。
+      CREATE TABLE IF NOT EXISTS finding_retests (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        finding_id TEXT NOT NULL,
+        verdict TEXT NOT NULL,
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        repro TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        reviewer TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_retests_finding ON finding_retests(task_id, finding_id, created_at);
+
+      -- P14-B5：跨唤醒作战计划（状态由系统派生，模型不能自报完成）。
+      CREATE TABLE IF NOT EXISTS plan_steps (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        ord INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        needs_fact_ids_json TEXT NOT NULL DEFAULT '[]',
+        needs_intent_ids_json TEXT NOT NULL DEFAULT '[]',
+        needs_finding_ids_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'pending',
+        intent_id TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_plan_task ON plan_steps(task_id, ord);
+
+      -- P14-B2：带外令牌与命中（命中只证明目标发起了回调，不等于可利用）。
+      CREATE TABLE IF NOT EXISTS oast_tokens (
+        token TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        callback TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        issued_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        hits INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS oast_hits (
+        id TEXT PRIMARY KEY,
+        token TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        at TEXT NOT NULL,
+        source_ip TEXT NOT NULL DEFAULT '',
+        method TEXT NOT NULL DEFAULT '',
+        path TEXT NOT NULL DEFAULT '',
+        user_agent TEXT NOT NULL DEFAULT '',
+        protocol TEXT NOT NULL DEFAULT 'http'
+      );
+      CREATE INDEX IF NOT EXISTS idx_oast_hits_task ON oast_hits(task_id, at);
+
+      -- P14-B1：HTTP 事务索引（正文在 evidence/http/<sha>.{req,res}.txt，内容寻址）。
+      CREATE TABLE IF NOT EXISTS http_transactions (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        intent_id TEXT,
+        method TEXT NOT NULL,
+        url TEXT NOT NULL,
+        host TEXT NOT NULL,
+        path TEXT NOT NULL,
+        status INTEGER NOT NULL,
+        request_sha256 TEXT NOT NULL,
+        response_sha256 TEXT NOT NULL,
+        request_path TEXT NOT NULL,
+        response_path TEXT NOT NULL,
+        request_bytes INTEGER NOT NULL,
+        response_bytes INTEGER NOT NULL,
+        response_head TEXT NOT NULL DEFAULT '',
+        truncated INTEGER NOT NULL DEFAULT 0,
+        redirects_json TEXT NOT NULL DEFAULT '[]',
+        started_at TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_http_tx_task ON http_transactions(task_id, created_at);
+
+      -- P14-B0：凭据只存指针与指纹，明文永不入库。
+      CREATE TABLE IF NOT EXISTS credentials (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        asset TEXT NOT NULL,
+        username TEXT,
+        secret_ref TEXT NOT NULL,
+        secret_hmac TEXT,
+        source_finding_id TEXT,
+        fact_id TEXT,
+        verified_at TEXT,
+        last_used_at TEXT,
+        reuse_count INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_credentials_task ON credentials(task_id, asset);
 
       CREATE TABLE IF NOT EXISTS leases (
         task_id TEXT NOT NULL,
@@ -675,7 +825,7 @@ export class HistoryStore {
   recordAsset(input: {
     taskId: string;
     address: string;
-    auth: Pick<AuthScope, "targets" | "outOfScope">;
+    auth: Pick<AuthScope, "targets" | "outOfScope" | "pivotPolicy">;
     /** Force kind; default = admitAddress result (admitted|oos). */
     kind?: AssetKind;
     source?: AssetSource;
@@ -683,20 +833,33 @@ export class HistoryStore {
     intentId?: string | null;
     /** If true and address is in-scope, write kind=live. */
     live?: boolean;
+    /** P14-B3 — typed surface unit. */
+    assetType?: AssetType | null;
+    parentAddress?: string | null;
+    weight?: number;
   }): { fact: Fact; asset: AssetRecord; created: boolean } {
-    const address = normalizeTargetPattern(input.address) || input.address.trim().toLowerCase();
+    const rawAddress = input.address.trim();
+    // Typed units keep their own identity: endpoints keep path, services keep
+    // host:port. Host-ish assets keep the legacy normalized address.
+    const address =
+      input.assetType === "endpoint"
+        ? normalizeEndpointAddress(rawAddress)
+        : input.assetType === "service"
+          ? normalizeServiceAddress(rawAddress)
+          : normalizeTargetPattern(rawAddress) || rawAddress.toLowerCase();
     if (!address) throw new Error("asset address required");
+    const scopeHost = normalizeHost(rawAddress) || rawAddress;
 
     let kind: AssetKind =
       input.kind ??
       admitAddress(
-        { targets: input.auth.targets, outOfScope: input.auth.outOfScope },
-        address,
+        { targets: input.auth.targets, outOfScope: input.auth.outOfScope, pivotPolicy: input.auth.pivotPolicy },
+        scopeHost,
       ).kind;
     if (input.live) {
       const gate = admitAddress(
-        { targets: input.auth.targets, outOfScope: input.auth.outOfScope },
-        address,
+        { targets: input.auth.targets, outOfScope: input.auth.outOfScope, pivotPolicy: input.auth.pivotPolicy },
+        scopeHost,
       );
       if (gate.kind === "oos") kind = "oos";
       else kind = "live";
@@ -713,8 +876,8 @@ export class HistoryStore {
     }
 
     const admission = admitAddress(
-      { targets: input.auth.targets, outOfScope: input.auth.outOfScope },
-      address,
+      { targets: input.auth.targets, outOfScope: input.auth.outOfScope, pivotPolicy: input.auth.pivotPolicy },
+      scopeHost,
     );
     const summary =
       input.summary ??
@@ -727,9 +890,16 @@ export class HistoryStore {
     const fact = this.appendFact({
       taskId: input.taskId,
       layer: "title",
-      title: `资产 · ${kind} · ${address}`,
+      title: `资产 · ${kind}${input.assetType ? ` · ${input.assetType}` : ""} · ${address}`,
       summary,
-      tags: assetTags({ kind, address, source }),
+      tags: assetTags({
+        kind,
+        address,
+        source,
+        ...(input.assetType ? { assetType: input.assetType } : {}),
+        ...(input.parentAddress ? { parentAddress: input.parentAddress } : {}),
+        ...(typeof input.weight === "number" ? { weight: input.weight } : {}),
+      }),
       intentId: input.intentId ?? null,
     });
     return {
@@ -760,6 +930,722 @@ export class HistoryStore {
     return [...byAddr.values()].sort((a, b) => a.address.localeCompare(b.address));
   }
 
+  /* --------------------------- P14 事务 --------------------------- */
+
+  /**
+   * P14-B1 — index one HTTP transaction. Idempotent on
+   * task|method|url|requestSha|responseSha (re-running the same request is
+   * evidence reuse, not a new transaction).
+   */
+  recordHttpTransaction(
+    input: Omit<HttpTransaction, "id" | "createdAt"> & { id?: string; createdAt?: string },
+  ): { transaction: HttpTransaction; created: boolean } {
+    if (input.intentId && !this.getIntent(input.taskId, input.intentId)) {
+      throw new Error(`unknown http transaction intent: ${input.intentId}`);
+    }
+    const existing = this.listHttpTransactions(input.taskId, 500).find(
+      (tx) =>
+        tx.method === input.method &&
+        tx.url === input.url &&
+        tx.requestSha256 === input.requestSha256 &&
+        tx.responseSha256 === input.responseSha256,
+    );
+    if (existing) return { transaction: existing, created: false };
+    const transaction: HttpTransaction = {
+      id: input.id ?? randomUUID(),
+      taskId: input.taskId,
+      intentId: input.intentId ?? null,
+      method: input.method,
+      url: input.url,
+      host: input.host,
+      path: input.path,
+      status: input.status,
+      requestSha256: input.requestSha256,
+      responseSha256: input.responseSha256,
+      requestPath: input.requestPath,
+      responsePath: input.responsePath,
+      requestBytes: input.requestBytes,
+      responseBytes: input.responseBytes,
+      responseHead: input.responseHead ?? "",
+      truncated: Boolean(input.truncated),
+      redirects: input.redirects ?? [],
+      startedAt: input.startedAt,
+      durationMs: input.durationMs,
+      note: input.note ?? "",
+    };
+    this.db.prepare(
+      `INSERT INTO http_transactions
+        (id, task_id, intent_id, method, url, host, path, status, request_sha256, response_sha256,
+         request_path, response_path, request_bytes, response_bytes, response_head, truncated,
+         redirects_json, started_at, duration_ms, note, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      transaction.id, transaction.taskId, transaction.intentId, transaction.method, transaction.url,
+      transaction.host, transaction.path, transaction.status, transaction.requestSha256,
+      transaction.responseSha256, transaction.requestPath, transaction.responsePath,
+      transaction.requestBytes, transaction.responseBytes, transaction.responseHead,
+      transaction.truncated ? 1 : 0, JSON.stringify(transaction.redirects), transaction.startedAt,
+      transaction.durationMs, transaction.note, input.createdAt ?? this.now(),
+    );
+    this.emit(input.taskId, "http_transaction_recorded", {
+      transactionId: transaction.id,
+      method: transaction.method,
+      host: transaction.host,
+      status: transaction.status,
+    });
+    return { transaction, created: true };
+  }
+
+  listHttpTransactions(taskId: string, limit = 50): HttpTransaction[] {
+    const rows = this.db
+      .prepare("SELECT * FROM http_transactions WHERE task_id = ? ORDER BY created_at DESC LIMIT ?")
+      .all(taskId, limit) as Row[];
+    return rows.map((row) => this.rowToHttpTransaction(row));
+  }
+
+  getHttpTransaction(taskId: string, id: string): HttpTransaction | null {
+    const row = this.db
+      .prepare("SELECT * FROM http_transactions WHERE task_id = ? AND id = ?")
+      .get(taskId, id) as Row | undefined;
+    return row ? this.rowToHttpTransaction(row) : null;
+  }
+
+  /**
+   * Resolve an evidence ref (`http:<id>` / `oast:<token>` / file path) to a
+   * sealed artifact. Returns null when the ref is not a known ref kind.
+   */
+  resolveEvidenceRef(
+    taskId: string,
+    ref: string,
+  ): { path: string; sha256: string; content: Buffer } | null {
+    if (ref.startsWith("http:")) {
+      const id = ref.slice("http:".length);
+      const tx = this.getHttpTransaction(taskId, id);
+      if (!tx) throw new Error(`unknown http transaction ref: ${ref}`);
+      const content = readEvidenceBytes(this.evidenceDir, tx.responsePath);
+      const sha256 = createHash("sha256").update(content).digest("hex");
+      if (sha256 !== tx.responseSha256) {
+        throw new Error(`http transaction ${id} response hash mismatch (evidence changed)`);
+      }
+      return { path: ref, sha256, content };
+    }
+    if (ref.startsWith("oast:")) {
+      const token = ref.slice("oast:".length);
+      if (!this.getOastToken(taskId, token)) throw new Error(`unknown oast token ref: ${ref}`);
+      const hits = this.listOastHits(taskId, token);
+      if (!hits.length) {
+        throw new Error(`oast ref has no hit yet: ${ref}（命中才能作证据）`);
+      }
+      const content = Buffer.from(JSON.stringify({ token, hits }, null, 2), "utf8");
+      return { path: ref, sha256: createHash("sha256").update(content).digest("hex"), content };
+    }
+    return null;
+  }
+
+  private rowToHttpTransaction(row: Row): HttpTransaction {
+    return {
+      id: String(row.id),
+      taskId: String(row.task_id),
+      intentId: row.intent_id === null || row.intent_id === undefined ? null : String(row.intent_id),
+      method: String(row.method),
+      url: String(row.url),
+      host: String(row.host),
+      path: String(row.path),
+      status: Number(row.status),
+      requestSha256: String(row.request_sha256),
+      responseSha256: String(row.response_sha256),
+      requestPath: String(row.request_path),
+      responsePath: String(row.response_path),
+      requestBytes: Number(row.request_bytes),
+      responseBytes: Number(row.response_bytes),
+      responseHead: String(row.response_head ?? ""),
+      truncated: Number(row.truncated ?? 0) === 1,
+      redirects: JSON.parse(String(row.redirects_json ?? "[]")) as string[],
+      startedAt: String(row.started_at),
+      durationMs: Number(row.duration_ms),
+      note: String(row.note ?? ""),
+    };
+  }
+
+  /* --------------------------- P14 复测 --------------------------- */
+
+  /**
+   * P14-B6 — append-only remediation retest.
+   * fixed: requires repro + ≥1 proof evidence, and only then moves the finding
+   * to `retested`. reproduced/inconclusive never move it (a failed request or a
+   * WAF block cannot prove a fix).
+   */
+  recordFindingRetest(
+    taskId: string,
+    findingId: string,
+    input: {
+      verdict: RetestVerdict;
+      evidencePaths?: string[];
+      repro?: string;
+      note?: string;
+      reviewer: string;
+    },
+  ): { retest: FindingRetest; finding: Finding } {
+    const finding = this.getFinding(taskId, findingId);
+    if (!finding) throw new Error(`unknown finding: ${findingId}`);
+    if (finding.status === "retracted") throw new Error("retracted finding cannot be retested");
+    const reviewer = input.reviewer.trim();
+    if (!reviewer) throw new Error("retest requires reviewer");
+    const repro = (input.repro ?? "").trim();
+    const note = (input.note ?? "").trim();
+    const paths = [...new Set((input.evidencePaths ?? []).map((p) => p.trim()).filter(Boolean))];
+
+    if (input.verdict === "fixed" && (!repro || !paths.length)) {
+      throw new Error("retest fixed requires repro/复测步骤 + ≥1 证据（事务或文件）");
+    }
+    if (input.verdict === "inconclusive" && !note) {
+      throw new Error("retest inconclusive requires note（缺什么/为什么无法确认）");
+    }
+
+    const evidence = paths.map((p) => {
+      const ref = this.resolveEvidenceRef(taskId, p);
+      if (ref) return { path: p, sha256: ref.sha256, content: ref.content };
+      try {
+        return captureEvidence(this.evidenceDir, p);
+      } catch {
+        throw new Error(`missing or invalid retest evidence: ${p}`);
+      }
+    });
+    for (const file of evidence) this.saveVersion(file);
+
+    const retest: FindingRetest = {
+      id: randomUUID(),
+      taskId,
+      findingId,
+      verdict: input.verdict,
+      evidence: evidence.map((file) => ({ path: file.path, sha256: file.sha256, role: "proof" as const })),
+      repro,
+      note,
+      reviewer,
+      createdAt: this.now(),
+    };
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        `INSERT INTO finding_retests
+          (id, task_id, finding_id, verdict, evidence_json, repro, note, reviewer, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        retest.id, taskId, findingId, retest.verdict, JSON.stringify(retest.evidence),
+        retest.repro, retest.note, retest.reviewer, retest.createdAt,
+      );
+      if (retest.verdict === "fixed") {
+        this.db.prepare(
+          `UPDATE findings SET status = 'retested' WHERE task_id = ? AND id = ?
+           AND status IN ('verified', 'retested', 'accepted')`,
+        ).run(taskId, findingId);
+      }
+      this.emit(taskId, "finding_retest_concluded", {
+        findingId,
+        retestId: retest.id,
+        verdict: retest.verdict,
+        evidencePaths: retest.evidence.map((e) => e.path),
+      });
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    return { retest, finding: this.getFinding(taskId, findingId)! };
+  }
+
+  listFindingRetests(taskId: string, findingId?: string): FindingRetest[] {
+    const rows = findingId
+      ? this.db.prepare(
+          "SELECT * FROM finding_retests WHERE task_id = ? AND finding_id = ? ORDER BY created_at",
+        ).all(taskId, findingId)
+      : this.db.prepare("SELECT * FROM finding_retests WHERE task_id = ? ORDER BY created_at").all(taskId);
+    return (rows as Row[]).map((row) => ({
+      id: String(row.id),
+      taskId: String(row.task_id),
+      findingId: String(row.finding_id),
+      verdict: String(row.verdict) as RetestVerdict,
+      evidence: JSON.parse(String(row.evidence_json ?? "[]")),
+      repro: String(row.repro ?? ""),
+      note: String(row.note ?? ""),
+      reviewer: String(row.reviewer),
+      createdAt: String(row.created_at),
+    }));
+  }
+
+  /* --------------------------- P14 主机画像 --------------------------- */
+
+  /** Upsert one foothold profile per (task, asset); unknown fields stay empty. */
+  recordHostProfile(taskId: string, draft: HostProfileDraftInput): HostProfile {
+    const asset = normalizeTargetPattern(draft.asset) || draft.asset.trim().toLowerCase();
+    if (!asset) throw new Error("host profile asset required");
+    const now = this.now();
+    const existing = this.getHostProfile(taskId, asset);
+    const profile: HostProfile = {
+      id: existing?.id ?? randomUUID(),
+      taskId,
+      asset,
+      hostname: draft.hostname?.trim() || null,
+      os: draft.os?.trim() || null,
+      domain: draft.domain?.trim() || null,
+      users: [...new Set((draft.users ?? []).map((v) => v.trim()).filter(Boolean))],
+      privileges: [...new Set((draft.privileges ?? []).map((v) => v.trim()).filter(Boolean))],
+      services: [...new Set((draft.services ?? []).map((v) => v.trim()).filter(Boolean))],
+      shares: [...new Set((draft.shares ?? []).map((v) => v.trim()).filter(Boolean))],
+      av: [...new Set((draft.av ?? []).map((v) => v.trim()).filter(Boolean))],
+      evidencePath: draft.evidencePath?.trim() || null,
+      source: draft.source?.trim() || "worker",
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    this.db.prepare(
+      `INSERT INTO host_profiles
+        (id, task_id, asset, hostname, os, domain, users_json, privileges_json, services_json,
+         shares_json, av_json, evidence_path, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(task_id, asset) DO UPDATE SET
+         hostname = excluded.hostname, os = excluded.os, domain = excluded.domain,
+         users_json = excluded.users_json, privileges_json = excluded.privileges_json,
+         services_json = excluded.services_json, shares_json = excluded.shares_json,
+         av_json = excluded.av_json, evidence_path = excluded.evidence_path,
+         source = excluded.source, updated_at = excluded.updated_at`,
+    ).run(
+      profile.id, taskId, asset, profile.hostname, profile.os, profile.domain,
+      JSON.stringify(profile.users), JSON.stringify(profile.privileges),
+      JSON.stringify(profile.services), JSON.stringify(profile.shares),
+      JSON.stringify(profile.av), profile.evidencePath, profile.source,
+      profile.createdAt, profile.updatedAt,
+    );
+    this.emit(taskId, "host_profile_recorded", {
+      profileId: profile.id,
+      asset,
+      users: profile.users.length,
+      privileges: profile.privileges.length,
+    });
+    return profile;
+  }
+
+  getHostProfile(taskId: string, asset: string): HostProfile | null {
+    const row = this.db
+      .prepare("SELECT * FROM host_profiles WHERE task_id = ? AND asset = ?")
+      .get(taskId, normalizeTargetPattern(asset) || asset.trim().toLowerCase()) as Row | undefined;
+    return row ? this.rowToHostProfile(row) : null;
+  }
+
+  listHostProfiles(taskId: string): HostProfile[] {
+    const rows = this.db
+      .prepare("SELECT * FROM host_profiles WHERE task_id = ? ORDER BY updated_at DESC")
+      .all(taskId) as Row[];
+    return rows.map((row) => this.rowToHostProfile(row));
+  }
+
+  private rowToHostProfile(row: Row): HostProfile {
+    const parseList = (raw: unknown): string[] => {
+      try {
+        const parsed = JSON.parse(String(raw ?? "[]")) as unknown;
+        return Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        return [];
+      }
+    };
+    return {
+      id: String(row.id),
+      taskId: String(row.task_id),
+      asset: String(row.asset),
+      hostname: row.hostname === null || row.hostname === undefined ? null : String(row.hostname),
+      os: row.os === null || row.os === undefined ? null : String(row.os),
+      domain: row.domain === null || row.domain === undefined ? null : String(row.domain),
+      users: parseList(row.users_json),
+      privileges: parseList(row.privileges_json),
+      services: parseList(row.services_json),
+      shares: parseList(row.shares_json),
+      av: parseList(row.av_json),
+      evidencePath: row.evidence_path === null || row.evidence_path === undefined ? null : String(row.evidence_path),
+      source: String(row.source ?? "worker"),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+  }
+
+  /* --------------------------- P14 计划 --------------------------- */
+
+  /** Replace the task plan atomically. Dependencies must already exist. */
+  setPlan(taskId: string, drafts: PlanStepDraftInput[]): PlanStep[] {
+    if (!drafts.length) throw new Error("plan_set requires at least one step");
+    if (drafts.length > 20) throw new Error("plan_set accepts at most 20 steps");
+    for (const draft of drafts) {
+      for (const id of draft.needsFactIds ?? []) {
+        if (!this.getFact(taskId, id)) throw new Error(`plan needs unknown fact: ${id}`);
+      }
+      for (const id of draft.needsIntentIds ?? []) {
+        if (!this.getIntent(taskId, id)) throw new Error(`plan needs unknown intent: ${id}`);
+      }
+      for (const id of draft.needsFindingIds ?? []) {
+        if (!this.getFinding(taskId, id)) throw new Error(`plan needs unknown finding: ${id}`);
+      }
+    }
+    const now = this.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM plan_steps WHERE task_id = ?").run(taskId);
+      drafts.forEach((draft, ord) => {
+        this.db.prepare(
+          `INSERT INTO plan_steps
+            (id, task_id, ord, title, summary, needs_fact_ids_json, needs_intent_ids_json,
+             needs_finding_ids_json, status, intent_id, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?)`,
+        ).run(
+          randomUUID(), taskId, ord, draft.title, draft.summary ?? "",
+          JSON.stringify(draft.needsFactIds ?? []), JSON.stringify(draft.needsIntentIds ?? []),
+          JSON.stringify(draft.needsFindingIds ?? []), now,
+        );
+      });
+      this.emit(taskId, "plan_updated", { steps: drafts.length, action: "set" });
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    return this.listPlan(taskId);
+  }
+
+  listPlan(taskId: string): PlanStep[] {
+    const rows = this.db
+      .prepare("SELECT * FROM plan_steps WHERE task_id = ? ORDER BY ord")
+      .all(taskId) as Row[];
+    return rows.map((row) => {
+      const needsFactIds = JSON.parse(String(row.needs_fact_ids_json ?? "[]")) as string[];
+      const needsIntentIds = JSON.parse(String(row.needs_intent_ids_json ?? "[]")) as string[];
+      const needsFindingIds = JSON.parse(String(row.needs_finding_ids_json ?? "[]")) as string[];
+      const stored = String(row.status ?? "pending");
+      const intentId = row.intent_id === null || row.intent_id === undefined ? null : String(row.intent_id);
+      let status = stored as PlanStep["status"];
+      if (intentId) {
+        const intent = this.getIntent(taskId, intentId);
+        if (intent?.status === "succeeded") status = "done";
+        else if (intent && ["failed", "expired"].includes(intent.status)) status = "ready";
+        else status = "dispatched";
+      } else if (status === "pending" || status === "ready") {
+        status = this.planDepsSatisfied(taskId, needsFactIds, needsIntentIds, needsFindingIds)
+          ? "ready"
+          : "pending";
+      }
+      return {
+        id: String(row.id),
+        taskId,
+        ord: Number(row.ord),
+        title: String(row.title),
+        summary: String(row.summary ?? ""),
+        needsFactIds,
+        needsIntentIds,
+        needsFindingIds,
+        status,
+        intentId,
+        updatedAt: String(row.updated_at),
+      };
+    });
+  }
+
+  /** Only labels are editable; status is system-derived. */
+  updatePlanStep(taskId: string, stepId: string, patch: { title?: string; summary?: string }): PlanStep {
+    const existing = this.listPlan(taskId).find((step) => step.id === stepId);
+    if (!existing) throw new Error(`unknown plan step: ${stepId}`);
+    const title = patch.title?.trim() || existing.title;
+    const summary = patch.summary !== undefined ? patch.summary.trim() : existing.summary;
+    this.db.prepare("UPDATE plan_steps SET title = ?, summary = ?, updated_at = ? WHERE task_id = ? AND id = ?")
+      .run(title, summary, this.now(), taskId, stepId);
+    this.emit(taskId, "plan_updated", { stepId, action: "update" });
+    return this.listPlan(taskId).find((step) => step.id === stepId)!;
+  }
+
+  /** First actionable step (lowest ord, status=ready). */
+  nextPlanStep(taskId: string): PlanStep | null {
+    return this.listPlan(taskId).find((step) => step.status === "ready") ?? null;
+  }
+
+  private planDepsSatisfied(
+    taskId: string,
+    factIds: string[],
+    intentIds: string[],
+    findingIds: string[],
+  ): boolean {
+    for (const id of factIds) if (!this.getFact(taskId, id)) return false;
+    for (const id of intentIds) {
+      const intent = this.getIntent(taskId, id);
+      if (!intent || !["succeeded", "failed", "expired"].includes(intent.status)) return false;
+    }
+    for (const id of findingIds) {
+      const finding = this.getFinding(taskId, id);
+      if (!finding || !["verified", "retested", "accepted"].includes(finding.status)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Plan gate used by proposeIntent: when a plan exists, the caller must point
+   * at a ready step; the plan never dispatches on its own.
+   */
+  private assertPlanAllows(taskId: string, planStepId?: string | null): void {
+    const steps = this.listPlan(taskId);
+    if (!steps.length) {
+      if (planStepId) throw new Error(`unknown plan step: ${planStepId}`);
+      return;
+    }
+    // A finished plan no longer constrains ad-hoc intents.
+    if (!planStepId && steps.every((step) => step.status === "done")) return;
+    if (planStepId) {
+      const step = steps.find((entry) => entry.id === planStepId);
+      if (!step) throw new Error(`unknown plan step: ${planStepId}`);
+      if (step.status !== "ready") {
+        throw new Error(`plan step ${planStepId} is ${step.status}, not ready (deps unmet)`);
+      }
+      return;
+    }
+    const ready = steps.find((step) => step.status === "ready");
+    if (ready) {
+      throw new Error(
+        `task has a ready plan step ${ready.id} ("${ready.title}"); pass planStepId or clear the plan with plan_set`,
+      );
+    }
+    throw new Error("task has a plan but no ready step; wait for deps or update the plan");
+  }
+
+  private markPlanStepDispatched(taskId: string, stepId: string, intentId: string): void {
+    const row = this.db
+      .prepare("SELECT id FROM plan_steps WHERE task_id = ? AND id = ?")
+      .get(taskId, stepId) as Row | undefined;
+    if (!row) return;
+    this.db.prepare(
+      "UPDATE plan_steps SET status = 'dispatched', intent_id = ?, updated_at = ? WHERE task_id = ? AND id = ?",
+    ).run(intentId, this.now(), taskId, stepId);
+  }
+
+  /* --------------------------- P14 带外 --------------------------- */
+
+  recordOastToken(input: {
+    token: string;
+    taskId: string;
+    kind: "http" | "dns";
+    callback: string;
+    note?: string;
+    issuedAt?: string;
+    expiresAt: string;
+  }): OastToken {
+    const token = input.token.trim();
+    if (!/^[a-z0-9]{8,64}$/i.test(token)) throw new Error("oast token must be 8-64 alphanumerics");
+    const issuedAt = input.issuedAt ?? this.now();
+    this.db.prepare(
+      `INSERT INTO oast_tokens (token, task_id, kind, callback, note, issued_at, expires_at, hits)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(token) DO NOTHING`,
+    ).run(token, input.taskId, input.kind, input.callback, input.note ?? "", issuedAt, input.expiresAt);
+    this.emit(input.taskId, "oast_token_issued", { token, kind: input.kind });
+    return this.getOastToken(input.taskId, token)!;
+  }
+
+  getOastToken(taskId: string, token: string): OastToken | null {
+    const row = this.db
+      .prepare("SELECT * FROM oast_tokens WHERE task_id = ? AND token = ?")
+      .get(taskId, token) as Row | undefined;
+    return row ? this.rowToOastToken(row) : null;
+  }
+
+  listOastTokens(taskId: string): OastToken[] {
+    const rows = this.db
+      .prepare("SELECT * FROM oast_tokens WHERE task_id = ? ORDER BY issued_at")
+      .all(taskId) as Row[];
+    return rows.map((row) => this.rowToOastToken(row));
+  }
+
+  /** Record one inbound callback; only known task tokens are stored. */
+  recordOastHit(taskId: string, input: {
+    token: string;
+    at?: string;
+    sourceIp?: string;
+    method?: string;
+    path?: string;
+    userAgent?: string;
+    protocol?: "http" | "dns";
+  }): OastHit {
+    const token = this.getOastToken(taskId, input.token);
+    if (!token) throw new Error(`unknown oast token: ${input.token}`);
+    const hit: OastHit = {
+      token: input.token,
+      taskId,
+      at: input.at ?? this.now(),
+      sourceIp: input.sourceIp ?? "",
+      method: input.method ?? "",
+      path: input.path ?? "",
+      userAgent: input.userAgent ?? "",
+      protocol: input.protocol ?? "http",
+    };
+    this.db.prepare(
+      `INSERT INTO oast_hits (id, token, task_id, at, source_ip, method, path, user_agent, protocol)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(randomUUID(), hit.token, taskId, hit.at, hit.sourceIp, hit.method, hit.path, hit.userAgent, hit.protocol);
+    this.db.prepare("UPDATE oast_tokens SET hits = hits + 1 WHERE task_id = ? AND token = ?")
+      .run(taskId, hit.token);
+    this.emit(taskId, "oast_hit", { token: hit.token, sourceIp: hit.sourceIp, path: hit.path, protocol: hit.protocol });
+    return hit;
+  }
+
+  listOastHits(taskId: string, token?: string): OastHit[] {
+    const rows = token
+      ? this.db.prepare("SELECT * FROM oast_hits WHERE task_id = ? AND token = ? ORDER BY at").all(taskId, token)
+      : this.db.prepare("SELECT * FROM oast_hits WHERE task_id = ? ORDER BY at").all(taskId);
+    return (rows as Row[]).map((row) => ({
+      token: String(row.token),
+      taskId: String(row.task_id),
+      at: String(row.at),
+      sourceIp: String(row.source_ip ?? ""),
+      method: String(row.method ?? ""),
+      path: String(row.path ?? ""),
+      userAgent: String(row.user_agent ?? ""),
+      protocol: String(row.protocol ?? "http") as "http" | "dns",
+    }));
+  }
+
+  private rowToOastToken(row: Row): OastToken {
+    return {
+      token: String(row.token),
+      taskId: String(row.task_id),
+      kind: String(row.kind) as "http" | "dns",
+      callback: String(row.callback),
+      note: String(row.note ?? ""),
+      issuedAt: String(row.issued_at),
+      expiresAt: String(row.expires_at),
+      hits: Number(row.hits ?? 0),
+    };
+  }
+
+  /* --------------------------- P14 凭据 --------------------------- */
+
+  /**
+   * Record a credential pointer (never plaintext). Dedup by
+   * task|kind|asset|username|secretRef; repeating is idempotent.
+   */
+  recordCredential(input: {
+    taskId: string;
+    kind: CredentialKind;
+    asset: string;
+    username?: string | null;
+    secretRef: string;
+    secretHmac?: string | null;
+    sourceFindingId?: string | null;
+    verified?: boolean;
+    expiresAt?: string | null;
+  }): { credential: Credential; created: boolean } {
+    const asset = normalizeTargetPattern(input.asset) || input.asset.trim().toLowerCase();
+    if (!asset) throw new Error("credential asset required");
+    const secretRef = input.secretRef.trim();
+    if (!secretRef) throw new Error("credential secretRef required (pointer, not plaintext)");
+    if (input.sourceFindingId && !this.getFinding(input.taskId, input.sourceFindingId)) {
+      throw new Error(`unknown credential source finding: ${input.sourceFindingId}`);
+    }
+    const username = input.username?.trim() || null;
+    const existing = this.listCredentials(input.taskId).find(
+      (row) =>
+        row.kind === input.kind &&
+        row.asset === asset &&
+        (row.username ?? null) === username &&
+        row.secretRef === secretRef,
+    );
+    if (existing) return { credential: existing, created: false };
+
+    const now = this.now();
+    const credentialId = randomUUID();
+    // P14-B4 bridge: a credential is also a Fact, so lateral Intents can cite it
+    // through sourceFactIds without inventing a second truth source. The Fact
+    // never carries the secret, only the pointer label.
+    const fact = this.appendFact({
+      taskId: input.taskId,
+      layer: "title",
+      title: `凭据 · ${input.kind} · ${asset}`,
+      summary: `${username ? `user=${username} · ` : ""}secret 不入图（按 credential_list 的 secretRef 读取）`,
+      tags: ["credential", `credential.id:${credentialId}`],
+    });
+    const credential: Credential = {
+      id: credentialId,
+      taskId: input.taskId,
+      kind: input.kind,
+      asset,
+      username,
+      secretRef,
+      secretHmac: input.secretHmac?.trim().toLowerCase() || null,
+      sourceFindingId: input.sourceFindingId ?? null,
+      factId: fact.id,
+      verifiedAt: input.verified ? now : null,
+      lastUsedAt: null,
+      reuseCount: 0,
+      expiresAt: input.expiresAt ?? null,
+      createdAt: now,
+    };
+    this.db.prepare(
+      `INSERT INTO credentials
+        (id, task_id, kind, asset, username, secret_ref, secret_hmac, source_finding_id,
+         fact_id, verified_at, last_used_at, reuse_count, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      credential.id, credential.taskId, credential.kind, credential.asset, credential.username,
+      credential.secretRef, credential.secretHmac, credential.sourceFindingId, credential.factId,
+      credential.verifiedAt, null, 0, credential.expiresAt, credential.createdAt,
+    );
+    this.emit(input.taskId, "credential_recorded", {
+      credentialId: credential.id,
+      factId: credential.factId,
+      kind: credential.kind,
+      asset: credential.asset,
+      verified: Boolean(credential.verifiedAt),
+    });
+    return { credential, created: true };
+  }
+
+  listCredentials(taskId: string): Credential[] {
+    const rows = this.db
+      .prepare("SELECT * FROM credentials WHERE task_id = ? ORDER BY created_at")
+      .all(taskId) as Row[];
+    return rows.map((row) => this.rowToCredential(row));
+  }
+
+  getCredential(taskId: string, credentialId: string): Credential | null {
+    const row = this.db
+      .prepare("SELECT * FROM credentials WHERE task_id = ? AND id = ?")
+      .get(taskId, credentialId) as Row | undefined;
+    return row ? this.rowToCredential(row) : null;
+  }
+
+  /** Mark one reuse on a live credential (横向复用计数，供报告排序). */
+  touchCredential(taskId: string, credentialId: string): Credential {
+    const current = this.getCredential(taskId, credentialId);
+    if (!current) throw new Error(`unknown credential: ${credentialId}`);
+    const now = this.now();
+    this.db.prepare(
+      "UPDATE credentials SET reuse_count = reuse_count + 1, last_used_at = ? WHERE task_id = ? AND id = ?",
+    ).run(now, taskId, credentialId);
+    this.emit(taskId, "credential_reused", { credentialId, asset: current.asset });
+    return this.getCredential(taskId, credentialId)!;
+  }
+
+  private rowToCredential(row: Row): Credential {
+    return {
+      id: String(row.id),
+      taskId: String(row.task_id),
+      kind: String(row.kind) as CredentialKind,
+      asset: String(row.asset),
+      username: row.username === null || row.username === undefined ? null : String(row.username),
+      secretRef: String(row.secret_ref),
+      secretHmac: row.secret_hmac === null || row.secret_hmac === undefined ? null : String(row.secret_hmac),
+      sourceFindingId: row.source_finding_id === null || row.source_finding_id === undefined
+        ? null
+        : String(row.source_finding_id),
+      factId: row.fact_id === null || row.fact_id === undefined ? null : String(row.fact_id),
+      verifiedAt: row.verified_at === null || row.verified_at === undefined ? null : String(row.verified_at),
+      lastUsedAt: row.last_used_at === null || row.last_used_at === undefined ? null : String(row.last_used_at),
+      reuseCount: Number(row.reuse_count ?? 0),
+      expiresAt: row.expires_at === null || row.expires_at === undefined ? null : String(row.expires_at),
+      createdAt: String(row.created_at),
+    };
+  }
+
   private findAssetFact(taskId: string, address: string): Fact | null {
     const needle = `asset.addr:${address}`;
     for (const fact of this.listFacts(taskId)) {
@@ -775,6 +1661,9 @@ export class HistoryStore {
     return {
       address,
       kind,
+      assetType: parseAssetTypeFromTags(fact.tags),
+      parentAddress: parseAssetParentFromTags(fact.tags),
+      weight: parseAssetWeightFromTags(fact.tags),
       factId: fact.id,
       title: fact.title,
       summary: fact.summary,
@@ -1010,6 +1899,8 @@ export class HistoryStore {
     rejectOosOnly?: boolean;
     /** Apply Reason fanout hard caps (open count + same-root). */
     fanout?: FanoutPolicy;
+    /** P14-B5 — dispatch the next ready plan step instead of an ad-hoc intent. */
+    planStepId?: string | null;
   }): Intent {
     const sourceFactIds = this.validateSourceFactIds(input.taskId, input.sourceFactIds);
     if (input.rejectOosOnly !== false) {
@@ -1018,6 +1909,7 @@ export class HistoryStore {
     if (input.fanout) {
       this.assertFanoutAllows(input.taskId, sourceFactIds, input.fanout);
     }
+    this.assertPlanAllows(input.taskId, input.planStepId);
     const now = this.now();
     const intent: Intent = {
       id: randomUUID(),
@@ -1056,6 +1948,9 @@ export class HistoryStore {
         intent.concludedAt,
         intent.conclusion,
       );
+    if (input.planStepId) {
+      this.markPlanStepDispatched(input.taskId, input.planStepId, intent.id);
+    }
     this.emit(input.taskId, "intent_proposed", {
       intentId: intent.id,
       title: intent.title,
@@ -2577,6 +3472,10 @@ export class HistoryStore {
       throw new Error("finding_verify requires ≥1 evidence file under evidence/");
     }
     const files = paths.map((p) => {
+      // P14-B1: refs like `http:<id>` resolve to the sealed transaction artifact;
+      // everything else stays a file under evidence/.
+      const ref = this.resolveEvidenceRef(taskId, p);
+      if (ref) return ref;
       try {
         return captureEvidence(this.evidenceDir, p);
       } catch {
@@ -3174,6 +4073,32 @@ export class HistoryStore {
         const src = i.sourceFactIds.join(",");
         lines.push(`- [${i.id}] (${i.status}) ${i.title} ←facts ${src}`);
       }
+    }
+    // P14-B4: foothold profiles (structured, bounded).
+    const profiles = this.listHostProfiles(taskId);
+    if (profiles.length) {
+      lines.push("", "## Foothold 主机画像");
+      for (const profile of profiles.slice(0, 10)) {
+        lines.push(
+          `- ${profile.asset} · ${profile.os ?? "os?"} · ${profile.domain ?? "domain?"} · users=${profile.users.length} priv=${profile.privileges.join("/") || "-"} svc=${profile.services.length} share=${profile.shares.length} av=${profile.av.join("/") || "-"}`,
+        );
+      }
+    }
+    // P14-B5: the plan survives Reason wake-ups; show only what is actionable.
+    const plan = this.listPlan(taskId);
+    if (plan.length) {
+      lines.push("", "## 作战计划（plan_step）");
+      for (const step of plan.slice(0, 12)) {
+        const needs = [
+          ...step.needsFactIds.map((id) => `fact:${id}`),
+          ...step.needsIntentIds.map((id) => `intent:${id}`),
+          ...step.needsFindingIds.map((id) => `finding:${id}`),
+        ];
+        lines.push(
+          `- [${step.id}] #${step.ord} (${step.status}) ${step.title}${needs.length ? ` ←${needs.join(",")}` : ""}`,
+        );
+      }
+      lines.push("（ready 才是可派单的下一步；intent_propose 带 planStepId；计划≠授权。）");
     }
     return lines;
   }

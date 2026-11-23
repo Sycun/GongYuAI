@@ -5,6 +5,7 @@
  * 约定：新入口统一返回 JSON；委托不匹配 403；缺输入 400；业务冲突 409。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import {
   AnswerConsultSchema,
@@ -40,6 +41,7 @@ import {
   type MemoryNode,
   type ProviderFault,
   type TaskRecord,
+  redactSecretRef,
 } from "@gongyuai/contracts";
 import {
   listExecutionSteps,
@@ -53,6 +55,8 @@ import type { JobRunner } from "./jobs.js";
 import type { WorkerRunner } from "./runner.js";
 import type { PlatformStore } from "./platform.js";
 import { assembleHandoff, sweepTaskConsults, todayWork } from "./handoff.js";
+import { assetHistory } from "./asset-history.js";
+import { TunnelManager } from "@gongyuai/exec";
 import {
   buildAssetGraph,
   buildExecutionGraph,
@@ -165,7 +169,7 @@ export async function handleOpsRoute(
 
   /* ------------------------------ 任务级路由 ------------------------------ */
   const taskMatch = path.match(
-    /^\/tasks\/([^/]+)\/(handoff|consults|jobs|materials|coverage-matrix|coverage-cells|freshness|changes|rollback|graphs|causality|roles|provider|model-request|memory|alerts)(\/.*)?$/,
+    /^\/tasks\/([^/]+)\/(handoff|consults|jobs|materials|coverage-matrix|coverage-cells|freshness|changes|rollback|graphs|causality|roles|provider|model-request|memory|alerts|p14|asset-history)(\/.*)?$/,
   );
   if (!taskMatch) return handlePlatformRoute(req, res, method, url, deps);
 
@@ -451,8 +455,15 @@ export async function handleOpsRoute(
           })),
           retractedEvidence,
         };
+        const endpointAssets = input.assets
+          .filter((asset) => asset.assetType === "endpoint")
+          .map((asset) => asset.address);
+        const hostAssets = input.assets
+          .filter((asset) => asset.assetType !== "endpoint")
+          .map((asset) => asset.address);
         const cells = deriveCoverageMatrix({
-          assets: input.assets.map((asset) => asset.address),
+          assets: hostAssets,
+          endpoints: endpointAssets,
           techniques: [
             ...new Set([
               ...input.findings.map((finding) => finding.vulnClass),
@@ -473,6 +484,7 @@ export async function handleOpsRoute(
             vulnClass: finding.vulnClass,
             status: finding.status,
             evidence: finding.evidence,
+            endpoint: finding.endpoint,
           })),
           intents: input.intents.map((intent) => ({ technique: intent.technique, asset: intent.assetRoot, status: intent.status })),
           manual: input.manual,
@@ -583,6 +595,42 @@ export async function handleOpsRoute(
       const history = open(task, true);
       try {
         return sendText(res, 200, rollbackScript(history.ops.listChanges(taskId)), "text/x-shellscript; charset=utf-8"), true;
+      } finally {
+        history.close();
+      }
+    }
+
+    // P14-B3 — cross-task read-only "历史接触"（线索，不是授权/事实）。
+    if (group === "asset-history" && method === "GET") {
+      const address = url.searchParams.get("address") ?? "";
+      return send(res, 200, assetHistory(store, task, address)), true;
+    }
+
+    // P14 — read-only projection of transactions / plan / credentials / retests / OAST.
+    if (group === "p14" && method === "GET") {
+      const history = open(task, true);
+      try {
+        return send(res, 200, {
+          transactions: history.listHttpTransactions(taskId, 50),
+          plan: history.listPlan(taskId),
+          credentials: history.listCredentials(taskId).map((credential) => ({
+            ...credential,
+            secretRef: redactSecretRef(credential.secretRef),
+          })),
+          retests: history.listFindingRetests(taskId),
+          oastTokens: history.listOastTokens(taskId),
+          oastHits: history.listOastHits(taskId),
+          tunnels: (() => {
+            try {
+              return new TunnelManager({
+                baseDir: join(task.dataDir, "exec"),
+                authorizeHost: () => true, // read-only listing; authorization happened at open
+              }).list();
+            } catch {
+              return [];
+            }
+          })(),
+        }), true;
       } finally {
         history.close();
       }

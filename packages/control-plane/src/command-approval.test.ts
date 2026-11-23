@@ -9,9 +9,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import { CreateTaskRequestSchema } from "@gongyuai/contracts";
 import { CommandLedger } from "@gongyuai/history";
+import { decideApproval } from "./command-approval.js";
 import { bootControlPlane } from "./index.js";
+import { executorBound, outOfScopeFor } from "./command-approval.js";
 
-test("independent worker dispatch is held before spawn and the supervisor drains the task", { timeout: 15000 }, async t => {
+test("independent worker dispatch is gated by task authorization and the supervisor drains the task", { timeout: 15000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), "gy-command-hold-"));
   const plane = await bootControlPlane({ dataRoot: root, host: "127.0.0.1", port: 0, isolated: true });
   t.after(async () => { await plane.close(); rmSync(root, { recursive: true, force: true }); });
@@ -49,11 +51,11 @@ test("independent worker dispatch is held before spawn and the supervisor drains
     const ctx={manifest:m,history:{recordToolGate(){}},usage:{toolCalls:0,installs:0}};
     const probe=await runShell(ctx,"uname -m");
     writeFileSync(m.dataDir+"/allowed.txt",probe.stdout);
-    try {await runShell(ctx,"touch "+m.dataDir+"/should-not-exist");} catch {}
+    try {await runShell(ctx,"curl -s http://evil.test/");} catch (err) { writeFileSync(m.dataDir+"/denied.txt",String(err && err.message)); }
     setInterval(()=>{},1000);
   `;
   const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script,
-    JSON.stringify({ taskId: task.id, dataDir: task.dataDir, workspaceDir: task.dataDir, commandFence: task.fence, auth: task.auth, budget: task.budget })],
+    JSON.stringify({ taskId: task.id, dataDir: task.dataDir, workspaceDir: task.dataDir, evidenceDir: join(task.dataDir, "evidence"), commandFence: task.fence, auth: task.auth, budget: task.budget })],
     { stdio: "ignore" });
   const ended = once(child, "exit");
   t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill(); });
@@ -62,14 +64,49 @@ test("independent worker dispatch is held before spawn and the supervisor drains
     await plane.watchdog.tick(); await delay(40);
   }
   const paused = plane.store.get(task.id)!;
+  // 授权范围内的命令（真实 command 提案）不再被 localProbe 白名单拦死：送审并执行。
   assert.equal(paused.status, "paused");
   assert.equal(paused.commandReview?.decision, "block");
-  assert.match(paused.error!, /超出任务授权范围或执行器支持范围/);
-  // 范围外的 touch 不再送审：只有白名单探针会调用审批模型。
+  assert.match(paused.error!, /evil\.test/);
   assert.deepEqual(calls, ["uname -m"]);
   assert.ok(readFileSync(join(task.dataDir, "allowed.txt"), "utf8").trim());
-  assert.ok(!existsSync(join(task.dataDir, "should-not-exist")));
+  // 越界目标在 worker 侧就被拒，回执落到台账，控制面据此暂停。
+  assert.match(readFileSync(join(task.dataDir, "denied.txt"), "utf8"), /evil\.test/);
+  assert.equal(executorBound({ tool: "shell", summary: "uname -m", digest: "", command: "uname -m" }, task.auth), true);
+  assert.equal(executorBound({ tool: "shell", summary: "evil", digest: "", command: "curl -s http://evil.test/" }, task.auth), false);
+  assert.match(outOfScopeFor(task.auth, "curl -s http://evil.test/"), /超出任务授权范围或执行器支持范围/);
+  assert.match(outOfScopeFor(task.auth, "curl -s http://evil.test/"), /evil\.test/);
   assert.equal((await ended)[1], "SIGTERM");
   await plane.watchdog.tick();
   assert.equal(plane.store.get(task.id)?.status, "paused");
+});
+
+test("P14-B7 approval decision table: allow / ask / block", () => {
+  // In-scope low-risk read-only stays automatic.
+  assert.equal(
+    decideApproval({ bounded: true, risk: "low", activity: "read_only", scope: "read-only" }).decision,
+    "allow",
+  );
+  // Unconfirmed boundary or an unsure judge goes to a human instead of blocking.
+  assert.equal(
+    decideApproval({ bounded: false, risk: "low", activity: "read_only", scope: "read-only" }).decision,
+    "ask",
+  );
+  assert.equal(
+    decideApproval({ bounded: true, risk: "unknown", activity: "read_only", scope: "read-only" }).decision,
+    "ask",
+  );
+  assert.equal(
+    decideApproval({ bounded: true, risk: "low", activity: "unknown", scope: "read-only" }).decision,
+    "ask",
+  );
+  // Real risk stays blocked (fail-closed).
+  assert.equal(
+    decideApproval({ bounded: true, risk: "high", activity: "external_action", scope: "read-only" }).decision,
+    "block",
+  );
+  assert.equal(
+    decideApproval({ bounded: true, risk: "medium", activity: "destructive", scope: "local-validation" }).decision,
+    "block",
+  );
 });

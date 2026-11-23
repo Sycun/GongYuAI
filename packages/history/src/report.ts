@@ -140,8 +140,19 @@ export function writeTaskReport(
     if (tentativeCount) {
       lines.push(`另有 ${tentativeCount} 条 tentative 线索未进交付（finding_verify 附证据与 repro 后方可列入）。`);
     }
-    if (retractedCount) {
-      lines.push(`已撤回 ${retractedCount} 条误报（保留可查，不进交付）。`);
+    // P14-B6：复测结论单独成章（只有 fixed 会推进 finding 状态）。
+    const findingRetests = history.listFindingRetests(id);
+    if (findingRetests.length) {
+      lines.push("", "## Retest（复测）", "");
+      for (const retest of findingRetests) {
+        const target = findings.find((entry) => entry.id === retest.findingId);
+        lines.push(
+          `- ${retest.verdict} · ${label(target?.title ?? retest.findingId)}（${retest.findingId}）· ${retest.createdAt} · 复测人：${label(retest.reviewer)}`,
+        );
+        if (retest.repro) lines.push(`  - 复测步骤：${label(retest.repro)}`);
+        if (retest.note) lines.push(`  - 说明：${label(retest.note)}`);
+        for (const e of retest.evidence) lines.push(`  - 证据：${link(e.path, e.sha256)}`);
+      }
     }
 
     // 第九轮：证据撤回的影响必须与图/矩阵一致（受影响项与仍独立成立的项分开写）。

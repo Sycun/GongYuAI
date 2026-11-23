@@ -39,7 +39,8 @@
     "restore:isolation": "tsx scripts/restore-isolation.ts",
     "knowledge:acceptance": "tsx scripts/knowledge-acceptance.ts",
     "knowledge:hybrid-acceptance": "tsx scripts/knowledge-hybrid-acceptance.ts",
-    "knowledge:provider-console": "tsx scripts/knowledge-provider-console.ts"
+    "knowledge:provider-console": "tsx scripts/knowledge-provider-console.ts",
+    "acceptance:shell-c2": "tsx scripts/shell-c2-acceptance.ts"
   },
   "dependencies": {
     "@gongyuai/contracts": "workspace:*",

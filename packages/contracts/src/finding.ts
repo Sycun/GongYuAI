@@ -52,9 +52,18 @@ export function findingStatusAllows(
 export const FindingConfidenceSchema = z.enum(["tentative", "firm"]);
 export type FindingConfidence = z.infer<typeof FindingConfidenceSchema>;
 
+/** P13-A3 / P14-B1 — what a piece of evidence is for. Missing = proof (legacy). */
+export const EvidenceRoleSchema = z.enum(["baseline", "proof", "verification", "supporting"]);
+export type EvidenceRole = z.infer<typeof EvidenceRoleSchema>;
+
 export const FindingEvidenceSchema = z.object({
+  /** File path under evidence/, or a ref: `http:<id>` / `oast:<token>` / `tool:<id>`. */
   path: z.string().min(1),
+  /** Content hash; refs are resolved to the underlying transaction/hit/artifact at verify time. */
   sha256: z.string().length(64),
+  role: EvidenceRoleSchema.optional(),
+  note: z.string().optional(),
+  version: z.number().int().positive().optional(),
 });
 
 export const FindingSchema = z.object({
@@ -177,3 +186,22 @@ export function findingDedupKey(input: {
     (input.endpoint ?? "").trim().toLowerCase(),
   ].join("|");
 }
+/**
+ * P14-B6 — remediation retest verdict. Only `fixed` moves the finding forward;
+ * one failed request never proves a fix.
+ */
+export const RetestVerdictSchema = z.enum(["reproduced", "fixed", "inconclusive"]);
+export type RetestVerdict = z.infer<typeof RetestVerdictSchema>;
+
+export const FindingRetestSchema = z.object({
+  id: z.string().uuid(),
+  taskId: z.string().uuid(),
+  findingId: z.string().uuid(),
+  verdict: RetestVerdictSchema,
+  evidence: z.array(FindingEvidenceSchema).default([]),
+  repro: z.string().default(""),
+  note: z.string().default(""),
+  reviewer: z.string().min(1),
+  createdAt: z.string().datetime(),
+});
+export type FindingRetest = z.infer<typeof FindingRetestSchema>;

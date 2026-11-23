@@ -35,6 +35,11 @@
 | [data-flywheel.md](./data-flywheel.md) | **数据飞轮（P9 提案）**：采集→评测→蒸馏→改进→验证五环、质量闸、提案收件箱、越用越好用 | 改记分卡 / 趋势 / 自动蒸馏 / 晋升闸前读 |
 | [graph-views.md](./graph-views.md) | **图视图族（P10 提案）**：资产/攻击面/执行/记忆四图投影、跨图导航、图提示、Graph workspace | 改控制台图视图 / 投影 / 跨图跳转前读 |
 | [pentest-ops-design.md](./pentest-ops-design.md) | **渗透执行层与委托规则（P11 提案）**：会话管理器、后台作业异步回流、隧道/Chromium、时间窗/RoE/速率自判/模型求助、任务生命周期 | 改会话 / 作业 / 生命周期 / 委托契约前读 |
+| [pentest-exec-c2-enhancement.md](./pentest-exec-c2-enhancement.md) | **执行面与 C2（✅ 实现）**：真实 shell / 后台作业 / PTY / C2（listener·session·task·watchdog·token·文件）、授权台账与断点续接、模型拒绝纠偏、手动命令；303 测试 + 9 项验收 | 打真实目标 / 排查「授权了仍不动」前读 |
+| [research-c2-csai-artex.md](./research-c2-csai-artex.md) | **对照调研**：CyberStrikeAI 的 C2 收敛逻辑与 8 个坑、ARTEX 的拦截与审查输入边界；能力差距表与三步增量（含 file:line 证据） | 决定 C2 下一步 / 复用上游设计前读 |
+| [pentest-adaptive-enhancement.md](./pentest-adaptive-enhancement.md) | **长跑自适应（P13 提案）**：三基座缺角盘点 + 七刀（拦截话术/冷折叠/steer·cancel/终态分型/证据角色化/凭据 grounded/LLM 韧性），ARTEX 语义对照，AGPL 边界与验收口径 | 长跑跑不动、图太大、跑偏停不下、拒绝后乱撞时读 |
+| [pentest-completeness.md](./pentest-completeness.md) | **渗透完备性清单（三基座）**：14 阶段 × 女娲/DAG/Super-agent 矩阵、缺口按影响排序、外部弹药边界 | 回答「还缺什么/能不能接完整委托」时读 |
+| [pentest-capability-extension.md](./pentest-capability-extension.md) | **渗透能力扩展（P14，✅ 已实现）**：十二域能力面盘点 + 三类缺口（断头路/域语义/新面）+ 八刀（事务证据/盲打 OAST/类型化攻击面/内网推进/计划链/复测/执行边界），ARTEX 与 norma 对照，pivot 授权语义 | 决定「交付能不能复核、攻击面能不能经营、拿 shell 后往哪走」时读 |
 | [pi-durable-integration.md](./pi-durable-integration.md) | **Pi 底座盘点**：pi-durable/chord 原生能力映射、深化增量、底座管活图管对 | 改 worker 主循环 / 用底座能力前读 |
 | [long-range-completeness.md](./long-range-completeness.md) | **长程完备性（P12）**：D1/2/3 必补、D4 调研、D5 规划者、D6 辅助者、D8 通过、D7 删除 | 补长程时间维度缺口 / 角色设计前读 |
 | [attack-chain-graph.md](./attack-chain-graph.md) | **攻击链图（P10 扩展）**：漏洞因果链投影、外网→组合漏洞→C2/getshell→内网建模、点击漏洞聚焦、链模式融合 | 改攻击链 / provenance / 链模式前读 |

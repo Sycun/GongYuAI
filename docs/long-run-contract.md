@@ -204,7 +204,7 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 - 从终态重新开始时重新计墙钟，保留操作者设定的四项预算。Token、调用和安装沿用任务累计口径。详情 API 同时返回本轮增量 `runUsage` 和累计 `usage`。
 - **预算尽仍出报告（P5）**：硬闸或 incomplete 收卷仍落盘 `report.md`。控制面墙钟截止时停止 Worker，用当前 History 写报告，再发布 `budget_exhausted`。如果收卷写盘失败，任务记为 `failed` 并保留错误原因。
 - Tool results are truncated for the chat buffer；权威细节在 evidence + History。
-- Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`.
+- Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`；只读状态查询放行（`scutil --nc list|status|probe`、`networksetup -get*/-list*`，任何能力级可查）。
 
 ## Tool single gate（P5）
 
@@ -225,7 +225,7 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 | active-lab | + 主动利用类 MCP |
 | full | 全部 Worker 工具面（仍禁主机 VPN/代理变更） |
 
-新任务 schema 默认 `observe`；`gy run` 默认传 `active-lab`。VPN/代理变更永远拒绝。
+新任务 schema 默认 `observe`；聊天/控制台任务与 `gy run` 默认 `active-lab`（2026-11-23 定调：联网渗透默认放开，范围外目标仍须授权绑定）。VPN/代理变更永远拒绝（只读状态查询除外）。
 
 ## Pause / resume / scope revision（阶段 2）
 

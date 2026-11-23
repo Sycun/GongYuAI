@@ -15,7 +15,7 @@ export type ChatApproval = {
 };
 export type ApprovalReceipt = {
   id: string; at: string; model: string; scope: ChatApproval["scope"];
-  decision: "allow" | "block" | "unavailable" | "expired"; risk: "low" | "medium" | "high" | "unknown"; reason: string;
+  decision: "allow" | "block" | "ask" | "unavailable" | "expired"; risk: "low" | "medium" | "high" | "unknown"; reason: string;
   /** 谁下的结论：模型（默认）、用户（会话内确认）、策略（范围拦截/超时）。 */
   actor?: "model" | "user" | "policy";
 };

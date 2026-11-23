@@ -8,6 +8,17 @@ export type CommandProposal = {
   tool: string; summary: string; digest: string;
   /** Only a fixed, local argv can be dispatched after a positive opinion. */
   localProbe?: string;
+  /**
+   * 实际待执行命令（审批与审计需要看到真实动作）。
+   * 台账在任务 dataDir 内（0600），随任务删除；不写入配置或备份。
+   */
+  command?: string;
+  /** 命令解析出的目标主机；用于范围核对，缺失表示纯本地动作。 */
+  hosts?: string[];
+  /** 该命令所需能力级；控制面据此判断是否越过授权。 */
+  need?: "observe" | "scan" | "active-lab" | "full";
+  /** c2 / session 等长驻动作的会话标识。 */
+  sessionId?: string;
 };
 export type CommandTicket = {
   id: string; task: string; fence: number; at: number; action: CommandProposal; receipt?: ApprovalReceipt;
@@ -59,6 +70,11 @@ export class CommandLedger {
     return this.decode(this.db.prepare("SELECT * FROM requests WHERE task=? AND fence=? AND state=? ORDER BY at,rowid LIMIT 1").get(task, fence, state));
   }
   get(id: string) { return this.decode(this.db.prepare("SELECT * FROM requests WHERE id=?").get(id)); }
+  /** 当前状态：pending | awaiting_user | allowed | held（审批队列展示/等待窗口用）。 */
+  state(id: string): string | undefined {
+    const row = this.db.prepare("SELECT state FROM requests WHERE id=?").get(id) as { state?: string } | undefined;
+    return row?.state;
+  }
   /** 手动确认：pending → awaiting_user，等待用户在会话内允许或拒绝。 */
   awaitUser(ticket: CommandTicket) {
     return this.db.prepare("UPDATE requests SET state='awaiting_user' WHERE id=? AND task=? AND fence=? AND state='pending'")

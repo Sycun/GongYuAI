@@ -45,6 +45,7 @@ import {
   writeTaskReport,
 } from "@gongyuai/history";
 import { AssignmentService } from "./assignments.js";
+import { AuthorizationInputError, authorizationDigest, currentRecord, registerAuthorization } from "./authorization.js";
 import { queryChatModels } from "./chat-provider.js";
 import { deliverySummary } from "./delivery.js";
 import { handleOpsRoute } from "./routes-ops.js";
@@ -441,6 +442,38 @@ export function startControlServer(opts: ServerOptions) {
         const rest = taskMatch[2] ?? "";
         const task = store.get(taskId);
         if (!task) return send(res, 404, { error: "not found" });
+        // 授权台账：登记一版书面授权 / 查询当前记录与一行摘要。
+        if (rest === "/authorization") {
+          if (method === "GET") {
+            return send(res, 200, { taskId: task.id, authorization: currentRecord(task), digest: authorizationDigest(task) });
+          }
+          if (method === "POST") {
+            try {
+              const body = await readJson(req, 256 * 1024);
+              const authorization = registerAuthorization(task, body, { save: record => store.save(record) });
+              return send(res, 200, { task: store.get(task.id) ?? task, authorization });
+            } catch (err) {
+              const missing = err instanceof AuthorizationInputError ? err.missing : undefined;
+              const message = err instanceof SyntaxError
+                ? `授权内容不是有效 JSON：${err.message}`
+                : err instanceof Error ? err.message : String(err);
+              return send(res, 400, { error: message, ...(missing?.length ? { missing } : {}) });
+            }
+          }
+          return send(res, 405, { error: "授权台账只支持 GET 与 POST" });
+        }
+        // 操作员手动指定命令：绕过模型，但仍走授权裁决、审批与证据。
+        if (method === "POST" && rest === "/command") {
+          if (!task.assignment) return send(res, 409, { error: "只有工作区任务支持手动指定命令" });
+          try {
+            const body = await readJson(req, 64 * 1024) as { command?: unknown; purpose?: unknown };
+            const command = typeof body.command === "string" ? body.command : "";
+            const purpose = typeof body.purpose === "string" ? body.purpose : undefined;
+            return send(res, 200, { task: await assignments.submitCommand(task.id, command, purpose) });
+          } catch (err) {
+            return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
         // 会话内处理一次待确认命令：允许/拒绝只绑定当次调用，重试针对审批模型不可用。
         const reviewAction = /^\/command-review\/(approve|reject|retry)$/.exec(rest);
         if (method === "POST" && reviewAction) {

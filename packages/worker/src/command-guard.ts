@@ -44,12 +44,22 @@ export async function reviewBeforeDispatch(m: WorkerManifest, action: CommandPro
   try {
     check(ledger, m, fence);
     const ticket = ledger.request(m.taskId, fence, action);
-    const deadline = Date.now() + (manual ? MANUAL_WAIT_MS : 90_000);
+    // P14-B7: an `ask` verdict moves the ticket to awaiting_user. Give a human a
+    // real window to answer instead of failing the command after 90s; only the
+    // first transition extends, so a stuck queue still fails closed.
+    let deadline = Date.now() + (manual ? MANUAL_WAIT_MS : 90_000);
+    let extendedForHuman = false;
     while (true) {
       check(ledger, m, fence);
+      if (!manual && !extendedForHuman && ledger.state(ticket.id) === "awaiting_user") {
+        deadline = Date.now() + 10 * 60_000;
+        extendedForHuman = true;
+      }
       const result = ledger.get(ticket.id)?.receipt;
       if (result) {
-        if (result.decision === "allow" && action.localProbe && localProbes.some(s => s === action.localProbe)) return ticket.id;
+        // 控制面已按授权范围与执行器能力判定（proposal.command 在范围内才 allow），
+        // 这里只认回执，不再用 localProbe 白名单二次拦截。
+        if (result.decision === "allow") return ticket.id;
         throw new Error(result.reason);
       }
       if (Date.now() >= deadline) {

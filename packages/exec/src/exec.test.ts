@@ -1,0 +1,393 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { connect, type Socket } from "node:net";
+import { execSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { authorizeCommand, authorizePeer, capabilityAtLeast, classifyCommand, extractHosts } from "./scope.js";
+import { runCommand } from "./proc.js";
+import { JobStore } from "./jobs.js";
+import { ShellSessionManager } from "./sessions.js";
+import { C2Manager } from "./c2.js";
+
+const AUTH = { targets: ["127.0.0.1", "10.10.0.0/16", "*.example.test"], outOfScope: ["10.10.9.9"], capability: "active-lab" as const };
+
+function tempDir(): string {
+  return mkdtempSync(join(tmpdir(), "gy-exec-"));
+}
+
+test("extractHosts 抽 URL/IP/CIDR 内主机，忽略 loopback", () => {
+  assert.deepEqual(extractHosts("curl -s http://10.10.1.5:8080/a?b=1").sort(), ["10.10.1.5"]);
+  assert.deepEqual(extractHosts("nmap -sV 10.10.2.3").sort(), ["10.10.2.3"]);
+  assert.deepEqual(extractHosts("ffuf -u https://api.example.test/FUZZ -w w.txt").sort(), ["api.example.test"]);
+  assert.deepEqual(extractHosts("curl http://127.0.0.1:8080/").sort(), []);
+});
+
+test("authorizeCommand：范围内放行、越界拒绝、能力级不足拒绝", () => {
+  const ok = authorizeCommand(AUTH, "curl -s http://10.10.1.5:8080/");
+  assert.equal(ok.allowed, true, ok.reason);
+  assert.equal(ok.need, "scan");
+
+  const oos = authorizeCommand(AUTH, "curl -s http://10.10.9.9/");
+  assert.equal(oos.allowed, false);
+  assert.match(oos.reason, /越界/);
+
+  const low = authorizeCommand({ ...AUTH, capability: "scan" }, "sqlmap -u http://10.10.1.5/x?id=1");
+  assert.equal(low.allowed, false);
+  assert.match(low.reason, /能力级不足/);
+
+  const local = authorizeCommand({ ...AUTH, capability: "scan" }, "uname -a");
+  assert.equal(local.allowed, true, local.reason);
+});
+
+test("authorizeCommand：主机网络变更与破坏命令始终拒绝", () => {
+  assert.equal(classifyCommand("iptables -A INPUT -j DROP"), "host-network");
+  assert.equal(authorizeCommand({ ...AUTH, capability: "full" }, "iptables -A INPUT -j DROP").allowed, false);
+  assert.equal(classifyCommand("rm -rf / --no-preserve-root"), "destructive");
+  assert.equal(authorizeCommand({ ...AUTH, capability: "full" }, "rm -rf / --no-preserve-root").allowed, false);
+});
+
+test("capabilityAtLeast 阶梯", () => {
+  assert.equal(capabilityAtLeast("observe", "scan"), false);
+  assert.equal(capabilityAtLeast("active-lab", "scan"), true);
+  assert.equal(capabilityAtLeast(undefined, "observe"), true);
+});
+
+test("authorizePeer：loopback 允许、范围外拒绝", () => {
+  assert.equal(authorizePeer(AUTH, "127.0.0.1").allowed, true);
+  assert.equal(authorizePeer(AUTH, "203.0.113.9").allowed, false);
+  assert.equal(authorizePeer({ targets: ["203.0.113.0/24"] }, "203.0.113.9").allowed, true);
+});
+
+test("runCommand：正常退出码与输出", async () => {
+  const dir = tempDir();
+  try {
+    const r = await runCommand({ command: "printf 'a'; printf 'b' >&2; exit 3", cwd: dir, timeoutMs: 5_000 });
+    assert.equal(r.exitCode, 3);
+    assert.equal(r.stdout, "a");
+    assert.equal(r.stderr, "b");
+    assert.equal(r.timedOut, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runCommand：超时按进程组杀死并标记 timedOut", async () => {
+  const dir = tempDir();
+  try {
+    const r = await runCommand({ command: "sleep 5", cwd: dir, timeoutMs: 300 });
+    assert.equal(r.timedOut, true);
+    assert.ok(r.durationMs < 4_000, `duration=${r.durationMs}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("JobStore：后台作业活过一次工具调用，增量读输出", async () => {
+  const dir = tempDir();
+  try {
+    const store = new JobStore(dir);
+    const job = store.start({ command: "printf 'one\\n'; sleep 0.4; printf 'two\\n'", cwd: dir, label: "test job" });
+    assert.equal(job.status, "running");
+    const waited = await store.wait(job.id, { untilOutput: "two", timeoutMs: 10_000 });
+    assert.equal(waited.matched, true, JSON.stringify(waited.meta));
+    let meta = store.get(job.id);
+    const deadline = Date.now() + 5_000;
+    while (meta?.status === "running" && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+      meta = store.get(job.id);
+    }
+    assert.equal(meta?.status, "exited", JSON.stringify(meta));
+    assert.equal(meta?.exitCode, 0);
+    const chunk = store.read(job.id, "stdout", 0);
+    assert.equal(chunk?.data.includes("one"), true);
+    assert.equal(chunk?.data.includes("two"), true);
+    const next = store.read(job.id, "stdout", chunk!.nextOffset);
+    assert.equal(next?.data, "");
+    assert.equal(store.list().length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("JobStore：kill 之后状态为 killed 且不再变更", async () => {
+  const dir = tempDir();
+  try {
+    const store = new JobStore(dir);
+    const job = store.start({ command: "sleep 30", cwd: dir });
+    const killed = store.kill(job.id);
+    assert.equal(killed?.status, "killed");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(store.get(job.id)?.status, "killed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ShellSessionManager：PTY 会话可持续输入输出", async () => {
+  const dir = tempDir();
+  const mgr = new ShellSessionManager(dir);
+  try {
+    const session = mgr.open({ cwd: dir });
+    assert.equal(session.status, "open");
+    const first = await mgr.wait(session.id, { idleMs: 400, timeoutMs: 8_000 });
+    assert.equal(first.status, "open");
+    assert.ok(mgr.write(session.id, "echo gy-hello").ok);
+    const got = await mgr.wait(session.id, { pattern: "gy-hello", timeoutMs: 8_000 });
+    assert.equal(got.matched, true, `tail=${got.data.slice(-300)}`);
+    assert.ok(mgr.write(session.id, "pwd").ok);
+    const pwd = await mgr.wait(session.id, { pattern: dir.split("/").pop()!, timeoutMs: 8_000 });
+    assert.equal(pwd.matched, true, `tail=${pwd.data.slice(-300)}`);
+    assert.equal(mgr.list().length, 1);
+  } finally {
+    mgr.closeAll();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** 合成 raw implant：把收到的整行交给本地 bash 执行，模拟反弹 shell。 */
+function fakeRawImplant(port: number): Promise<() => void> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host: "127.0.0.1", port }, () => resolve(() => socket.destroy()));
+    socket.on("error", reject);
+    socket.write("ready\n");
+    socket.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const out = execSync(line, { encoding: "utf8", timeout: 5_000 });
+          socket.write(out);
+        } catch (err) {
+          socket.write(`ERR ${(err as Error).message}\n`);
+        }
+      }
+    });
+  });
+}
+
+test("C2Manager(raw)：监听、会话、执行、输出回收、越界命令拒绝", async () => {
+  const dir = tempDir();
+  const c2 = new C2Manager({ baseDir: dir, auth: AUTH, handshakeMs: 300 });
+  let closeClient: (() => void) | null = null;
+  try {
+    const listener = await c2.listen({ bindHost: "127.0.0.1", bindPort: 0 });
+    assert.equal(listener.status, "running");
+    closeClient = await fakeRawImplant(listener.bindPort);
+    await new Promise((r) => setTimeout(r, 400));
+    const sessions = c2.sessionList();
+    assert.equal(sessions.length, 1);
+    const session = sessions[0]!;
+    assert.equal(session.allowed, true, session.reason);
+
+    const task = await c2.task(session.id, { kind: "exec", command: "echo gy-c2-ok", waitMs: 5_000 });
+    assert.equal(task.status, "success", `${task.error} / ${task.result}`);
+    assert.match(task.result, /gy-c2-ok/);
+
+    await assert.rejects(
+      () => c2.task(session.id, { kind: "exec", command: "curl http://evil.outside.test/", waitMs: 2_000 }),
+      /C2 任务被拒绝/,
+    );
+    assert.equal(c2.taskList(session.id).length >= 2, true);
+  } finally {
+    closeClient?.();
+    c2.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C2Manager(raw)：无输出且到等待上限的任务标记 failed，不伪装成功", async () => {
+  const dir = tempDir();
+  const c2 = new C2Manager({ baseDir: dir, auth: AUTH, handshakeMs: 300 });
+  let closeClient: (() => void) | null = null;
+  try {
+    const listener = await c2.listen({ bindHost: "127.0.0.1", bindPort: 0 });
+    closeClient = await fakeRawImplant(listener.bindPort);
+    await new Promise((r) => setTimeout(r, 400));
+    const session = c2.sessionList()[0]!;
+    const task = await c2.task(session.id, { kind: "exec", command: "sleep 3", waitMs: 300, marker: "__NEVER__" });
+    assert.equal(task.status, "failed", JSON.stringify(task));
+    assert.match(task.error, /超时/);
+  } finally {
+    closeClient?.();
+    c2.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C2Manager(raw)：文件上传/下载按 sha256 落盘并可分段读", async () => {
+  const dir = tempDir();
+  const c2 = new C2Manager({ baseDir: dir, auth: AUTH, handshakeMs: 300 });
+  let closeClient: (() => void) | null = null;
+  try {
+    const listener = await c2.listen({ bindHost: "127.0.0.1", bindPort: 0 });
+    closeClient = await fakeRawImplant(listener.bindPort);
+    await new Promise((r) => setTimeout(r, 400));
+    const session = c2.sessionList()[0]!;
+    const payload = randomBytes(3_000);
+    const remote = join(dir, "remote.bin");
+    const put = await c2.putFile(session.id, remote, payload);
+    assert.ok(put.tasks.length >= 2, `chunks=${put.tasks.length}`);
+    assert.ok(put.tasks.every((t) => t.status === "success"), JSON.stringify(put.tasks.map((t) => [t.status, t.error])));
+    assert.equal(put.file.sha256, createHash("sha256").update(payload).digest("hex"));
+    const got = await c2.getFile(session.id, remote, { waitMs: 10_000 });
+    assert.equal(got.file.sha256, put.file.sha256);
+    assert.deepEqual(got.content, payload);
+    const head = c2.readBlob(got.file.sha256, 0, 512);
+    assert.deepEqual(Buffer.from(head.data, "base64"), payload.subarray(0, 512));
+    assert.equal(head.size, payload.length);
+  } finally {
+    closeClient?.();
+    c2.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C2Manager：看门狗关闭半开会话并让在途任务失败", async () => {
+  const dir = tempDir();
+  const c2 = new C2Manager({ baseDir: dir, auth: AUTH, handshakeMs: 200, sessionIdleMs: 400, sweepMs: 100 });
+  const ref: { socket: Socket | null } = { socket: null };
+  try {
+    const listener = await c2.listen({ bindHost: "127.0.0.1", bindPort: 0 });
+    await new Promise<void>((resolve, reject) => {
+      ref.socket = connect({ host: "127.0.0.1", port: listener.bindPort }, () => resolve());
+      ref.socket.on("error", reject);
+      ref.socket.write("ready\n");
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    const session = c2.sessionList()[0]!;
+    const pending = c2.task(session.id, { kind: "exec", command: "echo never", waitMs: 5_000, marker: "__NEVER__" });
+    await new Promise((r) => setTimeout(r, 1_000));
+    assert.equal(c2.session(session.id)?.status, "closed", JSON.stringify(c2.session(session.id)));
+    const task = await pending;
+    assert.equal(task.status, "failed", JSON.stringify(task));
+  } finally {
+    ref.socket?.destroy();
+    c2.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C2Manager：agent token 不匹配直接断开，不登记会话", async () => {
+  const dir = tempDir();
+  const c2 = new C2Manager({ baseDir: dir, auth: AUTH, handshakeMs: 300, token: "s3cret" });
+  const ref: { socket: Socket | null } = { socket: null };
+  try {
+    const listener = await c2.listen({ bindHost: "127.0.0.1", bindPort: 0 });
+    await new Promise<void>((resolve) => {
+      ref.socket = connect({ host: "127.0.0.1", port: listener.bindPort }, () => {
+        ref.socket!.write(`${JSON.stringify({ t: "hello", host: "intruder", user: "x", token: "wrong" })}\n`);
+        resolve();
+      });
+    });
+    await new Promise((r) => setTimeout(r, 500));
+    const live = c2.sessionList().filter((item) => item.kind === "agent" && item.status !== "closed");
+    assert.equal(live.length, 0, JSON.stringify(c2.sessionList()));
+  } finally {
+    ref.socket?.destroy();
+    c2.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C2Manager(agent)：hello 握手后按任务派发并回收结果", async () => {
+  const dir = tempDir();
+  const c2 = new C2Manager({ baseDir: dir, auth: AUTH, handshakeMs: 500 });
+  const ref: { socket: Socket | null } = { socket: null };
+  try {
+    const listener = await c2.listen({ bindHost: "127.0.0.1", bindPort: 0 });
+    await new Promise<void>((resolve, reject) => {
+      ref.socket = connect({ host: "127.0.0.1", port: listener.bindPort }, () => {
+        ref.socket!.write(`${JSON.stringify({ t: "hello", host: "lab-host", user: "tester", os: "linux", arch: "x64", pid: 42 })}\n`);
+        resolve();
+      });
+      ref.socket.on("error", reject);
+      ref.socket.on("data", (chunk: Buffer) => {
+        for (const line of chunk.toString("utf8").split("\n")) {
+          if (!line.trim()) continue;
+          const msg = JSON.parse(line) as { t?: string; id?: string; command?: string };
+          if (msg.t === "task" && msg.id) {
+            let stdout = "";
+            try {
+              stdout = execSync(msg.command ?? "", { encoding: "utf8", timeout: 5_000 });
+            } catch {
+              stdout = "";
+            }
+            ref.socket!.write(`${JSON.stringify({ t: "result", id: msg.id, ok: true, stdout })}\n`);
+          }
+        }
+      });
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    const session = c2.sessionList()[0]!;
+    assert.equal(session.kind, "agent");
+    assert.equal(session.host, "lab-host");
+    assert.equal(session.user, "tester");
+    const task = await c2.task(session.id, { kind: "exec", command: "echo agent-ok", waitMs: 5_000 });
+    assert.equal(task.status, "success", task.error);
+    assert.match(task.result, /agent-ok/);
+  } finally {
+    ref.socket?.destroy();
+    c2.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("P14-B7 参数级判类：引号内的危险动词不再被首词掩盖", async () => {
+  const { shellTokens } = await import("./scope.js");
+  assert.deepEqual(
+    shellTokens("bash -c 'mimikatz.exe sekurlsa'"),
+    ["bash", "-c", "mimikatz.exe", "sekurlsa"],
+  );
+  // Highest-risk verb inside an interpreter payload still demands full.
+  assert.equal(authorizeCommand(AUTH, "bash -c 'mimikatz.exe sekurlsa'").need, "full");
+  assert.equal(authorizeCommand(AUTH, "python3 -c 'import socket'").need, "scan");
+  assert.equal(authorizeCommand(AUTH, "sh -c 'msfconsole -q'").need, "active-lab");
+  // Destructive payload inside quotes is destructive, not exec.
+  assert.equal(classifyCommand("bash -c \"rm -rf /\""), "destructive");
+  assert.equal(classifyCommand("echo hi"), "exec");
+});
+
+test("P14-B4 已声明的 pivot CIDR 才放行内网主机", () => {
+  const base = { targets: ["127.0.0.1"], outOfScope: [], capability: "active-lab" as const };
+  assert.equal(authorizeCommand(base, "curl http://10.20.0.5/").allowed, false);
+  const declared = {
+    ...base,
+    pivotPolicy: { mode: "declared" as const, cidrs: ["10.20.0.0/24"] },
+  };
+  assert.equal(authorizeCommand(declared, "curl http://10.20.0.5/").allowed, true);
+  assert.equal(authorizeCommand(declared, "curl http://10.20.9.5/").allowed, false);
+  const off = { ...base, pivotPolicy: { mode: "off" as const, cidrs: ["10.20.0.0/24"] } };
+  assert.equal(authorizeCommand(off, "curl http://10.20.0.5/").allowed, false);
+});
+
+test("P14-B4 陈旧会话：pid 已死 → closed 落盘，transcript 仍可读", () => {
+  const dir = tempDir();
+  try {
+    const sessionsDir = join(dir, "sessions", "sh-stale-1");
+    execSync(`mkdir -p ${JSON.stringify(sessionsDir)}`);
+    execSync(`printf 'hello from dead pty\\n' > ${JSON.stringify(join(sessionsDir, "transcript.log"))}`);
+    execSync(
+      `cat > ${JSON.stringify(join(sessionsDir, "meta.json"))} <<'JSON'
+{"id":"sh-stale-1","shell":"/bin/bash","cwd":"/tmp","pid":999999,"status":"open","createdAt":"2026-01-01T00:00:00.000Z","lastActivityAt":"2026-01-01T00:00:00.000Z","bufferPath":"${join(sessionsDir, "transcript.log")}","exitCode":null}
+JSON`,
+    );
+    const mgr = new ShellSessionManager(dir);
+    const meta = mgr.get("sh-stale-1");
+    assert.equal(meta?.status, "closed");
+    // 结论必须落盘，而不是只留在内存里。
+    const persisted = JSON.parse(readFileSync(join(sessionsDir, "meta.json"), "utf8")) as { status?: string };
+    assert.equal(persisted.status, "closed");
+    assert.deepEqual(mgr.list().map((item) => item.id), ["sh-stale-1"]);
+    const chunk = mgr.read("sh-stale-1", 0);
+    assert.match(chunk?.data ?? "", /hello from dead pty/);
+    assert.equal(chunk?.status, "closed");
+    const write = mgr.write("sh-stale-1", "id");
+    assert.equal(write.ok, false);
+    assert.equal(write.status, "closed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

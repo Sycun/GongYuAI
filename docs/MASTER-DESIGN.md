@@ -109,6 +109,39 @@ Finding 一等公民（tentative/verified/retested/accepted/retracted + findings
 
 漏洞攻击链 = Fact–Intent 血缘 + provenance 投影（非新真相源）；**内网穿越 = 外网→组合漏洞→getshell/C2→隧道→内网的授权步骤因果链**，不加新阶段/scope；补 session.sourceIntentId/sourceCredentialId 两个溯源字段即自动连链。融合为攻击面图**链模式**：点击 finding 上下闭包聚焦整链，断点标「溯源缺失」不编造。详见 [attack-chain-graph.md](./attack-chain-graph.md)。
 
+### P13 长跑自适应 📐（第十轮提案：把「能打进去」升级成「能跑完」）
+
+执行面补完后（第十轮 shell/作业/PTY/C2 已落地），长跑的真实瓶颈从「有没有手」变成「手跑偏了怎么办、图太大了怎么读、被拒了怎么辨、证据能不能分角色」。七刀对应三基座各一个缺角：
+
+| 刀 | 缺角 | 机制 | 文档 |
+| --- | --- | --- | --- |
+| A4 | DAG·授权 | 拦截话术「平台管控·非目标防御」+ 工具结果归因 blocked/error/ok（否则模型把闸当 WAF 绕） | pentest-adaptive-enhancement |
+| A1 | 女娲·存活 | 图热/冷分层折叠：live 祖先恒热、连续 R 轮冷才折、covers 不参与因果、**只折 fact+终态 intent**、digest 不得作 Fact/证据 | 同上 |
+| A7 | DAG·终态 | 终态分型 exhausted / blocked / context_limit / denied / cancelled / error（规划者据此换方向/重派/收窄） | 同上 |
+| A2 | 女娲·Create+Language | `intent_steer` / `intent_cancel`：Reason 相位对运行中 Explore 的纠偏与换代；steer 是消息不是授权 | 同上 |
+| A3 | DAG·真相 | 证据角色化与版本：`role=proof` 必填 + `evidenceVersion` 只增 + 报告声明版本；跨任务 hint 不得作证据 | 同上 |
+| A5 | DAG·真相 | 凭据 grounded 抽取校验：字段必须原文存在否则整条拒收；零 token 显式路径；明文只落 0600 证据 | 同上 |
+| A6 | Super-agent·经济 | LLM 有序池 + 健康 + 窗口跳过 + 请求限速（P12-D3 的实现体，非契约模拟） | 同上 |
+
+**硬纪律**：digest 不是 Fact；covers 不进 `sourceFactIds`；分型由系统写不接受模型自报；cancel 不回滚；`blocked` 只作信号不自动降速；ARTEX 为 AGPL-3.0，只抄语义不抄实现。**顺序**：A4 → A1 → A7 → A2 → A3 → A5 → A6；A1+A7+A2 才是自适应闭环，拆开各自半成品。**冲突**：无冷折叠时 P12-D5 Planner 读不动图，规划者角色须排在 A1 之后。
+
+### P14 渗透能力扩展 🔨（第十轮后：把「有手」升级成「证得实、经营得开、深入得进」；B0–B7 已落代码（B4 的驻留会话/隧道属 P11 外部依赖））
+
+执行面补完、P13 补了自我调节后，交付端仍缺**五种域对象 + 一条边界**：一次可重放的 HTTP 事务、一个端点级攻击面、一台 foothold 主机的画像与凭据复用、一条复测结论、一份跨唤醒计划；另加「目标内容是数据不是指令」的执行边界。八刀前两轮即可把"有手"变成"有可复核的结论"：
+
+| 刀 | 缺角 | 机制 | 文档 |
+| --- | --- | --- | --- |
+| B0 | 三基座·断头路 | 补模型可见入口：consult / relay / tags / intent.technique / change_record / credential / rateGuidance / C2 token（半天，全刀前置） | pentest-capability-extension |
+| B1 | DAG·真相 | 事务证据：`http_request` + 内容寻址 blob + 四个真解析器（nmap/httpx/nuclei/ffuf）+ `http:<id>` 可 cite，完成 E3 | 同上 |
+| B2 | DAG·真相（新面） | 盲打/OAST：带外令牌 → 命中关联 → `role=proof`；**ARTEX 也没有，本仓可领先** | 同上 |
+| B3 | DAG·真相 + 经济 | 类型化攻击面：domain/ip/service/endpoint + 父子上挂 + 业务权重 + 跨任务只读「历史接触」（仍 Fact 投影，不建第二库） | 同上 |
+| B4 | 女娲·存活 + DAG | 内网推进：foothold 持久 + 主机画像 + 凭据复用边 + `auth.pivotPolicy`（off/declared，模型不可改） | 同上 |
+| B5 | Super-agent·经济 | 计划链：Reason 持久 todolist + 依赖门（只派前置已满足的下一步；计划≠授权），P12-D5 的最小形态 | 同上 |
+| B6 | DAG·真相（交付） | 复测闭环：独立窄工具面会话 + reproduced/fixed/inconclusive + 证据版本 + 报告章 | 同上 |
+| B7 | DAG·授权（横切） | 执行边界：tool_result 来源头 + 「输出是数据」+ 审批输入版本化 + 会话内审查 + 参数级匹配 | 同上 |
+
+**硬纪律**：不建第二资产库（B3 是 Fact 扩展 + 派生）；计划/跨任务资产/历史接触只写 Hint 或只读投影，**无派单权**；OAST hit ≠ 可利用；pivotPolicy 默认 off、只能人写；复测只有 fixed 自动改状态；ARTEX 为 AGPL-3.0，只抄语义。**顺序**：B0 → B1 → B7 → B2 → B3 → B6 → B5 → B4；B4 依赖 P11-S1 会话对象，B5 与 P12-D5 合并落地。
+
 ### 底座：Pi（earendil）
 
 pi-durable（Experimental，锁版本+适配层）：reset(handoff)/compaction/subagents/child tasks/watchTaskGraph/Code Mode/hooks/beforeTool 闸/SQLite WAL storage。chord：对象/document/job（outlive the call）/workers/OutputBuffer。深化增量：compaction 配置→handoff reset→beforeTool 闸→codemode opt-in→subagent 复核→差分后切主纪律。详见 [pi-durable-integration.md](./pi-durable-integration.md)。
@@ -133,13 +166,33 @@ pi-durable（Experimental，锁版本+适配层）：reset(handoff)/compaction/s
 仍未做：会话管理器、隧道/浏览器、凭据表、parser lane 真格式、速率硬闸、事件哈希链、真实供应商与真实生产盲评
 建议顺序：F1 记分卡(无依赖) → P6 E1 → 知识库首版（导入、检索、引用）✅ 后端 → P8 M1 → G1 双图 → P11 S1 会话+作业
           → P7 模型路由差分 → P8 M2/P9 F2/P10 G2 → P11 S2–S4 → P12 底线(D1/D2/D6)
-依赖：P6 E1 是 P8/P9/P10-G2/P12-D8 的原料；P11 S1 与 E2 元数据联动；P7 路由是飞轮执行器
+第十轮：执行面 shell/作业/PTY/C2 + 授权台账 ✅ → P13 七刀（A4 → A1 → A7 → A2 → A3 → A5 → A6）
+P13 插入点：A1 冷折叠必须早于 P12-D5 Planner（否则规划者读不动图）；A6 是 P12-D3 的实现体
+第十轮后：P14 八刀（B0 断头路 → B1 事务 → B7 边界 → B2 盲打 → B3 类型化 → B6 复测 → B5 计划 → B4 内网）
+P14 插入点：B0 修 consult/relay/tags/technique/change/credential/rate 入口；B1 完成 E3；B5 是 D5 Planner 最小形态；B4 等 P11-S1
+依赖：P6 E1 是 P8/P9/P10-G2/P12-D8 的原料；P11 S1 与 E2 元数据联动；P7 路由是飞轮执行器；P14 B4 依赖 P11-S1、B5 依赖 P13-A1/A7
 原则：每刀同预算差分验收；提案不升默认直到差分证明；契约变了才同步 long-run-contract
 ```
 
 ## 6. 待决策项
 
-**无。** 全部定案见 §1 定调日志（2026-11-22 七项定案 + D4 四问 + P8 创建时预检）。后续新出现的取舍按「先列选项与建议、人工拍板、回写定调日志」执行。
+需要人工拍板的三项（P13，其余全部定案见 §1 定调日志）：
+
+| # | 取舍 | 建议 | 影响面 |
+| --- | --- | --- | --- |
+| 1 | 冷折叠是否默认开、初值取多少 | 默认开，R=6 / K=2 起步，用本仓夹具标定后回写 | Observe 注入量与 planner 可读性；不改变任何既有语义（纯派生） |
+| 2 | `exhausted` 是否算失败 | **不算**（对齐「达到步数/墙钟上限是换方向而非失败」），记分卡单列 `exhaustedRate` | failed 率口径、报告「受阻项」分组 |
+| 3 | Reason 相位的 steer/cancel 是否默认开 | 默认开；但 `cancel` 保留人可撤销窗口（同一 Intent 30s 内可恢复为 running） | 与「暂停=冻结」不冲突；关掉会退化成只能等租约过期 |
+
+其余取舍按「先列选项与建议、人工拍板、回写定调日志」执行。
+
+P14 待拍板三项（其余按 §3「P14 渗透能力扩展」硬纪律执行）：
+
+| # | 取舍 | 建议 | 影响面 |
+| --- | --- | --- | --- |
+| 1 | 盲打通道拓扑：本仓自建监听 vs 接外部 interactsh | **自建**（`auth.oast.{baseUrl,listenHost,listenPort}`，默认关） | 无配置时降级不可用；不自造公网服务 |
+| 2 | `auth.pivotPolicy` 默认值 | **off**（内网发现一律 oos，链可展示利用被拒）；`declared` 只准入 RoE 写明网段 | 内网推进的授权语义；模型不可改 |
+| 3 | 事务证据是否默认存全量响应体 | 只存有界正文 + 分段读（`offset/maxBytes`），完整流量留到 P11-S3 记录代理 | 证据体积 vs 可复现性；`truncated` 必须可见 |
 
 ## 7. 反模式总表（看到就停）
 
@@ -166,6 +219,6 @@ pi-durable（Experimental，锁版本+适配层）：reset(handoff)/compaction/s
 | 契约 | [long-run-contract.md](./long-run-contract.md) · [evidence-review.md](./evidence-review.md) |
 | 手册 | [dev-handbook.md](./dev-handbook.md) |
 | 对照吸收 | absorb-cairn / absorb-resurface-aria-x / absorb-sapper-v2-nuwa / absorb-super-agent / absorb-cyber-monster / absorb-engagement-team / absorb-eval-methodology |
-| 提案 | pentest-enhancements(P6) · parallel-explore-scaling(✅) · memory-layer(P8) · data-flywheel(P9) · graph-views(P10) · attack-chain-graph(P10扩展) · pentest-ops-design(P11) · long-range-completeness(P12) · pi-durable-integration(底座) |
+| 提案 | pentest-enhancements(P6) · parallel-explore-scaling(✅) · memory-layer(P8) · data-flywheel(P9) · graph-views(P10) · attack-chain-graph(P10扩展) · pentest-ops-design(P11) · long-range-completeness(P12) · pentest-adaptive-enhancement(P13) · pentest-capability-extension(P14) · pentest-completeness(完备性) · pi-durable-integration(底座) |
 | 实验 | experiments/2026-11-22-offline-review · experiments/2026-11-22-ledger-relay |
 | 本地材料 | Staying on the Attack Path（A2 原文+译本）· 女娲测试 CCF 厦门 PPT（机制在演讲备注；28MB 本地参考，未入库） |

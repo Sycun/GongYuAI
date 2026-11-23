@@ -11,7 +11,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { BackgroundJob, JobKind, SubmitJobInput } from "@gongyuai/contracts";
-import { detectMaterialKind, isTerminalTaskStatus } from "@gongyuai/contracts";
+import {
+  detectMaterialKind,
+  isTerminalTaskStatus,
+  parseToolOutput,
+  type ParsedToolOutput,
+  type SupportedTool,
+} from "@gongyuai/contracts";
 import {
   listEvidenceFiles,
   minimatch,
@@ -324,18 +330,37 @@ export class JobRunner {
       };
     }
     if (job.kind === "parse-import") {
+      // P14-B1: real machine-readable parsers (same code the worker uses).
       const summary = job.inputs.map((input) => {
         const content = readEvidenceBytes(paths.evidenceDir, input.path).toString("utf8");
         const kind = detectMaterialKind(input.path, content);
-        const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0);
-        return { path: input.path, kind, sha256: sha256(content), rows: kind === "http-transaction" ? undefined : lines.length - 1, parser: "builtin-v1" };
+        const tool = detectToolOutput(content);
+        const parsed: ParsedToolOutput = tool
+          ? parseToolOutput(tool, content)
+          : { assets: [], findings: [], skipped: true, reason: "no machine-readable parser" };
+        return {
+          path: input.path,
+          kind,
+          sha256: sha256(content),
+          tool: tool ?? null,
+          parser: tool ? `${tool}-parser@1` : "skip",
+          assets: parsed.assets.length,
+          findings: parsed.findings.length,
+          skipped: parsed.skipped,
+          ...(parsed.reason ? { reason: parsed.reason } : {}),
+        };
       });
       const body = JSON.stringify({ taskId: task.id, parsedAt: new Date().toISOString(), summary }, null, 2);
       const rel = `jobs/${job.id}/parse.json`;
       writeEvidenceFile(paths.evidenceDir, rel, body);
       return {
         artifacts: [{ path: rel, sha256: sha256(body) }],
-        result: { parsed: summary.length, parsers: summary.map((entry) => entry.parser) },
+        result: {
+          parsed: summary.length,
+          parsers: summary.map((entry) => entry.parser),
+          assets: summary.reduce((sum, entry) => sum + entry.assets, 0),
+          findings: summary.reduce((sum, entry) => sum + entry.findings, 0),
+        },
       };
     }
     // 角色作业：确定性模拟，不调用真实模型（真实表现单列待验证）。
@@ -372,3 +397,34 @@ export class JobRunner {
 }
 
 export type { JobKind };
+
+/**
+ * P14-B1 — detect which machine-readable parser fits an imported artifact.
+ * Only shapes we actually parse are returned; everything else stays `null`
+ * (the job reports parser=skip instead of inventing rows).
+ */
+function detectToolOutput(content: string): SupportedTool | null {
+  const head = content.trimStart().slice(0, 400);
+  if (head.startsWith("<nmaprun") || content.includes("<nmaprun")) return "nmap";
+  if (head.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(content) as Record<string, unknown>;
+      if (Array.isArray(parsed.results) && typeof parsed.config === "object") return "ffuf";
+    } catch {
+      /* fall through to JSONL detection */
+    }
+  }
+  const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0).slice(0, 5);
+  const objects: Array<Record<string, unknown>> = [];
+  for (const line of lines) {
+    if (!line.trim().startsWith("{")) continue;
+    try {
+      objects.push(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      /* ignore malformed line */
+    }
+  }
+  if (objects.some((obj) => typeof obj["template-id"] === "string")) return "nuclei";
+  if (objects.some((obj) => typeof obj.status_code === "number" || typeof obj["status-code"] === "number")) return "httpx";
+  return null;
+}

@@ -24,9 +24,54 @@ export const ASSET_KIND_RANK: Record<AssetKind, number> = {
 export const AssetSourceSchema = z.enum(["auth", "discover"]);
 export type AssetSource = z.infer<typeof AssetSourceSchema>;
 
+/**
+ * P14-B4 — internal pivot admission. `off` (default) keeps every non-target
+ * asset oos; `declared` admits only the CIDRs a human wrote into the contract.
+ * The model can never widen this: it is part of AuthScope, written only by the
+ * control plane on operator edit.
+ */
+export const PivotPolicySchema = z.object({
+  mode: z.enum(["off", "declared"]).default("off"),
+  /** CIDRs admitted for internal testing after a foothold (declared mode only). */
+  cidrs: z.array(z.string().min(1)).default([]),
+});
+export type PivotPolicy = z.infer<typeof PivotPolicySchema>;
+
+/** P14-B2 — out-of-band callback channel. Absent = OAST unavailable (no fake hits). */
+export const OastConfigSchema = z.object({
+  /** Public base URL the target can reach, e.g. http://10.0.0.9:8799 */
+  baseUrl: z.string().url(),
+  listenHost: z.string().min(1).default("127.0.0.1"),
+  listenPort: z.number().int().min(0).max(65535).default(0),
+  /** DNS suffix for hostname callbacks, e.g. oob.lab.test (enables the DNS channel). */
+  dnsName: z.string().trim().min(1).optional(),
+  /** UDP bind for the DNS channel (absent = 127.0.0.1; 53 needs privilege). */
+  dnsListenHost: z.string().min(1).optional(),
+  dnsListenPort: z.number().int().min(0).max(65535).optional(),
+  /** A-record answer returned for a token query (absent = loopback). */
+  dnsAnswer: z.string().trim().min(1).optional(),
+});
+export type OastConfig = z.infer<typeof OastConfigSchema>;
+
+/** CIDRs currently admitted by a declared pivot policy. */
+export function pivotCidrs(auth: { pivotPolicy?: PivotPolicy } | undefined): string[] {
+  const policy = auth?.pivotPolicy;
+  return policy?.mode === "declared" ? policy.cidrs : [];
+}
+
+/** P14-B3 — typed surface unit (host / service / endpoint / domain). */
+export const AssetTypeSchema = z.enum(["domain", "ip", "service", "endpoint"]);
+export type AssetType = z.infer<typeof AssetTypeSchema>;
+
 export const AssetRecordSchema = z.object({
   address: z.string().min(1),
   kind: AssetKindSchema,
+  /** Typed layer; absent on legacy address-only facts. */
+  assetType: AssetTypeSchema.nullable().default(null),
+  /** Parent address (service → host, endpoint → host). */
+  parentAddress: z.string().nullable().default(null),
+  /** Business weight 0-5 (RoE/operator), used to order coverage work. */
+  weight: z.number().int().min(0).max(5).default(0),
   factId: z.string().min(1),
   title: z.string().min(1),
   summary: z.string().default(""),
@@ -172,9 +217,25 @@ export function targetAllows(
   targets: string[],
   candidate: string,
   outOfScope: string[] = [],
+  /** CIDRs admitted by a declared pivot policy (P14-B4). Empty = no pivot. */
+  pivot: string[] = [],
 ): boolean {
   if (outOfScope.length && matchTarget(outOfScope, candidate).ok) return false;
-  return matchTarget(targets, candidate).ok;
+  if (matchTarget(targets, candidate).ok) return true;
+  return pivot.length > 0 && matchTarget(pivot, candidate).ok;
+}
+
+/** Full authorization predicate: targets ∪ declared pivot CIDRs, minus outOfScope. */
+export function scopeAllows(
+  auth: { targets: string[]; outOfScope?: string[]; pivotPolicy?: PivotPolicy },
+  candidate: string,
+): boolean {
+  return targetAllows(
+    auth.targets,
+    candidate,
+    auth.outOfScope ?? [],
+    pivotCidrs(auth),
+  );
 }
 
 /**
@@ -183,27 +244,83 @@ export function targetAllows(
  * concrete hosts under them become admitted (or oos).
  */
 export function admitAddress(
-  auth: { targets: string[]; outOfScope?: string[] },
+  auth: { targets: string[]; outOfScope?: string[]; pivotPolicy?: PivotPolicy },
   address: string,
-): { kind: Extract<AssetKind, "admitted" | "oos">; matchedBy?: string } {
+): { kind: Extract<AssetKind, "admitted" | "oos">; matchedBy?: string; viaPivot?: boolean } {
   const oos = auth.outOfScope ?? [];
   if (oos.length && matchTarget(oos, address).ok) {
     return { kind: "oos" };
   }
   const hit = matchTarget(auth.targets, address);
   if (hit.ok) return { kind: "admitted", matchedBy: hit.by };
+  const pivot = pivotCidrs(auth);
+  if (pivot.length && matchTarget(pivot, address).ok) {
+    return { kind: "admitted", matchedBy: "pivot", viaPivot: true };
+  }
   return { kind: "oos" };
+}
+
+/** P14-B3 — endpoint identity keeps path/query; fragment and trailing slash go. */
+export function normalizeEndpointAddress(raw: string): string {
+  try {
+    const url = new URL(raw.trim());
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+}
+
+/** P14-B3 — service identity is `host:port` (lowercased, no scheme). */
+export function normalizeServiceAddress(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\/+$/, "");
+}
+
+export const assetTypeTag = (t: AssetType) => `asset.type:${t}`;
+export const assetParentTag = (parent: string) => `asset.parent:${parent}`;
+export const assetWeightTag = (weight: number) => `asset.weight:${weight}`;
+
+export function parseAssetTypeFromTags(tags: string[]): AssetType | null {
+  for (const tag of tags) {
+    if (!tag.startsWith("asset.type:")) continue;
+    const value = tag.slice("asset.type:".length);
+    if (value === "domain" || value === "ip" || value === "service" || value === "endpoint") return value;
+  }
+  return null;
+}
+
+export function parseAssetParentFromTags(tags: string[]): string | null {
+  for (const tag of tags) {
+    if (tag.startsWith("asset.parent:")) return tag.slice("asset.parent:".length);
+  }
+  return null;
+}
+
+export function parseAssetWeightFromTags(tags: string[]): number {
+  for (const tag of tags) {
+    if (!tag.startsWith("asset.weight:")) continue;
+    const n = Number(tag.slice("asset.weight:".length));
+    if (Number.isInteger(n) && n >= 0 && n <= 5) return n;
+  }
+  return 0;
 }
 
 export function assetTags(input: {
   kind: AssetKind;
   address: string;
+  assetType?: AssetType | null;
+  parentAddress?: string | null;
+  weight?: number;
   source: AssetSource;
 }): string[] {
-  return [
+  const tags = [
     ASSET_TAG,
     assetKindTag(input.kind),
     assetAddrTag(input.address),
     assetSourceTag(input.source),
   ];
+  if (input.assetType) tags.push(assetTypeTag(input.assetType));
+  if (input.parentAddress) tags.push(assetParentTag(input.parentAddress));
+  if (typeof input.weight === "number") tags.push(assetWeightTag(input.weight));
+  return tags;
 }
