@@ -3,6 +3,12 @@
 2026-11-22 调研定案起草；同日按用户定调重构：**记忆分项目记忆与全局记忆两级**。状态：**提案，未动工**。  
 配套：[theory-fact-intent-dag.md](./theory-fact-intent-dag.md) · [architecture.md](./architecture.md) · [evidence-review.md](./evidence-review.md) · [absorb-sapper-v2-nuwa.md](./absorb-sapper-v2-nuwa.md)
 
+<a id="knowledge-library"></a>
+
+## 知识与经验 · 参考资料
+
+「参考资料」按来源、版本和段落保存文档。控制台可配置本地或云端向量服务，按委托检索并查看索引进度。报告引用从任务侧密封快照回读。项目经验的提炼和本次任务事实的复核分别沿用各自流程。[参考资料接口](./knowledge-library-api.md) · [控制台接入](./knowledge-library-console.md)
+
 ## 结论（先读这四句）
 
 1. **项目记忆已有且硬**：每个任务过程中的记忆 = History 黑板（Fact–Intent DAG）+ Relay π + Durable checkpoint + evidence，四件齐全。**缺的是全局记忆**——用户整个平台使用生涯产生的沉淀，目前代码零落地。

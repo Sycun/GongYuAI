@@ -130,6 +130,7 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   "settings-approval": { title: "命令审批", subtitle: "审批模型与风险范围" },
   graphs: { title: "图谱中心", subtitle: "资产 · 攻击面 · 执行 · 记忆" },
   demo: { title: "演示场景", subtitle: "规划者与 Worker 的标注演示，不调用控制面" },
+  knowledge: { title: "参考资料", subtitle: "知识与经验 · 委托范围 · 向量化设置与索引状态" },
   "settings-assets": {
     title: "资产收集",
     subtitle: "FOFA · 鹰图 · 自定义 API · AI 自动发现写入清单",

@@ -19,8 +19,9 @@ const TaskDetailPage = lazy(() => import("./pages/TaskDetailPage").then(m => ({ 
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const GraphCenterPage = lazy(() => import("./pages/GraphCenterPage").then(m => ({ default: m.GraphCenterPage })));
 const DemoPage = lazy(() => import("./pages/DemoPage").then(m => ({ default: m.DemoPage })));
+const KnowledgePage = lazy(() => import("./pages/KnowledgePage").then(m => ({ default: m.KnowledgePage })));
 
-type Route = "chat" | "overview" | "tasks" | "graphs" | "demo" | SettingsRoute | DetailTab;
+type Route = "chat" | "overview" | "tasks" | "graphs" | "demo" | "knowledge" | SettingsRoute | DetailTab;
 type Location = { route: Route; id: string | null; query: Record<string, string> };
 const workPages = [
   { key: "overview", label: "总览" },
@@ -28,8 +29,12 @@ const workPages = [
   { key: "graphs", label: "图谱中心" },
   { key: "demo", label: "演示场景" },
 ] as const;
+const knowledgePages = [
+  { key: "knowledge", label: "参考资料" },
+] as const;
 const groups = [
   { title: "工作区", items: workPages },
+  { title: "知识与经验", items: knowledgePages },
   { title: "任务详情", items: DETAIL_TABS },
   { title: "系统设置", items: SETTINGS_SECTIONS },
 ];
@@ -44,7 +49,7 @@ function parseHash(): Location {
   const located = (route: Route, nextId: string | null = null): Location => ({ route, id: nextId, query });
   if (part === "settings" || part === "settings-tools") return located("settings-model");
   if (part === "dive") return located("live", id || null);
-  if (part === "graphs" || part === "demo") return located(part, id || null);
+  if (part === "graphs" || part === "demo" || part === "knowledge") return located(part, id || null);
   if (part === "tasks" || part === "overview" || part === "chat" || isDetail(part)) {
     return located(part, id || null);
   }
@@ -291,6 +296,7 @@ export function App() {
             onCreated={task => { openTask(task); void refresh(); }} />}
           {route === "graphs" && <GraphCenterPage onOpen={openHref} />}
           {route === "demo" && <DemoPage />}
+          {route === "knowledge" && <KnowledgePage query={page.query} tasks={tasks} />}
           {isSettingsRoute(route) && <SettingsPage section={settingsSectionOf(route)} catalog={catalog} onCatalog={setCatalog} profileId={id} />}
           {isDetail(route) && <TaskDetailPage key={detailId} task={tasks.find(t => t.id === detailId) ?? null}
             tab={route} focus={page.query} refreshNonce={detailNonce}

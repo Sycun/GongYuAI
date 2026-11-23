@@ -17,6 +17,12 @@ import { PlatformStore } from "./platform.js";
 import { JobRunner } from "./jobs.js";
 import { SilentUpdater, resolveInstallRoot } from "./updater.js";
 import { migrateLegacyHomeDataRoot, resolveCanonicalDataRoot } from "./data-root.js";
+import type { KnowledgeEmbeddingPatch } from "@gongyuai/contracts";
+import { KnowledgeStore } from "./knowledge.js";
+export { KnowledgeStore } from "./knowledge.js";
+export { KnowledgeApiError, routeKnowledge, scopeFromTask, scopeFromDeclaration, resolveCitation, buildReportExport } from "./knowledge-api.js";
+export { extractKnowledgeBody, sectionsFromSnapshot, findSection, deriveSourceKey, parentRangeOf, CHUNKER_VERSION, EXTRACTION_VERSION } from "./knowledge-parse.js";
+export { EmbeddingClient, EmbeddingDimMismatch, EmbeddingUnavailable, resolveEmbeddingRuntime } from "./knowledge-embed.js";
 export { startControlServer as startServer } from "./server.js";
 export { SettingsStore } from "./settings.js";
 export { SilentUpdater, resolveInstallRoot } from "./updater.js";
@@ -35,6 +41,11 @@ export type BootOptions = {
    * 不会自动重启或续跑任何任务，也不会产生外部调用。所有读取都留在 dataRoot 内。
    */
   isolated?: boolean;
+  /**
+   * 本地向量化配置覆盖（验收与隔离运行用）。写入本数据根的 settings.json，
+   * 不触碰正式数据根。缺省沿用 settings.json 里的 knowledgeEmbedding。
+   */
+  knowledgeEmbedding?: KnowledgeEmbeddingPatch;
 };
 
 function readPackageVersion(installRoot: string): string {
@@ -79,6 +90,10 @@ export async function bootControlPlane(opts: BootOptions = {}) {
   const store = new ControlStore(dataRoot);
   const platform = new PlatformStore(dataRoot);
   const settings = new SettingsStore(dataRoot, installRoot);
+  if (opts.knowledgeEmbedding) settings.patchKnowledgeEmbedding(opts.knowledgeEmbedding);
+  const knowledge = new KnowledgeStore(dataRoot, {
+    embeddingSettings: () => settings.get().knowledgeEmbedding,
+  });
   // Seed env for this process so any child inherits defaults
   Object.assign(process.env, settings.workerEnv());
 
@@ -110,10 +125,12 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     version,
     platform,
     jobs,
+    knowledge,
   });
 
   return {
     store,
+    knowledge,
     runner,
     watchdog,
     isolated,
@@ -128,6 +145,7 @@ export async function bootControlPlane(opts: BootOptions = {}) {
       await jobs.stop();
       await server.close();
       runner.dispose();
+      knowledge.close();
       store.close();
       platform.close();
     },

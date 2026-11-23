@@ -1,0 +1,135 @@
+{
+  "started": "2026-11-23T12:32:40.017Z",
+  "scope": "isolated synthetic shared corpus",
+  "base": "https://api.siliconflow.cn/v1",
+  "model": "Qwen/Qwen3-VL-Embedding-8B",
+  "upstreamRequests": [
+    {
+      "status": 200,
+      "model": "Qwen/Qwen3-VL-Embedding-8B",
+      "inputs": 1,
+      "vectors": 1,
+      "dim": 4096
+    },
+    {
+      "status": 200,
+      "model": "Qwen/Qwen3-VL-Embedding-8B",
+      "inputs": 1,
+      "vectors": 1,
+      "dim": 4096
+    },
+    {
+      "status": 200,
+      "model": "Qwen/Qwen3-VL-Embedding-8B",
+      "inputs": 2,
+      "vectors": 2,
+      "dim": 4096
+    },
+    {
+      "status": 200,
+      "model": "Qwen/Qwen3-VL-Embedding-8B",
+      "inputs": 1,
+      "vectors": 1,
+      "dim": 4096
+    }
+  ],
+  "checks": [
+    {
+      "check": "local index",
+      "state": "ready",
+      "model": "bge-m3-mlx-4bit",
+      "dim": 1024,
+      "done": 2,
+      "total": 2,
+      "indexKey": "c2|local|http://127.0.0.1:8000/v1|bge-m3-mlx-4bit"
+    },
+    {
+      "check": "local search",
+      "status": 200,
+      "query": "接班的图书管理员如何得知前任尚未办完的还书事项？",
+      "keywords": 0,
+      "semantic": 2,
+      "top": "§值班交接",
+      "score": 0.5968761190362976,
+      "degraded": false
+    },
+    {
+      "check": "initial citation",
+      "status": "verified",
+      "locator": "§值班交接",
+      "chunkSha256": "35820fa98b6668b6dfb19c8e395b11f8f009ef5ff6c0d2dcd53e117ccd114839",
+      "snapshotSha256": "636f8a757e3597653afb42ecbeca97b8f63c4cc1288410892f9e8bfd707c1dc5"
+    },
+    {
+      "check": "cloud probe",
+      "controlHttp": 200,
+      "ok": true,
+      "dim": 4096,
+      "ms": 565
+    },
+    {
+      "check": "cloud rebuild",
+      "status": 202,
+      "versions": 1
+    },
+    {
+      "check": "cloud index",
+      "state": "ready",
+      "model": "Qwen/Qwen3-VL-Embedding-8B",
+      "dim": 4096,
+      "done": 2,
+      "total": 2,
+      "indexKey": "c2|cloud|https://api.siliconflow.cn/v1|Qwen/Qwen3-VL-Embedding-8B"
+    },
+    {
+      "check": "cloud search",
+      "status": 200,
+      "query": "接班的图书管理员如何得知前任尚未办完的还书事项？",
+      "keywords": 0,
+      "semantic": 1,
+      "top": "§值班交接",
+      "score": 0.7315739470019216,
+      "degraded": false
+    },
+    {
+      "check": "cloud citation",
+      "status": "verified",
+      "locator": "§值班交接",
+      "chunkSha256": "35820fa98b6668b6dfb19c8e395b11f8f009ef5ff6c0d2dcd53e117ccd114839",
+      "snapshotSha256": "636f8a757e3597653afb42ecbeca97b8f63c4cc1288410892f9e8bfd707c1dc5"
+    },
+    {
+      "check": "local rebuild",
+      "status": 202,
+      "versions": 1
+    },
+    {
+      "check": "local index",
+      "state": "ready",
+      "model": "bge-m3-mlx-4bit",
+      "dim": 1024,
+      "done": 2,
+      "total": 2,
+      "indexKey": "c2|local|http://127.0.0.1:8000/v1|bge-m3-mlx-4bit"
+    },
+    {
+      "check": "local search",
+      "status": 200,
+      "query": "接班的图书管理员如何得知前任尚未办完的还书事项？",
+      "keywords": 0,
+      "semantic": 2,
+      "top": "§值班交接",
+      "score": 0.5968761190362976,
+      "degraded": false
+    },
+    {
+      "check": "restored local citation",
+      "status": "verified",
+      "locator": "§值班交接",
+      "chunkSha256": "35820fa98b6668b6dfb19c8e395b11f8f009ef5ff6c0d2dcd53e117ccd114839",
+      "snapshotSha256": "636f8a757e3597653afb42ecbeca97b8f63c4cc1288410892f9e8bfd707c1dc5"
+    }
+  ],
+  "result": "passed",
+  "finished": "2026-11-23T12:32:47.422Z"
+}

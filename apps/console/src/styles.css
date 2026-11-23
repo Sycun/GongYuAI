@@ -234,3 +234,20 @@ body {
   .gy-dag-toolbar, .gy-dag-legend { padding-inline: 12px; }
   .gy-dag-controls .semi-button { height: 34px; min-width: 36px; }
 }
+
+.gy-knowledge { display: grid; gap: 16px; align-content: start; }
+.gy-knowledge-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.gy-knowledge-scope { min-width: 0; }
+.gy-knowledge-scope-note { display: block; margin-top: -6px; }
+.gy-knowledge-index-head { margin-bottom: 4px; }
+.gy-knowledge-search-bar { margin-bottom: 12px; }
+.gy-knowledge-hits, .gy-knowledge-material-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.gy-knowledge-hits > li, .gy-knowledge-material-list > li { padding: 10px 12px; border: 1px solid var(--semi-color-border); border-radius: 10px; background: var(--semi-color-bg-0); }
+.gy-knowledge-hit-context { display: block; margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.gy-knowledge .semi-card { border-radius: 14px; }
+.gy-knowledge-index .semi-descriptions { margin-top: 8px; }
+
+@media (max-width: 760px) {
+  .gy-knowledge-toolbar { align-items: stretch; }
+  .gy-knowledge-scope .semi-autocomplete, .gy-knowledge-scope .semi-select { width: 100% !important; }
+}

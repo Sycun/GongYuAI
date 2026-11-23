@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { coverageLabels, type TaskStatus, type TaskRecord, type WorkerManifest, type Fact } from "@gongyuai/contracts";
+import { coverageLabels, knowledgeSourceKindLabels, type TaskStatus, type TaskRecord, type WorkerManifest, type Fact, type KnowledgeVersionStatus } from "@gongyuai/contracts";
 import type { HistoryStore, FactReview } from "./index.js";
 import { describeGoalEvidence, formatAccounting } from "./delivery.js";
 import { integrationSuccessRate, totalIntegrationCalls } from "@gongyuai/contracts";
@@ -44,7 +44,9 @@ function label(raw: string) {
 export function writeTaskReport(
   task: Pick<WorkerManifest, "taskId" | "dataDir" | "auth">,
   history: HistoryStore,
-  opts: { status: TerminalReportStatus; reason?: string; includeRelay?: boolean; accounting?: Pick<TaskRecord, "budget" | "usage" | "startedAt" | "finishedAt"> },
+  opts: { status: TerminalReportStatus; reason?: string; includeRelay?: boolean; accounting?: Pick<TaskRecord, "budget" | "usage" | "startedAt" | "finishedAt">;
+    /** 知识库侧的版本状态查询；缺省时报告只少一行停用提示，不影响定版回读。 */
+    materialVersionStatus?: (versionId: string, materialId: string) => KnowledgeVersionStatus | undefined },
 ): string {
   return history.withReportTransaction(() => {
     const id = task.taskId;
@@ -393,6 +395,38 @@ export function writeTaskReport(
     if (remaining.length) {
       lines.push("## 其余历史记录（未关联到已复核结论）", "");
       for (const f of remaining) lines.push(`- ${factLabel(f)}。${label(f.summary)}${f.evidencePath ? ` · 记录路径：${label(f.evidencePath)}` : ""}`);
+    }
+    const citations = history.listMaterialCitations(id);
+    if (citations.length) {
+      lines.push("", "## 参考资料引用（定版）", "");
+      for (const [index, citation] of citations.entries()) {
+        // 快照缺失或校验失败时报告仍要出得来，并明确标注无法复验，不静默跳过。
+        let evidence: string;
+        try {
+          evidence = link(`knowledge/${citation.snapshotSha256}`, citation.snapshotSha256);
+        } catch (err) {
+          evidence = `**无法复验**（${label(err instanceof Error ? err.message : String(err))}）· 期望 SHA-256 ${citation.snapshotSha256}`;
+        }
+        const versionStatus = opts.materialVersionStatus?.(citation.versionId, citation.materialId);
+        lines.push(
+          `- 引用 #${index + 1}（${citation.createdAt}）· ${label(citation.materialTitle)} · ` +
+            `${knowledgeSourceKindLabels[citation.sourceKind]} · ${label(citation.versionLabel)} · ${label(citation.locator)}`,
+          `  支持的表述：${label(citation.claim)}`,
+          `  发布者：${label(citation.publisher)}　段落：${label(citation.sectionHeading ?? "（无标题）")}` +
+            (citation.sectionPage !== null ? `　页码：${citation.sectionPage}` : ""),
+          `  定版快照：${evidence}`,
+        );
+        if (citation.pinKind === "range" && citation.charStart !== null && citation.charEnd !== null) {
+          lines.push(`  原文范围：[${citation.charStart}, ${citation.charEnd})　片段 SHA-256 ${citation.chunkSha256 ?? "（未登记）"}`);
+        }
+        if (citation.pageBasis === "legacy-paragraph") {
+          lines.push("  页码依据：早期提取按空行推算，**物理页码无法确认**；正文与快照校验值不受影响。");
+        }
+        if (versionStatus === "deprecated") {
+          lines.push("  该版本已停用；本引用仍按当时定版回读，当前检索默认给有效版。");
+        }
+      }
+      lines.push("");
     }
     if (corrections.length) {
       lines.push("", "## 交付更正", "");

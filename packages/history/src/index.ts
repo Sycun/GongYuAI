@@ -91,6 +91,33 @@ import {
   type RetestRequestInput,
   type RetestRequestStatus,
 } from "@gongyuai/contracts";
+import {
+  MaterialCitationSchema,
+  type KnowledgeBodyFormat,
+  type KnowledgeSection,
+  type KnowledgeSourceKind,
+  type MaterialCitation,
+  type MaterialCitationInput,
+} from "@gongyuai/contracts";
+
+/**
+ * 控制面在知识库侧校验通过后交来的定版标签与快照字节。
+ * 标签只用于渲染报告；正文仍从密封快照回读，不在这里存第二份真相。
+ */
+export type MaterialCitationSeal = {
+  materialTitle: string;
+  publisher: string;
+  sourceKind: KnowledgeSourceKind;
+  versionNo: number;
+  versionLabel: string;
+  bodyFormat: KnowledgeBodyFormat;
+  sectionHeading: string | null;
+  sectionPage: number | null;
+  sectionOrdinal: number;
+  /** 片段元数据（不含正文）：标题路径、父章节、片序、行号、页码依据。 */
+  sectionMeta: Omit<KnowledgeSection, "text">;
+  snapshot: Buffer;
+};
 
 export { TaskOperations } from "./ops.js";
 export type { OpsScope, JobPatch } from "./ops.js";
@@ -446,10 +473,57 @@ export class HistoryStore {
       );
       CREATE INDEX IF NOT EXISTS idx_peer_reviews_task ON peer_reviews(task_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_peer_reviews_engagement ON peer_reviews(engagement_id, created_at);
+
+      -- 知识库首版：报告里的定版资料引用。快照字节密封进 evidence_versions，
+      -- 因此资料更新、旧版停用、服务重启或上游离线后，旧报告仍能回读原段落。
+      CREATE TABLE IF NOT EXISTS material_citations (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        engagement_id TEXT NOT NULL,
+        material_id TEXT NOT NULL,
+        version_id TEXT NOT NULL,
+        locator TEXT NOT NULL,
+        claim TEXT NOT NULL,
+        body_format TEXT NOT NULL,
+        material_title TEXT NOT NULL,
+        publisher TEXT NOT NULL,
+        source_kind TEXT NOT NULL,
+        version_no INTEGER NOT NULL,
+        version_label TEXT NOT NULL,
+        section_heading TEXT,
+        section_page INTEGER,
+        section_ordinal INTEGER NOT NULL,
+        sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256),
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_material_citations_task ON material_citations(task_id, created_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_material_citations_dedup
+        ON material_citations(task_id, material_id, version_id, locator, claim);
     `);
     this.ensureIntentSourceFactIdsColumn();
     this.ensureIntentTechniqueColumns();
     this.ensureGoalColumns();
+    this.ensureCitationPinColumns();
+  }
+
+  /**
+   * 定版引用的原文范围与片段校验值。旧行没有这些值，pin_kind 保持 locator，
+   * 回读走旧切分，因此升级前后读到的是同一段。
+   * section_json 只存片段元数据（不含正文），正文一律从密封快照回读。
+   */
+  private ensureCitationPinColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(material_citations)`).all() as Array<{ name: string }>;
+    const have = new Set(cols.map((c) => c.name));
+    const add: Record<string, string> = {
+      pin_kind: "TEXT NOT NULL DEFAULT 'locator'",
+      char_start: "INTEGER",
+      char_end: "INTEGER",
+      chunk_sha256: "TEXT",
+      section_json: "TEXT",
+    };
+    for (const [name, definition] of Object.entries(add)) {
+      if (!have.has(name)) this.db.exec(`ALTER TABLE material_citations ADD COLUMN ${name} ${definition}`);
+    }
   }
 
   /** Migrate older DBs that predate goal-level assets / findings / board gate. */
@@ -1976,6 +2050,7 @@ export class HistoryStore {
       ["retest_requests", "task_id"],
       ["peer_reviews", "task_id"],
       ["delivery_corrections", "task_id"],
+      ["material_citations", "task_id"],
     ];
     const clauses: string[] = [];
     const params: Array<string> = [sha256];
@@ -2209,6 +2284,147 @@ export class HistoryStore {
           createdAt: String(r.createdAt),
         } as PeerReview;
       });
+  }
+
+  /**
+   * 定版资料引用。快照字节在此密封进本任务的 evidence_versions，报告因此
+   * 不依赖知识库快照或上游网络。重复提交同一引用返回已有记录，不追加。
+   */
+  recordMaterialCitation(
+    taskId: string,
+    engagementId: string,
+    input: MaterialCitationInput,
+    seal: MaterialCitationSeal,
+  ): MaterialCitation {
+    const entry = MaterialCitationSchema.parse(input);
+    if (!engagementId.trim()) throw new Error("material citation requires an engagement");
+    const sha256 = createHash("sha256").update(seal.snapshot).digest("hex");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = this.db.prepare(
+        `SELECT id FROM material_citations
+         WHERE task_id = ? AND material_id = ? AND version_id = ? AND locator = ? AND claim = ?`,
+      ).get(taskId, entry.materialId, entry.versionId, entry.locator, entry.claim) as { id: string } | undefined;
+      if (existing) {
+        this.db.exec("COMMIT");
+        return this.getMaterialCitation(taskId, existing.id)!;
+      }
+      const citation: MaterialCitation = {
+        id: randomUUID(),
+        taskId,
+        engagementId,
+        materialId: entry.materialId,
+        versionId: entry.versionId,
+        locator: entry.locator,
+        claim: entry.claim,
+        snapshotSha256: sha256,
+        bodyFormat: seal.bodyFormat,
+        materialTitle: seal.materialTitle,
+        publisher: seal.publisher,
+        sourceKind: seal.sourceKind,
+        versionNo: seal.versionNo,
+        versionLabel: seal.versionLabel,
+        sectionHeading: seal.sectionHeading,
+        sectionPage: seal.sectionPage,
+        sectionOrdinal: seal.sectionOrdinal,
+        createdAt: this.now(),
+        pinKind: entry.charStart === undefined ? "locator" : "range",
+        charStart: entry.charStart ?? null,
+        charEnd: entry.charEnd ?? null,
+        chunkSha256: entry.chunkSha256 ?? null,
+        headingPath: seal.sectionMeta.headingPath,
+        pageBasis: seal.sectionMeta.pageBasis,
+      };
+      this.saveVersion({ path: `knowledge/${sha256}`, sha256, content: seal.snapshot });
+      this.db.prepare(
+        `INSERT INTO material_citations (id, task_id, engagement_id, material_id, version_id, locator, claim,
+           body_format, material_title, publisher, source_kind, version_no, version_label,
+           section_heading, section_page, section_ordinal, sha256, created_at,
+           pin_kind, char_start, char_end, chunk_sha256, section_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(citation.id, taskId, engagementId, citation.materialId, citation.versionId, citation.locator,
+        citation.claim, citation.bodyFormat, citation.materialTitle, citation.publisher, citation.sourceKind,
+        citation.versionNo, citation.versionLabel, citation.sectionHeading, citation.sectionPage,
+        citation.sectionOrdinal, sha256, citation.createdAt,
+        citation.pinKind, citation.charStart, citation.charEnd, citation.chunkSha256,
+        JSON.stringify(seal.sectionMeta));
+      this.emit(taskId, "material_citation_recorded", {
+        citationId: citation.id,
+        materialId: citation.materialId,
+        versionId: citation.versionId,
+        locator: citation.locator,
+        sha256,
+      });
+      this.db.exec("COMMIT");
+      return citation;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  private static readonly CITATION_BASE_COLUMNS = `id, task_id AS taskId, engagement_id AS engagementId,
+    material_id AS materialId, version_id AS versionId, locator, claim, body_format AS bodyFormat,
+    material_title AS materialTitle, publisher, source_kind AS sourceKind,
+    version_no AS versionNo, version_label AS versionLabel, section_heading AS sectionHeading,
+    section_page AS sectionPage, section_ordinal AS sectionOrdinal,
+    sha256 AS snapshotSha256, created_at AS createdAt`;
+
+  private citationColumnNames: Set<string> | null = null;
+
+  /**
+   * 只读连接不跑迁移，因此升级前的库可能还没有定版范围列。
+   * 缺列时用 SQL 常量补默认值，让旧引用照样读得出来（pinKind 回落 locator）。
+   */
+  private citationColumns(): string {
+    if (!this.citationColumnNames) {
+      this.citationColumnNames = new Set(
+        (this.db.prepare(`PRAGMA table_info(material_citations)`).all() as Array<{ name: string }>)
+          .map((row) => row.name),
+      );
+    }
+    const have = this.citationColumnNames;
+    const optional: Array<[string, string, string]> = [
+      ["pin_kind", "pinKind", "'locator'"],
+      ["char_start", "charStart", "NULL"],
+      ["char_end", "charEnd", "NULL"],
+      ["chunk_sha256", "chunkSha256", "NULL"],
+      ["section_json", "sectionJson", "NULL"],
+    ];
+    const extras = optional.map(([column, alias, fallback]) =>
+      have.has(column) ? `${column} AS ${alias}` : `${fallback} AS ${alias}`);
+    return `${HistoryStore.CITATION_BASE_COLUMNS}, ${extras.join(", ")}`;
+  }
+
+  private mapCitation(row: Omit<MaterialCitation, "headingPath" | "pageBasis"> & { sectionJson: string | null }): MaterialCitation {
+    const { sectionJson, ...rest } = row;
+    const meta = sectionJson ? JSON.parse(sectionJson) as Omit<KnowledgeSection, "text"> : null;
+    return { ...rest, headingPath: meta?.headingPath ?? [], pageBasis: meta?.pageBasis ?? null };
+  }
+
+  /** 定版时登记的片段元数据，回读时与密封快照切出的正文合并。 */
+  citationSectionMeta(taskId: string, citationId: string): Omit<KnowledgeSection, "text"> | null {
+    const rows = this.db.prepare(
+      `SELECT ${this.citationColumns()} FROM material_citations WHERE task_id = ? AND id = ?`,
+    ).all(taskId, citationId) as Array<{ sectionJson: string | null }>;
+    const json = rows[0]?.sectionJson;
+    return json ? JSON.parse(json) as Omit<KnowledgeSection, "text"> : null;
+  }
+
+  getMaterialCitation(taskId: string, citationId: string): MaterialCitation | null {
+    if (this.archiveTables && !this.archiveTables.has("material_citations")) return null;
+    const row = this.db.prepare(
+      `SELECT ${this.citationColumns()} FROM material_citations WHERE task_id = ? AND id = ?`,
+    ).get(taskId, citationId) as (Omit<MaterialCitation, "headingPath" | "pageBasis"> & { sectionJson: string | null }) | undefined;
+    return row ? this.mapCitation(row) : null;
+  }
+
+  listMaterialCitations(taskId: string): MaterialCitation[] {
+    if (this.archiveTables && !this.archiveTables.has("material_citations")) return [];
+    return (this.db.prepare(
+      `SELECT ${this.citationColumns()} FROM material_citations WHERE task_id = ? ORDER BY rowid`,
+    ).all(taskId) as Array<Omit<MaterialCitation, "headingPath" | "pageBasis"> & { sectionJson: string | null }>)
+      .map((row) => this.mapCitation(row));
   }
 
   appendReview(taskId: string, input: CreateFactReview): FactReview {
