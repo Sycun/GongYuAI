@@ -116,7 +116,7 @@ test("appendProgress mirrors into worker.log for Logs tab", () => {
   }
 });
 
-test("shell authorization and budget decisions are each audited once", (t) => {
+test("shell authorization and budget decisions are each audited once", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "gy-gate-"));
   const evidenceDir = join(root, "evidence");
   const workspaceDir = join(root, "workspace");
@@ -137,15 +137,15 @@ test("shell authorization and budget decisions are each audited once", (t) => {
   m.evidenceDir = evidenceDir;
   m.auth.capability = "observe";
   const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
-  assert.throws(() => runShell(ctx, "printf allowed"), /observe/);
+  await assert.rejects(() => runShell(ctx, "printf allowed"), /observe/);
   const denied = history.listEvents(m.taskId).filter((e) => e.kind === "tool_gate");
   assert.equal(denied.length, 1);
   assert.equal(denied[0]!.payload.ok, false);
 
   m.auth.capability = "scan";
-  assert.equal(runShell(ctx, "printf allowed").stdout, "allowed");
+  assert.equal((await runShell(ctx, "printf allowed")).stdout, "allowed");
   m.budget.maxToolCalls = 2;
-  assert.throws(() => runShell(ctx, "printf blocked"), /maxToolCalls/);
+  await assert.rejects(() => runShell(ctx, "printf blocked"), /maxToolCalls/);
   const gates = history.listEvents(m.taskId).filter((e) => e.kind === "tool_gate");
   assert.equal(gates.length, 3);
   assert.equal(gates.filter((g) => g.payload.ok).length, 1);
@@ -236,7 +236,7 @@ test("skill and MCP outcomes follow returned content and protocol status", async
   const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
   const mcp = await openMcpHub(m, ctx);
   try {
-    assert.equal(await mcp.call("mcp__archive__read", {}), "receipt unavailable");
+    await assert.rejects(mcp.call("mcp__archive__read", {}), /审批/);
     const partial = JSON.parse(await mcp.invoke("local-receipt", "run", { target: "archive.invalid" }));
     assert.notEqual(partial.exitCode, 0);
     assert.equal(partial.stdout, "receipt");

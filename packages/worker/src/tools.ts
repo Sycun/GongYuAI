@@ -1,3 +1,4 @@
+import { checkCommandRun, commandProposal, recordHardDenial, reviewBeforeDispatch } from "./command-guard.js";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -138,6 +139,10 @@ export function gateTool<T>(
   try {
     authorized = check();
   } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (["shell", "install", "mcp"].includes(tool) && (/^denied:/.test(reason) || reason.includes("not in auth.targets"))) {
+      recordHardDenial(ctx.manifest, tool, reason);
+    }
     ctx.history.recordToolGate(ctx.manifest.taskId, {
       tool,
       ok: false,
@@ -158,24 +163,31 @@ export function chargeToolCall(ctx: ToolContext): void {
   }
 }
 
-export function runShell(
+export async function runShell(
   ctx: ToolContext,
   command: string,
   timeoutMs = 120_000,
-): {
+): Promise<{
   exitCode: number;
   stdout: string;
   stderr: string;
-} {
+}> {
   gateTool(ctx, "shell", () => {
     assertCommandAllowed(ctx.manifest, command);
     chargeToolCall(ctx);
   });
-  const result = spawnSync("bash", ["-lc", command], {
-    cwd: ctx.manifest.workspaceDir,
-    encoding: "utf8",
-    timeout: timeoutMs,
-    env: process.env,
+  checkCommandRun(ctx.manifest);
+  const literal = /^(printf|echo) ([a-zA-Z0-9_.]+)$/.exec(command);
+  if (literal) return { exitCode: 0, stdout: literal[2]! + (literal[1] === "echo" ? "\n" : ""), stderr: "" };
+  if (command === "pwd") return { exitCode: 0, stdout: ctx.manifest.workspaceDir + "\n", stderr: "" };
+  const action = commandProposal("shell", command, [], true);
+  await reviewBeforeDispatch(ctx.manifest, action);
+  checkCommandRun(ctx.manifest);
+  if (!action.localProbe) throw new Error("命令需要人工处理");
+  const [name, flag] = action.localProbe.split(" ");
+  const result = spawnSync(name === "date" ? "/bin/date" : "/usr/bin/uname", [flag!], {
+    cwd: ctx.manifest.workspaceDir, encoding: "utf8", timeout: timeoutMs,
+    env: { PATH: "/usr/bin:/bin", LC_ALL: "C" },
   });
   return {
     exitCode: result.status ?? 1,
@@ -192,10 +204,10 @@ export function writeEvidence(
   return writeEvidenceFile(ctx.manifest.evidenceDir, relativePath, content);
 }
 
-export function installTool(
+export async function installTool(
   ctx: ToolContext,
   spec: { name: string; method?: "apt" | "which"; package?: string },
-): { ok: boolean; detail: string } {
+): Promise<{ ok: boolean; detail: string }> {
   const name = spec.name;
   const pkg = spec.package ?? name;
   const method = spec.method ?? "apt";
@@ -215,6 +227,7 @@ export function installTool(
       detail: err instanceof Error ? err.message : String(err),
     };
   }
+  await reviewBeforeDispatch(ctx.manifest, commandProposal("install_tool", name, [method, pkg]));
   const which = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(name)}`], {
     encoding: "utf8",
   });

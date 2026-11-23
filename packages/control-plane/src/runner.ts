@@ -20,7 +20,8 @@ import {
   type TerminalTaskStatus,
   type WorkerManifest,
 } from "@gongyuai/contracts";
-import { openHistory, writeTaskReport } from "@gongyuai/history";
+import { CommandLedger, hasCommandLedger, openHistory, writeTaskReport, type CommandTicket } from "@gongyuai/history";
+import { reviewCommand } from "./command-approval.js";
 import { durableDbForSlot, manifestPathForSlot, taskPaths } from "./paths.js";
 import { exhaustedCounter, mergeUsageFromDisk, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
@@ -82,7 +83,7 @@ function writeManifestForSlot(
     }
   }
   const manifest: WorkerManifest = {
-    taskId: task.id,
+    taskId: task.id, commandFence: task.fence,
     dataDir: task.dataDir,
     historyDb: paths.historyDb,
     durableDb,
@@ -133,6 +134,8 @@ export class WorkerRunner {
   private readonly lastScaleCheck = new Map<string, number>();
   /** Set by boot shutdown: detached workers may outlive this control plane. */
   private disposed = false;
+  private readonly imageForRun = new Map<string, string>();
+  private readonly reviews = new Map<string, AbortController>();
 
   constructor(
     private readonly store: ControlStore,
@@ -140,11 +143,53 @@ export class WorkerRunner {
     private readonly settings: SettingsStore,
   ) {}
 
+  private invalidateCommands(task: TaskRecord) {
+    if (!hasCommandLedger(task.dataDir)) return;
+    const ledger = new CommandLedger(task.dataDir);
+    try { ledger.deactivate(task.id, task.fence); } finally { ledger.close(); }
+  }
+
+  /** Process approvals separately from the worker. A slow reviewer must not stall other tasks' leases. */
+  async reconcileCommands(task: TaskRecord): Promise<boolean> {
+    if (!hasCommandLedger(task.dataDir)) return false;
+    const ledger = new CommandLedger(task.dataDir);
+    let held: CommandTicket | undefined;
+    try {
+      held = ledger.next(task.id, task.fence, "held");
+      if (!held) {
+        const pending = ledger.next(task.id, task.fence, "pending");
+        if (!pending) return false;
+        const key = task.id + ":" + task.fence;
+        if (!this.reviews.has(key)) {
+          const controller = new AbortController();
+          this.reviews.set(key, controller);
+          void reviewCommand(this.settings, pending, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]))
+            .then(receipt => {
+              if (this.disposed) return;
+              const target = new CommandLedger(task.dataDir);
+              try {
+                if (target.active(task.id, task.fence)) target.settle(pending, receipt);
+              } finally { target.close(); }
+            }).catch(() => { /* The worker deadline also fails closed. */ })
+            .finally(() => this.reviews.delete(key));
+        }
+        return true;
+      }
+    } finally { ledger.close(); }
+    const receipt = held.receipt!;
+    const record = this.store.get(task.id);
+    if (!record || record.fence !== task.fence) return true;
+    record.commandReview = { id: receipt.id, fence: task.fence, at: receipt.at, tool: held.action.tool, model: receipt.model,
+      decision: receipt.decision === "unavailable" ? "unavailable" : "block", reason: receipt.reason };
+    this.store.save(record);
+    await this.pause(task.id);
+    return true;
+  }
+
   async start(taskId: string): Promise<TaskRecord> {
     const task = this.store.get(taskId);
     if (!task) throw new Error(`task not found: ${taskId}`);
     if (task.assignment) throw new Error("此任务由工作区任务处理器执行");
-
     if (this.isAlive(task)) {
       throw new Error("任务已在运行中");
     }
@@ -152,6 +197,22 @@ export class WorkerRunner {
       throw new Error(`任务正在${task.status === "pause_requested" ? "暂停" : "停止"}，等待确认后再操作`);
     }
 
+    if (isActiveTaskStatus(task.status) && await this.reconcileCommands(task)) throw new Error("命令审批处理中或任务已暂停");
+    if (this.cfg.mode === "docker") {
+      const inspected = spawnSync("docker", ["image", "inspect", "--format",
+        '{{.Id}} {{index .Config.Labels "org.gongyuai.command-review"}}', this.cfg.workerImage],
+        { encoding: "utf8", timeout: 5000 });
+      const image = /^(sha256:[0-9a-f]{64}) 1$/.exec(inspected.stdout?.trim() ?? "");
+      if (!image) {
+        const reason = "工作镜像缺少命令审批版本，任务暂停，需使用新版 worker 镜像。";
+        task.commandReview = { id: "image-" + task.fence, fence: task.fence, at: new Date().toISOString(),
+          tool: "worker", model: "", decision: "unavailable", reason };
+        this.store.save(task);
+        await this.pause(task.id);
+        throw new Error(reason);
+      }
+      this.imageForRun.set(task.id, image[1]!);
+    }
     if (!isActiveTaskStatus(task.status)) {
       this.prepareRestart(task);
     }
@@ -159,6 +220,8 @@ export class WorkerRunner {
     const lease = this.store.acquireLease(taskId, this.cfg.ownerId, this.cfg.leaseMs);
     if (!lease.ok) throw new Error(`lease: ${lease.reason}`);
 
+    const ledger = new CommandLedger(lease.task.dataDir);
+    try { ledger.activate(taskId, lease.task.fence); } finally { ledger.close(); }
     const workerCount = taskWorkerCount(lease.task, countScalableAssets(lease.task));
     for (let slot = 0; slot < workerCount; slot++) {
       writeManifestForSlot(lease.task, this.settings, slot, workerCount);
@@ -262,7 +325,7 @@ export class WorkerRunner {
   }
 
   private workerEntry(): string {
-    const dist = join(repoRoot, "packages/worker/dist/main.js");
+    const dist = join(repoRoot, "packages/worker/dist/reviewed-main.js");
     const src = join(repoRoot, "packages/worker/src/main.ts");
     return existsSync(dist) ? dist : src;
   }
@@ -381,6 +444,7 @@ export class WorkerRunner {
     if (!task || !isActiveTaskStatus(task.status)) return;
 
     let current: number;
+    if (this.cfg.mode === "docker" && !this.imageForRun.has(taskId)) return;
     if (this.cfg.mode === "local") {
       const slots = this.children.get(taskId);
       // Without a live child map (e.g. control-plane restarted) slot identity is
@@ -425,6 +489,8 @@ export class WorkerRunner {
   }
 
   private spawnDockerSlot(task: TaskRecord, slot: number, workerCount: number): string {
+    const image = this.imageForRun.get(task.id);
+    if (!image) throw new Error("工作镜像审批版本尚未确认");
     const absData = resolve(task.dataDir);
     const name = `gy-task-${task.id.slice(0, 8)}-w${slot}`;
     spawnSync("docker", ["rm", "-f", name], { encoding: "utf8" });
@@ -456,7 +522,7 @@ export class WorkerRunner {
       `GY_VISION=${this.settings.workerEnv().GY_VISION}`,
       "-e",
       `GY_VISION_MODEL=${this.settings.workerEnv().GY_VISION_MODEL}`,
-      this.cfg.workerImage,
+      image,
     ];
 
     const result = spawnSync("docker", args, { encoding: "utf8" });
@@ -524,6 +590,7 @@ export class WorkerRunner {
       }
     }
     this.children.delete(taskId);
+    this.imageForRun.delete(taskId);
   }
 
   finishWorkerRun(task: TaskRecord, status: TerminalTaskStatus, error: string | null): TaskRecord {
@@ -575,6 +642,7 @@ export class WorkerRunner {
     if (task.status === "paused") return task;
     if (task.status === "stopping") throw new Error("任务正在停止，不能暂停");
 
+    this.invalidateCommands(task);
     task.status = "pause_requested";
     task.pauseRequestedAt = new Date().toISOString();
     task.error = null;
@@ -594,6 +662,7 @@ export class WorkerRunner {
       this.store.save(latest);
       throw new Error(latest.error);
     }
+    if (latest.fence !== task.fence || latest.status !== "pause_requested") return latest;
     latest.status = "paused";
     latest.pausedAt = new Date().toISOString();
     latest.lastHeartbeatAt = latest.pausedAt;
@@ -603,7 +672,7 @@ export class WorkerRunner {
     latest.containerIds = [];
     latest.leaseOwner = null;
     latest.leaseUntil = null;
-    latest.error = null;
+    latest.error = latest.commandReview?.fence === latest.fence ? latest.commandReview.reason : null;
     this.store.save(latest);
     this.children.delete(taskId);
     return latest;
@@ -678,6 +747,7 @@ export class WorkerRunner {
       return task;
     }
 
+    this.invalidateCommands(task);
     task.status = "stopping";
     this.store.save(task);
     let status: "stopped" | "budget_exhausted" = "stopped";
@@ -692,6 +762,7 @@ export class WorkerRunner {
   /** Stop observing children; used when the control plane shuts down. */
   dispose(): void {
     this.disposed = true;
+    for (const review of this.reviews.values()) review.abort();
     this.children.clear();
   }
 

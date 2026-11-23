@@ -961,6 +961,8 @@ export const WorkerManifestSchema = z.object({
   workerSlot: z.number().int().nonnegative().default(0),
   /** Total Explore workers spawned for this task. */
   workerCount: z.number().int().positive().default(1),
+  /** Command-approval epoch. Older manifests omit it and cannot dispatch guarded commands. */
+  commandFence: z.number().int().nonnegative().optional(),
   mock: z.boolean(),
   model: z
     .object({

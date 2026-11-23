@@ -442,7 +442,7 @@ async function tryPiDurable(
       parameters: obj({ command: str() }),
       replay: "none",
       execute: async (args: { command: string }) => {
-        const r = runShell(ctx, args.command);
+        const r = await runShell(ctx, args.command);
         state.toolCalls = ctx.usage.toolCalls;
         state.installs = ctx.usage.installs;
         // Flush sidecar before ckpt — status file is what CP/watchdog poll;
@@ -630,7 +630,7 @@ async function tryPiDurable(
       parameters: obj({ name: str(), package: str() }),
       replay: "none",
       execute: async (args: { name: string; package: string }) => {
-        const r = installTool(ctx, {
+        const r = await installTool(ctx, {
           name: args.name,
           package: args.package || args.name,
         });
@@ -1820,7 +1820,7 @@ async function runOpenAiToolLoop(
         }
         switch (call.function.name) {
           case "shell": {
-            const r = runShell(ctx, args.command ?? "");
+            const r = await runShell(ctx, args.command ?? "");
             shellResult = formatShellResult(r);
             result = JSON.stringify(r);
             ctx.history.appendFact({
@@ -1920,7 +1920,7 @@ async function runOpenAiToolLoop(
           }
           case "install_tool":
             result = JSON.stringify(
-              installTool(ctx, { name: args.name ?? "", package: args.package }),
+              await installTool(ctx, { name: args.name ?? "", package: args.package }),
             );
             ctx.history.appendFact({
               taskId: manifest.taskId,

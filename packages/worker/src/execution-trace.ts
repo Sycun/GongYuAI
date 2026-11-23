@@ -3,7 +3,7 @@ import type { ShellTraceCall, WorkerManifest } from "@gongyuai/contracts";
 import { saveExecutionStep } from "@gongyuai/history";
 import { appendProgress, type runShell } from "./tools.js";
 
-export function formatShellResult(result: ReturnType<typeof runShell>): string {
+export function formatShellResult(result: Awaited<ReturnType<typeof runShell>>): string {
   return `exit=${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`;
 }
 

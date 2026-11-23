@@ -92,7 +92,7 @@ export function createBuiltinFromRoot(
       } else {
         argv = [...flagArgs, target, ...extraArgs];
       }
-      const r = runCliTool(ctx, {
+      const r = await runCliTool(ctx, {
         binary,
         args: argv,
         evidenceRel: `mcp/${serverId}/${Date.now()}.txt`,

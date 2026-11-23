@@ -84,11 +84,24 @@ export class Watchdog {
     if (!task || task.assignment || !isActiveTaskStatus(task.status)) return;
     // Draining states are owned by the operator action (pause/stop). The
     // watchdog neither restarts nor promotes them.
-    if (isDrainingTaskStatus(task.status)) return;
+    if (isDrainingTaskStatus(task.status)) {
+      if (task.status === "pause_requested" && task.commandReview?.fence === task.fence &&
+          (!task.leaseOwner || task.leaseOwner === this.cfg.ownerId || !task.leaseUntil || Date.parse(task.leaseUntil) <= Date.now())) {
+        await this.runner.pause(taskId);
+      }
+      return;
+    }
     if (
       task.leaseOwner && task.leaseOwner !== this.cfg.ownerId &&
       task.leaseUntil && Date.parse(task.leaseUntil) > Date.now()
     ) return;
+
+    if (await this.runner.reconcileCommands(task)) {
+      if (task.leaseOwner === this.cfg.ownerId && this.runner.isAlive(task)) {
+        this.store.renewLease(task.id, this.cfg.ownerId, task.fence, this.cfg.leaseMs);
+      }
+      return;
+    }
 
     // Sync usage from worker-status + checkpoint (status sidecar can lag on Pi).
     refreshTaskUsage(task);

@@ -1,3 +1,4 @@
+import { commandProposal, reviewBeforeDispatch } from "../command-guard.js";
 import {
   isIpv4Cidr,
   targetAllows,
@@ -167,6 +168,9 @@ export async function openMcpHub(
         chargeToolCall(ctx);
         return active;
       }, { serverId, toolName });
+      if (pool.get(serverId)?.transport !== "builtin") {
+        await reviewBeforeDispatch(manifest, commandProposal("mcp", serverId + "/" + toolName, args));
+      }
       const result = await session.callTool(toolName, args);
       success = result.ok;
       return result.text.slice(0, 12_000);
@@ -256,6 +260,7 @@ async function openOne(
   }
   if (cfg.transport === "stdio") {
     if (!cfg.command) return null;
+    await reviewBeforeDispatch(ctx.manifest, commandProposal("stdio", cfg.command, cfg.args ?? []));
     return openStdioSession(cfg.id, cfg.command, cfg.args ?? [], cfg.env ?? {});
   }
   if (cfg.transport === "http") {

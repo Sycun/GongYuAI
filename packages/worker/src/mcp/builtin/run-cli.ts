@@ -1,8 +1,9 @@
+import { checkCommandRun, commandProposal, reviewBeforeDispatch } from "../../command-guard.js";
 import { spawnSync } from "node:child_process";
 import type { ToolContext } from "../../tools.js";
 import { writeEvidence } from "../../tools.js";
 
-export function runCliTool(
+export async function runCliTool(
   ctx: ToolContext,
   opts: {
     binary: string;
@@ -10,9 +11,14 @@ export function runCliTool(
     evidenceRel: string;
     timeoutMs?: number;
   },
-): { exitCode: number; stdout: string; stderr: string; evidencePath: string } {
+): Promise<{ exitCode: number; stdout: string; stderr: string; evidencePath: string }> {
   const quoted = opts.args.map((a) => JSON.stringify(a)).join(" ");
   const cmd = `${opts.binary} ${quoted}`;
+  checkCommandRun(ctx.manifest);
+  const literalPrint = opts.binary === "/usr/bin/printf" && opts.args.length > 0 && opts.args.length <= 8 && /^[a-zA-Z0-9_./-]+%?$/.test(opts.args[0]!) &&
+    opts.args.every(a => /^[a-zA-Z0-9_./%-]{1,120}$/.test(a)) && !opts.args.some(a => /%[0-9]/.test(a));
+  if (!literalPrint) await reviewBeforeDispatch(ctx.manifest, commandProposal("cli", opts.binary, opts.args));
+  checkCommandRun(ctx.manifest);
   const result = spawnSync(opts.binary, opts.args, {
     cwd: ctx.manifest.workspaceDir,
     encoding: "utf8",
