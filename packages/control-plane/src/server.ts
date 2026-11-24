@@ -28,9 +28,11 @@ import {
   ChatProfileSchema,
   UpdateScopeRequestSchema,
   UpdateSettingsPatchSchema,
+  FindingValidateRunRequestSchema,
   KnowledgeEmbeddingPatchSchema,
   KnowledgeEmbeddingTestSchema,
 } from "@gongyuai/contracts";
+import { getTraffic, queryFromSearchParams, readTrafficBody } from "@gongyuai/exec";
 import {
   computeScorecard,
   describeGoalEvidence,
@@ -64,6 +66,7 @@ import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
 import type { SettingsStore } from "./settings.js";
 import type { SilentUpdater } from "./updater.js";
+import { runIndependentValidation, ValidationBusyError } from "./validate-runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(__dirname, "..", "web");
@@ -601,6 +604,72 @@ export function startControlServer(opts: ServerOptions) {
             });
           } finally {
             history.close();
+          }
+        }
+        if (method === "GET" && rest === "/traffic") {
+          try {
+            return send(res, 200, queryFromSearchParams(task.dataDir, task.id, url.searchParams));
+          } catch (err) {
+            return send(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        const trafficBlob = /^\/traffic\/([^/]+)\/blob$/.exec(rest);
+        if (method === "GET" && trafficBlob) {
+          const side = url.searchParams.get("side");
+          if (side !== "req" && side !== "res") return send(res, 400, { error: "side must be req or res" });
+          const offset = Number(url.searchParams.get("offset") ?? "0");
+          const maxRaw = url.searchParams.get("maxBytes");
+          const maxBytes = maxRaw == null || maxRaw === "" ? undefined : Number(maxRaw);
+          try {
+            const slice = readTrafficBody(task.dataDir, decodeURIComponent(trafficBlob[1]!), side, offset, maxBytes);
+            return send(res, 200, {
+              sha256: slice.sha256,
+              side: slice.side,
+              offset: slice.offset,
+              size: slice.size,
+              ...(slice.contentType ? { contentType: slice.contentType } : {}),
+              body: slice.body,
+              bytes: slice.bytes.toString("base64"),
+              nextOffset: slice.nextOffset,
+              evidenceRef: slice.evidenceRef,
+            });
+          } catch (err) {
+            const status = typeof err === "object" && err && "status" in err && typeof err.status === "number" ? err.status : 400;
+            return send(res, status, { error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+        const trafficOne = /^\/traffic\/([^/]+)$/.exec(rest);
+        if (method === "GET" && trafficOne) {
+          const record = getTraffic(task.dataDir, decodeURIComponent(trafficOne[1]!));
+          if (!record || record.taskId !== task.id) return send(res, 404, { error: "traffic not found" });
+          return send(res, 200, { traffic: record, evidenceRef: `http:${record.id}` });
+        }
+        const validateRun = /^\/findings\/([^/]+)\/validate-run$/.exec(rest);
+        if (method === "POST" && validateRun) {
+          const findingId = decodeURIComponent(validateRun[1]!);
+          const paths = taskPaths(task.dataDir);
+          if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
+          try {
+            const parsed = FindingValidateRunRequestSchema.safeParse(await readJson(req));
+            if (!parsed.success) return send(res, 400, { error: parsed.error.message });
+            const body = parsed.data;
+            if (body.findingId !== findingId) return send(res, 400, { error: "findingId mismatch" });
+            const result = await runIndependentValidation({
+              taskId: task.id,
+              taskDir: task.dataDir,
+              historyDb: paths.historyDb,
+              evidenceDir: paths.evidenceDir,
+              targets: task.auth.targets,
+              findingId,
+              ...(body.force ? { force: true } : {}),
+            });
+            return send(res, result.httpStatus, result.body);
+          } catch (err) {
+            if (err instanceof ValidationBusyError) {
+              return send(res, 409, { error: err.message, jobId: err.jobId, status: "running" });
+            }
+            const status = typeof err === "object" && err && "status" in err && typeof err.status === "number" ? err.status : 409;
+            return send(res, status, { error: err instanceof Error ? err.message : String(err) });
           }
         }
         const operatorFinding = /^\/findings\/([^/]+)\/(verify|retract)$/.exec(rest);
