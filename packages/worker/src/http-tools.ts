@@ -63,7 +63,7 @@ export async function httpRequestTool(
       authorizeHost: (host) =>
         scopeAllows(ctx.manifest.auth, host)
           ? { allowed: true }
-          : { allowed: false, reason: `${host} not in auth.targets/pivot` },
+          : { allowed: false, reason: `${host} not in task targets/pivot` },
     },
   );
   const artifact = result.artifact;

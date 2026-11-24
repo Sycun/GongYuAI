@@ -161,3 +161,41 @@
 - 只有设计没有代码的：会话管理器、隧道/pivot、浏览器内核、凭据表/`credential_record`、parser lane 四种真实格式、速率硬闸/时间窗/RoE、自动蒸馏与 ToolArtifact 人审执行。
 - 页面/组件/交互：全部不在本轮范围。
 
+## 8. 第十轮补刀：DAG 执行硬闸与 Intent 所有权
+
+> 目标：把“只有 Fact–Intent DAG 有执行权”从文档口径落到工具闸，闭合零 Intent 执行、非认领人 conclude、leader/follower 提示词分工三个缺口。契约见 [long-run-contract.md](./long-run-contract.md)「执行硬闸」。
+
+| 项 | 代码落点 | 正常入口 | 单测 / 验收 | 状态 |
+| --- | --- | --- | --- | --- |
+| Explore 执行绑定 activeIntentId | `worker/src/graph-phase.ts`（`executionRequiresActiveIntent`/`executionIntentDenial`）、`worker/src/pi-loop.ts`（`phaseToolDenial`） | Pi/OpenAI 工具调用前统一闸；拒绝写 `tool_gate` | `graph-phase.test.ts`「execution tools require an active claimed Intent」 | 已验证 |
+| 零 Intent 不得进 Explore | `graph-phase.ts` `phase_set(explore)` 前置 open Intent | Worker `phase_set` | `graph-phase.test.ts`「phase_set(explore) refuses zero open Intent」 | 已验证 |
+| conclude 所有权校验 | `history/src/index.ts` `concludeIntent` 校验 `claimedBy`；`forceConcludeExploreTimeout` 走 system 例外 | Worker `intent_conclude`、超时收卷 | `history.test.ts`、`plan.test.ts`、`graph-phase.test.ts`、`explore-timeout.test.ts` | 已验证 |
+| 多 worker 脑手硬边界 | `graph-phase.ts` leader 不 claim；`pi-loop.ts` leader 不执行、follower 不 assert_goal/Reason | slot 0 leader / follower Explore | `graph-phase.test.ts`「multi-worker leader delegates execution」 | 已验证（单 worker 仍兼任脑手） |
+| 回归 | `pnpm -r run build` exit 0；`pnpm test` 全 workspace fail 0；`pnpm smoke` PASS | — | 新增 3 条硬闸用例；既有 32 条相位/History 用例通过 | 已验证 |
+
+### 8.1 本轮没有做的事
+
+- 模型路由仍是启动期按 slot 选 tier，未做运行期按相位动态路由；OpenAI fallback 仍绕过 tier。
+- `smoke:tools` 的 nmap 禁用可见性用例失败：`CORE_MCP_IDS` 基线会保留核心 MCP，与脚本期望不一致；属既有工具可见性口径问题，不在本刀修改。
+- 真实供应商红队委托盲评、持久会话/隧道/浏览器、自动蒸馏仍按原台账推进。
+
+## 9. 第十一轮：P16 语义收敛（授权层退场 / 零目标拒绝）
+
+> 目标：把 [red-team-positioning.md](./red-team-positioning.md)（2026-11-24 定调）的产品语义落到代码——目标默认授权、运行期零目标审查、解释性拒绝按缺陷处理。闭合该文 §8 差距表 1–5（第 6 项前轮已改）。契约同步见 [long-run-contract.md](./long-run-contract.md)「Capability ladder」。
+
+| 项 | 代码落点 | 正常入口 | 单测 / 验收 | 状态 |
+| --- | --- | --- | --- | --- |
+| 授权层退场（差距 1） | `control-plane/src/authorization.ts` 收敛为旧台账**只读兼容** + 坐标解析（`parseScopeMessage`）；移除 `registerAuthorization`/`parseAuthorizationText`/写入路径；`server.ts` `POST /authorization` → 410 指引 `/scope`，`GET` 保留回查 | `GET /tasks/:id/authorization`（只读）；`POST /tasks/:id/scope` 改坐标 | `authorization.test.ts`（只读回查/损坏回落投影）；`operator-command.test.ts`（410） | 已验证 |
+| `needs_input` 澄清（差距 2） | `assignments.ts` `needs_authorization`→`needs_input`（`NEEDS_INPUT` 前缀、`needs-input.json`）；`bindResume` 把目标/排除/能力**合并进 `task.auth`**（`scopeVersion++`），不登记授权；「已授权 X，继续」兼容为加入坐标 | 会话回复「目标: X，继续」；`POST /tasks/:id/scope` | `command-exec.test.ts`、`operator-command.test.ts`（澄清环：越界→澄清→合并→执行）、`resume-binding.test.ts` | 已验证 |
+| 拒绝处理链（差距 3） | `assignments.ts` `isRefusal`（paused 理由 + result 第一人称拒绝）→ `correctRefusal`：上下文重问→结构化重问→换模型（≤3）→操作员 `paused` 结构化故障（`triedModels`+原始片段）；换模型成功切 `task.assignment.model`；续接支持操作员换模型 | 会话续接（可换模型）；`POST /tasks/:id/command` 手动命令 | `p16-semantics.test.ts` 口径 1/2；`operator-command.test.ts` | 已验证 |
+| 坐标裁决 + 工程自保（差距 4） | `exec/src/scope.ts` 裁决理由改任务坐标口径；`HOST_NETWORK_DENY`/`DESTRUCTIVE_DENY` 保留；`assignments.ts` 工程自保拒绝单独处理（不走 needs_input）；`worker/tools.ts`、`http-tools.ts`、`command-approval.ts` 措辞同步 | worker shell/http/C2 闸；会话命令 | `exec.test.ts`；`p16-semantics.test.ts` 口径 4（targets=* 仍永拒主机网络/破坏性） | 已验证 |
+| 契约收敛（差距 5） | `contracts/index.ts` `authorizationNote` 可选（默认 ""）、capability 默认 `active-lab`、新增 `roe`；`contracts/scope.ts` `taskScopePromptBlock` 替代 `authorizationPromptBlock`；`contracts/authorization.ts` 仅留 schema + 读取助手；`pi-loop.ts` 两处 system prompt 去授权语义、注入 roe | 建档 API/控制台/`gy run`；worker prompt | `p16-semantics.test.ts` 口径 3（无授权登记建档、默认 active-lab、roe 透传） | 已验证 |
+| 控制台/CLI 同步 | `TasksPage.tsx` 授权依据→「任务备注（可选）」去必填校验；`TaskDetailPage.tsx`/`api.ts` 同步；`cli --auth` 改可选 | 控制台新建任务；`gy run --target`（无需 --auth） | 控制台构建通过；`apps/cli` 构建通过 | 已验证 |
+| 回归 | `pnpm -r run build` exit 0；`pnpm -r run test` **450 通过 / 0 失败**（contracts 80 / history 79 / exec 58 / worker 75 / control-plane 126 / console 32）；`pnpm smoke` PASS；`pnpm e2e:engagement` **80/80** | — | 新增 `p16-semantics.test.ts` 5 例覆盖定位文档五条验收口径 | 已验证 |
+
+### 9.1 本轮没有做的事
+
+- AD/云自动采集（SharpHound/云 API 枚举器）仍缺，图可导入可查但无自动采集——属独立大特性，不在本轮。
+- 真实授权委托盲评、三层模型路由真实正确率/费用差分仍缺外部材料与真实运行，不在本轮。
+- 拆小重派（拒绝处理链第 4 步）以「结构化单步重问」近似实现；未做把复合 Intent 自动拆成多个子 Intent 的完整重派。
+

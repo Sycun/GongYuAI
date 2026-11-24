@@ -190,6 +190,62 @@ export function filterOpenAiTools(
   return tools.filter((t) => allowed.has(t.function.name));
 }
 
+const EXECUTION_TOOLS = new Set([
+  "shell",
+  "shell_job",
+  "shell_session",
+  "c2",
+  "http_request",
+  "oast_issue",
+  "tunnel_open",
+  "tunnel_close",
+  "install_tool",
+  "mcp_invoke",
+]);
+
+const READONLY_ACTIONS: Record<string, Set<string>> = {
+  shell_job: new Set(["poll", "wait", "list"]),
+  shell_session: new Set(["read", "wait", "list"]),
+  c2: new Set(["list", "sessions", "read", "note", "blob-get"]),
+};
+
+export function executionRequiresActiveIntent(
+  name: string,
+  args?: Record<string, unknown>,
+): boolean {
+  if (name === "mcp_invoke" || name.startsWith("mcp__")) return true;
+  if (!EXECUTION_TOOLS.has(name)) return false;
+  const readonly = READONLY_ACTIONS[name];
+  if (readonly) {
+    const action = String(args?.action ?? "").trim().toLowerCase();
+    if (action && readonly.has(action)) return false;
+  }
+  return true;
+}
+
+export function executionIntentDenial(opts: {
+  history: HistoryStore;
+  taskId: string;
+  workerId: string;
+  state: CheckpointState;
+  name: string;
+  args?: Record<string, unknown>;
+}): string | undefined {
+  if (!executionRequiresActiveIntent(opts.name, opts.args)) return undefined;
+  const intentId = opts.state.activeIntentId;
+  if (!intentId) {
+    return `denied: ${opts.name} requires an active claimed Intent; intent_claim first`;
+  }
+  const intent = opts.history.getIntent(opts.taskId, intentId);
+  if (!intent || !["claimed", "running"].includes(intent.status)) {
+    return `denied: active Intent ${intentId} is not claimed/running`;
+  }
+  if (intent.claimedBy !== opts.workerId) {
+    return `denied: active Intent ${intentId} claimed by ${intent.claimedBy ?? "nobody"}, not ${opts.workerId}`;
+  }
+  return undefined;
+}
+
 export const GRAPH_PHASE_TOOLS = [
   {
     type: "function" as const,
@@ -487,6 +543,9 @@ export type GraphToolCtx = {
   save: () => void;
   /** From task execution config; drives Reason/transfer hard caps + leases. */
   execution?: Partial<ExecutionConfig> | null;
+  /** slot 0 leader owns Bootstrap/Reason/Report; followers only Explore. */
+  leader?: boolean;
+  workerCount?: number;
 };
 
 export function handleGraphTool(
@@ -510,7 +569,13 @@ export function handleGraphTool(
     if (!allowed.has(next)) {
       return `invalid phase: ${args.phase ?? ""} (want bootstrap|explore|reason|report)`;
     }
+    if (ctx.leader === false && next !== "explore") {
+      return "denied: follower only Explore; leader owns Bootstrap/Reason/Report";
+    }
     const open = ctx.history.openIntents(ctx.taskId);
+    if (next === "explore" && open.length === 0 && !ctx.state.activeIntentId) {
+      return "denied: Explore requires ≥1 open Intent; intent_propose first";
+    }
     if (next === "reason" && open.length > 0) {
       return `denied: Reason 互斥 — ${open.length} open Intent(s); finish Explore first`;
     }
@@ -637,6 +702,9 @@ export function handleGraphTool(
   }
 
   if (name === "intent_claim") {
+    if (ctx.leader === true && (ctx.workerCount ?? 1) > 1) {
+      return "denied: leader delegates Explore; follower claims Intent";
+    }
     if (ctx.state.activeIntentId) {
       return `denied: already exploring intent ${ctx.state.activeIntentId}; conclude it first`;
     }
@@ -665,14 +733,18 @@ export function handleGraphTool(
           ? "failed"
           : null;
     if (!status) return `invalid status: ${args.status ?? ""} (succeeded|failed)`;
+    const intentId = args.intentId ?? "";
+    if (ctx.state.activeIntentId !== intentId) {
+      return `denied: conclude only active Intent ${ctx.state.activeIntentId ?? "—"}; claim it first`;
+    }
     const facts = parseFactsJson(args.factsJson);
     try {
       const done = ctx.history.concludeIntent(
         ctx.taskId,
-        args.intentId ?? "",
+        intentId,
         status,
         args.conclusion ?? "",
-        { facts },
+        { facts, workerId },
       );
       if (!done) return `conclude failed: ${args.intentId ?? ""}`;
       if (ctx.state.activeIntentId === done.id) {

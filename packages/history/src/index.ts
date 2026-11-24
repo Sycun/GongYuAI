@@ -2223,6 +2223,7 @@ export class HistoryStore {
       "failed",
       conclusion,
       {
+        system: true,
         facts: [
           {
             layer: "title",
@@ -2265,9 +2266,21 @@ export class HistoryStore {
     intentId: string,
     status: Extract<IntentStatus, "succeeded" | "failed">,
     conclusion: string,
-    opts?: { facts?: ConcludeFactInput[] },
+    opts?: { facts?: ConcludeFactInput[]; workerId?: string; system?: boolean },
   ): Intent | null {
     const facts = opts?.facts ?? [];
+    if (!opts?.system) {
+      if (!opts?.workerId) {
+        throw new Error("conclude requires workerId (or system timeout)");
+      }
+      const current = this.getIntent(taskId, intentId);
+      if (!current) return null;
+      if (current.claimedBy !== opts.workerId) {
+        throw new Error(
+          `conclude denied: Intent claimed by ${current.claimedBy ?? "nobody"}, not ${opts.workerId}`,
+        );
+      }
+    }
     if (status === "succeeded" && facts.length === 0) {
       throw new Error(
         "conclude(succeeded) requires ≥1 Fact with intentId (Explore writeback)",

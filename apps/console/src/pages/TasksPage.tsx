@@ -175,7 +175,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
         name: hint,
         mock: values.mock === true,
         auth: {
-          authorizationNote: values.authorizationNote.trim(),
+          authorizationNote: (values.authorizationNote ?? "").trim(),
           targets: targetList,
           outOfScope: parseTargets(values.outOfScope ?? ""),
         },
@@ -306,6 +306,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
           initValues={{
             targets: "",
             objective: "",
+            authorizationNote: "",
             maxConcurrentExplores: 1,
             mock: false,
             reconcileName: "asset-diff",
@@ -324,7 +325,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
             placeholder={"https://a.example.com\nhttps://b.example.com\n或 CIDR / host，一行一个"}
             autosize={{ minRows: 3, maxRows: 8 }}
             rules={[{ required: true, message: "必填" }]}
-            extraText="多行或多个逗号分隔；作业范围仅允许在这些目标内执行"
+            extraText="多行或多个逗号分隔；任务目标坐标，进入任务即视为授权，执行仍受坐标与档位约束"
             onChange={(v) => {
               if (concurrencyTouched.current) return;
               const rec = recommendedConcurrency(parseTargets(String(v ?? "")).length);
@@ -335,9 +336,8 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
           />
           <Form.TextArea
             field="authorizationNote"
-            label="授权依据"
-            placeholder="填写授权单号或委托范围说明"
-            rules={[{ required: true, validator: (_rule, value) => typeof value === "string" && value.trim().length >= 8, message: "请填写至少 8 个字符的授权依据" }]}
+            label="任务备注（可选）"
+            placeholder="可选：委托背景、节奏或特别说明；授权是使用前提，不在工具内登记"
           />
           <Form.TextArea field="outOfScope" label="排除范围（可选）" placeholder="每行一个排除项" />
           <Form.Section text="目标类型">

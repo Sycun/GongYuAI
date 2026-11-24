@@ -174,20 +174,19 @@ Goal 设计规则：
 pnpm gy run \
   --goals /path/to/goals.json \
   --target https://app.example.test \
-  --auth "Operator-provided engagement note; target is treated as authorized" \
   --name customer-web-engagement \
   --capability active-lab \
   --concurrency 1
 ```
 
-当前兼容语义：
+当前语义（P16 已收敛）：
 
-- `--auth` 仍是 CLI 的必填兼容字段，会写入旧 `authorizationNote`；**它不是产品授权审查**。
-- CLI 当前默认 `--capability active-lab`；直接调用 API 时仍可能遇到旧 schema 默认值，以实际 manifest 为准。
+- `--auth` 为**可选**备注字段，写入 `authorizationNote`；授权是使用前提，**工具不登记、不审查授权**，目标进入任务即视为授权。
+- CLI 与 API schema 默认 `--capability active-lab`；`full` 由操作者显式选择。档位是操作配置，不是目标审查。
 - 不传 `--max-*` 时四项预算默认 `0 = unlimited`。只有明确需要硬上限时才传正数。
 - 首次真实任务建议 `--concurrency 1`，确认资产与图约束稳定后再提高；有效并发会按资产数动态扩容，硬顶为 16。
 
-P16 完成前，不要把 CLI 的 `--auth`、`gy scope` 的旧 `auth` 形状或 `gy resume` 文案中的“授权版本”误读为产品新增了授权层；这些是待收敛的兼容残留。
+P16 已收敛：CLI 的 `--auth` 是可选备注、`gy scope` 的 `auth` 形状是作业坐标、`scopeVersion` 只表示操作配置变更——产品没有授权层，旧台账仅只读兼容回查。
 
 ### 4.4 观察与引导
 
@@ -362,18 +361,18 @@ pnpm gy corrections <taskId>
 | 命令入口 | `apps/cli` |
 | Mission Control 与图投影 | `apps/console` |
 
-### 7.3 P16 优先收敛项
+### 7.3 P16 收敛项（2026-11-24 已落码）
 
-当前文档定调已经完成，但代码仍有历史语义残留。下一轮开发应先做这些最小改动：
+产品语义已落到代码（见 [implementation-ledger.md](./implementation-ledger.md) §9 与 [red-team-positioning.md](./red-team-positioning.md) §8）：
 
-1. 将 `AuthScopeSchema` 的授权台账语义改为作业坐标，保留迁移兼容。
-2. 将 `needs_authorization` 改为 `needs_input`，缺目标/材料/坐标冲突走结构化澄清。
-3. 将“一次纠偏后 `MODEL_REFUSED`”改为拒绝处理链；解释性拒绝不得成为终态或 Fact。
-4. 统一 API 与 CLI 的能力档位默认值；CLI 当前默认 `active-lab`，不要只改一处。
-5. 更新 `gy run/scope/resume` 的兼容文案，使“授权版本”改为“操作配置版本”。
-6. 为上述变化补契约测试、状态机测试和 CLI 行为测试。
+1. ✅ `AuthScopeSchema` 改为作业坐标：`authorizationNote` 可选、新增 `roe`；旧台账只读兼容。
+2. ✅ `needs_authorization` → `needs_input`，缺目标/材料/坐标冲突走结构化澄清。
+3. ✅ 拒绝处理链（上下文重问→结构化重问→换模型→操作员 paused 故障）；解释性拒绝不成为终态或 Fact。
+4. ✅ API 与 CLI 能力档位默认统一为 `active-lab`。
+5. ✅ `scopeVersion` 语义为操作配置变更；`POST /authorization` 退场（410 指引 `/scope`）。
+6. ✅ 契约/状态机/会话行为测试补齐（`p16-semantics.test.ts` 覆盖五条验收口径）。
 
-在 P16 完成前，文档可以描述目标语义，但交付说明必须明确“代码尚未完全对齐”。
+剩余兼容残留：`gy run/scope/resume` 个别文案仍含“授权”字样，属措辞清理，不影响语义。
 
 ---
 
@@ -422,7 +421,7 @@ P17 文档记录的 439 项测试是当时快照，不是当前工作树的永�
 | 已形成主链 | Fact–Intent DAG、CAS、证据闸、Relay、并行 Explore、Finding 独立复核、复测、更正、记分卡、快照、事件链 |
 | 已形成执行面 | Shell、PTY、后台作业、C2、驻留会话、隧道/pivot、HTTP 事务、OAST、端点覆盖、主机画像 |
 | P17 已补齐 | 主机枚举解析、事件哈希链、AD/云攻击图、BloodHound 导入、启动期三层模型路由、离线命令/阶段评测 |
-| P16 待收敛 | 授权台账兼容、`needs_authorization`、一次纠偏后 `MODEL_REFUSED`、能力档位默认值 |
+| P16 已收敛 | 授权层退场（旧台账只读兼容）、`needs_input` 澄清、拒绝处理链、能力档位默认 `active-lab`、任务坐标提示块 |
 | 部分接线 | Worker 自动注入、部分求助/唤醒、自动蒸馏、记录代理、Chromium 等按台账推进 |
 | 外部依赖未完成 | RFC3161 TSA、云 API 自动采集、真实生产盲评、真实供应商故障验证 |
 | 能力边界 | 进程内模型热切换、AD 全量边类型、真实阶段级端到端基准仍未完成 |

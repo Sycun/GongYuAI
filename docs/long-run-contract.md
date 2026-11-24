@@ -48,13 +48,14 @@ After crash, resume from last phase (`init → loop → report → done`)。
 | propose | → `proposed` | **强制** `sourceFactIds[]` 非空；每项为已有 Fact id 或伪 Fact `origin` |
 | claim | `proposed` → `claimed` | CAS；绑定 `claimedBy` |
 | start | `claimed` → `running` | 可选；可合并进 claim |
-| conclude ok | → `succeeded` | 必须附 conclusion + **≥1** 新 Fact（同调用写回，`intentId` 绑定） |
-| conclude fail | → `failed` | conclusion 写清否定证据 / 约束；Fact 可选 |
+| conclude ok | → `succeeded` | 必须附 conclusion + **≥1** 新 Fact（同调用写回，`intentId` 绑定）；**必须由 `claimedBy` 本人提交** |
+| conclude fail | → `failed` | conclusion 写清否定证据 / 约束；Fact 可选；**必须由 `claimedBy` 本人提交** |
 | heartbeat timeout | → `expired` 或回 `proposed` | 允许被重新 claim |
 
 幂等：
 
 - Intent claim = compare-and-swap on `proposed`。
+- Intent conclude = 认领人校验；非 `claimedBy` 拒绝。系统超时收卷（`forceConcludeExploreTimeout`）是唯一例外，写 partial Fact，不发明战术。
 - Goal assert sticky（`passes` 永不回退）。重新初始化目标只补缺失记录，首次通过时的证据路径和审计事件保留。
 - Facts append-only。
 
@@ -172,6 +173,14 @@ Worker OpenAI loop 按 Durable `phase` 过滤工具面：
 | explore | claim/conclude + shell/MCP/install/`assert_goal`/`technique_transfer` + `finding_record/verify/retract`；**每 worker** 一次一个 `activeIntentId`；多 worker 靠 Intent CAS 并行 |
 | reason | propose / assert / History / `technique_transfer` / `finding_record/verify/retract`；**有 open Intent 时强制回 explore**；吸收 Hint |
 
+**执行硬闸（2026-11-24 落地）**：相位过滤之上再绑 Intent，避免“零 Intent 进 Explore 后直接执行”。
+
+- `phase_set(explore)` 拒绝零 open Intent；必须先 `intent_propose`。
+- 执行类工具（`shell`、`http_request`、`mcp_invoke`/动态 MCP、`c2` 写操作、`tunnel_open/close`、`install_tool`、`oast_issue`、`shell_job/session` 的 start/write/open/close/kill）必须已有 `activeIntentId`，且该 Intent 为 `claimed/running`、`claimedBy` 等于当前 worker。只读 poll/wait/list/read/sessions/note 例外。
+- 多 worker 时 leader（slot 0）不持有执行工具、不 claim；follower 不进入 Bootstrap/Reason/Report，`assert_goal` 由 leader 提交。单 worker 仍兼任脑手。
+- `intent_conclude` 只允许结束当前 active Intent，并由 History 校验 `claimedBy`；非本人拒绝。
+- 拒绝写 `tool_gate` 事件，与能力阶梯/范围闸同口径。
+
 ## Hint（P4）
 
 - `POST /tasks/:id/hints` `{ text, source?, tags? }` 写入 History `hints` 表（事件 `hint_appended`）。
@@ -208,7 +217,8 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 
 ## Tool single gate（P5）
 
-- Worker 的 shell、安装、资产收集和 MCP 通过 `gateTool` 记录调度前的 `tool_gate` 判定。判定覆盖能力阶梯、各工具的授权检查和适用的预算。相位拒绝也写同类事件。
+- Worker 的 shell、安装、资产收集和 MCP 通过 `gateTool` 记录调度前的 `tool_gate` 判定。判定覆盖能力阶梯、各工具的授权检查和适用的预算。相位拒绝与 Intent 绑定拒绝也写同类事件。
+- Explore 执行工具在相位闸之后再过 Intent 闸：无 active claimed Intent 不得执行；多 worker leader 不执行。该闸不替代能力/范围/预算闸。
 - MCP 初始化和启用应用同一能力策略。直接调用与别名调用共享启用状态、工具注册、显式目标及预算检查。外部适配器需要对其自身的网络动作落实隔离和授权。
 - 不引入第二套审批产品面；人工 `ask` 闸属后续可选，非本刀。
 
@@ -227,7 +237,7 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 | active-lab | + 主动利用类 MCP |
 | full | 全部 Worker 工具面（仍禁主机 VPN/代理变更） |
 
-新任务 schema 现状默认 `observe`，聊天/控制台任务与 `gy run` 默认 `active-lab`（2026-11-23 定调：联网渗透默认放开）。**目标语义（P16 待收敛）**：新任务默认 `active-lab`，`full` 由操作者显式选择；档位不是授权审查。VPN/代理变更永远拒绝（只读状态查询除外）——这是工程自保，与目标无关。
+新任务 schema 默认 `active-lab`（P16 已收敛，2026-11-24）：`full` 由操作者显式选择；档位是操作配置，不是授权审查。`authorizationNote` 为可选操作备注（不再是必填授权证明），`roe` 为可选操作者意图自由文本。VPN/代理变更永远拒绝（只读状态查询除外）——这是工程自保，与目标无关。
 
 ## Pause / resume / scope revision（阶段 2）
 

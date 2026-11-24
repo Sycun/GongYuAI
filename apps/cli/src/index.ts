@@ -39,7 +39,7 @@ Usage:
   gy coverage-compare SNAPSHOT REFERENCE --snapshot-sha256 HASH --reference-sha256 HASH
   gy review <taskId> --file REVIEW.json
   gy pause <taskId>             # 请求暂停；确认 worker 退出后记录为 paused
-  gy resume <taskId>            # 从 paused 继续；启动时读取最新授权版本
+  gy resume <taskId>            # 从 paused 继续；启动时读取最新任务坐标（操作配置）
   gy scope <taskId> --file SCOPE.json   # { "auth": {...}, "reason": "..." }
   gy scorecard <taskId> [--out FILE]    # 交付记分卡；--out 导出可复算快照
   gy scorecard --recompute FILE         # 只读快照，离线复算分子/分母
@@ -231,8 +231,8 @@ async function main(): Promise<void> {
       | "scan"
       | "active-lab"
       | "full";
-    if (!goalsPath || !targets.length || !auth) {
-      throw new Error("gy run requires --goals --target --auth");
+    if (!goalsPath || !targets.length) {
+      throw new Error("gy run requires --goals --target");
     }
     const goals = JSON.parse(readFileSync(resolve(goalsPath), "utf8"));
     const body = CreateTaskRequestSchema.parse({
@@ -240,7 +240,7 @@ async function main(): Promise<void> {
       name,
       mock,
       auth: {
-        authorizationNote: auth,
+        authorizationNote: auth ?? "",
         targets,
         outOfScope: [],
         capability,

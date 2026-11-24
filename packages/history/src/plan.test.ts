@@ -54,7 +54,9 @@ test("plan steps derive ready from facts and dispatch only the ready one", () =>
     assert.equal(store.listPlan(TASK_ID)[0]!.status, "dispatched");
     assert.equal(store.listPlan(TASK_ID)[0]!.intentId, intent.id);
 
+    store.claimIntent(TASK_ID, intent.id, "worker-plan");
     store.concludeIntent(TASK_ID, intent.id, "succeeded", "done", {
+      workerId: "worker-plan",
       facts: [{ layer: "title", title: "login form found" }],
     });
     assert.equal(store.listPlan(TASK_ID)[0]!.status, "done");

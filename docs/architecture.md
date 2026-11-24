@@ -26,7 +26,7 @@ Long-running authorized pentest agents fail for four reasons: context windows fi
 | **DAG** | 路径与真相：走得对（授权在委托前提，不在运行时审查） | Fact–Intent 无因探索禁令（路径合法性）、证据闸 + SHA-256 封存、复核撤回 | 已硬化；渗透域语义见 P6 |
 | **Super-agent** | 调度经济：花得省 | 脑手分离（相位工具面）、多 Explore 异步派单、三层模型路由（提案） | 结构已有；模型分层/偏航审计见 P7 |
 
-细则：[absorb-super-agent.md](./absorb-super-agent.md)。Super-agent 是配置 + 小协议补丁，不是第二套编排系统；主脑永不拿回执行工具（Octop 0/5 委派教训）。
+细则：[absorb-super-agent.md](./absorb-super-agent.md)。Super-agent 是配置 + 小协议补丁，不是第二套编排系统；主脑永不拿回执行工具（Octop 0/5 委派教训）。执行权落到工具闸：Explore 执行必须绑定已认领 Intent，conclude 校验认领人；多 worker leader 不执行（见 [long-run-contract.md](./long-run-contract.md)）。
 
 繁衍动力学：[数据飞轮](./data-flywheel.md)（P9 提案）——采集→评测→蒸馏→改进→验证五环，让使用变成进化；转的是 harness 与知识，不是模型权重，每环过人审/差分/holdout 质量闸。
 

@@ -41,13 +41,13 @@ async function waitForStatus(url: string, taskId: string, wanted: string[]): Pro
   throw new Error(`任务 ${taskId} 未进入 ${wanted.join("/")}`);
 }
 
-test("授权登记后真实命令执行并留证；越界命令转 needs_authorization 且不执行", { timeout: 30000 }, async t => {
+test("P16：needs_input 澄清 + 坐标合并后真实命令执行并留证；越界命令转 needs_input 且不执行", { timeout: 30000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), "gy-command-exec-"));
   const plane = await bootControlPlane({ dataRoot: root, host: "127.0.0.1", port: 0, isolated: true });
   t.after(async () => { await plane.close(); rmSync(root, { recursive: true, force: true }); });
 
   const state = {
-    reply: JSON.stringify({ kind: "needs_authorization", targets: ["127.0.0.1"], actions: ["echo"], window: "", reason: "尚未登记授权" }),
+    reply: JSON.stringify({ kind: "needs_input", targets: ["127.0.0.1"], reason: "目标不在任务坐标内，请补充" }),
   };
   const taskPrompts: string[] = [];
   let reviewCalls = 0;
@@ -81,59 +81,44 @@ test("授权登记后真实命令执行并留证；越界命令转 needs_authori
   await approval.text();
   const selection = { profileId: "fixture", modelId: "reply" };
 
-  // 1) 没有授权时：结构化请求 + 暂停 + 请求文件（不是“解释为什么不能做”）
+  // 1) 缺坐标：needs_input 澄清 + 暂停 + 请求文件（不是授权申请，也不是解释性拒绝）
   const first = await settled(plane.url, await submit(plane.url, [{ role: "user", content: "检查 127.0.0.1 的本地回显" }], selection));
   assert.equal(first.status, "paused");
-  assert.match(first.reason ?? "", /^NEEDS_AUTHORIZATION: /);
+  assert.match(first.reason ?? "", /^NEEDS_INPUT: /);
   const task1 = plane.store.get(first.taskId)!;
-  const request = JSON.parse(readFileSync(join(task1.dataDir, "authorization-request.json"), "utf8")) as {
-    kind: string; targets: string[]; current: { version: number };
+  const request = JSON.parse(readFileSync(join(task1.dataDir, "needs-input.json"), "utf8")) as {
+    kind: string; targets: string[]; current: { targets: string[]; capability: string };
   };
-  assert.equal(request.kind, "needs_authorization");
+  assert.equal(request.kind, "needs_input");
   assert.deepEqual(request.targets, ["127.0.0.1"]);
-  assert.equal(request.current.version, 0);
-  assert.equal(readdirSync(join(task1.dataDir, "evidence", "authorization")).filter(name => name.startsWith("request-")).length, 1);
+  assert.ok(request.current.targets.includes("local:submitted-materials"));
+  assert.equal(readdirSync(join(task1.dataDir, "evidence", "needs-input")).filter(name => name.startsWith("request-")).length, 1);
 
-  // 2) 登记授权：台账 v1、能力级 active-lab、原件封存
-  const authorized = await fetch(plane.url + "/tasks/" + first.taskId + "/authorization", {
+  // 2) 授权登记入口已移除（410）；坐标经续接消息合并，不产生授权记录
+  const removed = await fetch(plane.url + "/tasks/" + first.taskId + "/authorization", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ text: "已授权 127.0.0.1，可做 active-lab" }),
   });
-  assert.equal(authorized.status, 200, await authorized.clone().text());
-  const stored = await authorized.json() as {
-    task: { auth: { capability: string; targets: string[] }; scopeVersion: number };
-    authorization: { version: number; capability: string; targets: string[]; evidence: { sha256: string; path: string } | null };
-  };
-  assert.equal(stored.authorization.version, 1);
-  assert.equal(stored.authorization.capability, "active-lab");
-  assert.deepEqual(stored.authorization.targets, ["127.0.0.1"]);
-  assert.ok(stored.authorization.evidence, "文本授权必须封存原件");
-  assert.equal(stored.authorization.evidence!.path, "authorization/v1-source.md");
-  assert.equal(stored.task.auth.capability, "active-lab");
-  assert.equal(stored.task.scopeVersion, 2);
+  assert.equal(removed.status, 410);
   const digest = await (await fetch(plane.url + "/tasks/" + first.taskId + "/authorization")).json() as {
-    taskId: string; digest: string; authorization: { version: number };
+    taskId: string; digest: string; authorization: unknown;
   };
   assert.equal(digest.taskId, first.taskId);
-  assert.equal(digest.authorization.version, 1);
-  assert.match(digest.digest, /^v1\/.*\/127\.0\.0\.1\/active-lab\/生效中$/);
-  // 缺目标：400 且明确缺项，不写台账。
-  const missing = await fetch(plane.url + "/tasks/" + first.taskId + "/authorization", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "授权人: 张三" }),
-  });
-  assert.equal(missing.status, 400);
-  const missingBody = await missing.json() as { error: string; missing: string[] };
-  assert.deepEqual(missingBody.missing, ["targets"]);
-  assert.match(missingBody.error, /授权目标为空/);
+  assert.equal(digest.authorization, null);
 
-  // 3) 授权覆盖后：模型给 command，系统执行并落证据
+  // 3) 坐标合并后：模型给 command，系统执行并落证据
   state.reply = JSON.stringify({ kind: "command", command: "echo gy-ok", purpose: "验证执行链路" });
-  const resumed = await fetch(plane.url + "/tasks/" + first.taskId + "/resume", { method: "POST" });
-  assert.equal(resumed.status, 200, await resumed.clone().text());
-  await resumed.text();
+  const resumed = await settled(plane.url, await submit(plane.url, [
+    { role: "user", content: "检查 127.0.0.1 的本地回显" },
+    { role: "user", content: "目标: 127.0.0.1，继续" },
+  ], selection));
+  assert.equal(resumed.taskId, first.taskId, "坐标澄清续接绑定同一任务");
   const done = await waitForStatus(plane.url, first.taskId, ["completed", "failed", "paused"]);
   assert.equal(done.status, "completed", done.reason ?? "");
   assert.match(done.result ?? "", /gy-ok/);
+  const merged = plane.store.get(first.taskId)!;
+  assert.ok(merged.auth.targets.includes("127.0.0.1"));
+  assert.equal(merged.authorization, null);
   const commandFiles = readdirSync(join(task1.dataDir, "evidence")).filter(name => /^command-.*\.md$/.test(name));
   assert.equal(commandFiles.length, 1);
   const evidence = readFileSync(join(task1.dataDir, "evidence", commandFiles[0]!), "utf8");
@@ -144,20 +129,20 @@ test("授权登记后真实命令执行并留证；越界命令转 needs_authori
   assert.ok(readFileSync(join(task1.dataDir, "evidence", "task-result.md"), "utf8").includes("gy-ok"));
   assert.ok(reviewCalls >= 1, "真实命令必须经过审批");
   const prompt = taskPrompts.at(-1) ?? "";
-  assert.match(prompt, /授权台账（已登记/);
+  assert.match(prompt, /任务坐标/);
   assert.match(prompt, /active-lab/);
-  assert.match(prompt, /needs_authorization/);
+  assert.match(prompt, /needs_input/);
 
-  // 4) 越界命令：不执行、转 needs_authorization、请求文件记录目标
+  // 4) 越界命令：不执行、转 needs_input 澄清、请求文件记录目标
   state.reply = JSON.stringify({ kind: "command", command: "curl http://evil.test/", purpose: "越界测试" });
   const second = await settled(plane.url, await submit(plane.url, [{ role: "user", content: "检查 evil.test 是否可达" }], selection));
   assert.equal(second.status, "paused");
-  assert.match(second.reason ?? "", /^NEEDS_AUTHORIZATION: /);
+  assert.match(second.reason ?? "", /^NEEDS_INPUT: /);
   assert.match(second.reason ?? "", /evil\.test/);
   const task2 = plane.store.get(second.taskId)!;
   assert.equal(readdirSync(join(task2.dataDir, "evidence")).filter(name => /^command-.*\.md$/.test(name)).length, 0);
   assert.equal(existsSync(join(task2.dataDir, "evidence", "task-result.md")), false);
-  const denied = JSON.parse(readFileSync(join(task2.dataDir, "authorization-request.json"), "utf8")) as {
+  const denied = JSON.parse(readFileSync(join(task2.dataDir, "needs-input.json"), "utf8")) as {
     kind: string; targets: string[]; command: string; reason: string;
   };
   assert.equal(denied.kind, "command_denied");

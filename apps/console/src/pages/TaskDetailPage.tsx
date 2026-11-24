@@ -584,7 +584,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
                           ? `${Math.round(task.budget.maxWallMs / 3_600_000)}h`
                           : "∞",
                     },
-                    { key: "授权说明", value: task.auth.authorizationNote || "—" },
+                    { key: "任务备注", value: task.auth.authorizationNote || "—" },
                   ]}
                 />
               </Card>

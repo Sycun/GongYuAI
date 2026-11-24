@@ -291,25 +291,25 @@
 
 ---
 
-## 8. 落地差距（新语义 vs 现状代码）
+## 8. 落地状态（P16 语义收敛，2026-11-24 已落码）
 
-本文是目标语义；以下现状按「下一轮实现」记账，改代码前先与本表对齐（涉及契约的同步 [long-run-contract.md](./long-run-contract.md)）。
+本节原为「目标语义 vs 现状代码」差距表；P16 收敛后逐项落码如下（契约同步见 [long-run-contract.md](./long-run-contract.md)「Capability ladder」）。
 
-| # | 现状 | 目标 | 位置 |
+| # | 原差距 | 收敛落点 | 状态 |
 | --- | --- | --- | --- |
-| 1 | `authorization.ts` 授权台账（版本、撤销、原件封存） | 移除授权层；`targets/outOfScope/roe` 成为普通任务字段 | `packages/control-plane/src/authorization.ts` |
-| 2 | `needs_authorization` 结构化请求 + 会话内「已授权…继续」 | `needs_input` 澄清；目标进入任务即生效 | `packages/control-plane/src/assignments.ts` |
-| 3 | 模型拒绝纠偏仅一次 → `MODEL_REFUSED` 停住 | 拒绝处理链（重问/换模型/拆派），不作为终态、不写 Fact | `assignments.ts`（`REFUSAL_TEXT` / `refusalRetryable`） |
-| 4 | `authorizeCommand` 按 `auth.targets` 裁决范围 | 按任务坐标与操作配置裁决；工程自保规则保留且不依赖模型 | `packages/exec/src/scope.ts` |
-| 5 | 契约文档把授权版本作为核心概念 | 授权版本退出契约；`scopeVersion` 仅表示**操作配置**变更 | `docs/long-run-contract.md` §Auth capability ladder |
-| 6 | DISCLAIMER 要求每任务提交授权说明与白名单 | 授权为使用前提；工具不设登记步骤 | `DISCLAIMER.md`（✅ 本轮已改） |
+| 1 | `authorization.ts` 授权台账（版本、撤销、原件封存） | 写入路径移除；模块收敛为旧台账**只读兼容** + 任务坐标解析（`parseScopeMessage`）；`targets/outOfScope/roe` 是普通任务字段 | ✅ |
+| 2 | `needs_authorization` 结构化请求 + 会话内「已授权…继续」 | `needs_input` 澄清（`NEEDS_INPUT` 前缀）；续接把目标/排除/能力**合并进任务坐标**，不登记授权；「已授权 X，继续」兼容为加入坐标 | ✅ |
+| 3 | 模型拒绝纠偏仅一次 → `MODEL_REFUSED` 停住 | 拒绝处理链：上下文重问 → 结构化重问 → 换模型（≤3）→ 操作员 `paused` 结构化故障（可换模型重跑/手动命令）；拒绝不写终态、不写 Fact | ✅ |
+| 4 | `authorizeCommand` 按 `auth.targets` 裁决范围 | 按任务坐标与操作档位裁决；工程自保（主机网络/破坏性）确定性拒绝保留，不依赖模型、不针对目标 | ✅ |
+| 5 | 契约文档把授权版本作为核心概念 | `authorizationNote` 可选化、capability 默认 `active-lab`、新增 `roe`；`scopeVersion` 仅表示操作配置变更；`authorizationPromptBlock` → `taskScopePromptBlock` | ✅ |
+| 6 | DISCLAIMER 要求每任务提交授权说明与白名单 | 授权为使用前提；工具不设登记步骤 | ✅（前轮已改） |
 
-**验收口径**（改代码时逐条断言）：
-- 对任意目标（含外部公网目标），模型输出中不出现解释性拒绝；出现即测试失败。
+**验收口径**（P16 测试逐条断言，见 `packages/control-plane/src/p16-semantics.test.ts`）：
+- 对任意目标（含外部公网目标），模型输出中不出现解释性拒绝；出现即走纠偏链，测试失败若纠偏后仍呈现拒绝终态。
 - 拒绝纠偏后任务不进入 `MODEL_REFUSED` 终态；只允许 `paused` + 换模型重跑。
-- 无授权登记步骤时，任务可直接从目标坐标启动。
+- 无授权登记步骤时，任务可直接从目标坐标启动（`authorizationNote` 可省略）。
 - 工程自保拒绝仍然有效（改本机路由/VPN 永拒），且原因可读、不针对目标。
-- 旧授权台账数据按只读兼容处理，不阻塞新任务。
+- 旧授权台账数据按只读兼容处理（`GET /tasks/:id/authorization` 仍可回查），不阻塞新任务；`POST /tasks/:id/authorization` 返回 410 指引 `/scope`。
 
 ---
 

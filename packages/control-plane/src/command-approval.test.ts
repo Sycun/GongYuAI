@@ -74,7 +74,7 @@ test("independent worker dispatch is gated by task authorization and the supervi
   assert.match(readFileSync(join(task.dataDir, "denied.txt"), "utf8"), /evil\.test/);
   assert.equal(executorBound({ tool: "shell", summary: "uname -m", digest: "", command: "uname -m" }, task.auth), true);
   assert.equal(executorBound({ tool: "shell", summary: "evil", digest: "", command: "curl -s http://evil.test/" }, task.auth), false);
-  assert.match(outOfScopeFor(task.auth, "curl -s http://evil.test/"), /超出任务授权范围或执行器支持范围/);
+  assert.match(outOfScopeFor(task.auth, "curl -s http://evil.test/"), /超出任务目标坐标或执行器支持范围/);
   assert.match(outOfScopeFor(task.auth, "curl -s http://evil.test/"), /evil\.test/);
   assert.equal((await ended)[1], "SIGTERM");
   await plane.watchdog.tick();

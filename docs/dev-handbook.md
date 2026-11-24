@@ -297,7 +297,7 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 - **授权是使用前提，不进入产品流程**；目标默认授权，产品不设授权登记/审查（[red-team-positioning.md](./red-team-positioning.md)）。
 - `targets` 是作业坐标（必填，工具需要知道打哪）；`outOfScope` 是操作者排除项。
-- 能力档位决定工具面与风险敞口；目标语义默认 `active-lab`（P16 收敛，现状 observe）。
+- 能力档位决定工具面与风险敞口；默认 `active-lab`（P16 已收敛，API/CLI 统一）。
 - **只拒绝工程自保**：主机 VPN/代理/路由变更、宿主破坏；与目标无关。
 - **模型解释性拒绝按缺陷处理**：重问/换模型/拆派，不作终态、不写 Fact、不计攻击失败。
 - Skill/MCP 下载物使用前审查；不自动执行未审脚本（供应链安全，不是目标审查）。
@@ -306,13 +306,13 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ## 9. 下一件最小可做事项
 
-**P0–P5 + 扇出硬闸 / familyKey / Cairn 调度 / 控制台 UX / TSec 子集差分 + P6-E1 Finding / P-d skill 对齐**已落地。  
+**P0–P5 + 扇出硬闸 / familyKey / Cairn 调度 / 控制台 UX / TSec 子集差分 + P6-E1 Finding / P-d skill 对齐 + P16 语义收敛**已落地。  
 下一刀按**真实差分痛点**选，候选按依赖排序：
 
-1. **P16 语义收敛**（docs 已定调，代价最小）：去授权层（authorization → 任务坐标）+ `needs_authorization` → `needs_input` + 拒绝处理链（重问/换模型/拆派）+ DISCLAIMER 对齐——先让产品行为与 [red-team-positioning.md](./red-team-positioning.md) 一致，再谈能力扩展。
-2. **P6 E3 结构化落图 + HTTP 事务证据**（E1 已就位；finding_verify 需要事务证据时优先）或 **E2 凭据结构化**——见 [pentest-enhancements.md](./pentest-enhancements.md) §3 依赖图。
-3. **P7 相位级模型路由差分**（强脑+快兵 vs 全强模型，真 TSecBench 子集同预算）——Super-agent 层唯一需要实验背书的主张。
-4. 真 TSecBench（相对裸循环 / ARTEX）子集实测。
+1. **P6 E3 结构化落图 + HTTP 事务证据**（E1 已就位；finding_verify 需要事务证据时优先）或 **E2 凭据结构化**——见 [pentest-enhancements.md](./pentest-enhancements.md) §3 依赖图。
+2. **P7 相位级模型路由差分**（强脑+快兵 vs 全强模型，真 TSecBench 子集同预算）——Super-agent 层唯一需要实验背书的主张。
+3. 真 TSecBench（相对裸循环 / ARTEX）子集实测。
+4. AD/云自动采集（SharpHound/云 API 枚举器）——图已可导入可查，缺自动采集这一独立大特性。
 
 Intentest 五段检索与 History/Relay 语义 RAG 仍默认不做；P7 审计者/事件过滤差分未证明收益前不升默认。
 

@@ -372,11 +372,12 @@ test("claimIntent is CAS on proposed; succeed conclude requires Fact writeback",
   assert.equal(lost, null);
 
   assert.throws(
-    () => store.concludeIntent(taskId, intent.id, "succeeded", "ok"),
+    () => store.concludeIntent(taskId, intent.id, "succeeded", "ok", { workerId: "worker-a" }),
     /requires ≥1 Fact/,
   );
 
   const done = store.concludeIntent(taskId, intent.id, "succeeded", "ok", {
+    workerId: "worker-a",
     facts: [{ layer: "title", title: "probe result", summary: "found X" }],
   });
   assert.ok(done);

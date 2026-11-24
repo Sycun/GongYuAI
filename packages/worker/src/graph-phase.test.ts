@@ -8,6 +8,8 @@ import { openHistory, writeEvidenceFile } from "@gongyuai/history";
 import {
   allowedToolNames,
   asGraphPhase,
+  executionIntentDenial,
+  executionRequiresActiveIntent,
   handleGraphTool,
   syncGraphPhase,
 } from "./graph-phase.js";
@@ -267,7 +269,7 @@ test("engagement_audit is read-only and visible in every phase", () => {
         assetRoot: "lab.example.com",
       });
       history.claimIntent(taskId, proposed.id, "worker-test");
-      history.concludeIntent(taskId, proposed.id, "failed", "no injection point");
+      history.concludeIntent(taskId, proposed.id, "failed", "no injection point", { workerId: "worker-test" });
     }
 
     const before = history.listIntents(taskId).length;
@@ -355,6 +357,142 @@ test("finding_validate refuses self-validation and accepts an independent worker
     assert.equal(parsed.validation.verdict, "confirmed");
     assert.equal(parsed.validation.independent, true);
     assert.equal(history.listFindingValidations(taskId, finding.id).length, 1);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("execution tools require an active claimed Intent; read-only polls are exempt", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-exec-intent-"));
+  const history = openHistory({
+    dbPath: join(root, "h.sqlite"),
+    evidenceDir: join(root, "evidence"),
+  });
+  const state = tmpState("explore");
+  try {
+    const taskId = "t-exec";
+    const intent = history.proposeIntent({
+      taskId,
+      title: "probe",
+      sourceFactIds: [ORIGIN_FACT_ID],
+    });
+    history.claimIntent(taskId, intent.id, "worker-a");
+
+    assert.equal(executionRequiresActiveIntent("shell"), true);
+    assert.equal(executionRequiresActiveIntent("mcp__nmap__scan"), true);
+    assert.equal(executionRequiresActiveIntent("shell_job", { action: "poll" }), false);
+    assert.equal(executionRequiresActiveIntent("shell_job", { action: "start" }), true);
+    assert.equal(executionRequiresActiveIntent("c2", { action: "sessions" }), false);
+    assert.equal(executionRequiresActiveIntent("c2", { action: "task" }), true);
+    assert.equal(executionRequiresActiveIntent("finding_record"), false);
+
+    const base = { history, taskId, workerId: "worker-a", state, name: "shell" };
+    assert.match(executionIntentDenial(base) ?? "", /active claimed Intent/);
+
+    state.activeIntentId = intent.id;
+    assert.equal(executionIntentDenial(base), undefined);
+    assert.match(
+      executionIntentDenial({ ...base, workerId: "worker-b" }) ?? "",
+      /claimed by worker-a/,
+    );
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("phase_set(explore) refuses zero open Intent; conclude enforces active + owner", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-phase-hard-"));
+  const history = openHistory({
+    dbPath: join(root, "h.sqlite"),
+    evidenceDir: join(root, "evidence"),
+  });
+  const state = tmpState("bootstrap");
+  try {
+    const taskId = "t-hard";
+    const ctx = {
+      history,
+      taskId,
+      workspaceDir: root,
+      state,
+      workerId: "worker-a",
+      leader: true,
+      workerCount: 1,
+      save: () => {},
+    };
+
+    assert.match(
+      handleGraphTool("phase_set", { phase: "explore" }, ctx) ?? "",
+      /requires ≥1 open Intent/,
+    );
+
+    const intent = history.proposeIntent({
+      taskId,
+      title: "one",
+      sourceFactIds: [ORIGIN_FACT_ID],
+    });
+    assert.ok(handleGraphTool("phase_set", { phase: "explore" }, ctx));
+
+    history.claimIntent(taskId, intent.id, "worker-a");
+    assert.throws(
+      () => history.concludeIntent(taskId, intent.id, "failed", "no", { workerId: "worker-b" }),
+      /conclude denied/,
+    );
+
+    assert.match(
+      handleGraphTool("intent_conclude", { intentId: intent.id, status: "failed", conclusion: "no" }, ctx) ?? "",
+      /conclude only active Intent/,
+    );
+
+    state.activeIntentId = intent.id;
+    const done = handleGraphTool(
+      "intent_conclude",
+      { intentId: intent.id, status: "failed", conclusion: "no" },
+      ctx,
+    );
+    assert.ok(done && !done.startsWith("denied"));
+    assert.equal(state.activeIntentId, null);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("multi-worker leader delegates execution; follower cannot enter Reason", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-role-hard-"));
+  const history = openHistory({
+    dbPath: join(root, "h.sqlite"),
+    evidenceDir: join(root, "evidence"),
+  });
+  const state = tmpState("explore");
+  try {
+    const taskId = "t-role";
+    const intent = history.proposeIntent({
+      taskId,
+      title: "one",
+      sourceFactIds: [ORIGIN_FACT_ID],
+    });
+    const leaderCtx = {
+      history,
+      taskId,
+      workspaceDir: root,
+      state,
+      workerId: "leader",
+      leader: true,
+      workerCount: 2,
+      save: () => {},
+    };
+    assert.match(
+      handleGraphTool("intent_claim", { intentId: intent.id }, leaderCtx) ?? "",
+      /leader delegates Explore/,
+    );
+
+    const followerCtx = { ...leaderCtx, workerId: "follower", leader: false };
+    assert.match(
+      handleGraphTool("phase_set", { phase: "reason" }, followerCtx) ?? "",
+      /follower only Explore/,
+    );
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

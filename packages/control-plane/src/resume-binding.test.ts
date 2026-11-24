@@ -78,7 +78,7 @@ test("续接意图绑定同线程既有任务；未命中意图才新建", async
     messages: [...originalMessages, resumeMessage], selection,
   });
 
-  // 返回同一任务、消息追加、状态=running、授权已登记。
+  // 返回同一任务、消息追加、状态=running、目标坐标已合并（不登记授权）。
   assert.equal(view.taskId, task.id, "续接不能新建任务");
   assert.equal(view.status, "running");
   const stored = JSON.parse(readFileSync(join(task.dataDir, "assignment-input.json"), "utf8")) as {
@@ -89,9 +89,9 @@ test("续接意图绑定同线程既有任务；未命中意图才新建", async
   assert.deepEqual(stored.messages[1], originalMessages[1]);
   assert.equal(stored.messages.at(-1)!.content, "已授权 127.0.0.1，继续");
   const bound = store.get(task.id)!;
-  assert.deepEqual(bound.auth.targets, ["127.0.0.1"]);
-  assert.equal(bound.auth.capability, "active-lab");
-  assert.equal(bound.authorization?.version, 1);
+  assert.deepEqual(bound.auth.targets, ["local:submitted-materials", "127.0.0.1"]);
+  assert.equal(bound.auth.capability, "observe");
+  assert.equal(bound.authorization, null);
   assert.equal(bound.threadId, "default");
   assert.equal(bound.parentTaskId, null);
 

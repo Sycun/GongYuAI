@@ -154,15 +154,14 @@ export async function bootControlPlane(opts: BootOptions = {}) {
 export * from "./platform.js";
 
 export {
-  AuthorizationInputError,
-  appendRecord,
   authorizationDigest,
   currentRecord,
   ledgerPath,
-  parseAuthorizationInput,
-  parseAuthorizationText,
+  normalizeTargetToken,
+  parseCapabilityValue,
+  parseScopeMessage,
   readLedger,
-  registerAuthorization,
-  writeLedger,
+  splitTargets,
 } from "./authorization.js";
+export type { AuthorizationCapability, ScopeMessage } from "./authorization.js";
 export type { AssignmentViewWithAuthorization } from "./assignments.js";

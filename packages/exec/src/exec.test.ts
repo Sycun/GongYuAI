@@ -25,7 +25,7 @@ test("extractHosts 抽 URL/IP/CIDR 内主机，忽略 loopback", () => {
   assert.deepEqual(extractHosts("curl http://127.0.0.1:8080/").sort(), []);
 });
 
-test("authorizeCommand：范围内放行、越界拒绝、能力级不足拒绝", () => {
+test("authorizeCommand：坐标内放行、越界拒绝、能力档位不足拒绝", () => {
   const ok = authorizeCommand(AUTH, "curl -s http://10.10.1.5:8080/");
   assert.equal(ok.allowed, true, ok.reason);
   assert.equal(ok.need, "scan");
@@ -36,7 +36,7 @@ test("authorizeCommand：范围内放行、越界拒绝、能力级不足拒绝"
 
   const low = authorizeCommand({ ...AUTH, capability: "scan" }, "sqlmap -u http://10.10.1.5/x?id=1");
   assert.equal(low.allowed, false);
-  assert.match(low.reason, /能力级不足/);
+  assert.match(low.reason, /能力档位不足/);
 
   const local = authorizeCommand({ ...AUTH, capability: "scan" }, "uname -a");
   assert.equal(local.allowed, true, local.reason);

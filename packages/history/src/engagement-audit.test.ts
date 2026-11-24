@@ -49,7 +49,7 @@ test("engagementAudit derives repeat failures, untouched assets and tentative ba
         assetRoot: "api.example.com",
       });
       store.claimIntent(TASK_ID, proposed.id, "worker-test");
-      store.concludeIntent(TASK_ID, proposed.id, "failed", "no injection point");
+      store.concludeIntent(TASK_ID, proposed.id, "failed", "no injection point", { workerId: "worker-test" });
     }
 
     for (const [vulnClass, endpoint] of [

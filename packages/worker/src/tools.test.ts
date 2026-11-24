@@ -97,7 +97,7 @@ test("assertCommandAllowed denies host network mutation even with *", () => {
 test("assertCommandAllowed denies out-of-scope hosts", () => {
   assert.throws(
     () => assertCommandAllowed(manifest(["10.0.0.0/8"]), "curl -s https://example.com/"),
-    /not in auth.targets/,
+    /not in task targets/,
   );
   assert.doesNotThrow(() =>
     assertCommandAllowed(manifest(["10.0.0.0/8"]), "curl -s http://10.0.188.64/"),

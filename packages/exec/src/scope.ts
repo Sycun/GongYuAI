@@ -1,12 +1,13 @@
 import { pivotCidrs, targetAllows, type AuthCapability, type PivotPolicy } from "@gongyuai/contracts";
 
 /**
- * 执行期授权判定（shell / 会话 / C2 共用一个闸）。
+ * 执行期坐标判定（shell / 会话 / C2 共用一个闸）。
  *
- * 与 worker 旧版 `assertCommandAllowed` 的差异：
- * - 返回结构化判定（需要什么能力级、命中哪些目标、越界在哪），供审批卡与模型共用；
+ * P16 — 按任务坐标与操作配置裁决，不做目标合法性审查（red-team-positioning.md）：
+ * - 返回结构化判定（需要什么能力档位、命中哪些目标、越界在哪），供审批卡与模型共用；
  * - 命令文本本身进入台账（审批要看到真实动作），摘要只用于列表；
- * - 本地动作（无外部主机）不再要求白名单：能力级 ≥ scan 即可执行，仍受审批闸控制。
+ * - 工程自保（主机网络/破坏性）确定性拒绝，与目标无关，不依赖模型；
+ * - 本地动作（无外部主机）不要求坐标白名单：能力档位 ≥ scan 即可执行，仍受审批闸控制。
  */
 
 export type AuthSnapshot = {
@@ -186,7 +187,7 @@ function capabilityFor(command: string, hosts: string[]): AuthCapability {
 }
 
 /**
- * 命令授权判定。`extraHosts` 用于会话/C2：把会话对端主机并入本次判定。
+ * 命令坐标判定。`extraHosts` 用于会话/C2：把会话对端主机并入本次判定。
  */
 export function authorizeCommand(
   auth: AuthSnapshot,
@@ -209,7 +210,7 @@ export function authorizeCommand(
     return { ...base, allowed: false, reason: "不可回滚的本机破坏命令被拒绝" };
   }
   if (!auth.targets.length) {
-    return { ...base, allowed: false, reason: "auth.targets 为空：先登记授权范围" };
+    return { ...base, allowed: false, reason: "任务目标坐标为空：先在任务里补充目标（needs_input 澄清）" };
   }
   const pivot = pivotCidrs(auth);
   for (const host of hosts) {
@@ -219,34 +220,34 @@ export function authorizeCommand(
     return {
       ...base,
       allowed: false,
-      reason: `目标越界：${outOfScopeHits.join("、")} 不在授权范围（或命中排除项）`,
+      reason: `目标越界：${outOfScopeHits.join("、")} 不在任务目标坐标内（或命中排除项）`,
     };
   }
   if (!capabilityAtLeast(auth.capability, need)) {
     return {
       ...base,
       allowed: false,
-      reason: `能力级不足：该动作需要 ${need}，当前 ${auth.capability ?? "observe"}`,
+      reason: `能力档位不足：该动作需要 ${need}，当前 ${auth.capability ?? "observe"}`,
     };
   }
   return {
     ...base,
     allowed: true,
     reason: hosts.length
-      ? `范围内：${hosts.join("、")}（需要 ${need}，已满足）`
+      ? `任务坐标内：${hosts.join("、")}（需要 ${need}，已满足）`
       : `本地动作（需要 ${need}，已满足）`,
   };
 }
 
-/** C2 会话对端授权：对端必须在授权范围内（loopback 视为实验室本机）。 */
+/** C2 会话对端坐标判定：对端必须在任务坐标内（loopback 视为实验室本机）。 */
 export function authorizePeer(auth: AuthSnapshot, peer: string): { allowed: boolean; reason: string } {
   const host = peer.trim().toLowerCase().replace(/^::ffff:/, "");
   if (host === "127.0.0.1" || host === "::1" || host === "localhost") {
     return { allowed: true, reason: "loopback（实验本机）" };
   }
-  if (!auth.targets.length) return { allowed: false, reason: "auth.targets 为空：先登记授权范围" };
+  if (!auth.targets.length) return { allowed: false, reason: "任务目标坐标为空：先在任务里补充目标（needs_input 澄清）" };
   if (targetAllows(auth.targets, host, auth.outOfScope ?? [], pivotCidrs(auth))) {
-    return { allowed: true, reason: `对端 ${host} 在授权范围内` };
+    return { allowed: true, reason: `对端 ${host} 在任务坐标内` };
   }
-  return { allowed: false, reason: `对端 ${host} 不在授权范围：只记录不回连任务` };
+  return { allowed: false, reason: `对端 ${host} 不在任务坐标内：只记录不回连任务` };
 }

@@ -1,13 +1,11 @@
 import { z } from "zod";
 
 /**
- * 授权台账（Authorization Ledger）。
+ * 旧授权台账（Authorization Ledger）——只读兼容（P16）。
  *
- * 设计约束：
- * - 委托的书面授权是一份**可引用原件**，不是一个布尔值。`auth` 仍是执行期唯一权威，
- *   本记录负责"这句话依据哪份原件"，并把版本、范围、能力级、时间窗固定下来。
- * - 记录只增不改：撤回写 `revokedAt`，范围变化写新版本；旧版本留在 evidence 里可回查。
- * - 台账不扩大 `auth.targets`：控制面把记录投影为 `AuthScope`，worker 仍按 `auth` 执行。
+ * 授权是使用前提，不是运行时功能（red-team-positioning.md）：新任务不再有授权
+ * 登记/版本/审查；`targets/outOfScope/roe` 是普通任务坐标。本模块仅保留 schema
+ * 与读取助手，让历史任务里已封存的台账记录仍可回查，不阻塞新任务。
  */
 
 export const AuthorizationEvidenceSchema = z.object({
@@ -86,55 +84,4 @@ export function latestAuthorization(ledger: AuthorizationLedger): AuthorizationR
   let best: AuthorizationRecord | null = null;
   for (const r of ledger.records) if (!best || r.version > best.version) best = r;
   return best;
-}
-
-/** 投影为执行期 AuthScope；`auth` 仍是 worker 唯一权威。 */
-export function authorizationToAuthScope(record: AuthorizationRecord): {
-  authorizationNote: string;
-  targets: string[];
-  outOfScope: string[];
-  capability: AuthorizationRecord["capability"];
-} {
-  return {
-    authorizationNote: `${record.issuedBy} 于 ${record.issuedAt} 出具（授权台账 v${record.version}）${record.note ? `：${record.note}` : ""}`.slice(0, 400),
-    targets: [...record.targets],
-    outOfScope: [...record.outOfScope],
-    capability: record.capability,
-  };
-}
-
-/**
- * 给模型看的授权块。要点：
- * - 明确"授权已登记 + 版本 + 范围 + 能力级"，避免模型把已登记授权当成未授权；
- * - 明确能力级含义，避免模型把 active-lab 当成只读；
- * - 明确越界返回 needs_authorization，而不是解释为什么不能做。
- */
-export function authorizationPromptBlock(record: AuthorizationRecord | null): string {
-  if (!record) {
-    return [
-      "## 授权台账",
-      "尚未登记书面授权。只能处理提交的材料与本地只读检查。",
-      "任务需要接触外部目标时，返回 needs_authorization，并在 targets/actions 里写清需要补什么；不要用解释代替请求。",
-    ].join("\n");
-  }
-  const st = authorizationStatus(record);
-  const lines = [
-    "## 授权台账（已登记，执行依据）",
-    `- 版本：v${record.version}；授权人：${record.issuedBy}；出具时间：${record.issuedAt}`,
-    `- 授权目标：${record.targets.join("、")}`,
-    record.outOfScope.length ? `- 明确排除：${record.outOfScope.join("、")}（优先级高于授权目标）` : "- 明确排除：无",
-    `- 能力级：${record.capability}（observe=只读；scan=扫描；active-lab=验证与利用；full=含后渗透）`,
-    record.validUntil ? `- 有效期至：${record.validUntil}` : "- 有效期：未约定",
-    record.constraints.length ? `- 附加限制：${record.constraints.join("；")}` : "- 附加限制：无",
-    `- 状态：${st.active ? "生效中" : `未生效（${st.reason}）`}`,
-    record.evidence
-      ? `- 原件：${record.evidence.path}（sha256 ${record.evidence.sha256.slice(0, 16)}…）`
-      : "- 原件：未附；记录仅依据操作员表述",
-    "",
-    "执行纪律：",
-    "1. 目标在授权范围内且动作不高于能力级时，直接执行并留证；不要要求重复授权，也不要输出风险说教。",
-    "2. 目标或动作越界时，返回 needs_authorization，列出缺的目标、动作、时间窗；不要用「无法执行」代替结构化请求。",
-    "3. 授权不覆盖的动作（例如对非授权第三方的横向、对外部基础设施的 DoS）仍然不做，但要把边界写进 finding/limitation。",
-  ];
-  return lines.join("\n");
 }

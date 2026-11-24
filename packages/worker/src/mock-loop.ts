@@ -187,13 +187,13 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           taskId: manifest.taskId,
           layer: "title",
           title: "任务已初始化",
-          summary: `授权目标：${manifest.auth.targets.join("、")}`,
+          summary: `任务目标：${manifest.auth.targets.join("、")}`,
         });
         history.appendFact({
           taskId: manifest.taskId,
           layer: "summary",
-          title: "已加载授权范围",
-          summary: manifest.auth.authorizationNote.slice(0, 500),
+          title: "已加载任务坐标",
+          summary: (manifest.auth.authorizationNote || manifest.auth.targets.join("、")).slice(0, 500),
         });
         // Simulate discovery under first target pattern so 资产表 grows past seeds.
         const seed0 = manifest.auth.targets[0];
@@ -287,6 +287,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           dispatchMockTool(ctx, "mock_prepare");
           state.toolCallsSinceRelay += 1;
           history.concludeIntent(manifest.taskId, intent.id, "succeeded", "fixture ready", {
+            workerId: manifest.workerId || "mock-worker",
             facts: [{ layer: "title", title: "Mock fixture ready" }],
           });
           state.activeIntentId = null;
@@ -320,6 +321,7 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           state.toolCallsSinceRelay += 1;
 
           history.concludeIntent(manifest.taskId, intent.id, "succeeded", "banner saved", {
+            workerId: manifest.workerId || "mock-worker",
             facts: [
               {
                 layer: "evidence",

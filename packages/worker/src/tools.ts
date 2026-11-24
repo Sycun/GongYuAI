@@ -140,12 +140,12 @@ export function assertCommandAllowed(manifest: WorkerManifest, command: string):
   }
   if (verdict.klass === "destructive") throw new Error("denied: destructive host command");
   const oos = verdict.outOfScopeHits[0];
-  if (oos) throw new Error(`target host ${oos} not in auth.targets`);
+  if (oos) throw new Error(`target host ${oos} not in task targets`);
   throw new Error(`denied: ${verdict.reason}`);
 }
 
 /**
- * Record one authorization decision before dispatch. Keep arguments and
+ * Record one scope/capability decision before dispatch. Keep arguments and
  * credentials out of the audit metadata.
  */
 export function gateTool<T>(
@@ -159,7 +159,7 @@ export function gateTool<T>(
     authorized = check();
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    if (["shell", "install", "mcp"].includes(tool) && (/^denied:/.test(reason) || reason.includes("not in auth.targets"))) {
+    if (["shell", "install", "mcp"].includes(tool) && (/^denied:/.test(reason) || reason.includes("not in task targets"))) {
       recordHardDenial(ctx.manifest, tool, reason);
     }
     ctx.history.recordToolGate(ctx.manifest.taskId, {

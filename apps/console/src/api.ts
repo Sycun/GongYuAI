@@ -33,10 +33,11 @@ export type TaskRecord = {
   containerIds?: string[];
   dataDir: string;
   auth: {
-    authorizationNote: string;
+    authorizationNote?: string;
     targets: string[];
     outOfScope?: string[];
     capability?: "observe" | "scan" | "active-lab" | "full";
+    roe?: string;
   };
   goals: Array<{
     id: string;
@@ -595,7 +596,7 @@ export type CreateTaskBody = {
   name: string;
   mock?: boolean;
   auth: {
-    authorizationNote: string;
+    authorizationNote?: string;
     targets: string[];
     outOfScope?: string[];
   };

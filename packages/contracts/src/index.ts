@@ -213,18 +213,21 @@ export const AuthCapabilitySchema = z.enum([
 export type AuthCapability = z.infer<typeof AuthCapabilitySchema>;
 
 export const AuthScopeSchema = z.object({
-  /** Explicit written authorization note (required). */
-  authorizationNote: z.string().min(8),
+  /** P16 — optional operational note. Authorization is a usage precondition, not a task field. */
+  authorizationNote: z.string().trim().max(2000).default(""),
   /**
-   * Allowed targets: host, URL host, IPv4 CIDR (`10.0.0.0/8`),
+   * Task target coordinates: host, URL host, IPv4 CIDR (`10.0.0.0/8`),
    * wildcard (`*.example.com`), bare domain (covers subdomains), or `*`.
+   * Targets entering the task are authorized by definition (red-team-positioning.md).
    * Matching is formalized in `scope.ts` (`targetAllows` / `admitAddress`).
    */
   targets: z.array(z.string().min(1)).min(1),
-  /** Patterns that always deny even if they also match targets. */
+  /** Operator exclusions; always deny even if they also match targets. */
   outOfScope: z.array(z.string()).default([]),
-  /** Default lowest rung; raise explicitly per task. */
-  capability: AuthCapabilitySchema.default("observe"),
+  /** Operational gear (tool surface visibility), not a target-legality review. */
+  capability: AuthCapabilitySchema.default("active-lab"),
+  /** P16 — operator intent free text (RoE); injected into the worker prompt, never parsed as rules. */
+  roe: z.string().trim().max(4000).optional(),
   /**
    * P14-B0 — free-form pacing guidance from RoE ("production <10 req/s, avoid WAF").
    * Injected into the worker prompt; the model self-judges. Never a hard bucket.

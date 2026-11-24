@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -17,10 +17,13 @@ function providerBody(text: string): string {
   return JSON.stringify({ choices: [{ message: { content: text } }] });
 }
 
-async function submit(url: string, content: string, selection: Record<string, unknown>) {
+async function submit(url: string, content: string, selection: Record<string, unknown>, messages?: Array<{ role: string; content: string }>) {
   return fetch(url + "/tasks/submit", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ requestId: randomUUID().replaceAll("-", ""), messages: [{ role: "user", content }], selection }),
+    body: JSON.stringify({
+      requestId: randomUUID().replaceAll("-", ""),
+      messages: messages ?? [{ role: "user", content }], selection,
+    }),
   });
 }
 
@@ -38,7 +41,7 @@ async function waitFor(url: string, taskId: string, wanted: string[], tries = 50
   throw new Error(`任务 ${taskId} 未进入 ${wanted.join("/")}，最后状态 ${last.status} / ${last.reason ?? ""}`);
 }
 
-test("授权登记后模型层拒绝先纠偏一次，再给 command；手动命令同样走授权与证据", { timeout: 40_000 }, async t => {
+test("P16：拒绝先纠偏再给 command（无需授权登记）；授权入口 410；needs_input 澄清环；工程自保", { timeout: 40_000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), "gy-operator-command-"));
   const plane = await bootControlPlane({ dataRoot: root, host: "127.0.0.1", port: 0, isolated: true });
   t.after(async () => { await plane.close(); rmSync(root, { recursive: true, force: true }); });
@@ -58,7 +61,12 @@ test("授权登记后模型层拒绝先纠偏一次，再给 command；手动命
     }
     promptLog.push(system);
     const corrected = (body.messages ?? []).some((m) => String(m.content).includes("系统校验（不是用户请求）"));
-    res.end(providerBody(corrected ? commandReply("echo retry-ok") : refusal));
+    const lastUser = [...(body.messages ?? [])].reverse().find((m) => m.role === "user");
+    const lastText = String(lastUser?.content ?? "");
+    if (corrected) res.end(providerBody(commandReply("echo retry-ok")));
+    else if (system.includes("evil.test")) res.end(providerBody(commandReply("echo admitted-ok")));
+    else if (lastText.includes("evil.test")) res.end(providerBody(commandReply("curl -s http://evil.test/")));
+    else res.end(providerBody(refusal));
   });
   await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => fixture.close(() => resolve())));
@@ -76,51 +84,33 @@ test("授权登记后模型层拒绝先纠偏一次，再给 command；手动命
   await approval.text();
   const selection = { profileId: "fixture", modelId: "reply" };
 
-  // 1) 没有授权：模型拒绝原样暂停（不纠偏，因为没有授权事实可引用）
+  // 1) 无授权登记：模型拒绝 → 系统纠偏（目标进入任务即视为授权）→ command → 真执行 + 证据
   const submitted = await submit(plane.url, "验证 127.0.0.1 的本地回显", selection);
   assert.equal(submitted.status, 202, await submitted.clone().text());
   const first = await submitted.json() as AssignmentView;
-  const paused = await waitFor(plane.url, first.taskId, ["paused"]);
-  assert.match(paused.reason ?? "", /无权|未获授权/);
-  assert.equal(promptLog.some((p) => p.includes("授权台账（已登记")), false);
+  const done = await waitFor(plane.url, first.taskId, ["completed", "failed", "paused"]);
+  assert.equal(done.status, "completed", `${done.status} / ${done.reason ?? ""}`);
+  assert.ok(promptLog.some((p) => p.includes("任务坐标")), "system 应含任务坐标块");
+  assert.equal(promptLog.some((p) => p.includes("授权台账（已登记")), false, "不再注入授权台账块");
+  assert.ok(promptLog.length >= 2, "拒绝后应至少纠偏一轮");
+  const task1 = plane.store.get(first.taskId)!;
+  const cmdEvidence = readdirSync(join(task1.dataDir, "evidence")).filter((name) => name.startsWith("command-"));
+  assert.ok(cmdEvidence.length >= 1, cmdEvidence.join(","));
+  assert.match(readFileSync(join(task1.dataDir, "evidence", cmdEvidence[0]!), "utf8"), /retry-ok/);
 
-  // 2) 登记授权：task.auth 投影为 active-lab + 127.0.0.1
+  // 2) 授权登记入口已移除：POST 返回 410，指引 /scope；GET 仍可只读回查（无记录为 null）
   const registered = await fetch(plane.url + "/tasks/" + first.taskId + "/authorization", {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ text: "授权人：张三 / 目标：127.0.0.1 / 能力：active-lab" }),
   });
-  assert.equal(registered.status, 200, await registered.clone().text());
-  const registeredBody = await registered.json() as { task: { auth: { targets: string[]; capability: string } }; authorization: { version: number } };
-  assert.deepEqual(registeredBody.task.auth.targets, ["127.0.0.1"]);
-  assert.equal(registeredBody.task.auth.capability, "active-lab");
-  assert.equal(registeredBody.authorization.version, 1);
+  assert.equal(registered.status, 410);
+  assert.match((await registered.json() as { error: string }).error, /scope|坐标/);
+  const ledgerGet = await fetch(plane.url + "/tasks/" + first.taskId + "/authorization");
+  assert.equal(ledgerGet.status, 200);
+  assert.equal((await ledgerGet.json() as { authorization: unknown }).authorization, null);
 
-  // 3) 继续：模型第一次仍拒绝 → 系统纠偏一次 → 返回 command → 真执行 + 证据
-  const resumed = await fetch(plane.url + "/tasks/" + first.taskId + "/resume", { method: "POST" });
-  assert.equal(resumed.status, 200, await resumed.clone().text());
-  const done = await waitFor(plane.url, first.taskId, ["completed", "failed", "paused"]);
-  assert.equal(done.status, "completed", `${done.status} / ${done.reason ?? ""}`);
-  assert.equal(promptLog.some((p) => p.includes("授权台账（已登记")), true, "第二轮的 system 应包含授权台账");
-  const task1 = plane.store.get(first.taskId)!;
-  const cmdEvidence = readdirSync(join(task1.dataDir, "evidence")).filter((name) => name.startsWith("command-"));
-  assert.ok(cmdEvidence.length >= 1, cmdEvidence.join(","));
-  const body = readFileSync(join(task1.dataDir, "evidence", cmdEvidence[0]!), "utf8");
-  assert.match(body, /retry-ok/);
-
-  // 4) 手动命令：绕过模型，仍走授权 + 审批 + 证据
-  const second = await (await submit(plane.url, "再验证一次", selection)).json() as AssignmentView;
-  await waitFor(plane.url, second.taskId, ["paused"]);
-  const secondAuth = await fetch(plane.url + "/tasks/" + second.taskId + "/authorization", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: "授权人：张三 / 目标：127.0.0.1 / 能力：active-lab" }),
-  });
-  assert.equal(secondAuth.status, 200, await secondAuth.clone().text());
-  await secondAuth.text();
-  const manual = await fetch(plane.url + "/tasks/" + second.taskId + "/command", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ command: "echo manual-ok", purpose: "操作员手动验证" }),
-  });
-  assert.equal(manual.status, 200, await manual.clone().text());
+  // 3) 手动命令：绕过模型，仍走坐标裁决 + 审批 + 证据
+  const second = await (await submit(plane.url, "执行命令：echo manual-ok", selection)).json() as AssignmentView;
   const manualDone = await waitFor(plane.url, second.taskId, ["completed", "failed", "paused"]);
   assert.equal(manualDone.status, "completed", `${manualDone.status} / ${manualDone.reason ?? ""}`);
   const task2 = plane.store.get(second.taskId)!;
@@ -130,21 +120,39 @@ test("授权登记后模型层拒绝先纠偏一次，再给 command；手动命
     .join("\n");
   assert.match(manualEvidence, /manual-ok/);
 
-  // 5) 手动命令越界：不执行，转 needs_authorization
-  const third = await (await submit(plane.url, "再验证一次", selection)).json() as AssignmentView;
-  await waitFor(plane.url, third.taskId, ["paused"]);
-  const thirdAuth = await fetch(plane.url + "/tasks/" + third.taskId + "/authorization", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: "授权人：张三 / 目标：127.0.0.1 / 能力：active-lab" }),
-  });
-  assert.equal(thirdAuth.status, 200, await thirdAuth.clone().text());
-  await thirdAuth.text();
-  const blocked = await fetch(plane.url + "/tasks/" + third.taskId + "/command", {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ command: "curl -s http://evil.test/" }),
-  });
-  assert.equal(blocked.status, 200, await blocked.clone().text());
-  const blockedDone = await waitFor(plane.url, third.taskId, ["paused", "completed", "failed"]);
-  assert.equal(blockedDone.status, "paused");
-  assert.match(blockedDone.reason ?? "", /evil\.test|越界|授权/);
+  // 4) 手动命令越界：不执行，转 needs_input 澄清（不是授权申请）
+  const third = await (await submit(plane.url, "执行命令：curl -s http://evil.test/", selection)).json() as AssignmentView;
+  const blocked = await waitFor(plane.url, third.taskId, ["paused", "completed", "failed"]);
+  assert.equal(blocked.status, "paused");
+  assert.match(blocked.reason ?? "", /NEEDS_INPUT/);
+  assert.match(blocked.reason ?? "", /evil\.test|越界|坐标/);
+  const task3 = plane.store.get(third.taskId)!;
+  assert.ok(existsSync(join(task3.dataDir, "needs-input.json")), "应落 needs-input 澄清请求");
+  assert.equal(readdirSync(join(task3.dataDir, "evidence")).filter((n) => n.startsWith("command-")).length, 0, "越界命令不得执行");
+
+  // 5) 澄清环：回复「目标: evil.test，继续」把目标加入坐标 → 续接同任务 → 执行
+  const resumed = await submit(plane.url, "", selection, [
+    { role: "user", content: "执行命令：curl -s http://evil.test/" },
+    { role: "user", content: "目标: evil.test，继续" },
+  ]);
+  assert.equal(resumed.status, 202, await resumed.clone().text());
+  const resumedView = await resumed.json() as AssignmentView;
+  assert.equal(resumedView.taskId, third.taskId, "澄清续接必须绑定同一任务");
+  const admitted = await waitFor(plane.url, third.taskId, ["completed", "failed", "paused"]);
+  assert.equal(admitted.status, "completed", `${admitted.status} / ${admitted.reason ?? ""}`);
+  const bound = plane.store.get(third.taskId)!;
+  assert.ok(bound.auth.targets.includes("evil.test"), "目标应合并进任务坐标");
+  assert.equal(bound.authorization, null, "不再产生授权记录");
+  const admittedEvidence = readdirSync(join(bound.dataDir, "evidence"))
+    .filter((name) => name.startsWith("command-"))
+    .map((name) => readFileSync(join(bound.dataDir, "evidence", name), "utf8"))
+    .join("\n");
+  assert.match(admittedEvidence, /admitted-ok/);
+
+  // 6) 工程自保：主机网络变更确定性拒绝，与目标无关，不走 needs_input
+  const fourth = await (await submit(plane.url, "执行命令：sudo route add -host 192.0.2.1", selection)).json() as AssignmentView;
+  const engineering = await waitFor(plane.url, fourth.taskId, ["paused", "completed", "failed"]);
+  assert.equal(engineering.status, "paused");
+  assert.match(engineering.reason ?? "", /主机网络|VPN|代理/);
+  assert.doesNotMatch(engineering.reason ?? "", /NEEDS_INPUT/);
 });

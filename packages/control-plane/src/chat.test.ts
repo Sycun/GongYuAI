@@ -318,7 +318,7 @@ test("command confirmation: scope first, user decides in session, one execution 
   const outOfScope = await run("curl -s http://192.0.2.9/");
   assert.equal(outOfScope.status, "paused");
   assert.equal(outOfScope.commandReview?.decision, "block");
-  assert.match(outOfScope.commandReview?.reason ?? "", /超出任务授权范围或执行器支持范围/);
+  assert.match(outOfScope.commandReview?.reason ?? "", /超出任务目标坐标或执行器支持范围/);
   assert.equal(reviewCalls.length, before);
 
   // 自动审批：模型不可用显示原因，重试入口就同一命令重审并执行。
