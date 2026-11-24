@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import type { ToolCatalogEntry, WorkerManifest, WorkerSkillPack } from "@gongyuai/contracts";
 import type { HistoryStore } from "@gongyuai/history";
 import { appendProgress } from "../tools.js";
@@ -9,8 +9,12 @@ export type SkillHub = {
   routingTable(): string[];
   /** Goal-based soft hints (ids only). */
   suggestForGoals(): string[];
-  /** Load full SKILL.md into tool result (on-demand). */
-  load(id: string, reason: string): string;
+  /** Check if skill id is already in the live pool. */
+  hasSkill(id: string): boolean;
+  /** Hot-register a newly installed skill pack into the live pool/routing table. */
+  register(pack: WorkerSkillPack, catalogEntry?: ToolCatalogEntry): void;
+  /** Load full SKILL.md (or an optional reference file under references/) into tool result. */
+  load(id: string, reason: string, ref?: string): string;
   /** Which skills have been loaded this run (for progress). */
   loadedIds(): string[];
 };
@@ -101,7 +105,35 @@ export function openSkillHub(
     return [];
   }
 
+  function listReferences(rootDir: string): string[] {
+    const refDir = join(rootDir, "references");
+    if (!existsSync(refDir)) return [];
+    try {
+      if (!statSync(refDir).isDirectory()) return [];
+      return readdirSync(refDir)
+        .filter((f) => !f.startsWith("."))
+        .sort()
+        .map((f) => `references/${f}`);
+    } catch {
+      return [];
+    }
+  }
+
   return {
+    hasSkill: (id) => pool.has(id),
+    register(pack, catalogEntry) {
+      pool.set(pack.id, pack);
+      if (!catalog.some((c) => c.id === pack.id)) {
+        catalog.push(
+          catalogEntry ?? {
+            id: pack.id,
+            name: pack.name,
+            description: "",
+            category: "skill",
+          },
+        );
+      }
+    },
     routingTable: () => {
       const lines: string[] = [];
       for (const c of catalog) {
@@ -142,7 +174,7 @@ export function openSkillHub(
       return scored.slice(0, 5).map((s) => s.id);
     },
 
-    load(id, reason) {
+    load(id, reason, ref) {
       const finish = startCall("skill", id);
       let success = false;
       try {
@@ -151,11 +183,27 @@ export function openSkillHub(
           const known = [...pool.keys()].slice(0, 30).join(", ");
           return `未知 Skill id：${id}。已知：${known}`;
         }
-        const path = join(pack.rootDir, "SKILL.md");
-        if (!existsSync(path)) return `Skill ${id} 缺少 SKILL.md`;
+        let targetPath = join(pack.rootDir, "SKILL.md");
+        let label = "SKILL.md";
+        if (ref && ref.trim()) {
+          const cleanRef = ref.trim().replace(/^\/+/, "");
+          const rootAbs = resolve(pack.rootDir);
+          const candidate = resolve(rootAbs, cleanRef);
+          const rel = relative(rootAbs, candidate);
+          if (!rel || rel.startsWith("..") || rel.includes("..")) {
+            return `非法参考路径：${ref}`;
+          }
+          if (!existsSync(candidate) || !statSync(candidate).isFile()) {
+            const avail = listReferences(pack.rootDir);
+            return `Skill ${id} 中不存在参考文件 ${cleanRef}。可用：${avail.join(", ") || "（无）"}`;
+          }
+          targetPath = candidate;
+          label = rel;
+        }
+        if (!existsSync(targetPath)) return `Skill ${id} 缺少 SKILL.md`;
         let body: string;
         try {
-          body = stripFrontmatter(readFileSync(path, "utf8")).trim();
+          body = stripFrontmatter(readFileSync(targetPath, "utf8")).trim();
         } catch (err) {
           return `读取失败：${err instanceof Error ? err.message : String(err)}`;
         }
@@ -168,16 +216,20 @@ export function openSkillHub(
         loaded.add(id);
         appendProgress(
           manifest.workspaceDir,
-          `load_skill ${id} · ${reason.slice(0, 100)}`,
+          `load_skill ${id}${ref ? ` (${label})` : ""} · ${reason.slice(0, 100)}`,
         );
         history.appendFact({
           taskId: manifest.taskId,
           layer: "summary",
           title: `加载 Skill ${id}`,
-          summary: reason.slice(0, 400),
+          summary: `${ref ? `[${label}] ` : ""}${reason.slice(0, 380)}`,
         });
         success = body.length > 0;
-        return `# Skill ${pack.name} (\`${id}\`)\n理由：${reason.slice(0, 200)}\n\n${clipped}`;
+        const refs = !ref ? listReferences(pack.rootDir) : [];
+        const refNote = refs.length
+          ? `\n\n---\n可用参考文档（调用 load_skill(id="${id}", ref="...") 按需读取）：${refs.join(", ")}`
+          : "";
+        return `# Skill ${pack.name} (\`${id}\` · ${label})\n理由：${reason.slice(0, 200)}\n\n${clipped}${refNote}`;
       } finally {
         finish(success);
       }

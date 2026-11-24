@@ -10,9 +10,10 @@ metadata:
 
 ## 选工具
 
-1. 先看 prompt 的 MCP 目录行：`（未安装）` 的不要 enable，换等价工具或先 `install_tool`（需 ≥scan）。
-2. 看 capability：scan 级任务不能 enable active-lab 的 MCP（sqlmap/hydra/netexec 等）。
-3. 一次只 enable 需要的；enable 会写 Fact 和审计事件。
+1. 优先使用 Kali 已集成的内置 MCP 与二进制；调用 `enable_mcp` 时若内置二进制未安装（需 ≥scan），系统会自动走 Kali-first `install_tool`（先查已装/别名 → Kali APT → 官方 go/pipx/npm/brew）并刷新健康缓存。
+2. 仅当 Kali 内置未覆盖时，再使用 `install_mcp` / `install_skill` 从官方或高星（≥500⭐）社区源热安装；重复请求已存在的 Kali 工具会被自动复用，不做多余下载。
+3. 看 capability：scan 级任务不能 enable active-lab 的 MCP（sqlmap/hydra/netexec 等）。
+4. 一次只 enable 需要的；enable 会写 Fact 和审计事件。
 
 ## 机读输出（强制）
 

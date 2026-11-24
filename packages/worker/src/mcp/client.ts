@@ -1,13 +1,22 @@
-import { spawnSync } from "node:child_process";
 import { commandProposal, reviewBeforeDispatch } from "../command-guard.js";
 import {
   isIpv4Cidr,
   targetAllows,
+  type ToolCatalogEntry,
   type WorkerManifest,
   type WorkerMcpServer,
 } from "@gongyuai/contracts";
 import type { ToolContext } from "../tools.js";
-import { appendProgress, assertCapabilityAllows, chargeToolCall, gateTool, mcpActionForServer } from "../tools.js";
+import {
+  appendProgress,
+  assertCapabilityAllows,
+  capabilityAtLeast,
+  chargeToolCall,
+  gateTool,
+  installTool,
+  mcpActionForServer,
+} from "../tools.js";
+import { builtinBinaryAvailable, invalidateBinaryHealth } from "../tool-installer.js";
 import { loadToolsRuntime, saveToolsRuntime } from "../tools-runtime.js";
 import { createBuiltinFromRoot } from "./builtin/from-manifest.js";
 import { parseAndRecord, parseSummaryLine, toolForServer } from "../tool-output.js";
@@ -25,7 +34,10 @@ export type McpHub = {
   promptLines: string[];
   catalogLines(): string[];
   enabledIds(): string[];
-  enable(id: string, reason: string): Promise<string>;
+  hasServer(id: string): boolean;
+  /** Hot-register a newly installed MCP server into the live pool/catalog. */
+  register(cfg: WorkerMcpServer, catalogEntry?: ToolCatalogEntry): void;
+  enable(id: string, reason: string, opts?: { autoInstall?: boolean }): Promise<string>;
   disable(id: string, reason: string): Promise<string>;
   call(fullName: string, args: Record<string, unknown>): Promise<string>;
   /** Call by serverId + toolName (for Pi after mid-run unlock). */
@@ -35,20 +47,7 @@ export type McpHub = {
   close(): Promise<void>;
 };
 
-/** Builtin MCP health: a missing binary stays in the catalog but cannot enable. */
-const BINARY_HEALTH = new Map<string, boolean>();
-function builtinBinaryAvailable(binary: string | undefined): boolean {
-  if (!binary) return true;
-  const cached = BINARY_HEALTH.get(binary);
-  if (cached !== undefined) return cached;
-  const probe = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(binary)}`], {
-    encoding: "utf8",
-    timeout: 5_000,
-  });
-  const ok = (probe.status ?? 1) === 0;
-  BINARY_HEALTH.set(binary, ok);
-  return ok;
-}
+export { invalidateBinaryHealth };
 
 export async function openMcpHub(
   manifest: WorkerManifest,
@@ -75,19 +74,57 @@ export async function openMcpHub(
     ...(runtime?.mcpEnabledIds ?? []),
   ]);
 
-  async function attach(id: string): Promise<string> {
+  const catalogEntries = new Map<string, ToolCatalogEntry>();
+  for (const c of manifest.mcpCatalog ?? []) {
+    catalogEntries.set(c.id, c);
+  }
+  for (const cfg of pool.values()) {
+    if (!catalogEntries.has(cfg.id)) {
+      catalogEntries.set(cfg.id, {
+        id: cfg.id,
+        name: cfg.name,
+        description: cfg.whenToUse ?? "",
+        category: "general",
+      });
+    }
+  }
+
+  async function attach(
+    id: string,
+    opts?: { autoInstall?: boolean },
+  ): Promise<string> {
     const cfg = gateTool(ctx, "enable_mcp", () => {
       const server = pool.get(id);
       if (!server) throw new Error(`未知 MCP id：${id}（不在 mcpPool/目录中）`);
       assertCapabilityAllows(manifest, mcpActionForServer(id, manifest));
-      if (server.transport === "builtin" && !builtinBinaryAvailable(server.binary)) {
-        throw new Error(`MCP 二进制不存在：${server.binary ?? server.id}（Kali 未安装）`);
-      }
       return server;
     }, { serverId: id });
+
+    let autoInstalledNote = "";
+    if (cfg.transport === "builtin" && !builtinBinaryAvailable(cfg.binary, { refresh: true })) {
+      const canAutoInstall =
+        opts?.autoInstall !== false &&
+        Boolean(cfg.binary) &&
+        !cfg.binary!.includes("/") &&
+        capabilityAtLeast(manifest.auth.capability, "scan");
+      if (canAutoInstall) {
+        const installed = await installTool(ctx, {
+          name: cfg.binary!,
+          method: "auto",
+        });
+        invalidateBinaryHealth(cfg.binary);
+        if (installed.ok && builtinBinaryAvailable(cfg.binary, { refresh: true })) {
+          autoInstalledNote = `（已自动安装二进制 ${cfg.binary}：${installed.detail}）`;
+        }
+      }
+      if (!builtinBinaryAvailable(cfg.binary, { refresh: true })) {
+        throw new Error(`MCP 二进制不存在：${cfg.binary ?? cfg.id}（未安装或自动安装失败）`);
+      }
+    }
+
     if (sessions.has(cfg.id)) {
       enabled.add(cfg.id);
-      return `MCP ${cfg.id} 已启用`;
+      return `MCP ${cfg.id} 已启用${autoInstalledNote}`;
     }
     const session = await openOne(cfg, ctx);
     if (!session) {
@@ -115,7 +152,7 @@ export async function openMcpHub(
     if (!promptLines.some((l) => l.includes(`\`${cfg.id}\``))) {
       promptLines.push(line);
     }
-    return `已启用 MCP ${cfg.id}；工具：${names.map((n) => mcpToolName(cfg.id, n)).join(", ") || "无"}`;
+    return `已启用 MCP ${cfg.id}${autoInstalledNote}；工具：${names.map((n) => mcpToolName(cfg.id, n)).join(", ") || "无"}（也可通过 mcp_invoke(serverId="${cfg.id}", toolName="${names[0] ?? "run"}") 调用）`;
   }
 
   function persist(): void {
@@ -131,21 +168,12 @@ export async function openMcpHub(
 
   function catalogLines(): string[] {
     const lines: string[] = [];
-    const catalog =
-      manifest.mcpCatalog?.length
-        ? manifest.mcpCatalog
-        : [...pool.values()].map((c) => ({
-            id: c.id,
-            name: c.name,
-            description: "",
-            category: "general",
-          }));
-    for (const c of catalog) {
+    for (const c of catalogEntries.values()) {
       if (enabled.has(c.id)) continue;
       const cfg = pool.get(c.id);
       const unavailable =
         cfg?.transport === "builtin" && !builtinBinaryAvailable(cfg.binary)
-          ? "（未安装）"
+          ? "（未安装，enable_mcp 时自动尝试 Kali/官方源安装）"
           : "";
       lines.push(
         `- \`${c.id}\` [${c.category}] ${c.name}${unavailable}${c.description ? ` — ${c.description}` : ""}`,
@@ -156,7 +184,7 @@ export async function openMcpHub(
 
   for (const id of initialIds) {
     try {
-      const msg = await attach(id);
+      const msg = await attach(id, { autoInstall: false });
       if (msg.includes("无法")) {
         appendProgress(manifest.workspaceDir, msg);
       }
@@ -230,8 +258,24 @@ export async function openMcpHub(
     promptLines,
     catalogLines,
     enabledIds: () => [...enabled],
-    async enable(id, reason) {
-      const msg = await attach(id);
+    hasServer: (id) => pool.has(id),
+    register(cfg, catalogEntry) {
+      pool.set(cfg.id, cfg);
+      if (!manifest.mcpPool.some((s) => s.id === cfg.id)) {
+        manifest.mcpPool.push(cfg);
+      }
+      catalogEntries.set(
+        cfg.id,
+        catalogEntry ?? {
+          id: cfg.id,
+          name: cfg.name,
+          description: cfg.whenToUse ?? "",
+          category: "user",
+        },
+      );
+    },
+    async enable(id, reason, opts) {
+      const msg = await attach(id, opts);
       persist();
       appendProgress(manifest.workspaceDir, `enable_mcp ${id} · ${reason.slice(0, 120)}`);
       ctx.history.appendFact({
@@ -315,7 +359,14 @@ async function openOne(
   }
   if (cfg.transport === "stdio") {
     if (!cfg.command) return null;
-    await reviewBeforeDispatch(ctx.manifest, commandProposal("stdio", cfg.command, cfg.args ?? []));
+    if (ctx.manifest.commandFence) {
+      await reviewBeforeDispatch(ctx.manifest, {
+        ...commandProposal("stdio", cfg.command, cfg.args ?? []),
+        command: [cfg.command, ...(cfg.args ?? [])].join(" "),
+        hosts: [],
+        need: "scan",
+      });
+    }
     return openStdioSession(cfg.id, cfg.command, cfg.args ?? [], cfg.env ?? {});
   }
   if (cfg.transport === "http") {

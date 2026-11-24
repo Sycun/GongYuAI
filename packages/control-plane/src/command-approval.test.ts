@@ -124,3 +124,45 @@ test("P14-B7 approval decision table: allow / ask / block", () => {
     "allow",
   );
 });
+
+test("executorBound gates install_tool, install_mcp, install_skill, and stdio MCP by capability and metacharacters", () => {
+  const scanAuth = { targets: ["example.invalid"], capability: "scan" as const };
+  const observeAuth = { targets: ["example.invalid"], capability: "observe" as const };
+
+  assert.equal(
+    executorBound({ tool: "install_tool", summary: "ffuf", digest: "", command: "apt install ffuf" }, scanAuth),
+    true,
+  );
+  assert.equal(
+    executorBound({ tool: "install_mcp", summary: "playwright", digest: "", command: "install_mcp playwright npx -y @playwright/mcp@latest" }, scanAuth),
+    true,
+  );
+  assert.equal(
+    executorBound({ tool: "install_skill", summary: "owasp-ssrf", digest: "", command: "install_skill owasp-ssrf github:OWASP/CheatSheetSeries/cheatsheets/SSRF.md" }, scanAuth),
+    true,
+  );
+  assert.equal(
+    executorBound({ tool: "stdio", summary: "npx", digest: "", command: "npx -y @modelcontextprotocol/server-fetch" }, scanAuth),
+    true,
+  );
+
+  // Observe capability cannot install or launch stdio MCP
+  assert.equal(
+    executorBound({ tool: "install_tool", summary: "ffuf", digest: "", command: "apt install ffuf" }, observeAuth),
+    false,
+  );
+  assert.equal(
+    executorBound({ tool: "stdio", summary: "npx", digest: "", command: "npx -y @modelcontextprotocol/server-fetch" }, observeAuth),
+    false,
+  );
+
+  // Shell metacharacters / empty command are always blocked
+  assert.equal(
+    executorBound({ tool: "install_tool", summary: "ffuf", digest: "", command: "apt install ffuf; rm -rf /" }, scanAuth),
+    false,
+  );
+  assert.equal(
+    executorBound({ tool: "stdio", summary: "npx", digest: "" }, scanAuth),
+    false,
+  );
+});

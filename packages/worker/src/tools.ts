@@ -2,6 +2,14 @@ import { checkCommandRun, commandProposal, recordHardDenial, reportCommandOutcom
 import { authorizeCommand, commandRepeatHash, extractHosts as execExtractHosts, isRepeatExemptCommand } from "@gongyuai/exec";
 import { execRuntimeFor } from "./exec-runtime.js";
 import { parseShellOutput } from "./tool-output.js";
+import {
+  buildInstallShellCommand,
+  findInstalledBinary,
+  invalidateBinaryHealth,
+  resolveInstallPlan,
+  validateToolInstallSpec,
+  type InstallMethod,
+} from "./tool-installer.js";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -267,68 +275,97 @@ export function writeEvidence(
 
 export async function installTool(
   ctx: ToolContext,
-  spec: { name: string; method?: "apt" | "npm" | "which"; package?: string },
-): Promise<{ ok: boolean; detail: string }> {
-  const name = spec.name;
-  const pkg = spec.package ?? name;
-  const method = spec.method ?? "apt";
+  spec: { name: string; method?: InstallMethod | "which"; package?: string },
+): Promise<{ ok: boolean; detail: string; alreadyPresent?: boolean; method?: string; path?: string }> {
+  const name = spec.name.trim();
+  const rawMethod: InstallMethod =
+    spec.method && spec.method !== "which" ? spec.method : "auto";
+  const initialPkg = spec.package?.trim() || name;
   try {
     gateTool(ctx, "install", () => {
       assertCapabilityAllows(ctx.manifest, "install");
-      const nameOk = /^[\w][\w.+-]*$/.test(name);
-      const pkgOk = method === "npm"
-        ? /^(@[\w.-]+\/)?[\w][\w.+-]*$/.test(pkg)
-        : /^[\w][\w.+:~=-]*$/.test(pkg);
-      if (!nameOk || !pkgOk) {
-        throw new Error("invalid tool or package name");
-      }
-      if (isBudgetHit(ctx.usage.installs + 1, ctx.manifest.budget.maxInstalls)) {
-        throw new Error("maxInstalls exceeded");
-      }
-    }, { name: name.slice(0, 80) });
+      validateToolInstallSpec(name, initialPkg, rawMethod);
+    }, { name: name.slice(0, 80), method: rawMethod });
   } catch (err) {
     return {
       ok: false,
       detail: err instanceof Error ? err.message : String(err),
     };
   }
-  await reviewBeforeDispatch(ctx.manifest, {
-    ...commandProposal("install_tool", name, [method, pkg]),
-    command: `${method} install ${pkg}`,
-    hosts: [],
-    need: "scan",
+
+  // 0) Kali-first zero-redundant-download check: reuse existing binary or Kali alias.
+  const existing = findInstalledBinary(name);
+  if (existing.found) {
+    invalidateBinaryHealth(name);
+    ctx.history.recordInstall(ctx.manifest.taskId, name, {
+      alreadyPresent: true,
+      binary: existing.binary,
+      path: existing.path,
+      alias: existing.alias,
+    });
+    return {
+      ok: true,
+      alreadyPresent: true,
+      path: existing.path,
+      detail: existing.alias
+        ? `${name} already satisfied by Kali-integrated ${existing.binary} at ${existing.path} (no download needed)`
+        : `${name} already present at ${existing.path}`,
+    };
+  }
+
+  // Check install budget only when an actual install is required.
+  try {
+    gateTool(ctx, "install", () => {
+      if (isBudgetHit(ctx.usage.installs + 1, ctx.manifest.budget.maxInstalls)) {
+        throw new Error("maxInstalls exceeded");
+      }
+    }, { name: name.slice(0, 80), phase: "budget" });
+  } catch (err) {
+    return {
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const plan = resolveInstallPlan({
+    name,
+    package: spec.package,
+    method: rawMethod,
   });
-  const which = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(name)}`], {
-    encoding: "utf8",
-  });
-  if ((which.status ?? 1) === 0) {
-    ctx.history.recordInstall(ctx.manifest.taskId, name, { alreadyPresent: true });
-    return { ok: true, detail: `${name} already present at ${which.stdout.trim()}` };
+  try {
+    validateToolInstallSpec(name, plan.package, plan.method);
+  } catch (err) {
+    return {
+      ok: false,
+      detail: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  if (ctx.manifest.commandFence) {
+    await reviewBeforeDispatch(ctx.manifest, {
+      ...commandProposal("install_tool", name, [plan.method, plan.package]),
+      command: `${plan.method} install ${plan.package}`,
+      hosts: [],
+      need: "scan",
+    });
   }
 
   ctx.usage.installs += 1;
-  let cmd: string;
-  if (method === "apt") {
-    cmd = `sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ${pkg}`;
-  } else if (method === "npm") {
-    cmd = `npm install -g ${pkg}`;
-  } else {
-    return { ok: false, detail: `unknown install method ${method}` };
-  }
 
-  // Local/dev fallback: create a stub shim so smoke can proceed without root/apt
-  if (ctx.manifest.mock || process.env.GY_ALLOW_STUB_INSTALL === "1" || process.platform === "darwin") {
+  // Explicit mock / test stub mode only (never silently stub on real macOS).
+  if (ctx.manifest.mock || process.env.GY_ALLOW_STUB_INSTALL === "1") {
     const binDir = join(ctx.manifest.workspaceDir, ".bin");
     mkdirSync(binDir, { recursive: true });
     const stub = join(binDir, name);
     writeFileSync(
       stub,
-      `#!/usr/bin/env bash\necho \"${name} stub (dev install)\"\nexit 0\n`,
+      `#!/usr/bin/env bash\necho "${name} stub (dev install)"\nexit 0\n`,
       { mode: 0o755 },
     );
     const pathFile = join(ctx.manifest.workspaceDir, ".path");
     appendFileSync(pathFile, `${binDir}\n`);
     process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
+    invalidateBinaryHealth(name);
     ctx.history.recordInstall(ctx.manifest.taskId, name, {
       method: "stub",
       path: stub,
@@ -338,35 +375,39 @@ export async function installTool(
       `installs/${name}.txt`,
       `installed stub for ${name} at ${stub}\n`,
     );
-    return { ok: true, detail: `stub-installed ${name} (dev)` };
+    return { ok: true, method: "stub", path: stub, detail: `stub-installed ${name} (dev)` };
   }
 
+  const cmd = buildInstallShellCommand(plan.method, plan.package);
   const result = spawnSync("bash", ["-lc", cmd], {
     encoding: "utf8",
     timeout: 600_000,
   });
   const ok = (result.status ?? 1) === 0;
-  const verify = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(name)}`], {
-    encoding: "utf8",
-  });
-  const present = (verify.status ?? 1) === 0;
+  invalidateBinaryHealth(name);
+  const verify = findInstalledBinary(name);
+  const present = verify.found;
   ctx.history.recordInstall(ctx.manifest.taskId, name, {
-    method,
-    package: pkg,
+    method: plan.method,
+    source: plan.source,
+    package: plan.package,
     ok: ok && present,
+    path: verify.found ? verify.path : undefined,
     stdout: (result.stdout ?? "").slice(-2000),
     stderr: (result.stderr ?? "").slice(-2000),
   });
   writeEvidence(
     ctx,
     `installs/${name}.txt`,
-    `method=${method}\nok=${ok && present}\n${result.stdout}\n${result.stderr}\n`,
+    `method=${plan.method}\nsource=${plan.source}\npackage=${plan.package}\nok=${ok && present}\n${result.stdout}\n${result.stderr}\n`,
   );
   return {
     ok: ok && present,
+    method: plan.method,
+    path: verify.found ? verify.path : undefined,
     detail: present
-      ? `installed ${name}`
-      : `install failed: ${result.stderr || result.stdout}`,
+      ? `installed ${name} via ${plan.method} (${plan.source}) at ${verify.path}`
+      : `install failed (${plan.method} ${plan.package}): ${(result.stderr || result.stdout || "").slice(0, 600)}`,
   };
 }
 

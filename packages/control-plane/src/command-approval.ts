@@ -1,4 +1,4 @@
-import { authorizeCommand } from "@gongyuai/exec";
+import { authorizeCommand, capabilityAtLeast } from "@gongyuai/exec";
 import { localProbes, type CommandTicket } from "@gongyuai/history";
 import { selectableChatModels, targetAllows, type ApprovalReceipt } from "@gongyuai/contracts";
 import { needsKey, requestCompletion, responseText } from "./chat-provider.js";
@@ -23,14 +23,27 @@ export type CommandAuth = {
   capability?: "observe" | "scan" | "active-lab" | "full";
 };
 
+const SHELL_META = /[;&|`$<>\r\n]/;
+
 /**
  * 能否执行：
  * - 有坐标且提案带真实 command 时，由坐标判定（与 worker 同一个闸）决定，不再按 localProbe 白名单；
+ * - install_tool / install_mcp / install_skill / stdio MCP 属本机受控工具管理动作：要求能力档位 ≥ scan、带真实命令且无 shell 注入元字符；
  * - MCP 提案带声明主机时按坐标核对主机，纯本地 MCP 动作（无主机）交给审批模型评估副作用；
  * - 没有坐标的老调用保持原语义（只放行固定本地探针）。
  */
 export function executorBound(action: CommandTicket["action"], auth?: CommandAuth): boolean {
   if (auth && (action.tool === "shell" || action.tool === "cli") && action.command) return authorizeCommand(auth, action.command).allowed;
+  if (
+    auth &&
+    (action.tool === "install_tool" ||
+      action.tool === "install_mcp" ||
+      action.tool === "install_skill" ||
+      action.tool === "stdio") &&
+    action.command?.trim()
+  ) {
+    return capabilityAtLeast(auth.capability, "scan") && !SHELL_META.test(action.command);
+  }
   if (auth && action.hosts?.length) return action.hosts.every(host => targetAllows(auth.targets, host, auth.outOfScope ?? []));
   if (auth && action.tool === "mcp") return true;
   return action.tool === "shell" && localProbes.some(probe => probe === action.localProbe && probe === action.summary);

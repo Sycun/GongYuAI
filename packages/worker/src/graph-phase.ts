@@ -90,6 +90,8 @@ const EXPLORE = new Set([
   "change_record",
   "credential_record",
   "install_tool",
+  "install_mcp",
+  "install_skill",
   "assert_goal",
   "enable_mcp",
   "disable_mcp",
@@ -210,6 +212,8 @@ const EXECUTION_TOOLS = new Set([
   "tunnel_open",
   "tunnel_close",
   "install_tool",
+  "install_mcp",
+  "install_skill",
   "mcp_invoke",
 ]);
 

@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { authorizeCommand } from "@gongyuai/exec";
 import type { ToolContext } from "../../tools.js";
 import { writeEvidence } from "../../tools.js";
+import { findInstalledBinary } from "../../tool-installer.js";
 
 export async function runCliTool(
   ctx: ToolContext,
@@ -22,14 +23,16 @@ export async function runCliTool(
   // 缺 command 的旧提案会被降级成 localProbe 白名单直接拦截。
   const verdict = authorizeCommand(ctx.manifest.auth, cmd);
   if (!verdict.allowed) throw new Error(`denied: ${verdict.reason}`);
-  if (!literalPrint) await reviewBeforeDispatch(ctx.manifest, {
+  if (!literalPrint && ctx.manifest.commandFence) await reviewBeforeDispatch(ctx.manifest, {
     ...commandProposal("cli", opts.binary, opts.args),
     command: cmd,
     hosts: verdict.hosts,
     need: verdict.need,
   });
   checkCommandRun(ctx.manifest);
-  const result = spawnSync(opts.binary, opts.args, {
+  const resolved = findInstalledBinary(opts.binary);
+  const execBin = resolved.found ? resolved.path : opts.binary;
+  const result = spawnSync(execBin, opts.args, {
     cwd: ctx.manifest.workspaceDir,
     encoding: "utf8",
     timeout: opts.timeoutMs ?? 180_000,

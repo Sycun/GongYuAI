@@ -24,6 +24,8 @@ import {
   writeEvidence,
   type ToolContext,
 } from "./tools.js";
+import { INSTALL_METHODS, type InstallMethod } from "./tool-installer.js";
+import { installMcp, installSkill, trustedRegistryCatalogHint } from "./trusted-registry.js";
 import { collectorsPromptBlock, runAssetSearch } from "./asset-collectors.js";
 import { boardClearPolicyBlock, hasBenchmarkHarness } from "./board-policy.js";
 import { takeSoftPaceAdvice } from "./soft-pace.js";
@@ -939,19 +941,61 @@ async function tryPiDurable(
 
     const install_tool = defineTool({
       name: "install_tool",
-      description: "Install a missing pentest tool",
+      description:
+        "Install a missing pentest CLI tool (Kali-first: reuses already-installed/Kali binaries, then Kali APT, then official go/pipx/npm/brew; method=auto by default).",
       parameters: obj({ name: str(), package: str(), method: str() }),
       replay: "none",
-      execute: async (args: { name: string; package: string; method?: string }) => {
-        const method = args.method === "npm" ? "npm" : "apt";
+      execute: async (args: { name: string; package?: string; method?: string }) => {
+        const method: InstallMethod =
+          args.method && (INSTALL_METHODS as readonly string[]).includes(args.method)
+            ? (args.method as InstallMethod)
+            : "auto";
         const r = await installTool(ctx, {
           name: args.name,
-          package: args.package || args.name,
+          package: args.package || undefined,
           method,
         });
         state.installs = ctx.usage.installs;
         ckpt.save(state);
         return { output: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    } as never);
+
+    const install_mcp = defineTool({
+      name: "install_mcp",
+      description:
+        "Install & hot-register an MCP server from official or high-star (>=500 stars) community sources. Automatically reuses Kali-integrated builtin MCPs without redundant downloads.",
+      parameters: obj({ id: str(), source: str(), reason: str() }),
+      replay: "none",
+      execute: async (args: { id: string; source?: string; reason?: string }) => {
+        const r = await installMcp(ctx, mcpHub, {
+          id: args.id,
+          source: args.source || undefined,
+          reason: args.reason || "needed",
+        });
+        state.installs = ctx.usage.installs;
+        ckpt.save(state);
+        return { output: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    } as never);
+
+    const install_skill = defineTool({
+      name: "install_skill",
+      description:
+        "Install & hot-register a Skill from official or high-star (>=500 stars) community GitHub sources. Reuses local skills without redundant downloads.",
+      parameters: obj({ id: str(), source: str(), reason: str() }),
+      replay: "none",
+      execute: async (args: { id: string; source?: string; reason?: string }) => {
+        const r = await installSkill(ctx, skillHub, {
+          id: args.id,
+          source: args.source || undefined,
+          reason: args.reason || "needed",
+        });
+        state.installs = ctx.usage.installs;
+        ckpt.save(state);
+        return {
+          output: [{ type: "text", text: r.content ? `${r.detail}\n\n${r.content}` : JSON.stringify(r) }],
+        };
       },
     } as never);
 
@@ -1031,11 +1075,11 @@ async function tryPiDurable(
     const load_skill = defineTool({
       name: "load_skill",
       description:
-        "Load full SKILL.md for one skill id from the routing table (on-demand; do not load all).",
-      parameters: obj({ id: str(), reason: str() }),
+        "Load full SKILL.md (or optional ref under references/) for one skill id from the routing table (on-demand; do not load all).",
+      parameters: obj({ id: str(), reason: str(), ref: str() }),
       replay: "none",
-      execute: async (args: { id: string; reason: string }) => {
-        const text = skillHub.load(args.id, args.reason || "needed for current phase");
+      execute: async (args: { id: string; reason: string; ref?: string }) => {
+        const text = skillHub.load(args.id, args.reason || "needed for current phase", args.ref);
         return { output: [{ type: "text", text }] };
       },
     } as never);
@@ -1398,6 +1442,8 @@ async function tryPiDurable(
           asset_search,
           write_evidence,
           install_tool,
+          install_mcp,
+          install_skill,
           ...(hasBenchmarkHarness(manifest) ? [tsecbench] : []),
           assert_goal,
           enable_mcp,
@@ -2012,10 +2058,11 @@ ${poolLine}
 - 凭据：用 credential_record 登记**指针**（secretRef=证据路径/环境变量名），绝不在 Fact/聊天里写明文；横向复用前先 credential_list 查已有对象。
 - 变更：动手前 change_record（含 rollbackCmd）；回滚只生成不执行。
 - 求助：影响/坐标事实判断不了时 operator_consult（24h 无回复自动转非阻塞），不要猜。
-- 缺少二进制时用 install_tool（需 ≥scan；method=apt 装系统包，method=npm 装全局 node 工具如 pnpm）。
+- 缺少二进制时用 install_tool（需 ≥scan；默认 method=auto：先复用 Kali 已集成二进制/别名，再走 Kali APT，仅缺包时走官方 go/pipx/npm/brew，严禁多余下载）。
 - 管理自己启动的后台作业用 shell_job(action=kill, jobId)；禁止 pkill/killall（可能误杀无关进程，会被工程自保拒绝）。
-- MCP：常开核以外用 enable_mcp 再调用；未 enable 的 MCP 不可调用。
-- Skill：系统只给路由表。需要方法论时 load_skill(id)；按阶段加载，不要一次灌入全部正文。
+- MCP：常开核以外用 enable_mcp 再调用（内置 MCP 缺二进制时 enable_mcp 会自动走 Kali-first 安装）；未 enable 的 MCP 不可调用。仅当 Kali 内置未覆盖时可用 install_mcp 从官方/高星（≥500⭐）社区源热安装。
+- Skill：系统只给路由表。需要方法论时 load_skill(id, reason, ref?)（可按需读 references/ 子文档）；按阶段加载，不要一次灌入全部正文。本地未覆盖时可用 install_skill 从官方/高星（≥500⭐）GitHub 源热安装。
+- ${trustedRegistryCatalogHint()}
 - TSecBench：默认禁止批量 hint；平台 409 already finished 视为终态，停止重试并写 blocked 证据。
 ${visionLine}
 ${boardClearPolicyBlock(manifest)}${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}${observeText ? `\n当前 Observe（History）：\n${observeText}\n` : ""}`;
@@ -2320,15 +2367,54 @@ async function runOpenAiToolLoop(
       type: "function" as const,
       function: {
         name: "install_tool",
-        description: "Install missing tool",
+        description:
+          "Install a missing pentest tool (Kali-first: reuses already-installed/Kali binaries, then Kali APT, then official go/pipx/npm/brew).",
         parameters: {
           type: "object",
           properties: {
             name: { type: "string" },
             package: { type: "string" },
-            method: { type: "string", enum: ["apt", "npm"], description: "apt (system package) or npm (global node tool)" },
+            method: {
+              type: "string",
+              enum: ["auto", "apt", "pip", "pipx", "go", "npm", "brew"],
+              description: "auto (default: Kali-first) or explicit apt/pip/pipx/go/npm/brew",
+            },
           },
           required: ["name"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "install_mcp",
+        description:
+          "Install & hot-register an MCP server from official or high-star (>=500 stars) community sources. Reuses Kali-integrated builtin MCPs automatically.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "MCP id (curated id like playwright/fetch/chrome-devtools, or custom id with source)" },
+            source: { type: "string", description: "Optional: npm:@official/pkg or github:owner/repo (official or >=500 stars)" },
+            reason: { type: "string" },
+          },
+          required: ["id", "reason"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "install_skill",
+        description:
+          "Install & hot-register a Skill from official or high-star (>=500 stars) community GitHub sources. Reuses local skills automatically.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Skill id (curated id like owasp-ssrf/patt-ssti, or custom id with source)" },
+            source: { type: "string", description: "Optional: github:owner/repo/path/to/SKILL.md (official or >=500 stars)" },
+            reason: { type: "string" },
+          },
+          required: ["id", "reason"],
         },
       },
     },
@@ -2404,12 +2490,13 @@ async function runOpenAiToolLoop(
       function: {
         name: "load_skill",
         description:
-          "Load full SKILL.md for one id from the routing table (on-demand; do not load all).",
+          "Load full SKILL.md (or optional ref under references/) for one id from the routing table (on-demand; do not load all).",
         parameters: {
           type: "object",
           properties: {
             id: { type: "string" },
             reason: { type: "string" },
+            ref: { type: "string", description: "Optional reference file path inside the skill pack, e.g. references/guide.md" },
           },
           required: ["id", "reason"],
         },
@@ -3299,17 +3386,52 @@ async function runOpenAiToolLoop(
             );
             break;
           }
-          case "install_tool":
-            result = JSON.stringify(
-              await installTool(ctx, { name: args.name ?? "", package: args.package }),
-            );
+          case "install_tool": {
+            const method: InstallMethod =
+              args.method && (INSTALL_METHODS as readonly string[]).includes(args.method)
+                ? (args.method as InstallMethod)
+                : "auto";
+            const r = await installTool(ctx, {
+              name: args.name ?? "",
+              package: args.package || undefined,
+              method,
+            });
+            result = JSON.stringify(r);
+            if (r.ok) {
+              messages[0] = { role: "system", content: refreshSystem() };
+            }
             ctx.history.appendFact({
               taskId: manifest.taskId,
               layer: "summary",
               title: "安装工具",
-              summary: args.name ?? "",
+              summary: `${args.name ?? ""} (${r.method ?? method})`,
             });
             break;
+          }
+          case "install_mcp": {
+            const r = await installMcp(ctx, mcpHub, {
+              id: args.id ?? "",
+              source: args.source || undefined,
+              reason: args.reason ?? "needed",
+            });
+            result = JSON.stringify(r);
+            if (r.ok) {
+              messages[0] = { role: "system", content: refreshSystem() };
+            }
+            break;
+          }
+          case "install_skill": {
+            const r = await installSkill(ctx, skillHub, {
+              id: args.id ?? "",
+              source: args.source || undefined,
+              reason: args.reason ?? "needed",
+            });
+            result = r.content ? `${r.detail}\n\n${r.content}` : JSON.stringify(r);
+            if (r.ok) {
+              messages[0] = { role: "system", content: refreshSystem() };
+            }
+            break;
+          }
           case "tsecbench":
             result = await tsecbenchTool(ctx, {
               action: args.action ?? "list",
@@ -3347,6 +3469,7 @@ async function runOpenAiToolLoop(
             result = skillHub.load(
               args.id ?? "",
               args.reason ?? "needed for current phase",
+              args.ref || undefined,
             );
             break;
           case "enable_skill":
