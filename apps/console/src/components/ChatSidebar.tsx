@@ -83,7 +83,7 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
               {!currentBlank && !items.length && <p className="gy-history-empty">尚无会话</p>}
               {items.map(c => <button type="button" key={c.id} className="gy-history-item" title={c.title}
                 aria-current={selected === c.id ? "page" : undefined} onClick={() => onSelect(c.id)}>
-                <IconCommentStroked aria-hidden="true" /><span>{c.title}</span>
+                <IconCommentStroked aria-hidden="true" /><span className="gy-history-title">{c.title}</span>
                 <i className={attention?.[c.id] ? "gy-unread" : "gy-unread is-quiet"} aria-label={attention?.[c.id] ? "有新进展" : undefined} />
               </button>)}
             </div>}

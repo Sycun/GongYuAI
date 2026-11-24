@@ -62,7 +62,9 @@ export function useConversations() {
     const grouped = new Map<string, Conversation>();
     for (const t of Object.values(turns).sort((a, b) => a.created - b.created || a.id.localeCompare(b.id))) {
       const c = grouped.get(t.conversationId) ?? {
-        id: t.conversationId, title: t.question.replace(/\s+/g, " ").slice(0, 48), updated: t.created, turns: [],
+        id: t.conversationId,
+        title: t.question.trimStart().split(/[\r\n]/, 1)[0].replace(/^#{1,6}\s+/, "").trim().slice(0, 48) || "新会话",
+        updated: t.created, turns: [],
       };
       c.turns.push(t);
       c.updated = t.created;

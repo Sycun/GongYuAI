@@ -5,6 +5,7 @@ import type { ChatCatalog, ChatSelection } from "@gongyuai/contracts";
 import { ChatModelPicker, effortLabels } from "../components/ChatModelPicker";
 import type { AssignmentView } from "@gongyuai/contracts/chat-input";
 import { AssignmentCard } from "../components/AssignmentCard";
+import { ChatMarkdown } from "../components/ChatMarkdown";
 import { STATUS_LABEL } from "../labels";
 import { ChatTaskSelect } from "../components/ChatTaskProgress";
 import type { TaskLink } from "../chat/useChatProjects";
@@ -150,11 +151,11 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
               if (near) setAway(false);
             }}>
               <div className="gy-transcript-inner">
-                <PlanCard taskId={viewedTaskId} turnId={binding?.turnId ?? null} question={binding?.question ?? null} conversationId={conversation.id}
+                <PlanCard key={viewedTaskId} taskId={viewedTaskId} turnId={binding?.turnId ?? null} question={binding?.question ?? null} conversationId={conversation.id}
                   onNotices={setNotices} onOpen={openRecord} />
                 {notices.map(item => <p key={item.id} className="gy-notice" role="status">{item.text}</p>)}
                 {conversation.turns.map(t => <article key={t.id} className="gy-turn" id={"turn-" + t.id} tabIndex={-1}>
-                  <div className="gy-question" aria-label="你">{t.question}
+                  <div className="gy-question" aria-label="你"><ChatMarkdown text={t.question} />
                     {Boolean(t.attachments?.length) && <div className="gy-sent-files">{t.attachments!.map(f =>
                       <span key={f.id}><IconFile aria-hidden="true" />{f.name}</span>)}</div>}
                   </div>
@@ -162,7 +163,7 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
                   {t.submissionKey && <AssignmentCard turn={t} submitting={pending === t.id} onTask={onTask} onRetry={onRetry} />}
                   {(!t.submissionKey || t.answer) && <div className="gy-answer"><div className="gy-answer-brand"><BrandMark />{t.submissionKey ? "任务结果" : "GongYuAI"}
                     <time dateTime={new Date(t.created).toISOString()}>{clock.format(t.created)}</time></div>
-                    {t.answer && <div className="gy-answer-text">{t.answer}</div>}
+                    {t.answer && <div className="gy-answer-text"><ChatMarkdown text={t.answer} /></div>}
                     {!t.submissionKey && pending === t.id && !t.answer && <span role="status" className="gy-response-state">正在回复…</span>}
                     {!t.submissionKey && pending !== t.id && (t.error || !t.answer) && <div className="gy-response-state" role="status">
                       <span>{t.error === t.review?.reason && t.error ? decisions[t.review!.decision] : t.error || "上次回复已中断。"}</span>
@@ -170,7 +171,6 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
                         onClick={() => onRetry(t)}>重试</Button>}
                     </div>}
                   </div>}
-                  {t.submissionKey && <p className="gy-receipt-note">{t.taskId ? `已提交给后端，任务 ${t.taskId.slice(0, 8)}。回执没有采纳字段，不能把它当成规划者已采纳。` : pending === t.id ? "已保存到本会话，正在提交给后端。" : "已保存到本会话。还没有任务回执。"}</p>}
                 </article>)}
               </div>
             </div>

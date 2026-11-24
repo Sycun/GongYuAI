@@ -149,13 +149,15 @@ export function TaskGraphRail({
     <aside className="gy-graph-rail" aria-label="任务图谱">
       <div className="gy-graph-focus">
         <span>当前任务</span>
-        <strong title={taskId ?? ""}>{viewed.face.taskName}</strong>
+        <strong title={viewed.face.taskName}>{viewed.face.taskName}</strong>
         <select aria-label="切换当前任务" value={taskId ?? ""} disabled={!options.length} onChange={(event) => onPin(event.target.value)}>
           {!taskId && <option value="">等待任务回执</option>}
           {options.map((id) => <option key={id} value={id}>{names[id] || id.slice(0, 8)}</option>)}
         </select>
-        <Button size="small" theme="borderless" disabled={!taskId || mode === "pinned"} onClick={() => taskId && onPin(taskId)}>固定查看</Button>
-        <Button size="small" theme="borderless" disabled={mode !== "pinned"} onClick={onFollow}>跟随最新任务</Button>
+        <div className="gy-focus-actions">
+          <Button size="small" theme="borderless" disabled={!taskId || mode === "pinned"} onClick={() => taskId && onPin(taskId)}>固定查看</Button>
+          <Button size="small" theme="borderless" disabled={mode !== "pinned"} onClick={onFollow}>跟随最新任务</Button>
+        </div>
         <ViewedTaskControls face={viewed.face} onAct={viewed.act} />
       </div>
       {views.map((item) => (

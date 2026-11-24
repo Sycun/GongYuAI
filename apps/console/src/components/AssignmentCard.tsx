@@ -52,18 +52,20 @@ export function AssignmentCard({ turn, submitting, onTask, onRetry }: Props) {
     finally { setBusy(""); }
   }
   const status = turn.taskStatus;
-  const subject = turn.taskId ? `任务 ${turn.taskId}` : "尚未取得任务编号的本轮提交";
   const pauseLabel = busy === "pause" ? "正在请求" : "暂停";
   const resumeLabel = busy === "resume" ? "正在请求" : "继续";
   const waitingApproval = review?.decision === "waiting";
   return <section className="gy-assignment-card" aria-label="任务回执">
-    <div><strong>{status ? STATUS_LABEL[status] ?? status : submitting ? "正在提交任务" : waitingApproval ? "等待你确认" : "等待任务回执"}</strong>
-      {turn.taskId && <a href={"#/live/" + turn.taskId}>任务 {turn.taskId}</a>}
-    </div>
+    <header><strong>任务回执</strong>
+      <span>{status ? STATUS_LABEL[status] ?? status : submitting ? "正在提交" : waitingApproval ? "等待你确认" : turn.taskId ? "已接收" : "尚未收到回执"}</span>
+    </header>
+    <p className="gy-receipt-summary">{turn.taskId
+      ? <>任务已提交 · <a href={"#/live/" + turn.taskId} title={turn.taskId}>查看任务 {turn.taskId.slice(0, 8)}</a></>
+      : "本轮内容已保存在会话中。"}</p>
     {review && turn.taskId && <CommandReviewCard taskId={turn.taskId} review={review} onDecided={() => setAttempt(n => n + 1)} />}
     {(turn.error || message) && !waitingApproval && <p role="status">{[turn.error, message].filter(Boolean).join(" · ")}</p>}
-    {turn.taskId && status && active.has(status) && <span className="gy-op-target">操作对象：{subject}<Button size="small" loading={busy === "pause"} onClick={() => void control("pause")}>{pauseLabel}</Button></span>}
-    {turn.taskId && status && ["paused","failed","stopped"].includes(status) && !waitingApproval && <span className="gy-op-target">操作对象：{subject}<Button size="small" loading={busy === "resume"} onClick={() => void control("resume")}>{resumeLabel}</Button></span>}
-    {!turn.taskId && !submitting && <span className="gy-op-target">操作对象：{subject}<Button size="small" onClick={() => onRetry(turn)}>重新提交</Button></span>}
+    {turn.taskId && status && active.has(status) && <Button size="small" title={`暂停任务 ${turn.taskId}`} loading={busy === "pause"} onClick={() => void control("pause")}>{pauseLabel}</Button>}
+    {turn.taskId && status && ["paused","failed","stopped"].includes(status) && !waitingApproval && <Button size="small" title={`继续任务 ${turn.taskId}`} loading={busy === "resume"} onClick={() => void control("resume")}>{resumeLabel}</Button>}
+    {!turn.taskId && !submitting && <Button size="small" onClick={() => onRetry(turn)}>重新提交</Button>}
   </section>;
 }

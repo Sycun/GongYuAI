@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { probe } from "../api";
+import { STATUS_LABEL } from "../labels";
+import { ChatMarkdown } from "./ChatMarkdown";
 import { consultLabel, diffNotices, goalOutcomeLabel, type NoticeItem, type WorkSignal, writeNotices } from "../workspace/model";
 
 type Goal = { id: string; title: string; description?: string; passes?: boolean };
 type Intent = { id: string; title: string; status?: string; claimedBy?: string | null };
 type Consult = { id: string; question: string; status?: string; releasedAt?: string | null; blocking?: boolean };
+type RecordedPlan = {
+  error?: string;
+  name: string;
+  status: string;
+  description: string;
+  goals: string[];
+  latestResult?: string;
+  consultStatus: string;
+  openConsults: Consult[];
+};
 
 function signalOf(input: {
   goals: Goal[];
@@ -25,7 +37,7 @@ function signalOf(input: {
     result,
     resultText: latest?.title ?? "",
     block: blocked,
-    blockText: blocked ? `任务状态 ${blocked}` : "",
+    blockText: blocked ? `任务状态 ${STATUS_LABEL[blocked] ?? blocked}` : "",
     decision: Array.isArray(input.consults) ? open.map((item) => item.id).sort().join("|") : "",
     decisionText: open.map((item) => item.question).join("；"),
   };
@@ -46,13 +58,13 @@ export function PlanCard({
   onNotices: (items: NoticeItem[]) => void;
   onOpen: (href: string) => void;
 }) {
-  const [text, setText] = useState("正在读取已记录的计划…");
-  const [consults, setConsults] = useState<Consult[]>([]);
+  const [plan, setPlan] = useState<RecordedPlan | string>("正在读取计划…");
+  const [sourceOpen, setSourceOpen] = useState(false);
   const report = useRef(onNotices);
   report.current = onNotices;
   useEffect(() => {
     if (!taskId || !conversationId) {
-      setText("等待任务回执。计划要等控制面记下任务后才显示。");
+      setPlan("收到任务回执后，这里会显示计划。");
       return;
     }
     const requested = taskId;
@@ -71,38 +83,23 @@ export function PlanCard({
       const intents = history.ok ? history.json.intents ?? [] : [];
       const facts = history.ok ? history.json.facts ?? [] : [];
       const status = task.ok ? task.json.task?.status ?? "" : "";
-      const name = task.ok ? task.json.task?.name ?? requested : requested;
+      const name = task.ok ? task.json.task?.name ?? "" : "";
       const described = (task.ok ? task.json.task?.goals : undefined) ?? goals;
       const ownDescription = described.map((goal) => goal.description || goal.title).filter(Boolean).join("；");
       const consultState = consult.ok ? consult.json.consults ?? [] : consult.kind === "unregistered" ? "unregistered" as const : "failed" as const;
       const open = Array.isArray(consultState) ? consultState.filter((item) => item.status === "open") : [];
-      setConsults(open);
-      const lines = [
-        `任务编号：${requested}`,
-        `任务状态：${status || "未记录"}`,
-        question
-          ? `对应轮次：${turnId ?? "未记录"}\n你的要求：${question}`
-          : `没有对应的会话轮次。\n该任务的说明：${ownDescription || name}`,
-        `已记录的任务：${name}`,
-        "规划者复述：服务端没有单独的复述字段。",
-        goals.length
-          ? `目标：${goals.map((goal) => {
-            const owner = intents.find((intent) => intent.title === goal.title)?.claimedBy;
-            return `${goal.title}（${goalOutcomeLabel(Boolean(goal.passes))}，${owner || "未记录处理人"}）`;
-          }).join("；")}`
-          : "目标：控制面还没有记下目标。",
-        facts.length ? `最近结果：${[...facts].reverse().find((fact) => fact.title)?.title}` : "最近结果：尚无已记录结果。",
-        consultState === "unregistered"
-          ? "是否需要你回答：求助接口未注册，不能判断。"
-          : consultState === "failed"
-            ? `是否需要你回答：求助读取失败。${!consult.ok ? consult.error : ""}`
-            : open.length
-              ? `需要你回答：${open.length} 条待答。`
-              : "是否需要你回答：当前没有待答问题。",
-        "作业执行成功和业务目标通过是两件独立的事。",
-      ];
-      setText(lines.join("\n"));
-      if (!history.ok && !task.ok) setText(`读取失败：${task.ok ? "" : task.error}`);
+      setPlan({
+        error: !task.ok && !history.ok ? `读取计划失败：${task.error}` : undefined,
+        name, status, description: ownDescription || name,
+        goals: goals.map((goal) => {
+          const owner = intents.find((intent) => intent.title === goal.title)?.claimedBy;
+          return `${goal.title}（${goalOutcomeLabel(Boolean(goal.passes))}，${owner || "未记录处理人"}）`;
+        }),
+        latestResult: history.ok ? [...facts].reverse().find((fact) => fact.title)?.title : "暂时无法读取结果",
+        consultStatus: consult.ok ? (open.length ? `${open.length} 条待答` : "暂无待答问题")
+          : consult.kind === "unregistered" ? "求助接口尚未注册" : `读取失败：${consult.error}`,
+        openConsults: open,
+      });
       const signal = signalOf({ goals, intents, facts, status, consults: consultState });
       const saved = JSON.parse(localStorage.getItem("gongyuai.chat.notice.v1." + conversationId + "." + requested) || "null") as { signal?: WorkSignal; items?: NoticeItem[] } | null;
       const previous = saved?.signal ?? null;
@@ -121,18 +118,34 @@ export function PlanCard({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [taskId, conversationId, question, turnId]);
+  }, [taskId, conversationId]);
 
   return (
     <section className="gy-plan-card" aria-label="计划">
-      <header><strong>计划</strong><span>只显示控制面已经记下的内容</span></header>
-      <p>{text}</p>
-      {consults.map((item) => (
-        <button type="button" key={item.id} className="gy-question-link" onClick={() => taskId && onOpen(`#/live/${encodeURIComponent(taskId)}?consult=${encodeURIComponent(item.id)}`)}>
-          {consultLabel(item)} · {item.question}
-          {item.releasedAt ? " · 阻塞已解除，仍待答" : ""}
-        </button>
-      ))}
+      <header><strong>计划</strong>{typeof plan !== "string" && <span>{STATUS_LABEL[plan.status] ?? (plan.status || "状态未记录")}</span>}</header>
+      {typeof plan === "string" ? <p>{plan}</p> : <>
+        {plan.error ? <p role="status">{plan.error}</p> : <dl className="gy-plan-facts">
+          <dt>业务目标</dt><dd>{plan.goals.length
+            ? <ul>{plan.goals.map((goal, i) => <li key={i}>{goal}</li>)}</ul> : "暂无已记录的目标"}</dd>
+          <dt>最近结果</dt><dd>{plan.latestResult || "暂无已记录的结果"}</dd>
+          <dt>需要你回答</dt><dd>{plan.consultStatus}</dd>
+        </dl>}
+        {plan.openConsults.map((item) => (
+          <button type="button" key={item.id} className="gy-question-link" onClick={() => taskId && onOpen(`#/live/${encodeURIComponent(taskId)}?consult=${encodeURIComponent(item.id)}`)}>
+            {consultLabel(item)} · {item.question}
+            {item.releasedAt ? " · 阻塞已解除，仍待答" : ""}
+          </button>
+        ))}
+        <details className="gy-plan-source" onToggle={event => setSourceOpen(event.currentTarget.open)}>
+          <summary>{question ? "查看本轮要求" : "查看任务说明"}</summary>
+          <dl className="gy-plan-facts">
+            <dt>任务编号</dt><dd>{taskId}</dd>
+            {plan.name && <><dt>任务名称</dt><dd>{plan.name}</dd></>}
+            {turnId && <><dt>对应轮次</dt><dd>{turnId}</dd></>}
+          </dl>
+          {sourceOpen && <ChatMarkdown text={question || plan.description || "暂无任务说明"} />}
+        </details>
+      </>}
     </section>
   );
 }
