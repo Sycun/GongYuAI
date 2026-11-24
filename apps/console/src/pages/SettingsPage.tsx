@@ -793,7 +793,7 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
 
   if (section === "update") {
     const showProgress = updating || phase === "failed" || phase === "done" || phase === "restarting";
-    const progress: Record<string, number> = { done: 100, failed: 100, restarting: 90, building: 70, overlay: 50, extracting: 30 };
+    const progress: Record<string, number> = { done: 100, restarting: 90, building: 70, overlay: 50, extracting: 30 };
     return <div className="gy-settings-stack gy-update-page">
       <section className="gy-config-card gy-release">
         <div className="gy-release-line">
@@ -807,8 +807,8 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
           {settings.update.lastUpdatedAt && <span>上次更新　{formatDateTime(settings.update.lastUpdatedAt, true)}</span>}
           {settings.update.lastCommit && <span>提交　<code>{settings.update.lastCommit.slice(0, 12)}</code></span>}
         </div>}
-        {showProgress && <div className="gy-release-status" role="status">
-          <Progress percent={progress[phase ?? ""] ?? 15} showInfo aria-label="更新进度" />
+        {showProgress && <div className="gy-release-status" role={phase === "failed" ? "alert" : "status"}>
+          {phase !== "failed" && <Progress percent={progress[phase ?? ""] ?? 15} showInfo aria-label="更新进度" />}
           <span>{updateStatus?.message || "准备更新…"} {updateStatus?.commit?.slice(0, 12)}</span>
           {phase === "failed" && updateStatus?.error && <pre>{updateStatus.error}</pre>}
         </div>}
