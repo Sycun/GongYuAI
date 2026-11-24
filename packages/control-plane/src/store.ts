@@ -169,18 +169,36 @@ export class ControlStore {
 
   /** 归档只改软隐藏标记：状态、检查点与历史一律不动，取消归档只清标记。 */
   setArchived(taskId: string, archived: boolean): TaskRecord | null {
-    const t = this.get(taskId);
-    if (!t) return null;
-    if (archived) {
-      if (!isArchivableTaskStatus(t.status)) {
-        throw new Error("仅已暂停或终态任务可归档");
-      }
-      if (!t.archivedAt) t.archivedAt = this.now();
-    } else {
-      t.archivedAt = null;
+    const task = this.get(taskId);
+    if (!task) return null;
+    this.updateArchiveFlag(task, archived);
+    return task;
+  }
+
+  setArchivedBatch(taskIds: string[], archived: boolean): TaskRecord[] {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const tasks = [...new Set(taskIds)].map(id => {
+        const task = this.get(id);
+        if (!task) throw new Error(`关联任务 ${id} 不存在`);
+        return task;
+      });
+      for (const task of tasks) this.updateArchiveFlag(task, archived);
+      this.db.exec("COMMIT");
+      return tasks;
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
     }
-    this.save(t);
-    return t;
+  }
+
+  private updateArchiveFlag(task: TaskRecord, archived: boolean): void {
+    if (Boolean(task.archivedAt) === archived) return;
+    if (archived && !isArchivableTaskStatus(task.status)) {
+      throw new Error(`仅已暂停或终态任务可归档。「${task.name}」当前无法归档。`);
+    }
+    task.archivedAt = archived ? this.now() : null;
+    this.save(task);
   }
 
   get(taskId: string): TaskRecord | null {

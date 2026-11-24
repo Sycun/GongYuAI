@@ -151,6 +151,15 @@ export function isArchivableTaskStatus(status: unknown): boolean {
   return typeof status === "string" && (pausedTaskStatuses.has(status) || terminalTaskStatuses.has(status));
 }
 
+export type TaskArchiveState = Pick<TaskRecord, "id" | "name" | "status" | "archivedAt"> & {
+  submissionKey?: string;
+};
+
+export const TaskArchiveBatchSchema = z.object({
+  taskIds: z.array(z.string().uuid()).nonempty(),
+  archived: z.boolean(),
+});
+
 /**
  * Budget hard gates. **0 = unlimited** (default): no wall/tool/token/install ceiling;
  * the worker runs until goals pass, fatal error, or operator stop.

@@ -18,9 +18,43 @@ import {
   surfacePath,
 } from "./model.js";
 import type { Probe } from "../api";
+import type { TaskArchiveState } from "@gongyuai/contracts";
+import { archiveKey, workspaceArchives } from "../chat/archives";
+import type { Conversation } from "../chat/useConversations";
 import { loadAssetGraph, loadMemoryGraph, loadSurface, type Getter } from "./loadGraphs.js";
 
 const signal = new AbortController().signal;
+
+test("task archives move conversations and projects only after all of their children are archived", () => {
+  const conversations: Conversation[] = [
+    { id: "first", title: "核对材料", updated: 0, turns: [
+      { id: "turn-a", conversationId: "first", created: 0, question: "核对甲", answer: "", taskId: "a" },
+      { id: "turn-b", conversationId: "first", created: 1, question: "核对乙", answer: "", submissionKey: "turn-b" },
+    ] },
+    { id: "second", title: "补充记录", updated: 0, turns: [] },
+  ];
+  const tasks = new Map<string, TaskArchiveState>([
+    ["a", { id: "a", name: "核对甲", status: "completed", archivedAt: "2026-11-24T01:00:00Z" }],
+    ["b", { id: "b", name: "核对乙", status: "paused", archivedAt: null, submissionKey: "turn-b" }],
+  ]);
+  const state = (isSubmitting = false) => workspaceArchives({
+    projects: ["材料核对", "空项目"], conversations, tasks, projectOf: () => "材料核对",
+    linkedTaskOf: id => id === "first" ? "a" : undefined,
+    isSubmitting: id => id === "first" && isSubmitting,
+    localArchives: new Set([archiveKey("chat", "second"), archiveKey("project", "空项目")]),
+  });
+  assert.deepEqual([...state().archivedChats], ["second"]);
+  assert.deepEqual([...state().archivedProjects], ["空项目"]);
+
+  tasks.get("b")!.archivedAt = "2026-11-24T01:00:00Z";
+  assert.deepEqual([...state().archivedChats], ["first", "second"]);
+  assert.deepEqual([...state().archivedProjects], ["材料核对", "空项目"]);
+  assert.equal(state(true).archivedProjects.has("材料核对"), false);
+
+  tasks.get("a")!.archivedAt = null;
+  assert.deepEqual([...state().archivedChats], ["second"]);
+  assert.equal(state().archivedProjects.has("材料核对"), false);
+});
 
 function ok(json: unknown): Promise<Probe<unknown>> {
   return Promise.resolve({ ok: true, status: 200, json, text: "", kind: "ok" });

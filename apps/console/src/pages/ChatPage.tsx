@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, SideSheet, TextArea } from "@douyinfe/semi-ui";
 import { IconArrowUp, IconClose, IconFile, IconCommentStroked, IconFolder, IconList, IconRefresh } from "@douyinfe/semi-icons";
-import type { ChatCatalog, ChatSelection } from "@gongyuai/contracts";
+import type { ChatCatalog, ChatSelection, TaskArchiveState } from "@gongyuai/contracts";
 import { ChatModelPicker, effortLabels } from "../components/ChatModelPicker";
 import type { AssignmentView } from "@gongyuai/contracts/chat-input";
 import { AssignmentCard } from "../components/AssignmentCard";
@@ -24,6 +24,8 @@ type Props = {
   files: DraftFile[]; storing: boolean; onFiles: (files: DraftFile[]) => void; onRemoveFile: (id: string) => void;
   conversation?: Conversation; pending?: string; draft: string; onDraft: (text: string) => void;
   projects: string[]; project: string; onMove: (name: string) => void;
+  archived: boolean; archiveBusy: boolean; onArchive: (archived: boolean) => void;
+  taskArchives: Map<string, TaskArchiveState>; onTaskArchive: (id: string, archived: boolean) => void;
   taskLink?: TaskLink; onLink: (id: string) => void;
   onSend: () => void; onTask: (t: Turn, view: AssignmentView) => void; onRetry: (turn: Turn) => void;
   onCancel: () => void;
@@ -47,7 +49,8 @@ function stateOf(turn: Turn, pending?: string) {
 }
 
 export function ChatPage({ catalog, selected, modelError, onSelectModel, onApprovalSettings, files, storing, onFiles, onRemoveFile, conversation, pending, draft, onDraft, onSend, onTask, onRetry, onCancel,
-  projects, project, onMove, taskLink, onLink, narrow, viewedTaskId, viewMode, taskChoices, onPin, onFollow }: Props) {
+  projects, project, onMove, taskLink, onLink, narrow, viewedTaskId, viewMode, taskChoices, onPin, onFollow,
+  archived, archiveBusy, onArchive, taskArchives, onTaskArchive }: Props) {
   const [modelOpen, setModelOpen] = useState(false);
   const [reading, setReading] = useState(false);
   const [details, setDetails] = useState(false);
@@ -122,13 +125,13 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
         <ChatModelPicker catalog={catalog} selected={selected} open={modelOpen} onOpen={setModelOpen}
           onSelect={onSelectModel} />}
       <Button className="gy-send" theme="solid" htmlType="submit" loading={Boolean(pending)}
-        disabled={Boolean(pending) || reading || storing || (!draft.trim() && !files.length) || !selected}
+        disabled={archiveBusy || Boolean(pending) || reading || storing || (!draft.trim() && !files.length) || !selected}
         aria-label="提交任务" title="提交任务" icon={<IconArrowUp />} />
       </div>
     </div>
   </form>;
   const rail = showRail ? <TaskGraphRail taskId={viewedTaskId} mode={viewMode} choices={taskChoices}
-    onPin={onPin} onFollow={onFollow} onStage={setStage} /> : null;
+    tasks={taskArchives} archiveBusy={archiveBusy} onArchive={onTaskArchive} onPin={onPin} onFollow={onFollow} onStage={setStage} /> : null;
   return <section className="gy-chat-page">
     <header className="gy-work-header">
       <div className="gy-work-path">{conversation
@@ -160,14 +163,14 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
                       <span key={f.id}><IconFile aria-hidden="true" />{f.name}</span>)}</div>}
                   </div>
                   {t.review && <ReviewRecord review={t.review} />}
-                  {t.submissionKey && <AssignmentCard turn={t} submitting={pending === t.id} onTask={onTask} onRetry={onRetry} />}
+                  {t.submissionKey && <AssignmentCard turn={t} submitting={pending === t.id} onTask={onTask} onRetry={archived ? undefined : onRetry} />}
                   {(!t.submissionKey || t.answer) && <div className="gy-answer"><div className="gy-answer-brand"><BrandMark />{t.submissionKey ? "任务结果" : "GongYuAI"}
                     <time dateTime={new Date(t.created).toISOString()}>{clock.format(t.created)}</time></div>
                     {t.answer && <div className="gy-answer-text"><ChatMarkdown text={t.answer} /></div>}
                     {!t.submissionKey && pending === t.id && !t.answer && <span role="status" className="gy-response-state">正在回复…</span>}
                     {!t.submissionKey && pending !== t.id && (t.error || !t.answer) && <div className="gy-response-state" role="status">
                       <span>{t.error === t.review?.reason && t.error ? decisions[t.review!.decision] : t.error || "上次回复已中断。"}</span>
-                      {last?.id === t.id && !pending && <Button size="small" type="tertiary" theme="borderless" icon={<IconRefresh />}
+                      {last?.id === t.id && !pending && !archived && <Button size="small" type="tertiary" theme="borderless" icon={<IconRefresh />}
                         onClick={() => onRetry(t)}>重试</Button>}
                     </div>}
                   </div>}
@@ -189,11 +192,14 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
               {viewedTaskId ? <GraphDetail taskId={viewedTaskId} view={stage} onOpenRecord={openRecord} /> : <p role="status">等待任务回执</p>}
             </div>}
           </div>
-          <div className="gy-composer-dock">{composer}</div>
+          <div className="gy-composer-dock">{archived ? <div className="gy-archive-notice">
+            <span role="status">此会话已归档</span>
+            <Button size="small" disabled={archiveBusy} onClick={() => onArchive(false)}>取消归档会话</Button>
+          </div> : composer}</div>
         </> : <div className="gy-session-start"><div className="gy-welcome-inner">
           <div className="gy-workspace-context"><IconFolder size="small" />{project} 工作区</div>
           <h2>今天要处理什么任务？</h2>
-          {composer}
+          {archived ? <p role="status">请新建活跃项目或取消项目归档后再开始会话。</p> : composer}
         </div></div>}
       </div>
       {!narrow && rail}
@@ -208,15 +214,19 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
         }
       }}>
       <dl className="gy-session-meta">
-        <dt>所属项目</dt><dd><select aria-label="所属项目" value={project} onChange={e => onMove(e.target.value)}>
+        <dt>所属项目</dt><dd>{archived ? project : <select aria-label="所属项目" disabled={archiveBusy} value={project} onChange={e => onMove(e.target.value)}>
           {projects.map(name => <option key={name}>{name}</option>)}
-        </select></dd>
-        <dt>关联任务</dt><dd>{details && <ChatTaskSelect value={taskLink?.id ?? ""} onChange={onLink} />}</dd>
+        </select>}</dd>
+        <dt>关联任务</dt><dd>{archived ? taskArchives.get(taskLink?.id ?? "")?.name ?? taskLink?.id ?? "未手动关联" :
+          details && <ChatTaskSelect value={taskLink?.id ?? ""} onChange={onLink} disabled={archiveBusy} />}</dd>
         <dt>当前模型</dt><dd>{selected?.modelId ?? "未选择"}</dd>
         <dt>思考强度</dt><dd>{effortLabels[selected?.effort ?? "default"]}</dd>
-        <dt>会话状态</dt><dd>{last ? stateOf(last, pending) : "尚未开始"}</dd>
-        {conversation && <><dt>开始时间</dt><dd>{stamp.format(conversation.turns[0].created)}</dd></>}
+        <dt>会话状态</dt><dd>{archived ? "已归档" : last ? stateOf(last, pending) : "尚未开始"}</dd>
+        {conversation?.turns[0] && <><dt>开始时间</dt><dd>{stamp.format(conversation.turns[0].created)}</dd></>}
       </dl>
+      {conversation && <Button className="gy-session-archive" size="small" disabled={archiveBusy} onClick={() => onArchive(!archived)}>
+        {archived ? "取消归档会话" : "归档会话"}
+      </Button>}
       {conversation && <section className="gy-session-turns"><h3>会话记录 <span>{conversation.turns.length}</span></h3>
         {conversation.turns.map((t, i) => <button type="button" key={t.id} onClick={() => { jumpTo.current = t.id; setDetails(false); }}>
           <b>{t.question}</b><small>第 {i + 1} 轮 · {stateOf(t, pending)}{t.selection && " · " + (t.replyModel ?? t.selection.modelId) + " · " + effortLabels[t.replyModel && t.replyModel !== t.selection.modelId ? "default" : t.selection.effort ?? "default"]}</small>

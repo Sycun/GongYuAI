@@ -1,5 +1,5 @@
 import { chatThinkingEfforts, selectableChatModels } from "@gongyuai/contracts/chat-model-options";
-import type { ChatCatalog, ChatSelection } from "@gongyuai/contracts";
+import type { ChatCatalog, ChatSelection, TaskArchiveState } from "@gongyuai/contracts";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button, SideSheet, Toast } from "@douyinfe/semi-ui";
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
@@ -8,7 +8,9 @@ import { DETAIL_TABS, ROUTE_META, SETTINGS_SECTIONS, isSettingsRoute, settingsSe
 import { newId } from "./chat/id";
 import { storeFiles, type DraftFile } from "./chat/attachments";
 import { useConversations } from "./chat/useConversations";
-import { useChatProjects } from "./chat/useChatProjects";
+import { defaultProject, useChatProjects } from "./chat/useChatProjects";
+import { archiveKey, conversationTaskIds, submissionTasks, taskIdForChat, workspaceArchives, type ArchiveScope } from "./chat/archives";
+import { useTaskArchives } from "./chat/useTaskArchives";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ChatPage } from "./pages/ChatPage";
 import { readFocusMap, resolveViewedTask, writeFocusMap, type StoredFocus } from "./workspace/model";
@@ -65,6 +67,10 @@ export function App() {
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 760px)").matches);
   const { conversations, send, pendingTurn, applyTask, cancel } = useConversations();
   const workspace = useChatProjects();
+  const taskArchives = useTaskArchives(Boolean(conversations.length || workspace.linkedChats.length || taskIdForChat(page.id ?? "")));
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const changingArchive = useRef(false);
   const [homeId, setHomeId] = useState(newId);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [fileDrafts, setFileDrafts] = useState<Record<string, DraftFile[]>>({});
@@ -85,11 +91,26 @@ export function App() {
   const { route, id } = page;
   const chat = route === "chat";
   const detailId = (isDetail(route) ? id : null) ?? lastTask.current ?? tasks.at(-1)?.id;
-  const conversation = conversations.find(c => c.id === id);
   const chatId = (chat ? id : lastChat.current) ?? homeId;
-  const project = workspace.projectOf(chatId);
-  const taskSessionId = /^task-([a-f0-9-]{36})$/.exec(chatId)?.[1];
+  const archiveRecords = taskArchives.records ?? new Map<string, TaskArchiveState>();
+  const taskSessionId = taskIdForChat(chatId);
   const taskLink = workspace.taskOf(chatId) ?? (taskSessionId ? { id: taskSessionId, turnId: undefined } : undefined);
+  const linkedTaskOf = (id: string) => workspace.taskOf(id)?.id ?? taskIdForChat(id);
+  const knownChats = new Set(conversations.map(c => c.id));
+  const linkedChats = new Set(workspace.linkedChats);
+  if (taskSessionId) linkedChats.add(chatId);
+  const workspaceChats = [...conversations, ...[...linkedChats].filter(id => !knownChats.has(id)).map(id => ({
+    id, title: archiveRecords.get(linkedTaskOf(id) ?? "")?.name ?? "关联任务", updated: 0, turns: [],
+  }))];
+  const isSubmitting = (id: string) => Boolean(pendingTurn(id) || preparing.current.has(id));
+  const { archivedChats, archivedProjects, chatsByProject, submissions } = workspaceArchives({
+    projects: workspace.projects, conversations: workspaceChats, projectOf: workspace.projectOf,
+    linkedTaskOf, tasks: archiveRecords, localArchives: workspace.archives, isSubmitting,
+  });
+  const activeProjects = workspace.projects.filter(name => !archivedProjects.has(name));
+  const conversation = workspaceChats.find(c => c.id === id);
+  const project = !id && chat && archivedProjects.has(defaultProject) ? activeProjects[0] ?? defaultProject : workspace.projectOf(chatId);
+  const chatArchived = archivedChats.has(chatId) || archivedProjects.has(project);
   const draft = drafts[chatId] ?? "";
   const preferred = choices[chatId] ?? conversation?.turns.at(-1)?.selection;
   const profile = catalog?.profiles.find(p => p.id === preferred?.profileId &&
@@ -153,6 +174,9 @@ export function App() {
       setOnline(true);
     } catch { setOnline(false); }
   }, []);
+  async function refreshAfterTaskAction() {
+    await Promise.all([refresh(), taskArchives.refresh().catch(() => {})]);
+  }
   useEffect(() => {
     if (chat) return;
     void refresh();
@@ -161,9 +185,11 @@ export function App() {
   }, [chat, refresh]);
 
   function newChat(name: string) {
+    if (changingArchive.current || archivedProjects.has(name)) return;
     const next = newId();
     workspace.moveChat(next, name);
     if (workspace.folded(name)) workspace.setFolded(name, false);
+    setShowArchived(false);
     navigate("chat", next);
   }
   function addressChat() {
@@ -171,7 +197,8 @@ export function App() {
   }
   const files = fileDrafts[chatId] ?? [];
   async function submit() {
-    if (!selected || (!draft.trim() && !files.length) || pendingTurn(chatId) || preparing.current.has(chatId)) return;
+    if (chatArchived || changingArchive.current || !selected || (!draft.trim() && !files.length) || isSubmitting(chatId)) return;
+    if (!id && project !== defaultProject) workspace.moveChat(chatId, project);
     const originalHash = location.hash;
     preparing.current.add(chatId); setStoring(old => ({ ...old, [chatId]: true }));
     try {
@@ -183,11 +210,48 @@ export function App() {
     } catch (e) { Toast.error(e instanceof Error ? e.message : "附件保存失败。"); }
     finally { preparing.current.delete(chatId); setStoring(old => ({ ...old, [chatId]: false })); }
   }
+  async function changeArchive(scope: ArchiveScope, archived: boolean) {
+    if (changingArchive.current) return;
+    const affected = scope.kind === "project" ? chatsByProject.get(scope.id) ?? [] :
+      scope.kind === "chat" ? workspaceChats.filter(item => item.id === scope.id) : [];
+    const preparingInProject = scope.kind === "project" && [...preparing.current].some(id => workspace.projectOf(id) === scope.id);
+    if (archived && (preparingInProject || affected.some(item => isSubmitting(item.id)))) {
+      Toast.warning("有会话正在提交任务，请等待提交结束后再归档。");
+      return;
+    }
+    changingArchive.current = true;
+    setArchiveBusy(true);
+    const label = archived ? "归档" : "取消归档";
+    try {
+      const hasUnknownReceipt = affected.some(item => item.turns.some(turn => turn.submissionKey && !turn.taskId));
+      const linkedSubmissions = hasUnknownReceipt ? submissionTasks((await taskArchives.refresh()).values()) : submissions;
+      const taskIds = new Set(scope.kind === "task" ? [scope.id] : []);
+      const localKeys: string[] = [];
+      for (const item of affected) {
+        const ids = conversationTaskIds(item, linkedTaskOf(item.id), linkedSubmissions);
+        if (ids.length) ids.forEach(taskId => taskIds.add(taskId));
+        else localKeys.push(archiveKey("chat", item.id));
+      }
+      if (scope.kind === "project" && !affected.length) localKeys.push(archiveKey("project", scope.id));
+      if (taskIds.size) await taskArchives.change([...taskIds], archived);
+      if (localKeys.length) workspace.setArchives(localKeys, archived);
+      const subject = { task: "任务", chat: "会话", project: "项目" }[scope.kind];
+      Toast.success(archived ? `${subject}已归档` : `已取消${subject}归档`);
+      if (!chat && taskIds.size) void refresh();
+    } catch (e) {
+      Toast.error(`${label}失败。${e instanceof Error ? e.message : "请稍后重试。"}`);
+      void taskArchives.refresh().catch(() => {});
+    } finally {
+      changingArchive.current = false;
+      setArchiveBusy(false);
+    }
+  }
   const sidebarProps = {
-    conversations, selected: chat ? id : null, blank: chat && !conversation, onNew: newChat,
+    conversations: workspaceChats, selected: chat ? id : null, blank: chat && !conversation, onNew: newChat,
     projects: workspace.projects, currentProject: project, projectOf: workspace.projectOf,
+    archivedChats, archivedProjects, showArchived, onShowArchived: setShowArchived, archiveBusy, onArchive: changeArchive,
     folded: workspace.folded, onFold: workspace.setFolded,
-    onCreate: (name: string) => { workspace.addProject(name); newChat(name); },
+    onCreate: (name: string) => { if (!changingArchive.current) { workspace.addProject(name); newChat(name); } },
     onSelect: (next: string) => navigate("chat", next),
     onFeatures: () => setPanel("features"),
     attention,
@@ -197,12 +261,11 @@ export function App() {
   const openHref = (href: string) => { location.hash = href.startsWith("#") ? href : "#" + href; };
   const viewed = resolveViewedTask({
     stored: focusMap[chatId],
-    turns: conversation?.turns ?? [],
+    turns: conversation?.turns.map(turn => turn.taskId || !turn.submissionKey ? turn : { ...turn, taskId: submissions.get(turn.submissionKey) }) ?? [],
     linkedTaskId: taskLink?.id,
   });
   const taskChoices = [...new Set([
-    ...(conversation?.turns.map((turn) => turn.taskId).filter((value): value is string => Boolean(value)) ?? []),
-    taskLink?.id,
+    ...(conversation ? conversationTaskIds(conversation, taskLink?.id, submissions) : taskLink ? [taskLink.id] : []),
     viewed.taskId,
   ].filter((value): value is string => Boolean(value)))];
   function pinTask(taskId: string) {
@@ -264,13 +327,19 @@ export function App() {
       {chat ? <ChatPage key={chatId} conversation={conversation} pending={pendingTurn(chatId)} draft={draft}
         onDraft={value => setDrafts(old => ({ ...old, [chatId]: value }))} onSend={submit}
         catalog={catalog} selected={selected} modelError={modelError}
-        projects={workspace.projects} project={project} taskLink={taskLink}
+        projects={activeProjects} project={project} taskLink={taskLink} archived={chatArchived} archiveBusy={archiveBusy}
+        taskArchives={archiveRecords}
+        onArchive={archived => void changeArchive({ kind: "chat", id: chatId }, archived)}
+        onTaskArchive={(id, archived) => void changeArchive({ kind: "task", id }, archived)}
         onMove={name => {
+          if (chatArchived || changingArchive.current || !activeProjects.includes(name)) return;
           workspace.moveChat(chatId, name);
           if (workspace.folded(name)) workspace.setFolded(name, false);
           addressChat();
         }}
         onLink={next => {
+          if (chatArchived || changingArchive.current) return;
+          if (!id && project !== defaultProject) workspace.moveChat(chatId, project);
           workspace.linkTask(chatId, next ? { id: next, turnId: conversation?.turns.at(-1)?.id } : undefined);
           if (next) pinTask(next);
           addressChat();
@@ -280,7 +349,7 @@ export function App() {
         onFiles={added => setFileDrafts(old => ({ ...old, [chatId]: [...(old[chatId] ?? []), ...added] }))}
         onRemoveFile={id => setFileDrafts(old => ({ ...old, [chatId]: (old[chatId] ?? []).filter(f => f.id !== id) }))}
         onApprovalSettings={() => navigate("settings-approval")}
-        onTask={applyTask} onRetry={t => selected && void send(chatId, t.question, selected, t)}
+        onTask={applyTask} onRetry={t => !chatArchived && !changingArchive.current && selected && void send(chatId, t.question, selected, t)}
         onCancel={() => cancel(chatId)} narrow={narrow}
         viewedTaskId={viewed.taskId} viewMode={viewed.mode} taskChoices={taskChoices}
         onPin={pinTask} onFollow={followTask} /> : <>
@@ -292,7 +361,7 @@ export function App() {
         </header>
         <div className="gy-shell-content"><Suspense fallback={<span role="status">正在打开…</span>}>
           {route === "overview" && <OverviewPage overview={overview} onSelect={openTask} onOpen={openHref} />}
-          {route === "tasks" && <TasksPage tasks={tasks} onSelect={openTask} onRefresh={refresh}
+          {route === "tasks" && <TasksPage tasks={tasks} onSelect={openTask} onRefresh={refreshAfterTaskAction}
             onCreated={task => { openTask(task); void refresh(); }} />}
           {route === "graphs" && <GraphCenterPage onOpen={openHref} />}
           {route === "demo" && <DemoPage />}
@@ -300,7 +369,7 @@ export function App() {
           {isSettingsRoute(route) && <SettingsPage section={settingsSectionOf(route)} catalog={catalog} onCatalog={setCatalog} profileId={id} />}
           {isDetail(route) && <TaskDetailPage key={detailId} task={tasks.find(t => t.id === detailId) ?? null}
             tab={route} focus={page.query} refreshNonce={detailNonce}
-            onTabChange={next => navigate(next, detailId ?? null, page.query)} onRefresh={() => { setDetailNonce(value => value + 1); return refresh(); }} />}
+            onTabChange={next => navigate(next, detailId ?? null, page.query)} onRefresh={() => { setDetailNonce(value => value + 1); return refreshAfterTaskAction(); }} />}
         </Suspense></div>
       </>}
     </main>

@@ -8,7 +8,8 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { CreateTaskRequestSchema, isArchivableTaskStatus } from "@gongyuai/contracts";
+import { CreateTaskRequestSchema, isArchivableTaskStatus, type TaskArchiveState } from "@gongyuai/contracts";
+import { bootControlPlane } from "./index.js";
 import { ControlStore } from "./store.js";
 
 function tempStore() {
@@ -102,4 +103,47 @@ test("archiving never touches dataDir contents (checkpoints, history, evidence)"
     store.close();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("workspace archive batches roll back entirely until all tasks are eligible", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-archive-batch-"));
+  const plane = await bootControlPlane({ dataRoot: root, host: "127.0.0.1", port: 0, isolated: true });
+  t.after(async () => { await plane.close(); rmSync(root, { recursive: true, force: true }); });
+  const first = newTask(plane.store, "first");
+  const second = newTask(plane.store, "second");
+  first.status = "completed";
+  first.assignment = { requestId: "previous-submission", model: "fixture", inputHash: "unused" };
+  second.status = "running";
+  plane.store.save(first);
+  plane.store.save(second);
+
+  const endpoint = plane.url + "/tasks/archives";
+  const batch = (archived: boolean) => fetch(endpoint, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ taskIds: [first.id, second.id, first.id], archived }),
+  });
+  const blocked = await batch(true);
+  assert.equal(blocked.status, 400);
+  assert.match(await blocked.text(), /second/);
+  assert.equal(plane.store.get(first.id)?.archivedAt, null);
+
+  second.status = "paused";
+  second.pausedAt = "2026-11-23T00:00:00.000Z";
+  plane.store.save(second);
+  const response = await batch(true);
+  assert.equal(response.status, 200);
+  const result = await response.json() as { tasks: TaskArchiveState[] };
+  assert.equal(result.tasks.length, 2);
+  assert.equal(result.tasks.find(task => task.id === first.id)?.submissionKey, "previous-submission");
+  assert.ok(result.tasks.every(task => task.archivedAt));
+  const listed = await (await fetch(endpoint)).json() as { tasks: TaskArchiveState[] };
+  const byId = (tasks: TaskArchiveState[]) => new Map(tasks.map(task => [task.id, task]));
+  assert.deepEqual(byId(listed.tasks), byId(result.tasks));
+  assert.deepEqual(await (await batch(true)).json(), result);
+
+  assert.equal((await batch(false)).status, 200);
+  const restored = plane.store.get(second.id);
+  assert.equal(restored?.archivedAt, null);
+  assert.equal(restored?.status, "paused");
+  assert.equal(restored?.pausedAt, second.pausedAt);
 });

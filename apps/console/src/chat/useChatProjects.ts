@@ -42,8 +42,28 @@ export function useChatProjects() {
       if (typeof link?.id === "string" && link.id && (link.turnId === undefined || typeof link.turnId === "string")) return link;
     } catch { /* Ignore an unreadable link without affecting chat history. */ }
   }
+  function archivedEntries(raw?: string) {
+    try {
+      const decoded: unknown = JSON.parse(raw ?? "[]");
+      if (Array.isArray(decoded)) return new Set(decoded.filter((key): key is string => typeof key === "string"));
+    } catch { /* Ignore malformed archive preferences. */ }
+    return new Set<string>();
+  }
+  const linkedChats = [...values.keys()].filter(key => key.startsWith("task/"))
+    .map(key => key.slice("task/".length)).filter(id => taskOf(id));
   return {
-    projects, taskOf,
+    projects, linkedChats, taskOf,
+    archives: archivedEntries(values.get("archives")),
+    setArchives: (keys: string[], archived: boolean) => {
+      let saved = values.get("archives");
+      try { saved = localStorage.getItem(prefix + "archives") ?? saved; } catch { /* Keep in-memory state. */ }
+      const entries = archivedEntries(saved);
+      for (const key of keys) {
+        if (archived) entries.add(key);
+        else entries.delete(key);
+      }
+      save("archives", JSON.stringify([...entries]));
+    },
     projectOf: (chatId: string) => values.get("belongs/" + chatId) || defaultProject,
     folded: (name: string) => values.get("fold/" + name) === "1",
     setFolded: (name: string, folded: boolean) => save("fold/" + name, folded ? "1" : "0"),

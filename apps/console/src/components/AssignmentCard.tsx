@@ -5,7 +5,7 @@ import type { Turn } from "../chat/useConversations";
 import { STATUS_LABEL } from "../labels";
 import { CommandReviewCard } from "./CommandReviewCard";
 
-type Props = { turn: Turn; submitting: boolean; onTask: (t: Turn, view: AssignmentView) => void; onRetry: (t: Turn) => void };
+type Props = { turn: Turn; submitting: boolean; onTask: (t: Turn, view: AssignmentView) => void; onRetry?: (t: Turn) => void };
 const active = new Set(["queued", "running", "initializing"]);
 export function AssignmentCard({ turn, submitting, onTask, onRetry }: Props) {
   const [busy, setBusy] = useState("");
@@ -66,6 +66,6 @@ export function AssignmentCard({ turn, submitting, onTask, onRetry }: Props) {
     {(turn.error || message) && !waitingApproval && <p role="status">{[turn.error, message].filter(Boolean).join(" · ")}</p>}
     {turn.taskId && status && active.has(status) && <Button size="small" title={`暂停任务 ${turn.taskId}`} loading={busy === "pause"} onClick={() => void control("pause")}>{pauseLabel}</Button>}
     {turn.taskId && status && ["paused","failed","stopped"].includes(status) && !waitingApproval && <Button size="small" title={`继续任务 ${turn.taskId}`} loading={busy === "resume"} onClick={() => void control("resume")}>{resumeLabel}</Button>}
-    {!turn.taskId && !submitting && <Button size="small" onClick={() => onRetry(turn)}>重新提交</Button>}
+    {!turn.taskId && !submitting && onRetry && <Button size="small" onClick={() => onRetry(turn)}>重新提交</Button>}
   </section>;
 }

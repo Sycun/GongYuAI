@@ -15,6 +15,7 @@ const retracted = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const evidence = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const forbidden = "44444444-4444-4444-8444-444444444444";
 const stats = { surface: 0, memory: 0, handoff: 0 };
+const ARCHIVABLE = new Set(["paused", "completed", "failed", "budget_exhausted", "incomplete", "stopped"]);
 
 const pausedJob = {
   id: "job-paused",
@@ -91,6 +92,18 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { total: tasks.length, active: 4, byStatus: { running: 4, completed: 3, failed: 1, paused: 1 }, recent: tasks.slice(0, 4) });
   }
   if (path === "/tasks" && req.method === "GET") return send(res, 200, { tasks });
+  if (path === "/tasks/archives" && req.method === "GET") return send(res, 200, { tasks });
+  if (path === "/tasks/archives" && req.method === "POST") {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const { taskIds, archived } = JSON.parse(Buffer.concat(chunks).toString());
+    const selected = [...new Set(taskIds)].map(id => tasks.find(item => item.id === id));
+    if (selected.some(item => !item || (archived && !item.archivedAt && !ARCHIVABLE.has(item.status)))) {
+      return send(res, 400, { error: "仅已暂停或终态任务可归档" });
+    }
+    for (const item of selected) item.archivedAt = archived ? item.archivedAt ?? now : null;
+    return send(res, 200, { tasks: selected });
+  }
   if (path === "/tasks/submit" && req.method === "POST") {
     return send(res, 201, { taskId: normal, status: "running", model: "fixture" });
   }
@@ -122,7 +135,6 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { task: found });
   }
   // 与正式控制面同一条规则：已暂停或终态可归档，归档/取消归档只改标记。
-  const ARCHIVABLE = new Set(["paused", "completed", "failed", "budget_exhausted", "incomplete", "stopped"]);
   if (rest === "/archive" && req.method === "POST") {
     if (!ARCHIVABLE.has(found.status)) return send(res, 400, { error: "仅已暂停或终态任务可归档" });
     if (!found.archivedAt) found.archivedAt = now;

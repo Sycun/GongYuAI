@@ -1,4 +1,5 @@
 import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, FindingValidation, HttpTransaction, EngagementAudit, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
+import type { TaskArchiveState } from "@gongyuai/contracts";
 import type {
   KnowledgeEmbeddingPatch,
   KnowledgeEmbeddingTestInput,
@@ -655,6 +656,11 @@ export const api = {
     request<{ task: TaskRecord }>(`/tasks/${id}/archive`, { method: "POST" }),
   unarchive: (id: string) =>
     request<{ task: TaskRecord }>(`/tasks/${id}/unarchive`, { method: "POST" }),
+  taskArchives: () => request<{ tasks: TaskArchiveState[] }>("/tasks/archives", { cache: "no-store" }),
+  setTaskArchives: (taskIds: string[], archived: boolean) =>
+    request<{ tasks: TaskArchiveState[] }>("/tasks/archives", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskIds, archived }),
+    }),
   history: (id: string, signal?: AbortSignal) => request<HistoryPayload>(`/tasks/${encodeURIComponent(id)}/history`, { signal }),
   /** P14 只读能力投影；凭据只返回脱敏后的 secretRef。 */
   getTaskP14: (id: string, signal?: AbortSignal) =>

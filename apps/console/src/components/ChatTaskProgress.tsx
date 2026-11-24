@@ -100,7 +100,7 @@ export function ChatTaskProgress({ taskId }: { taskId: string }) {
   </details>;
 }
 
-export function ChatTaskSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+export function ChatTaskSelect({ value, onChange, disabled }: { value: string; onChange: (id: string) => void; disabled?: boolean }) {
   const [tasks, setTasks] = useState<TaskRecord[]>();
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -112,7 +112,7 @@ export function ChatTaskSelect({ value, onChange }: { value: string; onChange: (
     return () => controller.abort();
   }, [attempt]);
   return <div>
-    <select aria-label="关联任务" value={value} onChange={e => onChange(e.target.value)}>
+    <select aria-label="关联任务" value={value} disabled={disabled} onChange={e => onChange(e.target.value)}>
       <option value="">未关联任务</option>
       {value && !tasks?.some(t => t.id === value) && <option value={value}>已关联 · {value}</option>}
       {tasks?.map(t => <option key={t.id} value={t.id}>{t.name} · {t.id.slice(0, 8)}</option>)}

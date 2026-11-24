@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@douyinfe/semi-ui";
-import { api } from "../api";
-import { STATUS_LABEL } from "../labels";
+import { IconArchive, IconUndo } from "@douyinfe/semi-icons";
+import type { TaskArchiveState } from "@gongyuai/contracts";
+import { isArchivableStatus, STATUS_LABEL } from "../labels";
 import { GraphStage, GraphThumb } from "./GraphCanvas";
 import { rememberGraphTask } from "../workspace/graphStore";
 import { useTaskGraph } from "../workspace/useTaskGraph";
@@ -71,7 +72,10 @@ function useViewedTaskControls(taskId: string | null, taskName: string) {
   };
 }
 
-function ViewedTaskControls({ face, onAct }: { face: TaskControlFace; onAct: (action: TaskAction) => void }) {
+function ViewedTaskControls({ face, onAct, task, archiveBusy, onArchive }: {
+  face: TaskControlFace; onAct: (action: TaskAction) => void; task?: TaskArchiveState;
+  archiveBusy: boolean; onArchive: (id: string, archived: boolean) => void;
+}) {
   return (
     <div className="gy-view-ops" aria-label="当前任务操作">
       <span>当前任务操作</span>
@@ -81,6 +85,9 @@ function ViewedTaskControls({ face, onAct }: { face: TaskControlFace; onAct: (ac
       {face.note && <p role="status">{face.note}</p>}
       {face.pause && <Button size="small" loading={face.pause.busy} onClick={() => void onAct("pause")}>{face.pause.label}</Button>}
       {face.resume && <Button size="small" loading={face.resume.busy} onClick={() => void onAct("resume")}>{face.resume.label}</Button>}
+      {task && (task.archivedAt || isArchivableStatus(task.status)) && <Button size="small" theme="borderless"
+        disabled={archiveBusy} icon={task.archivedAt ? <IconUndo aria-hidden="true" /> : <IconArchive aria-hidden="true" />}
+        onClick={() => onArchive(task.id, !task.archivedAt)}>{task.archivedAt ? "取消归档任务" : "归档任务"}</Button>}
     </div>
   );
 }
@@ -117,6 +124,9 @@ export function TaskGraphRail({
   taskId,
   mode,
   choices,
+  tasks,
+  archiveBusy,
+  onArchive,
   onPin,
   onFollow,
   onStage,
@@ -124,25 +134,18 @@ export function TaskGraphRail({
   taskId: string | null;
   mode: "follow" | "pinned" | "waiting";
   choices: string[];
+  tasks: Map<string, TaskArchiveState>;
+  archiveBusy: boolean;
+  onArchive: (id: string, archived: boolean) => void;
   onPin: (taskId: string) => void;
   onFollow: () => void;
   onStage: (view: ViewName | null) => void;
 }) {
-  const [names, setNames] = useState<Record<string, string>>({});
   useEffect(() => {
     if (taskId) rememberGraphTask(taskId);
   }, [taskId]);
-  useEffect(() => {
-    const controller = new AbortController();
-    api.tasks(controller.signal).then((result) => {
-      if (controller.signal.aborted) return;
-      const next: Record<string, string> = {};
-      for (const task of result.json.tasks ?? []) next[task.id] = task.name;
-      setNames(next);
-    }).catch(() => { /* 名称读不到时仍显示编号。 */ });
-    return () => controller.abort();
-  }, [taskId]);
-  const currentName = taskId ? (names[taskId] || taskId.slice(0, 8)) : "等待任务回执";
+  const task = taskId ? tasks.get(taskId) : undefined;
+  const currentName = task?.name ?? taskId?.slice(0, 8) ?? "等待任务回执";
   const viewed = useViewedTaskControls(taskId, currentName);
   const options = [...new Set(choices.filter(Boolean))];
   return (
@@ -152,13 +155,13 @@ export function TaskGraphRail({
         <strong title={viewed.face.taskName}>{viewed.face.taskName}</strong>
         <select aria-label="切换当前任务" value={taskId ?? ""} disabled={!options.length} onChange={(event) => onPin(event.target.value)}>
           {!taskId && <option value="">等待任务回执</option>}
-          {options.map((id) => <option key={id} value={id}>{names[id] || id.slice(0, 8)}</option>)}
+          {options.map(id => <option key={id} value={id}>{tasks.get(id)?.name ?? id.slice(0, 8)}</option>)}
         </select>
         <div className="gy-focus-actions">
           <Button size="small" theme="borderless" disabled={!taskId || mode === "pinned"} onClick={() => taskId && onPin(taskId)}>固定查看</Button>
           <Button size="small" theme="borderless" disabled={mode !== "pinned"} onClick={onFollow}>跟随最新任务</Button>
         </div>
-        <ViewedTaskControls face={viewed.face} onAct={viewed.act} />
+        <ViewedTaskControls face={viewed.face} onAct={viewed.act} task={task} archiveBusy={archiveBusy} onArchive={onArchive} />
       </div>
       {views.map((item) => (
         <GraphCard key={item.view} taskId={taskId} view={item.view} title={item.title} onOpen={onStage} />

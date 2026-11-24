@@ -17,6 +17,8 @@ import {
   ModelSettingsPatchSchema,
   PeerReviewSchema,
   RetestRequestSchema,
+  TaskArchiveBatchSchema,
+  type TaskArchiveState,
   ToggleToolsItemSchema,
   type TaskIntegrationUsage,
   type TaskRecord,
@@ -149,6 +151,10 @@ function withLiveGoals(task: TaskRecord): TaskRecord {
   } catch {
     return task;
   }
+}
+
+function taskArchiveState(task: TaskRecord): TaskArchiveState {
+  return { id: task.id, name: task.name, status: task.status, archivedAt: task.archivedAt, submissionKey: task.assignment?.requestId };
 }
 
 function sendFile(res: ServerResponse, abs: string, cache = false): boolean {
@@ -397,6 +403,17 @@ export function startControlServer(opts: ServerOptions) {
           200,
           settings.removeAssetCollector(decodeURIComponent(collectorDelete[1]!)),
         );
+      }
+
+      if (url.pathname === "/tasks/archives") {
+        if (method === "GET") return send(res, 200, { tasks: store.list().map(taskArchiveState) });
+        if (method === "POST") {
+          if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") {
+            return send(res, 415, { error: "请使用 JSON 请求。" });
+          }
+          const { taskIds, archived } = TaskArchiveBatchSchema.parse(await readJson(req, 1024 * 1024));
+          return send(res, 200, { tasks: store.setArchivedBatch(taskIds, archived).map(taskArchiveState) });
+        }
       }
 
       if (method === "GET" && url.pathname === "/tasks") {
