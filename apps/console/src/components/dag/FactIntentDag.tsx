@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Button, Empty, Spin } from "@douyinfe/semi-ui";
+import { Button, Empty, Spin, Switch, Tag } from "@douyinfe/semi-ui";
 import { IconBranch, IconClose, IconExpand, IconMinus, IconPlus } from "@douyinfe/semi-icons";
 import {
   Background, BaseEdge, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider,
@@ -7,17 +7,46 @@ import {
   type OnNodesChange, type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { STATUS_LABEL } from "../../labels";
-import { buildDagLayout, CARD_SIZE, collectDag, type DagFact, type DagIntent, type DagRecord } from "./buildDagLayout";
+import { FINDING_SEVERITY_LABEL, STATUS_LABEL } from "../../labels";
+import {
+  buildDagLayout, CARD_SIZE, collectDag,
+  type DagAsset, type DagFact, type DagFinding, type DagIntent, type DagRecord,
+} from "./buildDagLayout";
 
-type Props = { facts: DagFact[]; intents: DagIntent[]; height: number; loading?: boolean; focusId?: string };
+type Props = {
+  facts: DagFact[];
+  intents: DagIntent[];
+  findings?: DagFinding[];
+  assets?: DagAsset[];
+  height: number;
+  loading?: boolean;
+  focusId?: string;
+};
 type RecordNode = Node<DagRecord, "record">;
 type RoutedEdge = Edge<{ path: string }, "routed">;
-const KIND = { origin: "起点", fact: "事实", intent: "意图" };
+
+const KIND: Record<string, string> = { asset: "资产", fact: "事实", intent: "意图", finding: "漏洞" };
+const EDGE_KIND: Record<string, string> = {
+  "asserted-by": "资产凭据", anchors: "前驱事实", produces: "Explore 回写",
+  evidences: "支撑发现", yields: "意图产出", escalates: "同证据推进",
+};
+const ABSTENTION_LABEL: Record<string, string> = {
+  missing_shared_artifact: "缺少共享对象指纹", timestamp_inversion: "时间倒挂",
+  ungrounded_reference: "引用缺失", missing_timestamp: "缺少时间戳",
+};
 const MIN_ZOOM = 0.01;
 const MAX_ZOOM = 2;
 const FIT = { padding: "20px" as const, minZoom: MIN_ZOOM, maxZoom: 1 };
 const ARIA = { "node.a11yDescription.keyboardDisabled": "按回车或空格查看详情，按 Esc 关闭。" };
+
+function nodeMetaLabel(data: DagRecord): string {
+  if (!data.meta) return "";
+  if (data.kind === "finding") {
+    const [severity] = data.meta.split("/");
+    return FINDING_SEVERITY_LABEL[severity] ?? data.meta;
+  }
+  return STATUS_LABEL[data.meta] ?? data.meta;
+}
 
 function RecordCard({ data, targetPosition, sourcePosition }: NodeProps<RecordNode>) {
   return (
@@ -25,7 +54,7 @@ function RecordCard({ data, targetPosition, sourcePosition }: NodeProps<RecordNo
       <Handle type="target" position={targetPosition ?? Position.Left} />
       <span className="gy-dag-node-meta">
         <i aria-hidden="true" />{KIND[data.kind]}
-        {data.meta && <span>{STATUS_LABEL[data.meta] ?? data.meta}</span>}
+        {data.meta && <span>{nodeMetaLabel(data)}</span>}
       </span>
       <strong>{data.title}</strong>
       <Handle type="source" position={sourcePosition ?? Position.Right} />
@@ -56,15 +85,31 @@ function ZoomControls() {
   );
 }
 
-export default function FactIntentDag({ facts, intents, height, loading, focusId }: Props) {
+function edgeClass(link: { structural?: boolean; verification?: string; broken?: boolean }, active: boolean): string {
+  const base = link.broken ? "gy-dag-edge-broken"
+    : link.structural ? "gy-dag-edge-structural"
+    : link.verification === "proposed" ? "gy-dag-edge-proposed"
+    : "gy-dag-edge-proven";
+  return `${base}${active ? " gy-dag-edge-active" : ""}`;
+}
+
+export default function FactIntentDag({ facts, intents, findings = [], assets = [], height, loading, focusId }: Props) {
   const section = useRef<HTMLElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const flowId = useId().replace(/:/g, "");
   const [vertical, setVertical] = useState(false);
+  const [showOrphans, setShowOrphans] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(focusId ?? null);
-  const { records, topologyKey } = useMemo(() => collectDag(facts, intents), [facts, intents]);
-  const geometry = useMemo(() => buildDagLayout(topologyKey, vertical), [topologyKey, vertical]);
-  const selected = selectedId ? records.get(selectedId) : undefined;
+  const dag = useMemo(() => collectDag(facts, intents, findings, assets), [facts, intents, findings, assets]);
+  const geometry = useMemo(
+    () => buildDagLayout(dag, vertical, showOrphans),
+    [dag.topologyKey, vertical, showOrphans],
+  );
+  const selected = selectedId ? dag.records.get(selectedId) : undefined;
+  const incidentEdges = useMemo(
+    () => selectedId ? dag.links.filter((l) => l.source === selectedId || l.target === selectedId) : [],
+    [dag.links, selectedId],
+  );
 
   useLayoutEffect(() => {
     const el = section.current!;
@@ -76,7 +121,7 @@ export default function FactIntentDag({ facts, intents, height, loading, focusId
   }, []);
 
   const nodes = useMemo<RecordNode[]>(() => geometry.positions.map(({ id, position }) => {
-    const data = records.get(id)!;
+    const data = dag.records.get(id)!;
     return {
       id, position, data, ...CARD_SIZE, type: "record", selected: id === selectedId,
       sourcePosition: vertical ? Position.Bottom : Position.Right,
@@ -87,13 +132,13 @@ export default function FactIntentDag({ facts, intents, height, loading, focusId
         "aria-controls": id === selectedId ? `${flowId}-detail` : undefined,
       },
     };
-  }), [geometry, records, selectedId, vertical, flowId]);
+  }), [geometry, dag.records, selectedId, vertical, flowId]);
 
-  const edges = useMemo<RoutedEdge[]>(() => geometry.edges.map(({ id, source, target, kind, path }) => {
-    const active = selectedId === source || selectedId === target;
+  const edges = useMemo<RoutedEdge[]>(() => geometry.edges.map((link) => {
+    const active = selectedId === link.source || selectedId === link.target;
     return {
-      id, source, target, type: "routed", data: { path }, selectable: false,
-      className: `gy-dag-edge-${kind}${active ? " gy-dag-edge-active" : ""}`,
+      id: link.id, source: link.source, target: link.target, type: "routed", data: { path: link.path },
+      selectable: false, className: edgeClass(link, active),
       markerEnd: { type: MarkerType.ArrowClosed, color: active ? "var(--semi-color-primary)" : "var(--semi-color-text-2)" },
     };
   }), [geometry, selectedId]);
@@ -116,19 +161,19 @@ export default function FactIntentDag({ facts, intents, height, loading, focusId
       );
       return;
     }
-    const { clientWidth: width, clientHeight: height } = viewport.current!;
+    const { clientWidth: width, clientHeight: viewHeight } = viewport.current!;
     const bounds = flow.getNodesBounds(nodes);
-    const overview = getViewportForBounds(bounds, width, height, MIN_ZOOM, 1, FIT.padding);
+    const overview = getViewportForBounds(bounds, width, viewHeight, MIN_ZOOM, 1, FIT.padding);
     if (overview.zoom >= 0.65) {
       void flow.setViewport(overview);
       return;
     }
-    // At overview scale a long graph is illegible. Open at its first node at reading size.
-    const first = nodes.find((node) => node.data.kind === "origin") ?? nodes[0];
+    const first = nodes.find((node) => node.data.kind === "asset") ?? nodes[0];
+    if (!first) return;
     void flow.setViewport({
       zoom: 1,
       x: (vertical ? (width - CARD_SIZE.width) / 2 : 20) - first.position.x,
-      y: (vertical ? 20 : (height - CARD_SIZE.height) / 2) - first.position.y,
+      y: (vertical ? 20 : (viewHeight - CARD_SIZE.height) / 2) - first.position.y,
     });
   };
 
@@ -137,16 +182,26 @@ export default function FactIntentDag({ facts, intents, height, loading, focusId
     setSelectedId(null);
   };
 
+  const orphanCount = dag.orphanIds.size;
+
   return (
-    <section className="gy-dag" ref={section} aria-label="事实与意图关系图">
+    <section className="gy-dag" ref={section} aria-label="资产事实意图漏洞因果图">
       <ReactFlowProvider key={vertical ? "vertical" : "horizontal"}>
         <header className="gy-dag-toolbar">
           <div className="gy-dag-heading">
             <IconBranch />
-            <h3>事实与意图</h3>
+            <h3>意图图谱</h3>
             {nodes.length > 0 && <span>{nodes.length} 个节点 · {edges.length} 条连线</span>}
           </div>
-          {nodes.length > 0 && <ZoomControls />}
+          <div className="gy-dag-toolbar-right">
+            {orphanCount > 0 && (
+              <label className="gy-dag-orphan-toggle">
+                <Switch size="small" checked={showOrphans} onChange={setShowOrphans} aria-label="显示孤立节点" />
+                <span>显示孤立节点（{orphanCount}）</span>
+              </label>
+            )}
+            {nodes.length > 0 && <ZoomControls />}
+          </div>
         </header>
         {nodes.length ? (
           <>
@@ -164,14 +219,16 @@ export default function FactIntentDag({ facts, intents, height, loading, focusId
               </ReactFlow>
             </div>
             <footer className="gy-dag-legend">
-              <span><i />触发</span><span><i className="gy-dashed" />产出</span>
+              <span><i />已验证因果</span>
+              <span><i className="gy-dashed" />模型提议</span>
+              <span><i className="gy-structural" />结构关联</span>
               <span className="gy-dag-hint">拖动画布 · 选择节点查看详情</span>
             </footer>
           </>
         ) : loading ? (
           <div className="gy-dag-empty" role="status"><Spin /> 正在加载关系图…</div>
         ) : (
-          <Empty className="gy-dag-empty" title="暂无可绘制的节点" description="记录事实或意图后，关系图会显示在这里。" />
+          <Empty className="gy-dag-empty" title="暂无可绘制的节点" description="记录事实、意图或漏洞后，因果图会显示在这里。" />
         )}
       </ReactFlowProvider>
       {selected && (
@@ -180,7 +237,7 @@ export default function FactIntentDag({ facts, intents, height, loading, focusId
         }}>
           <div className="gy-dag-detail-heading">
             <div>
-              <span>{KIND[selected.kind]}{selected.meta && ` · ${STATUS_LABEL[selected.meta] ?? selected.meta}`}</span>
+              <span>{KIND[selected.kind]}{selected.meta && ` · ${nodeMetaLabel(selected)}`}</span>
               <h4>{selected.title}</h4>
             </div>
             <Button icon={<IconClose />} theme="borderless" type="tertiary" aria-label="关闭节点详情" onClick={closeDetails} />
@@ -189,7 +246,42 @@ export default function FactIntentDag({ facts, intents, height, loading, focusId
           <dl>
             <dt>节点 ID</dt><dd>{selectedId}</dd>
             {selected.sources && <><dt>前驱</dt><dd>{selected.sources.join("、")}</dd></>}
+            {typeof selected.data?.asset === "string" && <><dt>资产</dt><dd>{selected.data.asset}</dd></>}
+            {typeof selected.data?.vulnClass === "string" && <><dt>类别</dt><dd>{selected.data.vulnClass}</dd></>}
+            {typeof selected.data?.technique === "string" && selected.data.technique && <><dt>手法</dt><dd>{selected.data.technique}</dd></>}
+            {typeof selected.data?.assetRoot === "string" && selected.data.assetRoot && <><dt>资产根</dt><dd>{selected.data.assetRoot}</dd></>}
           </dl>
+          {incidentEdges.length > 0 && (
+            <div className="gy-dag-detail-edges">
+              <strong>关联因果边</strong>
+              <ul>
+                {incidentEdges.map((link) => {
+                  const outgoing = link.source === selectedId;
+                  const other = outgoing ? link.target : link.source;
+                  const otherTitle = dag.records.get(other)?.title ?? other;
+                  return (
+                    <li key={`${link.source}-${link.target}-${link.kind}`}>
+                      <span className="gy-dag-edge-direction">{outgoing ? "→" : "←"}</span>
+                      <span className="gy-dag-edge-other" title={other}>{otherTitle}</span>
+                      <Tag size="small" color="grey">{EDGE_KIND[link.kind] ?? link.kind}</Tag>
+                      {link.structural ? (
+                        <Tag size="small" color="blue">结构</Tag>
+                      ) : link.verification === "proven" ? (
+                        <Tag size="small" color="green">已验证</Tag>
+                      ) : (
+                        <Tag size="small" color="orange">提议</Tag>
+                      )}
+                      {link.abstentionReason && (
+                        <span className="gy-dag-abstention">
+                          {ABSTENTION_LABEL[link.abstentionReason] ?? link.abstentionReason}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </section>
       )}
     </section>

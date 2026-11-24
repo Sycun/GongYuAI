@@ -1,41 +1,18 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import {
-  Button,
-  Card,
-  Col,
-  Descriptions,
-  Empty,
-  Input,
-  List,
-  Modal,
-  Row,
-  Space,
-  Table,
-  Tabs,
-  Tag,
-  TextArea,
-  Toast,
-  Typography,
+  Button, Card, Col, Collapsible, Descriptions, Empty, List, Row, Space, Tabs, Tag, TextArea, Toast, Typography,
 } from "@douyinfe/semi-ui";
 import { IconArchive, IconPlay, IconRefresh, IconStop, IconUndo } from "@douyinfe/semi-icons";
 import {
   api,
   type AssetRecord,
-  type FindingRecord,
-  type HintRecord,
   type HistoryPayload,
   type RuntimePayload,
   type TaskRecord,
 } from "../api";
 import {
-  ASSET_KIND_LABEL,
   DETAIL_TABS,
   type DetailTab,
-  FINDING_SEVERITY_LABEL,
-  FINDING_STATUS_LABEL,
-  STATUS_LABEL,
-  findingSeverityColor,
-  findingStatusColor,
   formatWorkerStatus,
   isActiveStatus,
   isArchivableStatus,
@@ -43,20 +20,20 @@ import {
   isPausedStatus,
   isStartableStatus,
   shortId,
-  statusColor,
 } from "../labels";
 import { StatusTag } from "../components/StatusTag";
 import { GoalCoverage } from "../components/GoalCoverage";
-import { DeliveryScorecard } from "../components/DeliveryScorecard";
-import { ReconcilePanel } from "../components/ReconcilePanel";
 import { GoalReconcileCard, type AdoptedReconcile } from "../components/GoalReconcileCard";
 import { TaskOps } from "../components/TaskOps";
 import { CommandReviewCard } from "../components/CommandReviewCard";
-import { ExecutionTrace } from "../components/ExecutionTrace";
 import { IntegrationUsage } from "../components/IntegrationUsage";
-import { P14Panel } from "../components/P14Panel";
-import { P15Panel } from "../components/P15Panel";
+import { BattlefieldPanel } from "../components/BattlefieldPanel";
+import { TrafficPanel } from "../components/TrafficPanel";
+import { FindingsPanel } from "../components/FindingsPanel";
+import { LogsPanel } from "../components/LogsPanel";
+import { assetNodeId } from "../components/dag/buildDagLayout";
 import { formatDateTime } from "../time";
+import type { PlanStep } from "@gongyuai/contracts";
 
 const FactIntentDag = lazy(() => import("../components/dag/FactIntentDag"));
 
@@ -69,9 +46,8 @@ class DagErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 
   render() {
     if (!this.state.failed) return this.props.children;
-
     return (
-      <Card title="事实与意图">
+      <Card title="意图图谱">
         <Space>
           <Typography.Text role="alert">关系图加载失败</Typography.Text>
           <Button size="small" onClick={() => window.location.reload()}>重新加载页面</Button>
@@ -94,25 +70,15 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
   const [history, setHistory] = useState<HistoryPayload | null>(null);
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [runtime, setRuntime] = useState<RuntimePayload | null>(null);
-  const [evidenceFiles, setEvidenceFiles] = useState<
-    Array<{ path: string; size: number; mtime: string }>
-  >([]);
-  const [evidencePath, setEvidencePath] = useState<string | null>(null);
-  const [evidenceBody, setEvidenceBody] = useState("请选择左侧文件");
-  const [materialPath, setMaterialPath] = useState("");
-  const [materialBody, setMaterialBody] = useState("");
-  const [materialBusy, setMaterialBusy] = useState(false);
-  const [removingPath, setRemovingPath] = useState<string | null>(null);
-  /** 核算/判定后要重读历史（核算态与事件台账都不在任务列表里）。 */
+  const [plan, setPlan] = useState<PlanStep[]>([]);
   const [historyTick, setHistoryTick] = useState(0);
-  const [paneText, setPaneText] = useState("");
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [liveUsage, setLiveUsage] = useState<TaskRecord["usage"] | null>(null);
-  const [hints, setHints] = useState<HintRecord[]>([]);
+  const [hints, setHints] = useState<Array<{ id: string; text: string; source: string; createdAt: string }>>([]);
   const [hintDraft, setHintDraft] = useState("");
   const [hintBusy, setHintBusy] = useState(false);
-  const [findingProof, setFindingProof] = useState<{ path: string; body: string } | null>(null);
+  const [goalsOpen, setGoalsOpen] = useState(false);
 
   useEffect(() => {
     if (!task) return;
@@ -120,9 +86,8 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
 
     async function load() {
       setLoading(true);
-      setPaneText("");
       try {
-        if (tab === "live" || tab === "goals" || tab === "history" || tab === "findings") {
+        if (tab === "live" || tab === "graph" || tab === "findings" || tab === "traffic" || tab === "logs") {
           const [h, r] = await Promise.all([api.history(task!.id), api.runtime(task!.id)]);
           if (cancelled) return;
           setHistory(h.json);
@@ -135,54 +100,30 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
           if (cancelled) return;
           setAssets(a.json.assets ?? []);
         }
-        if (tab === "evidence") {
-          const ev = await api.evidence(task!.id);
-          if (cancelled) return;
-          setEvidenceFiles(ev.json.files ?? []);
-        }
-        if (tab === "report") {
-          const { json } = await api.delivery(task!.id);
-          const original = json.hasReport ? (await api.report(task!.id)).text : "";
-          if (cancelled) return;
-          setPaneText(original ? json.summary + "\n## 留存报告\n\n" + original : json.summary);
-        }
         if (tab === "logs") {
-          const r = await api.logs(task!.id);
-          if (cancelled) return;
-          setPaneText(r.text || "（空）");
+          try {
+            const p = await api.getTaskP14(task!.id);
+            if (!cancelled) setPlan(p.json.plan ?? []);
+          } catch { /* 计划缺失不阻塞日志 */ }
         }
       } catch (e) {
-        if (!cancelled) {
-          Toast.error(e instanceof Error ? e.message : String(e));
-        }
+        if (!cancelled) Toast.error(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
     void load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [task?.id, task?.status, tab, historyTick, refreshNonce]);
 
-  // 运行中自动刷新运行态 / 步骤，保持与任务状态一致
   useEffect(() => {
     if (!task || !isActiveStatus(task.status)) return;
-    if (
-      tab !== "live" &&
-      tab !== "goals" &&
-      tab !== "history" &&
-      tab !== "findings" &&
-      tab !== "assets" &&
-      tab !== "logs"
-    ) {
-      return;
-    }
+    if (tab !== "live" && tab !== "graph" && tab !== "findings" && tab !== "assets" && tab !== "logs") return;
     let cancelled = false;
     const tick = async () => {
       try {
-        if (tab === "live" || tab === "goals" || tab === "history" || tab === "findings") {
+        if (tab === "live" || tab === "graph" || tab === "findings" || tab === "logs") {
           const [h, r] = await Promise.all([api.history(task.id), api.runtime(task.id)]);
           if (cancelled) return;
           setHistory(h.json);
@@ -194,35 +135,17 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
           if (cancelled) return;
           setAssets(a.json.assets ?? []);
         }
-        if (tab === "logs") {
-          const r = await api.logs(task.id);
-          if (cancelled) return;
-          setPaneText(r.text || "（空）");
-        }
         await onRefresh();
-      } catch {
-        /* 轮询失败时静默，下一次再试 */
-      }
+      } catch { /* 轮询失败静默 */ }
     };
     const timer = window.setInterval(() => void tick(), 2500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [task?.id, task?.status, tab, onRefresh]);
 
-  useEffect(() => {
-    setLiveUsage(null);
-  }, [task?.id]);
+  useEffect(() => { setLiveUsage(null); }, [task?.id]);
 
   if (!task) {
-    return (
-      <Empty
-        title="未选择任务"
-        description="请先在「任务」里选择一个任务。"
-        style={{ padding: 48 }}
-      />
-    );
+    return <Empty title="未选择任务" description="请先在「任务」里选择一个任务。" style={{ padding: 48 }} />;
   }
 
   const usage = liveUsage ?? task.usage;
@@ -232,12 +155,12 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
   const archived = isArchivedTask(task);
   const archivable = isArchivableStatus(task.status) && !archived;
 
-  const stopTask = async () => {
-    if (!active || actionBusy) return;
+  const runAction = async (fn: () => Promise<unknown>, ok: string, guard: boolean) => {
+    if (!guard || actionBusy) return;
     setActionBusy(true);
     try {
-      await api.stop(task.id);
-      Toast.success("已发送停止");
+      await fn();
+      Toast.success(ok);
       await onRefresh();
     } catch (e) {
       Toast.error(e instanceof Error ? e.message : String(e));
@@ -246,158 +169,16 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
     }
   };
 
-  const pauseTask = async () => {
-    if (!active || actionBusy || task.status === "pause_requested" || task.status === "stopping") return;
-    setActionBusy(true);
-    try {
-      await api.pause(task.id);
-      Toast.success("已请求暂停；确认 worker 退出后显示已暂停");
-      await onRefresh();
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const resumeTask = async () => {
-    if (!paused || actionBusy) return;
-    setActionBusy(true);
-    try {
-      await api.resume(task.id);
-      Toast.success("已继续；本次运行读取最新授权版本");
-      await onRefresh();
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const startTask = async () => {
-    if (!startable || actionBusy) return;
-    setActionBusy(true);
-    try {
-      await api.start(task.id);
-      Toast.success("已开始运行");
-      await onRefresh();
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const archiveTask = async () => {
-    if (!archivable || actionBusy) return;
-    setActionBusy(true);
-    try {
-      await api.archive(task.id);
-      Toast.success("已归档");
-      await onRefresh();
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const unarchiveTask = async () => {
-    if (!archived || actionBusy) return;
-    setActionBusy(true);
-    try {
-      await api.unarchive(task.id);
-      Toast.success("已取消归档");
-      await onRefresh();
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setActionBusy(false);
-    }
-  };
-
-  const openEvidence = async (path: string) => {
-    setEvidencePath(path);
-    try {
-      const r = await api.evidenceFile(task.id, path);
-      setEvidenceBody(r.text);
-    } catch (e) {
-      setEvidenceBody(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const reloadEvidenceFiles = async () => {
-    const ev = await api.evidence(task.id);
-    setEvidenceFiles(ev.json.files ?? []);
-  };
-
-  /** 导入/替换一份原始材料：同一路径即替换，新内容重新算 SHA-256。 */
-  const importMaterial = async () => {
-    const path = materialPath.trim();
-    const content = materialBody;
-    if (!path) {
-      Toast.error("请填写材料路径（evidence/ 下相对路径）");
-      return;
-    }
-    if (!content.trim()) {
-      Toast.error("请填写材料内容");
-      return;
-    }
-    setMaterialBusy(true);
-    try {
-      const { json } = await api.writeEvidence(task.id, { path, content });
-      Toast.success(
-        `已写入 ${json.path}（${json.replaced ? "替换" : "新增"}，sha256 ${json.sha256.slice(0, 16)}…）`,
-      );
-      setMaterialPath("");
-      setMaterialBody("");
-      await reloadEvidenceFiles();
-      await onRefresh();
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setMaterialBusy(false);
-    }
-  };
-
-  /** 撤回材料：文件移出 evidence/，旧结果保留供追溯（服务端只记事件）。 */
-  const removeMaterial = async (path: string) => {
-    setRemovingPath(path);
-    try {
-      await api.removeEvidence(task.id, path);
-      Toast.success(`已撤回 ${path}`);
-      if (evidencePath === path) {
-        setEvidencePath(null);
-        setEvidenceBody("请选择左侧文件");
-      }
-      await reloadEvidenceFiles();
-      await onRefresh();
-    } catch (e) {
-      Toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRemovingPath(null);
-    }
-  };
-
-  /** 核算/判定后：历史（核算态 + goal_asserted 事件）+ 任务本身一起刷新。 */
   const reloadAfterGoalAction = async () => {
     setHistoryTick((n) => n + 1);
     await onRefresh();
   };
 
   const goals = history?.goals?.length ? history.goals : task.goals;
-
-  /**
-   * 首次通过采用的核算文件与最近一次拒绝原因都来自事件台账（服务端按时间
-   * 倒序返回），控制台只做展示，不自己推断结论。
-   */
   const goalEvents = history?.events ?? [];
   const adoptedByGoal = new Map<string, AdoptedReconcile>();
   for (const event of [...goalEvents].reverse()) {
-    const payload = (event?.payload ?? {}) as {
-      goalId?: string;
-      adoptedReconcile?: AdoptedReconcile;
-    };
+    const payload = (event?.payload ?? {}) as { goalId?: string; adoptedReconcile?: AdoptedReconcile };
     if (event?.kind === "goal_asserted" && payload.goalId && payload.adoptedReconcile && !adoptedByGoal.has(payload.goalId)) {
       adoptedByGoal.set(payload.goalId, payload.adoptedReconcile);
     }
@@ -409,17 +190,17 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
       rejectionByGoal.set(payload.goalId, payload.reason);
     }
   }
+  const passedGoals = goals.filter((g) => g.passes).length;
 
-  const historyFocus = focus?.intent || focus?.fact;
+  const graphFocus = focus?.intent || focus?.fact || focus?.finding
+    || (focus?.asset ? assetNodeId(focus.asset) : undefined);
 
   return (
     <div>
       <div className="gy-task-heading">
         <div>
           <Space align="center" spacing={12}>
-            <Typography.Title heading={4} style={{ margin: 0 }}>
-              {task.name}
-            </Typography.Title>
+            <Typography.Title heading={4} style={{ margin: 0 }}>{task.name}</Typography.Title>
             <StatusTag status={task.status} />
             {archived ? <Tag color="grey">已归档</Tag> : null}
           </Space>
@@ -430,69 +211,21 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
             {runtime?.lastConfirmedAt ? ` · 最后确认 ${formatDateTime(runtime.lastConfirmedAt)}` : ""}
           </Typography.Text>
           {task.error ? (
-            <Typography.Text type="danger" style={{ display: "block", marginTop: 4 }}>
-              {task.error}
-            </Typography.Text>
+            <Typography.Text type="danger" style={{ display: "block", marginTop: 4 }}>{task.error}</Typography.Text>
           ) : null}
         </div>
         <Space>
-          <Button icon={<IconRefresh />} onClick={() => void onRefresh()} loading={loading}>
-            刷新
-          </Button>
-          {archivable ? (
-            <Button
-              icon={<IconArchive />}
-              loading={actionBusy}
-              onClick={() => void archiveTask()}
-            >
-              归档
-            </Button>
-          ) : null}
-          {archived ? (
-            <Button
-              icon={<IconUndo />}
-              loading={actionBusy}
-              onClick={() => void unarchiveTask()}
-            >
-              取消归档
-            </Button>
-          ) : null}
+          <Button icon={<IconRefresh />} onClick={() => void onRefresh()} loading={loading}>刷新</Button>
+          {archivable ? <Button icon={<IconArchive />} loading={actionBusy} onClick={() => void runAction(() => api.archive(task.id), "已归档", archivable)}>归档</Button> : null}
+          {archived ? <Button icon={<IconUndo />} loading={actionBusy} onClick={() => void runAction(() => api.unarchive(task.id), "已取消归档", archived)}>取消归档</Button> : null}
           {active && task.status !== "pause_requested" && task.status !== "stopping" ? (
-            <Button loading={actionBusy} onClick={() => void pauseTask()}>
-              暂停
-            </Button>
+            <Button loading={actionBusy} onClick={() => void runAction(() => api.pause(task.id), "已请求暂停；确认 worker 退出后显示已暂停", active)}>暂停</Button>
           ) : null}
-          {paused ? (
-            <Button
-              type="primary"
-              theme="solid"
-              icon={<IconPlay />}
-              loading={actionBusy}
-              onClick={() => void resumeTask()}
-            >
-              继续
-            </Button>
-          ) : null}
+          {paused ? <Button type="primary" theme="solid" icon={<IconPlay />} loading={actionBusy} onClick={() => void runAction(() => api.resume(task.id), "已继续；本次运行读取最新授权版本", paused)}>继续</Button> : null}
           {active ? (
-            <Button
-              type="danger"
-              theme="solid"
-              icon={<IconStop />}
-              loading={actionBusy}
-              onClick={() => void stopTask()}
-            >
-              停止
-            </Button>
+            <Button type="danger" theme="solid" icon={<IconStop />} loading={actionBusy} onClick={() => void runAction(() => api.stop(task.id), "已发送停止", active)}>停止</Button>
           ) : startable ? (
-            <Button
-              type="primary"
-              theme="solid"
-              icon={<IconPlay />}
-              loading={actionBusy}
-              onClick={() => void startTask()}
-            >
-              开始
-            </Button>
+            <Button type="primary" theme="solid" icon={<IconPlay />} loading={actionBusy} onClick={() => void runAction(() => api.start(task.id), "已开始运行", startable)}>开始</Button>
           ) : null}
         </Space>
       </div>
@@ -506,760 +239,236 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
       />
 
       <div style={{ marginTop: 16 }}>
-        {tab === "live" && task && <TaskOps taskId={task.id} focus={focus} />}
-        {tab === "live" && task.commandReview && (
-          <div style={{ margin: "12px 0" }}>
-            <CommandReviewCard taskId={task.id} review={task.commandReview} onDecided={onRefresh} />
-          </div>
-        )}
         {tab === "live" && (
-          <Row gutter={16}>
-            <Col span={12}>
-              <Card title="持久运行" style={{ background: "var(--semi-color-bg-1)" }}>
-                <Descriptions
-                  align="left"
-                  data={[
-                    {
-                      key: "图相位",
-                      value: (
-                        <Tag color="blue" size="small">
-                          {runtime?.phase ||
-                            (runtime?.workerStatus as { phase?: string } | null)?.phase ||
-                            "—"}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      key: "活跃 Intent",
-                      value: shortId(
-                        runtime?.activeIntentId ||
-                          (runtime?.workerStatus as { activeIntentId?: string } | null)
-                            ?.activeIntentId ||
-                          "",
-                      ) || "—",
-                    },
-                    { key: "租约持有者", value: runtime?.leaseOwner || "—" },
-                    {
-                      key: "租约到期",
-                      value: runtime?.leaseUntil
-                        ? formatDateTime(runtime.leaseUntil, true)
-                        : "—",
-                    },
-                    { key: "栅栏号", value: String(runtime?.fence ?? task.fence) },
-                    { key: "检查点", value: runtime?.hasCheckpoint ? "有" : "无" },
-                    {
-                      key: "Explore 并发",
-                      value: String(
-                        runtime?.execution?.maxConcurrentExplores ??
-                          task.execution?.maxConcurrentExplores ??
-                          1,
-                      ),
-                    },
-                    {
-                      key: "Reason 扇出硬顶",
-                      value: `${runtime?.execution?.maxIntentsPerReason ?? task.execution?.maxIntentsPerReason ?? 4} / 同根 ${runtime?.execution?.maxIntentsPerAssetRoot ?? task.execution?.maxIntentsPerAssetRoot ?? 2}`,
-                    },
-                    {
-                      key: "工作进程",
-                      value: (runtime?.workerPids?.length
-                        ? runtime.workerPids
-                        : runtime?.workerPid
-                          ? [runtime.workerPid]
-                          : []
-                      ).join(", ") || "—",
-                    },
-                  ]}
-                />
-              </Card>
-            </Col>
-            <Col span={12}>
-              <Card title="预算" style={{ background: "var(--semi-color-bg-1)" }}>
-                <Descriptions
-                  align="left"
-                  data={[
-                    {
-                      key: "工具调用",
-                      value: `${usage.toolCalls} / ${task.budget.maxToolCalls > 0 ? task.budget.maxToolCalls : "∞"}`,
-                    },
-                    {
-                      key: "安装次数",
-                      value: `${usage.installs} / ${task.budget.maxInstalls > 0 ? task.budget.maxInstalls : "∞"}`,
-                    },
-                    {
-                      key: "Token",
-                      value: `${usage.tokens} / ${task.budget.maxTokens > 0 ? task.budget.maxTokens : "∞"}`,
-                    },
-                    {
-                      key: "墙钟上限",
-                      value:
-                        task.budget.maxWallMs > 0
-                          ? `${Math.round(task.budget.maxWallMs / 3_600_000)}h`
-                          : "∞",
-                    },
-                    { key: "任务备注", value: task.auth.authorizationNote || "—" },
-                  ]}
-                />
-              </Card>
-            </Col>
-            <Col span={24} style={{ marginTop: 16 }}>
-              <IntegrationUsage usage={runtime?.integrations} />
-            </Col>
-            <Col span={24} style={{ marginTop: 16 }}>
-              <Card
-                title="战术 Hint"
-                style={{ background: "var(--semi-color-bg-1)" }}
-                headerExtraContent={
-                  <Typography.Text type="tertiary" size="small">
-                    写入 History · 下次 Observe 吸收
-                  </Typography.Text>
-                }
-              >
-                <TextArea
-                  value={hintDraft}
-                  onChange={(v) => setHintDraft(v)}
-                  placeholder="例如：优先测 /login 的 SQL 注入；WAF 可试 X-Forwarded-For"
-                  autosize={{ minRows: 2, maxRows: 5 }}
-                />
-                <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
-                  <Button
-                    theme="solid"
-                    loading={hintBusy}
-                    disabled={!hintDraft.trim()}
-                    onClick={() => {
-                      void (async () => {
-                        const text = hintDraft.trim();
-                        if (!text) return;
-                        setHintBusy(true);
-                        try {
-                          const r = await api.createHint(task.id, { text, source: "human" });
-                          setHints((prev) => [r.json.hint, ...prev]);
-                          setHintDraft("");
-                          Toast.success("Hint 已注入");
-                        } catch (e) {
-                          Toast.error(e instanceof Error ? e.message : String(e));
-                        } finally {
-                          setHintBusy(false);
-                        }
-                      })();
-                    }}
-                  >
-                    注入 Hint
-                  </Button>
-                </div>
-                {hints.length > 0 && (
-                  <List
-                    style={{ marginTop: 12 }}
-                    dataSource={hints.slice(0, 8)}
-                    renderItem={(h) => (
-                      <List.Item
-                        main={
-                          <div>
-                            <Typography.Text type="tertiary" size="small">
-                              {h.source} · {formatDateTime(h.createdAt, true)}
-                            </Typography.Text>
-                            <div>{h.text}</div>
-                          </div>
-                        }
-                      />
-                    )}
+          <>
+            <TaskOps taskId={task.id} focus={focus} />
+            {task.commandReview && (
+              <div style={{ margin: "12px 0" }}>
+                <CommandReviewCard taskId={task.id} review={task.commandReview} onDecided={onRefresh} />
+              </div>
+            )}
+            <Row gutter={16}>
+              <Col span={12}>
+                <Card title="持久运行" style={{ background: "var(--semi-color-bg-1)" }}>
+                  <Descriptions
+                    align="left"
+                    data={[
+                      { key: "图相位", value: <Tag color="blue" size="small">{runtime?.phase || (runtime?.workerStatus as { phase?: string } | null)?.phase || "—"}</Tag> },
+                      { key: "活跃 Intent", value: shortId(runtime?.activeIntentId || (runtime?.workerStatus as { activeIntentId?: string } | null)?.activeIntentId || "") || "—" },
+                      { key: "租约持有者", value: runtime?.leaseOwner || "—" },
+                      { key: "租约到期", value: runtime?.leaseUntil ? formatDateTime(runtime.leaseUntil, true) : "—" },
+                      { key: "栅栏号", value: String(runtime?.fence ?? task.fence) },
+                      { key: "检查点", value: runtime?.hasCheckpoint ? "有" : "无" },
+                      { key: "Explore 并发", value: String(runtime?.execution?.maxConcurrentExplores ?? task.execution?.maxConcurrentExplores ?? 1) },
+                      { key: "Reason 扇出硬顶", value: `${runtime?.execution?.maxIntentsPerReason ?? task.execution?.maxIntentsPerReason ?? 4} / 同根 ${runtime?.execution?.maxIntentsPerAssetRoot ?? task.execution?.maxIntentsPerAssetRoot ?? 2}` },
+                      { key: "工作进程", value: (runtime?.workerPids?.length ? runtime.workerPids : runtime?.workerPid ? [runtime.workerPid] : []).join(", ") || "—" },
+                    ]}
                   />
-                )}
-              </Card>
-            </Col>
-            <Col span={24} style={{ marginTop: 16 }}>
-              <Card
-                title="执行链路"
-                style={{ background: "var(--semi-color-bg-1)" }}
-                bodyStyle={{ maxHeight: 640, overflow: "auto" }}
-              >
-                <ExecutionTrace
-                  taskId={task.id}
-                  progress={runtime?.progress}
-                  facts={runtime?.recentFacts}
-                  trace={runtime?.trace}
-                  active={active}
-                  emptyHint={active ? "等待执行节点上报步骤…" : "暂无执行步骤"}
-                />
-              </Card>
-            </Col>
-            <Col span={24} style={{ marginTop: 16 }}>
-              <Card title="执行节点状态" style={{ background: "var(--semi-color-bg-1)" }}>
-                <Descriptions align="left" data={formatWorkerStatus(runtime?.workerStatus)} />
-              </Card>
-            </Col>
-          </Row>
+                </Card>
+              </Col>
+              <Col span={12}>
+                <Card title="预算" style={{ background: "var(--semi-color-bg-1)" }}>
+                  <Descriptions
+                    align="left"
+                    data={[
+                      { key: "工具调用", value: `${usage.toolCalls} / ${task.budget.maxToolCalls > 0 ? task.budget.maxToolCalls : "∞"}` },
+                      { key: "安装次数", value: `${usage.installs} / ${task.budget.maxInstalls > 0 ? task.budget.maxInstalls : "∞"}` },
+                      { key: "Token", value: `${usage.tokens} / ${task.budget.maxTokens > 0 ? task.budget.maxTokens : "∞"}` },
+                      { key: "墙钟上限", value: task.budget.maxWallMs > 0 ? `${Math.round(task.budget.maxWallMs / 3_600_000)}h` : "∞" },
+                      { key: "任务备注", value: task.auth.authorizationNote || "—" },
+                    ]}
+                  />
+                </Card>
+              </Col>
+              <Col span={24} style={{ marginTop: 16 }}>
+                <IntegrationUsage usage={runtime?.integrations} />
+              </Col>
+              <Col span={24} style={{ marginTop: 16 }}>
+                <Card
+                  title="战术 Hint"
+                  style={{ background: "var(--semi-color-bg-1)" }}
+                  headerExtraContent={<Typography.Text type="tertiary" size="small">写入 History · 下次 Observe 吸收</Typography.Text>}
+                >
+                  <TextArea
+                    value={hintDraft}
+                    onChange={(v) => setHintDraft(v)}
+                    placeholder="例如：优先测 /login 的 SQL 注入；WAF 可试 X-Forwarded-For"
+                    autosize={{ minRows: 2, maxRows: 5 }}
+                  />
+                  <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end" }}>
+                    <Button
+                      theme="solid"
+                      loading={hintBusy}
+                      disabled={!hintDraft.trim()}
+                      onClick={() => {
+                        void (async () => {
+                          const text = hintDraft.trim();
+                          if (!text) return;
+                          setHintBusy(true);
+                          try {
+                            const r = await api.createHint(task.id, { text, source: "human" });
+                            setHints((prev) => [r.json.hint, ...prev]);
+                            setHintDraft("");
+                            Toast.success("Hint 已注入");
+                          } catch (e) {
+                            Toast.error(e instanceof Error ? e.message : String(e));
+                          } finally {
+                            setHintBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      注入 Hint
+                    </Button>
+                  </div>
+                  {hints.length > 0 && (
+                    <List
+                      style={{ marginTop: 12 }}
+                      dataSource={hints.slice(0, 8)}
+                      renderItem={(h) => (
+                        <List.Item
+                          main={
+                            <div>
+                              <Typography.Text type="tertiary" size="small">{h.source} · {formatDateTime(h.createdAt, true)}</Typography.Text>
+                              <div>{h.text}</div>
+                            </div>
+                          }
+                        />
+                      )}
+                    />
+                  )}
+                </Card>
+              </Col>
+              <Col span={24} style={{ marginTop: 16 }}>
+                <Card title="执行节点状态" style={{ background: "var(--semi-color-bg-1)" }}>
+                  <Descriptions align="left" data={formatWorkerStatus(runtime?.workerStatus)} />
+                </Card>
+              </Col>
+            </Row>
+          </>
         )}
 
         {tab === "assets" && (
-          <Card
-            title={`资产清单 · ${assets.length} 条`}
-            style={{ background: "var(--semi-color-bg-1)" }}
-            headerExtraContent={
-              <Space>
-                {active ? (
-                  <Tag color="green" size="small">
-                    实时同步
-                  </Tag>
-                ) : (
-                  <Tag color="grey" size="small">
-                    静止
-                  </Tag>
-                )}
-                <Typography.Text type="tertiary" size="small">
-                  与 Observe 同表 · asset_record 自动准入 · oos 不扇出利用
-                </Typography.Text>
-              </Space>
-            }
-          >
-            {assets.length === 0 ? (
-              <Empty
-                title="暂无资产"
-                description="创建任务后会从 auth.targets 写入种子行；运行中发现会追加。"
-              />
-            ) : (
-              <>
-                <Space style={{ marginBottom: 12 }} wrap>
-                  {(["live", "admitted", "seed", "oos", "candidate"] as const).map((k) => {
-                    const n = assets.filter((a) => a.kind === k).length;
-                    if (!n) return null;
-                    return (
-                      <Tag
-                        key={k}
-                        color={statusColor(
-                          k === "oos" ? "failed" : k === "live" ? "ok" : "running",
-                        )}
-                        size="small"
-                      >
-                        {ASSET_KIND_LABEL[k] ?? k} {n}
-                      </Tag>
-                    );
-                  })}
-                </Space>
-                <Table
-                  size="small"
-                  pagination={assets.length > 20 ? { pageSize: 20 } : false}
-                  dataSource={assets.map((a) => ({ ...a, key: a.address }))}
-                  columns={[
-                    {
-                      title: "地址 / 模式",
-                      dataIndex: "address",
-                      render: (v: string) => (
-                        <Typography.Text
-                          style={{
-                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                          }}
-                        >
-                          {v}
-                        </Typography.Text>
-                      ),
-                    },
-                    {
-                      title: "状态",
-                      dataIndex: "kind",
-                      width: 100,
-                      render: (k: string) => (
-                        <Tag
-                          color={statusColor(
-                            k === "oos" ? "failed" : k === "live" ? "ok" : "running",
-                          )}
-                          size="small"
-                        >
-                          {ASSET_KIND_LABEL[k] ?? k}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: "来源",
-                      dataIndex: "source",
-                      width: 90,
-                      render: (s: string) => (s === "auth" ? "授权" : "发现"),
-                    },
-                    {
-                      title: "说明",
-                      dataIndex: "summary",
-                      ellipsis: true,
-                    },
-                    {
-                      title: "Fact",
-                      dataIndex: "factId",
-                      width: 100,
-                      render: (id: string) => shortId(id),
-                    },
-                    {
-                      title: "更新",
-                      dataIndex: "createdAt",
-                      width: 180,
-                      render: (t: string) => formatDateTime(t, true),
-                    },
-                  ]}
-                />
-              </>
-            )}
-          </Card>
+          <BattlefieldPanel taskId={task.id} assets={assets} active={active} focusAsset={focus?.asset} />
         )}
 
-        {tab === "goals" && (
-          <Card
-            title="目标契约"
-            style={{ background: "var(--semi-color-bg-1)" }}
-            bodyStyle={{ paddingTop: 8 }}
-          >
-            <List
-              dataSource={goals}
-              emptyContent={loading ? "正在读取目标…" : "暂无目标"}
-              renderItem={(g) => {
-                const adopted = adoptedByGoal.get(g.id) ?? null;
-                const businessGoal = g.kind === "business-reconcile" || Boolean(g.business);
-                return (
-                  <List.Item
-                    main={
-                      <div>
-                        <Space wrap>
-                          <Typography.Text strong>{g.title}</Typography.Text>
-                          <Tag>{g.assessment ?? (g.passes ? "控制面记录已通过，待核对" : "未验证")}</Tag>
-                          {businessGoal ? (
-                            <Tag color="violet" size="small">
-                              业务核算
-                            </Tag>
-                          ) : null}
-                        </Space>
-                        <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0", maxWidth: "85ch", overflowWrap: "anywhere" }}>
-                          {g.description}
-                        </Typography.Paragraph>
-                        <Descriptions
-                          align="left"
-                          size="small"
-                          style={{ marginTop: 8, overflowWrap: "anywhere" }}
-                          data={[
-                            { key: "所需证据", value: g.evidencePatterns?.join("、") || "—" },
-                            { key: "已记录证据", value: g.evidencePaths?.join("、") || "暂无" },
-                          ]}
-                        />
-                        {g.reconcileGate && (
-                          <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                            核算条件：{g.reconcileGate.pattern}
-                            （未知项≤{g.reconcileGate.maxUnknown}、重复主键歧义≤{g.reconcileGate.maxAmbiguous}；
-                            只挂差异文件不算完成比对）
-                            {!g.passes && rejectionByGoal.get(g.id)
-                              ? ` · 未通过原因：${rejectionByGoal.get(g.id)}`
-                              : ""}
-                          </Typography.Paragraph>
-                        )}
-                        {businessGoal && (
-                          <GoalReconcileCard
-                            taskId={task.id}
-                            goal={g}
-                            adopted={adopted}
-                            onChanged={reloadAfterGoalAction}
-                          />
-                        )}
-                        {g.passes && adopted && !businessGoal && (
-                          <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                            首次通过采用的核算文件：{adopted.path}
-                            {" · SHA-256 "}
-                            {adopted.sha256}
-                          </Typography.Paragraph>
-                        )}
-                        {history && <GoalCoverage
-                          key={task.id + "/" + g.id}
-                          taskId={task.id}
-                          goalId={g.id}
-                          record={history.coverage?.filter((row) => row.goalId === g.id).at(-1)}
-                          onSaved={(row) => setHistory((prev) => prev && ({
-                            ...prev, coverage: [...(prev.coverage ?? []).filter((r) => r.id !== row.id), row],
-                          }))}
-                        />}
-                      </div>
-                    }
-                  />
-                );
-              }}
-            />
-          </Card>
+        {tab === "graph" && (
+          <div className="gy-graph-tab">
+            <Card
+              className="gy-graph-goals"
+              style={{ background: "var(--semi-color-bg-1)" }}
+              bodyStyle={{ paddingTop: 8 }}
+            >
+              <button type="button" className="gy-exec-group-head" onClick={() => setGoalsOpen((v) => !v)} aria-expanded={goalsOpen}>
+                <Typography.Text strong>目标契约与完成度</Typography.Text>
+                <Tag size="small" color={passedGoals === goals.length && goals.length > 0 ? "green" : "orange"}>
+                  {passedGoals} / {goals.length} 通过
+                </Tag>
+                <Typography.Text type="tertiary" size="small" style={{ marginLeft: "auto" }}>
+                  {goalsOpen ? "收起" : "展开查看验收条件与覆盖记录"}
+                </Typography.Text>
+              </button>
+              <Collapsible isOpen={goalsOpen}>
+                <List
+                  dataSource={goals}
+                  emptyContent={loading ? "正在读取目标…" : "暂无目标"}
+                  renderItem={(g) => {
+                    const adopted = adoptedByGoal.get(g.id) ?? null;
+                    const businessGoal = g.kind === "business-reconcile" || Boolean(g.business);
+                    return (
+                      <List.Item
+                        main={
+                          <div>
+                            <Space wrap>
+                              <Typography.Text strong>{g.title}</Typography.Text>
+                              <Tag>{g.assessment ?? (g.passes ? "控制面记录已通过，待核对" : "未验证")}</Tag>
+                              {businessGoal ? <Tag color="violet" size="small">业务核算</Tag> : null}
+                            </Space>
+                            <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0", maxWidth: "85ch", overflowWrap: "anywhere" }}>
+                              {g.description}
+                            </Typography.Paragraph>
+                            <Descriptions
+                              align="left" size="small" style={{ marginTop: 8, overflowWrap: "anywhere" }}
+                              data={[
+                                { key: "所需证据", value: g.evidencePatterns?.join("、") || "—" },
+                                { key: "已记录证据", value: g.evidencePaths?.join("、") || "暂无" },
+                              ]}
+                            />
+                            {g.reconcileGate && (
+                              <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                                核算条件：{g.reconcileGate.pattern}
+                                （未知项≤{g.reconcileGate.maxUnknown}、重复主键歧义≤{g.reconcileGate.maxAmbiguous}；只挂差异文件不算完成比对）
+                                {!g.passes && rejectionByGoal.get(g.id) ? ` · 未通过原因：${rejectionByGoal.get(g.id)}` : ""}
+                              </Typography.Paragraph>
+                            )}
+                            {businessGoal && (
+                              <GoalReconcileCard taskId={task.id} goal={g} adopted={adopted} onChanged={reloadAfterGoalAction} />
+                            )}
+                            {g.passes && adopted && !businessGoal && (
+                              <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                                首次通过采用的核算文件：{adopted.path} · SHA-256 {adopted.sha256}
+                              </Typography.Paragraph>
+                            )}
+                            {history && (
+                              <GoalCoverage
+                                key={task.id + "/" + g.id}
+                                taskId={task.id}
+                                goalId={g.id}
+                                record={history.coverage?.filter((row) => row.goalId === g.id).at(-1)}
+                                onSaved={(row) => setHistory((prev) => prev && ({
+                                  ...prev, coverage: [...(prev.coverage ?? []).filter((r) => r.id !== row.id), row],
+                                }))}
+                              />
+                            )}
+                          </div>
+                        }
+                      />
+                    );
+                  }}
+                />
+              </Collapsible>
+            </Card>
+            <DagErrorBoundary>
+              <Suspense fallback={<div className="gy-dag-empty" role="status">正在加载关系图…</div>}>
+                <FactIntentDag
+                  key={graphFocus}
+                  facts={history?.facts ?? []}
+                  intents={history?.intents ?? []}
+                  findings={history?.findings ?? []}
+                  assets={history?.assets ?? []}
+                  height={560}
+                  loading={loading}
+                  focusId={graphFocus}
+                />
+              </Suspense>
+            </DagErrorBoundary>
+          </div>
+        )}
+
+        {tab === "traffic" && (
+          <TrafficPanel taskId={task.id} intents={(history?.intents ?? []).map((i) => ({ id: i.id, title: i.title }))} />
         )}
 
         {tab === "findings" && (
-          <Card
-            title={`Finding 台账 · ${(history?.findings ?? []).length} 条`}
-            style={{ background: "var(--semi-color-bg-1)" }}
-            headerExtraContent={
-              <Typography.Text type="tertiary" size="small">
-                只读 History 投影 · tentative 不进交付 · verified 附封存证据
-              </Typography.Text>
-            }
-          >
-            {(history?.findings ?? []).length === 0 ? (
-              <Empty
-                title="暂无 Finding"
-                description="Worker 发现线索会 finding_record；复现并封存证据后 finding_verify。"
-              />
-            ) : (
-              <>
-                <Space style={{ marginBottom: 12 }} wrap>
-                  {(["critical", "high", "medium", "low", "info"] as const).map((s) => {
-                    const n = (history?.findings ?? []).filter(
-                      (f) => f.severity === s && f.status !== "retracted",
-                    ).length;
-                    if (!n) return null;
-                    return (
-                      <Tag key={s} color={findingSeverityColor(s)} size="small">
-                        {FINDING_SEVERITY_LABEL[s]} {n}
-                      </Tag>
-                    );
-                  })}
-                </Space>
-                <Table
-                  size="small"
-                  pagination={
-                    (history?.findings ?? []).length > 20 ? { pageSize: 20 } : false
-                  }
-                  dataSource={(history?.findings ?? []).map((f) => ({ ...f, key: f.id }))}
-                  expandedRowRender={(record?: FindingRecord) =>
-                    record ? (
-                    <div style={{ padding: "8px 16px" }}>
-                      {record.cvss && (
-                        <Typography.Paragraph size="small">
-                          CVSS vector：{record.cvss}
-                        </Typography.Paragraph>
-                      )}
-                      {record.repro && (
-                        <Typography.Paragraph size="small">
-                          复现：{record.repro}
-                        </Typography.Paragraph>
-                      )}
-                      {record.impact && (
-                        <Typography.Paragraph size="small">
-                          影响：{record.impact}
-                        </Typography.Paragraph>
-                      )}
-                      {record.fix && (
-                        <Typography.Paragraph size="small">
-                          修复建议：{record.fix}
-                        </Typography.Paragraph>
-                      )}
-                      {record.evidence.length === 0 ? (
-                        <Typography.Text type="tertiary" size="small">
-                          暂无封存证据（tentative 线索）
-                        </Typography.Text>
-                      ) : (
-                        record.evidence.map((e) => (
-                          <div key={e.path}>
-                            <Button
-                              size="small"
-                              theme="borderless"
-                              onClick={async () => {
-                                try {
-                                  const r = await api.evidenceFile(task!.id, e.path);
-                                  setFindingProof({ path: e.path, body: r.text });
-                                } catch (err) {
-                                  Toast.error(
-                                    err instanceof Error ? err.message : String(err),
-                                  );
-                                }
-                              }}
-                            >
-                              {e.path}
-                            </Button>
-                            <Typography.Text type="tertiary" size="small">
-                              SHA-256 {e.sha256.slice(0, 16)}…
-                            </Typography.Text>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    ) : null
-                  }
-                  columns={[
-                    {
-                      title: "严重性",
-                      dataIndex: "severity",
-                      width: 90,
-                      render: (s: string) => (
-                        <Tag color={findingSeverityColor(s)} size="small">
-                          {FINDING_SEVERITY_LABEL[s] ?? s}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: "标题",
-                      dataIndex: "title",
-                      width: 240,
-                      ellipsis: true,
-                    },
-                    {
-                      title: "资产 / 端点",
-                      dataIndex: "asset",
-                      width: 280,
-                      render: (v: string, record: FindingRecord) => (
-                        <Typography.Text
-                          style={{
-                            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                          }}
-                        >
-                          {v}
-                          {record.endpoint ? ` · ${record.endpoint}` : ""}
-                        </Typography.Text>
-                      ),
-                    },
-                    {
-                      title: "类别",
-                      dataIndex: "vulnClass",
-                      width: 120,
-                    },
-                    {
-                      title: "状态",
-                      dataIndex: "status",
-                      width: 110,
-                      render: (s: string) => (
-                        <Tag color={findingStatusColor(s)} size="small">
-                          {FINDING_STATUS_LABEL[s] ?? s}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: "证据",
-                      dataIndex: "evidence",
-                      width: 70,
-                      render: (e: FindingRecord["evidence"]) => e.length,
-                    },
-                    {
-                      title: "记录时间",
-                      dataIndex: "createdAt",
-                      width: 180,
-                      render: (t: string) => formatDateTime(t, true),
-                    },
-                  ]}
-                />
-                {findingProof && (
-                  <Card
-                    title={`证据 · ${findingProof.path}`}
-                    style={{ marginTop: 12 }}
-                    headerExtraContent={
-                      <Button size="small" onClick={() => setFindingProof(null)}>
-                        关闭
-                      </Button>
-                    }
-                  >
-                    <pre className="gy-mono">{findingProof.body}</pre>
-                  </Card>
-                )}
-              </>
-            )}
-          </Card>
-        )}
-
-        {tab === "history" && (
-          <Row gutter={16}>
-            <Col span={24}>
-              <DagErrorBoundary>
-                <Suspense fallback={<div className="gy-dag-empty" role="status">正在加载关系图…</div>}>
-                  <FactIntentDag
-                    key={historyFocus}
-                    facts={history?.facts ?? []}
-                    intents={history?.intents ?? []}
-                    height={420}
-                    loading={loading}
-                    focusId={historyFocus}
-                  />
-                </Suspense>
-              </DagErrorBoundary>
-            </Col>
-            <Col xs={24} sm={12} style={{ marginTop: 16 }}>
-              <Card title="近期意图" style={{ background: "var(--semi-color-bg-1)" }}>
-                <List
-                  dataSource={(history?.intents ?? []).slice(-20).reverse()}
-                  emptyContent={loading ? "正在读取意图…" : "暂无意图记录"}
-                  size="small"
-                  renderItem={(intent) => (
-                    <List.Item
-                      main={
-                        <div>
-                          <Space wrap>
-                            <StatusTag status={intent.status} />
-                            <Typography.Text strong={intent.id === runtime?.activeIntentId}>
-                              {intent.title}
-                            </Typography.Text>
-                          </Space>
-                          {intent.sourceFactIds?.length ? (
-                            <Typography.Paragraph type="tertiary" size="small" style={{ margin: "4px 0 0" }}>
-                              来源事实 {intent.sourceFactIds.map(shortId).join("、")}
-                            </Typography.Paragraph>
-                          ) : null}
-                        </div>
-                      }
-                    />
-                  )}
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={12} style={{ marginTop: 16 }}>
-              <Card title="近期事实" style={{ background: "var(--semi-color-bg-1)" }}>
-                <List
-                  dataSource={(history?.facts ?? []).slice(-40).reverse()}
-                  emptyContent={loading ? "正在读取事实…" : "暂无事实记录"}
-                  size="small"
-                  renderItem={(f) => (
-                    <List.Item
-                      main={
-                        <div>
-                          <Typography.Text type="tertiary" size="small">
-                            {STATUS_LABEL[f.layer] ?? f.layer}
-                          </Typography.Text>{" "}
-                          <Typography.Text>{f.title}</Typography.Text>
-                          {f.summary ? (
-                            <Typography.Text type="quaternary">
-                              {" "}
-                              — {f.summary.slice(0, 120)}
-                            </Typography.Text>
-                          ) : null}
-                        </div>
-                      }
-                    />
-                  )}
-                />
-              </Card>
-            </Col>
-            {history?.overview && (
-              <Col span={24} style={{ marginTop: 16 }}>
-                <Card>
-                  <details>
-                    <summary>完整历史摘要</summary>
-                    <pre className="gy-mono" style={{ marginTop: 12 }}>{history.overview}</pre>
-                  </details>
-                </Card>
-              </Col>
-            )}
-          </Row>
-        )}
-
-        {tab === "evidence" && (
-          <Row gutter={16}>
-            <Col span={24} style={{ marginBottom: 16 }}>
-              <Card
-                title="导入/替换材料"
-                style={{ background: "var(--semi-color-bg-1)" }}
-                headerExtraContent={
-                  <Typography.Text type="tertiary" size="small">
-                    写入 evidence/ 下相对路径 · 同路径即替换 · 导入与撤回都进事件台账
-                  </Typography.Text>
-                }
-              >
-                <Typography.Text strong size="small">
-                  路径
-                </Typography.Text>
-                <Input
-                  value={materialPath}
-                  onChange={(v) => setMaterialPath(v)}
-                  placeholder="assets/baseline.csv"
-                />
-                <div style={{ marginTop: 12 }}>
-                  <Typography.Text strong size="small">
-                    内容（utf8 文本）
-                  </Typography.Text>
-                  <TextArea
-                    value={materialBody}
-                    onChange={(v) => setMaterialBody(v)}
-                    placeholder={"host,os,version\na.example.com,linux,1"}
-                    autosize={{ minRows: 4, maxRows: 12 }}
-                  />
-                </div>
-                <div
-                  style={{
-                    marginTop: 12,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 12,
-                  }}
-                >
-                  <Typography.Text type="tertiary" size="small">
-                    csv 需表头，json 需数组或对象行；核算只读这份材料，不读痕迹以外的东西
-                  </Typography.Text>
-                  <Button theme="solid" loading={materialBusy} onClick={() => void importMaterial()}>
-                    导入/替换
-                  </Button>
-                </div>
-              </Card>
-            </Col>
-            <Col span={8}>
-              <Card title="文件" style={{ background: "var(--semi-color-bg-1)", maxHeight: 520, overflow: "auto" }}>
-                <List
-                  dataSource={evidenceFiles}
-                  emptyContent="无证据文件"
-                  size="small"
-                  renderItem={(f) => (
-                    <List.Item
-                      className={evidencePath === f.path ? "gy-list-active" : undefined}
-                      onClick={() => void openEvidence(f.path)}
-                      style={{ cursor: "pointer" }}
-                      main={
-                        <div>
-                          <Typography.Text>{f.path}</Typography.Text>
-                          <br />
-                          <Typography.Text type="tertiary" size="small">
-                            {f.size} 字节
-                          </Typography.Text>
-                        </div>
-                      }
-                      extra={
-                        <Button
-                          type="danger"
-                          theme="borderless"
-                          size="small"
-                          loading={removingPath === f.path}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            Modal.confirm({
-                              title: "撤回材料",
-                              content: "撤回后该材料不再支撑判定，旧结果保留供追溯",
-                              okText: "撤回",
-                              cancelText: "取消",
-                              okButtonProps: { type: "danger", theme: "solid" },
-                              onOk: () => removeMaterial(f.path),
-                            });
-                          }}
-                        >
-                          撤回
-                        </Button>
-                      }
-                    />
-                  )}
-                />
-              </Card>
-            </Col>
-            <Col span={16}>
-              <Card title="内容" style={{ background: "var(--semi-color-bg-1)" }}>
-                <pre className="gy-mono">{evidenceBody}</pre>
-              </Card>
-            </Col>
-          </Row>
-        )}
-
-        {tab === "report" && (
-          <Row gutter={[16, 16]}>
-            <Col span={24}>
-              <DeliveryScorecard taskId={task.id} refreshKey={history ? 1 : 0} />
-            </Col>
-            <Col span={24}>
-              <ReconcilePanel taskId={task.id} onDone={() => void onRefresh()} />
-            </Col>
-            <Col span={24}>
-              <Card style={{ background: "var(--semi-color-bg-1)" }}>
-                <pre className="gy-mono">{paneText || "加载中…"}</pre>
-              </Card>
-            </Col>
-          </Row>
+          <FindingsPanel
+            taskId={task.id}
+            findings={history?.findings ?? []}
+            goals={goals}
+            focusFinding={focus?.finding}
+            refreshKey={historyTick + refreshNonce}
+            onRefresh={() => void reloadAfterGoalAction()}
+          />
         )}
 
         {tab === "logs" && (
-          <Card style={{ background: "var(--semi-color-bg-1)" }}>
-            <pre className="gy-mono">{paneText || "加载中…"}</pre>
-          </Card>
+          <LogsPanel
+            taskId={task.id}
+            runtime={runtime}
+            active={active}
+            intents={(history?.intents ?? []).map((i) => ({ id: i.id, title: i.title }))}
+            plan={plan}
+          />
         )}
-
-        {tab === "p14" && <P14Panel taskId={task.id} />}
-
-        {tab === "p15" && <P15Panel taskId={task.id} />}
       </div>
     </div>
   );

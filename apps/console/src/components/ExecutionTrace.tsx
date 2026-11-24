@@ -3,7 +3,7 @@ import { Button, Collapsible, Empty, Space, Tag, Timeline, Toast, Typography } f
 import { IconChevronDown, IconChevronRight } from "@douyinfe/semi-icons";
 import type { ExecutionStep, ExecutionTracePage, ShellTraceCall } from "@gongyuai/contracts";
 import { api } from "../api";
-import { STATUS_LABEL } from "../labels";
+import { STATUS_LABEL, shortId } from "../labels";
 import { formatDateTime, parseTime } from "../time";
 
 export type TraceFact = {
@@ -21,6 +21,9 @@ export type ExecutionTraceProps = {
   trace?: ExecutionTracePage;
   active?: boolean;
   emptyHint?: string;
+  /** 按 Intent 分组折叠（执行与日志页的结构化视图）。 */
+  groupByIntent?: boolean;
+  intents?: Array<{ id: string; title: string }>;
 };
 
 type TraceNode = {
@@ -184,6 +187,8 @@ export function ExecutionTrace({
   trace,
   active = false,
   emptyHint = "暂无执行步骤",
+  groupByIntent = false,
+  intents = [],
 }: ExecutionTraceProps) {
   const [historyPage, setHistoryPage] = useState<ExecutionTracePage>();
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -240,15 +245,116 @@ export function ExecutionTrace({
     });
   };
 
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const groups = useMemo(() => {
+    if (!groupByIntent) return null;
+    const map = new Map<string, TraceNode[]>();
+    for (const n of nodes) {
+      const key = n.step?.intentId ?? "_other";
+      const bucket = map.get(key);
+      if (bucket) bucket.push(n);
+      else map.set(key, [n]);
+    }
+    return map;
+  }, [groupByIntent, nodes]);
+
+  const intentTitle = (id: string) => intents.find((i) => i.id === id)?.title ?? shortId(id);
+
+  const renderItem = (n: TraceNode) => {
+    const expanded = open.has(n.id);
+    const shellCallCount = n.step?.shellCallCount ?? 0;
+    const legacyShell = !n.step && n.tools.includes("shell");
+    const canExpand = Boolean(n.fact || shellCallCount || legacyShell);
+
+    return (
+      <Timeline.Item
+        key={n.id}
+        time={formatDateTime(n.at, Boolean(n.step))}
+        type={active && n.id === currentId ? "ongoing" : n.timelineType}
+        extra={
+          <Typography.Text type="quaternary" size="small">
+            {n.kind === "step" ? "进度" : "事件"}
+          </Typography.Text>
+        }
+      >
+        <button
+          type="button"
+          className="gy-exec-step-btn"
+          onClick={() => canExpand && toggle(n.id)}
+          aria-expanded={canExpand ? expanded : undefined}
+          disabled={!canExpand}
+        >
+          <span className="gy-exec-chevron" aria-hidden>
+            {canExpand ? (
+              expanded ? <IconChevronDown size="small" /> : <IconChevronRight size="small" />
+            ) : null}
+          </span>
+          <Space wrap spacing={8}>
+            <Typography.Text strong>{n.label}</Typography.Text>
+            {Boolean(n.step?.workerSlot) && (
+              <Tag size="small" color="grey">节点 {n.step?.workerSlot}</Tag>
+            )}
+            {n.tools.map((t) => (
+              <Tag key={t} size="small" color="blue">{t}</Tag>
+            ))}
+            {n.tokens != null ? (
+              <Tag size="small" color="grey">Token {n.tokens.toLocaleString()}</Tag>
+            ) : null}
+            {active && n.id === currentId ? (
+              <Tag size="small" color="orange">当前</Tag>
+            ) : null}
+            {shellCallCount > 0 ? (
+              <Typography.Text type="tertiary" size="small">{shellCallCount} 条命令</Typography.Text>
+            ) : null}
+          </Space>
+        </button>
+
+        {canExpand && (
+          <Collapsible isOpen={expanded}>
+            {expanded && (
+              <div className="gy-exec-details">
+                {n.step && shellCallCount > 0 && <ShellStepDetails taskId={taskId} stepId={n.step.id} />}
+                {legacyShell && (
+                  <Typography.Text type="tertiary" size="small">这条进度未保存可按步骤 ID 查询的命令详情</Typography.Text>
+                )}
+                {n.fact && (
+                  <div className="gy-exec-detail">
+                    <Typography.Text type="tertiary" size="small">
+                      {STATUS_LABEL[n.fact.layer] ?? n.fact.layer}
+                    </Typography.Text>
+                    <pre className="gy-mono gy-exec-summary">{n.fact.summary || "（无摘要）"}</pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </Collapsible>
+        )}
+      </Timeline.Item>
+    );
+  };
+
   if (!nodes.length) {
     return <Empty description={emptyHint} style={{ padding: "24px 0" }} />;
   }
+
+  const groupKeys = groups
+    ? [...groups.keys()].sort((a, b) => (a === "_other" ? 1 : b === "_other" ? -1 : 0))
+    : [];
 
   return (
     <div className="gy-exec-trace">
       <div className="gy-exec-trace-meta">
         <Typography.Text type="tertiary" size="small">
-          共 {nodes.length} 个节点
+          共 {nodes.length} 个节点{groups ? ` · ${groupKeys.length} 个意图分组` : ""}
         </Typography.Text>
         <ToolChain tools={toolSequence} />
         {before != null && (
@@ -258,92 +364,32 @@ export function ExecutionTrace({
         )}
       </div>
 
-      <Timeline mode="left" className="gy-exec-timeline">
-        {nodes.map((n) => {
-          const expanded = open.has(n.id);
-          const shellCallCount = n.step?.shellCallCount ?? 0;
-          const legacyShell = !n.step && n.tools.includes("shell");
-          const canExpand = Boolean(n.fact || shellCallCount || legacyShell);
-
+      {groups ? (
+        groupKeys.map((key) => {
+          const groupNodes = groups.get(key)!;
+          const collapsed = collapsedGroups.has(key);
           return (
-            <Timeline.Item
-              key={n.id}
-              time={formatDateTime(n.at, Boolean(n.step))}
-              type={active && n.id === currentId ? "ongoing" : n.timelineType}
-              extra={
-                <Typography.Text type="quaternary" size="small">
-                  {n.kind === "step" ? "进度" : "事件"}
-                </Typography.Text>
-              }
-            >
-              <button
-                type="button"
-                className="gy-exec-step-btn"
-                onClick={() => canExpand && toggle(n.id)}
-                aria-expanded={canExpand ? expanded : undefined}
-                disabled={!canExpand}
-              >
+            <section key={key} className="gy-exec-group">
+              <button type="button" className="gy-exec-group-head" onClick={() => toggleGroup(key)} aria-expanded={!collapsed}>
                 <span className="gy-exec-chevron" aria-hidden>
-                  {canExpand ? (
-                    expanded ? (
-                      <IconChevronDown size="small" />
-                    ) : (
-                      <IconChevronRight size="small" />
-                    )
-                  ) : null}
+                  {collapsed ? <IconChevronRight size="small" /> : <IconChevronDown size="small" />}
                 </span>
-                <Space wrap spacing={8}>
-                  <Typography.Text strong>{n.label}</Typography.Text>
-                  {Boolean(n.step?.workerSlot) && (
-                    <Tag size="small" color="grey">节点 {n.step?.workerSlot}</Tag>
-                  )}
-                  {n.tools.map((t) => (
-                    <Tag key={t} size="small" color="blue">
-                      {t}
-                    </Tag>
-                  ))}
-                  {n.tokens != null ? (
-                    <Tag size="small" color="grey">
-                      Token {n.tokens.toLocaleString()}
-                    </Tag>
-                  ) : null}
-                  {active && n.id === currentId ? (
-                    <Tag size="small" color="orange">
-                      当前
-                    </Tag>
-                  ) : null}
-                  {shellCallCount > 0 ? (
-                    <Typography.Text type="tertiary" size="small">
-                      {shellCallCount} 条命令
-                    </Typography.Text>
-                  ) : null}
-                </Space>
+                <Typography.Text strong>{key === "_other" ? "其他动态" : intentTitle(key)}</Typography.Text>
+                <Tag size="small" color="grey">{groupNodes.length}</Tag>
               </button>
-
-              {canExpand && (
-                <Collapsible isOpen={expanded}>
-                  {expanded && (
-                    <div className="gy-exec-details">
-                      {n.step && shellCallCount > 0 && <ShellStepDetails taskId={taskId} stepId={n.step.id} />}
-                      {legacyShell && (
-                        <Typography.Text type="tertiary" size="small">这条进度未保存可按步骤 ID 查询的命令详情</Typography.Text>
-                      )}
-                      {n.fact && (
-                        <div className="gy-exec-detail">
-                          <Typography.Text type="tertiary" size="small">
-                            {STATUS_LABEL[n.fact.layer] ?? n.fact.layer}
-                          </Typography.Text>
-                          <pre className="gy-mono gy-exec-summary">{n.fact.summary || "（无摘要）"}</pre>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </Collapsible>
-              )}
-            </Timeline.Item>
+              <Collapsible isOpen={!collapsed}>
+                <Timeline mode="left" className="gy-exec-timeline">
+                  {groupNodes.map(renderItem)}
+                </Timeline>
+              </Collapsible>
+            </section>
           );
-        })}
-      </Timeline>
+        })
+      ) : (
+        <Timeline mode="left" className="gy-exec-timeline">
+          {nodes.map(renderItem)}
+        </Timeline>
+      )}
     </div>
   );
 }
