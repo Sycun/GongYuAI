@@ -53,6 +53,7 @@ import {
   assetRootKey,
   assetTags,
   familyTag,
+  matchTarget,
   findingAssetInScope,
   findingDedupKey,
   findingSatisfiesGate,
@@ -101,6 +102,7 @@ import {
   type ReconcileStateReport,
 } from "./goal-evidence.js";
 import { readEvidenceBytes, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
+import { buildDagExport, type DagExport } from "./dag.js";
 import { TaskOperations } from "./ops.js";
 import { readIntegrationUsage, trackIntegrationCalls } from "./integration-usage.js";
 import {
@@ -246,6 +248,15 @@ export class HistoryStore {
   private readonly db: DatabaseSync;
 
   private readonly archiveTables?: Set<string>;
+
+  /**
+   * Lane D — 每个 task 的“当前活跃 Intent”（进程内，只由 claim / heartbeat / 收卷维护）。
+   * 不落库：它不是第二真相源，只是把「这次 Explore 属于哪个 Intent」传给
+   * history_append_fact / asset_record / credential_record / finding_record 这类
+   * 不显式传 intentId 的写入，治本 Fact 断链。控制面进程从不 claim/heartbeat，
+   * 因此操作员写入的事实不会被误挂到 worker 的 Intent 上。
+   */
+  private readonly activeIntentBindings = new Map<string, string>();
 
   constructor(opts: OpenHistoryOptions) {
     this.dbPath = opts.dbPath;
@@ -1035,7 +1046,7 @@ export class HistoryStore {
         ...(input.parentAddress ? { parentAddress: input.parentAddress } : {}),
         ...(typeof input.weight === "number" ? { weight: input.weight } : {}),
       }),
-      intentId: input.intentId ?? null,
+      intentId: this.resolveIntentIdForWrite(input.taskId, input.intentId),
     });
     return {
       fact,
@@ -1668,6 +1679,8 @@ export class HistoryStore {
     sourceFindingId?: string | null;
     verified?: boolean;
     expiresAt?: string | null;
+    /** 未传（undefined）→ 继承当前活跃 Intent；显式 null = 不挂父节点。 */
+    intentId?: string | null;
   }): { credential: Credential; created: boolean } {
     const asset = normalizeTargetPattern(input.asset) || input.asset.trim().toLowerCase();
     if (!asset) throw new Error("credential asset required");
@@ -1697,6 +1710,7 @@ export class HistoryStore {
       title: `凭据 · ${input.kind} · ${asset}`,
       summary: `${username ? `user=${username} · ` : ""}secret 不入图（按 credential_list 的 secretRef 读取）`,
       tags: ["credential", `credential.id:${credentialId}`],
+      intentId: this.resolveIntentIdForWrite(input.taskId, input.intentId),
     });
     const credential: Credential = {
       id: credentialId,
@@ -1846,6 +1860,7 @@ export class HistoryStore {
     summary?: string;
     evidencePath?: string | null;
     tags?: string[];
+    /** 未传（undefined）→ 继承当前活跃 Intent；显式 null = 明确不挂父节点。 */
     intentId?: string | null;
   }): Fact {
     const fact: Fact = {
@@ -1857,7 +1872,7 @@ export class HistoryStore {
       evidencePath: input.evidencePath ?? null,
       tags: input.tags ?? [],
       createdAt: this.now(),
-      intentId: input.intentId ?? null,
+      intentId: this.resolveIntentIdForWrite(input.taskId, input.intentId),
     };
     this.db
       .prepare(
@@ -2106,6 +2121,65 @@ export class HistoryStore {
     return null;
   }
 
+  /**
+   * Lane D — Intent.assetRoot 边界校验（确定性，不做网络/授权推断）。
+   *
+   * assetRoot 只能落在「前驱 Fact 已确认的资产」或「资产清单里已登记的资产」上，
+   * 且不能把范围外（oos）资产当根。否则拒绝：先 asset_record 或把该资产 Fact
+   * 列入 sourceFactIds。目的：不留“凭意图发明资产”的因果缺口。
+   */
+  groundedAssetRoot(
+    taskId: string,
+    assetRoot: string,
+    sourceFactIds: readonly string[],
+  ):
+    | { ok: true; address: string; matchedBy: "source-fact" | "inventory" }
+    | { ok: false; reason: string } {
+    const raw = assetRoot.trim();
+    if (!raw) return { ok: false, reason: "asset_root 不能为空" };
+    if (raw === "*" || raw.includes("*")) {
+      return { ok: false, reason: "asset_root 必须是具体主机/资产地址，不接受通配 *" };
+    }
+    if (raw.includes("/") && !raw.includes("://")) {
+      return { ok: false, reason: "asset_root 只接受主机/资产地址（CIDR/路径请写具体主机）" };
+    }
+    const address = normalizeHost(raw);
+    if (!address) return { ok: false, reason: `asset_root 不是可解析的主机/资产地址：${raw}` };
+
+    for (const id of sourceFactIds) {
+      if (id === ORIGIN_FACT_ID) continue;
+      const fact = this.getFact(taskId, id);
+      if (!fact) continue;
+      const addr = parseAssetAddrFromTags(fact.tags);
+      if (!addr) continue;
+      const host = normalizeHost(addr);
+      // 父域承接只在 address 至少两段时成立（拒绝用「com」这类公共后缀当根）。
+      const parentGrounded =
+        address.split(".").filter(Boolean).length >= 2 &&
+        host.length > address.length &&
+        host.endsWith(`.${address}`);
+      const grounded =
+        host === address || parentGrounded || matchTarget([addr, host], address).ok;
+      if (grounded) return { ok: true, address, matchedBy: "source-fact" };
+    }
+
+    const inventory = this.listAssets(taskId).filter(
+      (asset) => normalizeHost(asset.address) === address,
+    );
+    if (inventory.some((asset) => asset.kind !== "oos")) {
+      return { ok: true, address, matchedBy: "inventory" };
+    }
+    if (inventory.length > 0) {
+      return { ok: false, reason: `asset_root 指向范围外资产（oos）：${address}` };
+    }
+    return {
+      ok: false,
+      reason:
+        `asset_root 未被前驱 Fact 或资产清单确认：${address}；` +
+        "先 asset_record 落资产，或把该资产 Fact 列入 sourceFactIds",
+    };
+  }
+
   private assertNotOosOnlyExploit(taskId: string, sourceFactIds: string[]): void {
     const kinds: AssetKind[] = [];
     for (const id of sourceFactIds) {
@@ -2247,6 +2321,48 @@ export class HistoryStore {
     return done;
   }
 
+  /**
+   * Lane D — 绑定 Explore 的活跃 Intent。
+   *
+   * 绑定来源只有两个确定性信号：`claimIntent`（CAS 成功 = 认领人身份）与
+   * `heartbeatIntent`（CAS 成功 = 仍持有该 Intent 的 worker），因此 relay 重启后
+   * 第一轮 heartbeat 就能恢复绑定；控制面进程从不 claim/heartbeat，不会被误绑。
+   * intentId=null 表示解绑。绑定前必须确认 Intent 存在：不猜、不建。
+   */
+  bindActiveIntent(taskId: string, intentId: string | null): void {
+    if (!intentId) {
+      this.activeIntentBindings.delete(taskId);
+      return;
+    }
+    if (!this.getIntent(taskId, intentId)) {
+      throw new Error(`unknown active intent: ${intentId}`);
+    }
+    this.activeIntentBindings.set(taskId, intentId);
+  }
+
+  /**
+   * 当前活跃 Intent：只认「已绑定且仍 claimed/running」的 Intent。
+   * 绑定的 Intent 已收卷/过期 → 解绑并返回 null（宁可不挂，不乱挂）。
+   */
+  resolveActiveIntentId(taskId: string): string | null {
+    const bound = this.activeIntentBindings.get(taskId);
+    if (!bound) return null;
+    const intent = this.getIntent(taskId, bound);
+    if (!intent || !["claimed", "running"].includes(intent.status)) {
+      this.activeIntentBindings.delete(taskId);
+      return null;
+    }
+    return bound;
+  }
+
+  /**
+   * 写入时解析 intentId：显式传入（含显式 null）优先，未传（undefined）才继承活跃 Intent。
+   * 这是「伞形 Intent 数据断链」的治本点：调用方不传不等于没有父节点。
+   */
+  private resolveIntentIdForWrite(taskId: string, intentId?: string | null): string | null {
+    return intentId === undefined ? this.resolveActiveIntentId(taskId) : intentId;
+  }
+
   claimIntent(taskId: string, intentId: string, workerId: string): Intent | null {
     const now = this.now();
     const result = this.db
@@ -2257,6 +2373,8 @@ export class HistoryStore {
       )
       .run(workerId, now, intentId, taskId);
     if ((result.changes ?? 0) === 0) return null;
+    // CAS 成功即证明认领人身份 → 自动绑定，后续不传 intentId 的写入自动挂父节点。
+    this.bindActiveIntent(taskId, intentId);
     this.emit(taskId, "intent_claimed", { intentId, workerId });
     return this.getIntent(taskId, intentId);
   }
@@ -2349,6 +2467,10 @@ export class HistoryStore {
       this.db.exec("ROLLBACK");
       throw err;
     }
+    // Explore 结束：解绑，后续不传 intentId 的写入不再继承（宁可不挂，不乱挂）。
+    if (this.activeIntentBindings.get(taskId) === intentId) {
+      this.activeIntentBindings.delete(taskId);
+    }
     return this.getIntent(taskId, intentId);
   }
 
@@ -2380,7 +2502,10 @@ export class HistoryStore {
          WHERE id = ? AND task_id = ? AND claimed_by = ? AND status IN ('claimed', 'running')`,
       )
       .run(this.now(), intentId, taskId, workerId);
-    return (result.changes ?? 0) > 0;
+    if ((result.changes ?? 0) === 0) return false;
+    // Heartbeat 成功 = 该 worker 仍持有此 Intent（relay 重启后第一轮即可恢复绑定）。
+    this.bindActiveIntent(taskId, intentId);
+    return true;
   }
 
   /**
@@ -2423,6 +2548,9 @@ export class HistoryStore {
             requeued: true,
             requeueCount: requeueCount + 1,
           });
+          if (this.activeIntentBindings.get(taskId) === intent.id) {
+            this.activeIntentBindings.delete(taskId);
+          }
           const row = this.getIntent(taskId, intent.id);
           if (row) swept.push(row);
         }
@@ -2440,6 +2568,9 @@ export class HistoryStore {
             requeued: false,
             requeueCount,
           });
+          if (this.activeIntentBindings.get(taskId) === intent.id) {
+            this.activeIntentBindings.delete(taskId);
+          }
           const row = this.getIntent(taskId, intent.id);
           if (row) swept.push(row);
         }
@@ -3604,8 +3735,11 @@ export class HistoryStore {
         throw new Error(`unknown finding source fact: ${id}`);
       }
     }
-    if (input.intentId && !this.getIntent(input.taskId, input.intentId)) {
-      throw new Error(`unknown finding intent: ${input.intentId}`);
+    // 未传 intentId → 继承当前活跃 Intent（Explore 内 finding 不再孤立）；
+    // 显式传入（含 null）保持调用方语义。
+    const intentId = this.resolveIntentIdForWrite(input.taskId, input.intentId);
+    if (intentId && !this.getIntent(input.taskId, intentId)) {
+      throw new Error(`unknown finding intent: ${intentId}`);
     }
 
     const finding: Finding = {
@@ -3620,7 +3754,7 @@ export class HistoryStore {
       status: "tentative",
       endpoint,
       dedupKey,
-      intentId: input.intentId ?? null,
+      intentId,
       factIds,
       evidence: [],
       repro: input.repro ?? "",
@@ -4410,6 +4544,25 @@ export class HistoryStore {
   }
 
   /** P17 — record one AD/cloud node as a Fact; graph is derived, not stored. */
+  /**
+   * Lane D — 前端图谱投影的唯一取数入口：资产 → 事实 → 意图 → 漏洞 全链路，
+   * 每条因果边带确定性 `verification`（proven/proposed + abstentionReason）。
+   *
+   * 只读：不改任何表，不写事件。`generatedAt` 只标投影时点，不参与因果判定。
+   */
+  dagExport(taskId: string, generatedAt = this.now()): DagExport {
+    return buildDagExport({
+      taskId,
+      generatedAt,
+      facts: this.listFacts(taskId),
+      intents: this.listIntents(taskId),
+      findings: this.listFindings(taskId),
+      assets: this.listAssets(taskId),
+      credentials: this.listCredentials(taskId),
+      validations: this.listFindingValidations(taskId),
+    });
+  }
+
   recordAttackNode(taskId: string, node: AttackNode): Fact {
     return this.appendFact({
       taskId,
@@ -4737,3 +4890,40 @@ export function openHistory(opts: OpenHistoryOptions): HistoryStore {
 }
 
 export { CommandLedger, hasCommandLedger, localProbes, type CommandOutcome, type CommandProposal, type CommandTicket } from "./command-reviews.js";
+
+/* ------------------------------------------------------------------ *
+ * Lane D — 确定性符号因果边校验 + DAG 导出
+ * ------------------------------------------------------------------ */
+export {
+  applyCausalVerdict,
+  artifact,
+  artifactKey,
+  artifactsFromTags,
+  evidenceArtifacts,
+  normalizeAssetValue,
+  normalizeEndpointValue,
+  normalizeEvidencePath,
+  normalizeTrafficValue,
+  parseIsoMs,
+  sharedArtifacts,
+  summarizeCausalEdges,
+  verifyCausalEdge,
+} from "./edge-verifier.js";
+export type {
+  AbstentionReason,
+  CausalArtifact,
+  CausalArtifactKind,
+  CausalEdgeKind,
+  CausalEdgeSummary,
+  CausalEdgeVerdict,
+  CausalNodeRef,
+  CausalProof,
+} from "./edge-verifier.js";
+export {
+  buildDagExport,
+  type BuildDagExportInput,
+  type DagExport,
+  type DagFactRef,
+  type DagFindingRef,
+  type DagIntentRef,
+} from "./dag.js";

@@ -620,6 +620,14 @@ export function handleGraphTool(
 
   if (name === "intent_propose") {
     const sourceFactIds = parseFactIds(args.sourceFactIds ?? "");
+    // Lane D — asset_root 边界校验：只能落在已确认/已登记资产上，不许凭意图发明资产。
+    let assetRoot: string | undefined;
+    const rawAssetRoot = args.assetRoot?.trim();
+    if (rawAssetRoot) {
+      const grounding = ctx.history.groundedAssetRoot(ctx.taskId, rawAssetRoot, sourceFactIds);
+      if (!grounding.ok) return `错误: asset_root 边界校验失败 — ${grounding.reason}`;
+      assetRoot = grounding.address;
+    }
     const inReason = asGraphPhase(ctx.state.phase) === "reason";
     if (inReason && reasonLeaseMs > 0) {
       const lease = ctx.history.tryAcquireReasonLease(
@@ -638,7 +646,7 @@ export function handleGraphTool(
         summary: args.summary ?? "",
         sourceFactIds,
         ...(args.technique ? { technique: args.technique } : {}),
-        ...(args.assetRoot ? { assetRoot: args.assetRoot } : {}),
+        ...(assetRoot ? { assetRoot } : {}),
         ...(args.planStepId ? { planStepId: args.planStepId } : {}),
         rejectOosOnly: true,
         fanout: inReason ? fanout : undefined,
@@ -651,6 +659,8 @@ export function handleGraphTool(
         const claimed = ctx.history.claimIntent(ctx.taskId, intent.id, workerId);
         if (claimed) {
           if (inReason) ctx.history.releaseReasonLease(ctx.taskId, workerId);
+          // Lane D — 自动传递 activeIntentId：claim 即绑定，Explore 内不传 intentId 的写入自动挂父节点。
+          ctx.history.bindActiveIntent(ctx.taskId, claimed.id);
           ctx.state.activeIntentId = claimed.id;
           ctx.state.activeIntentClaimedAt = new Date().toISOString();
           ctx.state.toolsAtIntentClaim = ctx.state.toolCalls;
@@ -747,6 +757,8 @@ export function handleGraphTool(
       workerId,
     );
     if (!claimed) return `claim failed (not proposed?): ${args.intentId ?? ""}`;
+    // Lane D — claim 即绑定（history 层 claimIntent 也会绑；这里显式对齐 checkpoint 状态）。
+    ctx.history.bindActiveIntent(ctx.taskId, claimed.id);
     ctx.state.activeIntentId = claimed.id;
     ctx.state.activeIntentClaimedAt = new Date().toISOString();
     ctx.state.toolsAtIntentClaim = ctx.state.toolCalls;
@@ -780,6 +792,8 @@ export function handleGraphTool(
         { facts, workerId },
       );
       if (!done) return `conclude failed: ${args.intentId ?? ""}`;
+      // Lane D — Explore 结束即解绑：conclude 之后写的 Fact 不再继承（宁可不挂，不乱挂）。
+      ctx.history.bindActiveIntent(ctx.taskId, null);
       if (ctx.state.activeIntentId === done.id) {
         ctx.state.activeIntentId = null;
         ctx.state.activeIntentClaimedAt = null;

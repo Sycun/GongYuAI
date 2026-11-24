@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { ORIGIN_FACT_ID } from "@gongyuai/contracts";
-import { openHistory } from "@gongyuai/history";
+import { openHistory, writeEvidenceFile } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import {
   lastVerifiedEvidenceAt,
@@ -140,6 +140,133 @@ test("lastVerifiedEvidenceAt counts live foothold, ignores out-of-scope", () => 
     // Out-of-scope asset must not count as verified progress.
     history.recordAsset({ taskId, address: "192.0.2.7", auth: AUTH, live: true });
     assert.equal(lastVerifiedEvidenceAt(history, taskId), liveAt);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+/* ------------------------------------------------------------------ *
+ * 边界用例：同面无新证据 vs 跨面新证据（lane D 补充）
+ *
+ * 当前实现（packages/worker/src/evidence-rotation.ts）的牵引信号是**任务级**的
+ * 「最新 verified 证据」，不是按资产面（asset root）锚定。这三条用例把边界钉死：
+ * - 同一面没有新的 verified 证据 → 必须换面；
+ * - 同面只有 tentative 线索（未验证）→ 不算 traction，仍换面；
+ * - 跨面出现新的 verified 证据 → 按当前任务级锚点会延续本面 Intent（已知边界，
+ *   按面锚定需要改 evidence-rotation.ts，不在本轮写入范围，见 docs 台账「待联调验证」）。
+ * ------------------------------------------------------------------ */
+
+/** 把 Intent 的 created_at 提前，制造“这一面已经磨了很久”的时间锚点。 */
+function backdateIntent(dbPath: string, intentId: string, msAgo: number): void {
+  const db = new DatabaseSync(dbPath);
+  db.prepare("UPDATE intents SET created_at = ? WHERE id = ?").run(
+    new Date(Date.now() - msAgo).toISOString(),
+    intentId,
+  );
+  db.close();
+}
+
+test("边界：同一资产面没有新 verified 证据 → 强制换面", () => {
+  const { root, dbPath, history } = setup();
+  try {
+    const taskId = "t-same-surface-stall";
+    const intent = history.proposeIntent({
+      taskId,
+      title: "同一面磨到底",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.0.0.0/8",
+    });
+    history.claimIntent(taskId, intent.id, "w0");
+    backdateIntent(dbPath, intent.id, 120_000);
+    const ckpt = state({ activeIntentId: intent.id });
+    const result = maybeForceEvidenceStall({
+      history, taskId, workerId: "w0", workspaceDir: root, state: ckpt,
+      stallMs: 1000, save: () => {}, nowMs: Date.now(),
+    });
+    assert.equal(result.concluded, true);
+    assert.equal(result.intentId, intent.id);
+    assert.equal(ckpt.activeIntentId, null);
+    assert.equal(ckpt.phase, "reason");
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("边界：同面只有 tentative 线索不算 traction，仍换面", () => {
+  const { root, dbPath, history } = setup();
+  try {
+    const taskId = "t-tentative-only";
+    const intent = history.proposeIntent({
+      taskId,
+      title: "只有线索",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.0.0.0/8",
+    });
+    history.claimIntent(taskId, intent.id, "w0");
+    backdateIntent(dbPath, intent.id, 120_000);
+    // tentative 线索：写入时间是新的，但没有 verified 结论。
+    const lead = history.recordFinding({
+      taskId,
+      title: "可能是 SQLi",
+      asset: "10.0.0.9",
+      vulnClass: "CWE-89",
+      severity: "medium",
+    });
+    assert.equal(lead.finding.status, "tentative");
+    const ckpt = state({ activeIntentId: intent.id });
+    const result = maybeForceEvidenceStall({
+      history, taskId, workerId: "w0", workspaceDir: root, state: ckpt,
+      stallMs: 1000, save: () => {}, nowMs: Date.now(),
+    });
+    assert.equal(result.concluded, true);
+    assert.equal(ckpt.activeIntentId, null);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("边界：跨面新 verified 证据按任务级牵引（已知边界，待联调验证）", () => {
+  const { root, dbPath, history } = setup();
+  try {
+    const taskId = "t-cross-surface";
+    const intent = history.proposeIntent({
+      taskId,
+      title: "本面 exhausted",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.0.0.0/8",
+    });
+    history.claimIntent(taskId, intent.id, "w0");
+    backdateIntent(dbPath, intent.id, 120_000);
+    assert.equal(lastVerifiedEvidenceAt(history, taskId), 0);
+
+    // 另一个资产面（不同 asset root）产生了新的 verified 证据。
+    const lead = history.recordFinding({
+      taskId,
+      title: "跨面 XSS",
+      asset: "192.0.2.10",
+      vulnClass: "CWE-79",
+      severity: "high",
+      endpoint: "/search",
+    });
+    writeEvidenceFile(join(root, "evidence"), "findings/xss.txt", "alert(1) reflected\n");
+    const verified = history.verifyFinding(taskId, lead.finding.id, {
+      evidencePaths: ["findings/xss.txt"],
+      repro: "curl 'https://192.0.2.10/search?q=<script>'",
+      verifiedBy: "w0",
+    });
+    assert.equal(verified.status, "verified");
+    assert.ok(lastVerifiedEvidenceAt(history, taskId) > 0);
+
+    const ckpt = state({ activeIntentId: intent.id });
+    const result = maybeForceEvidenceStall({
+      history, taskId, workerId: "w0", workspaceDir: root, state: ckpt,
+      stallMs: 1000, save: () => {}, nowMs: Date.now(),
+    });
+    // 任务级锚点：跨面 verified 证据也算 traction，本面 Intent 继续。
+    assert.equal(result.concluded, false);
+    assert.equal(ckpt.activeIntentId, intent.id);
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

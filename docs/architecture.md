@@ -23,7 +23,7 @@ Long-running authorized pentest agents fail for four reasons: context windows fi
 | 基座 | 职责 | 本仓落点 | 状态 |
 | --- | --- | --- | --- |
 | **女娲** | 组织存活与繁衍：个体可死、图必须活、经验须传承 | 项目记忆（lease/Watchdog 接班、分层 History、Relay π、族级打法）已硬化；全局记忆（档案索引 + 蒸馏图谱 + 工具遗产，P8 提案，见 [memory-layer.md](./memory-layer.md)） | 存活已硬化；繁衍缺位 |
-| **DAG** | 路径与真相：走得对（授权在委托前提，不在运行时审查） | Fact–Intent 无因探索禁令（路径合法性）、证据闸 + SHA-256 封存、复核撤回 | 已硬化；渗透域语义见 P6 |
+| **DAG** | 路径与真相：走得对（授权在委托前提，不在运行时审查） | Fact–Intent 无因探索禁令（路径合法性）、证据闸 + SHA-256 封存、复核撤回、确定性符号因果边校验（proven/proposed） | 已硬化；渗透域语义见 P6；因果边校验单测已验证 |
 | **Super-agent** | 调度经济：花得省 | 脑手分离（相位工具面）、多 Explore 异步派单、三层模型路由（提案） | 结构已有；模型分层/偏航审计见 P7 |
 
 细则：[absorb-super-agent.md](./absorb-super-agent.md)。Super-agent 是配置 + 小协议补丁，不是第二套编排系统；主脑永不拿回执行工具（Octop 0/5 委派教训）。执行权落到工具闸：Explore 执行必须绑定已认领 Intent，conclude 校验认领人；多 worker leader 不执行（见 [long-run-contract.md](./long-run-contract.md)）。
@@ -60,6 +60,25 @@ Fact  ──front──▶  Intent  ──back──▶  Fact'
 - Fact 保留原始记录。复核按目标追加确认或撤回意见，撤回可指向同一任务的更正 Fact。证据路径和当时的内容版本随复核一起保存。见[复核设计](./evidence-review.md)。
 - 协作只通过图（stigmergy），禁止 Worker 间私聊成为真相源。
 - 运行中发现的子域/主机经 `asset_record` 写入资产投影；**自动**按 `auth.targets`（含 IPv4 CIDR / `*.domain`）准入，不另开资产库、不静默改作业坐标列表。
+
+### 因果边校验与 DAG 导出（Lane D）
+
+**符号边校验（`packages/history/src/edge-verifier.ts`）** —— 100% 确定性纯函数：不读时钟、不做 I/O、不调 LLM。每条因果边（`Fact → Intent`、`Intent → Fact`、`Fact/Intent → Finding`、`Finding → Finding`）按固定顺序判定：
+
+1. 端点缺失 / 自指 → `proposed` + `ungrounded_reference`；
+2. 时间不可解析 → `proposed` + `missing_timestamp`；
+3. 前驱 `createdAt` 晚于后继 → `proposed` + `timestamp_inversion`（引用再多也不洗白）；
+4. 后继显式引用前驱 id（`sourceFactIds` / `factIds` / `intentId`）→ `proven`；
+5. 对象/指纹真实交集（asset / endpoint / credential / 证据 SHA-256 / `http:<id>` / 证据文件路径）→ `proven`；
+6. 以上皆无 → `proposed` + `missing_shared_artifact`。
+
+`proven` 只表示「规则可证明」，不表示漏洞结论正确。判定写回 `GraphEdge.verification` / `abstentionReason`（Phase 0 冻结契约）。
+
+**DAG 导出（`packages/history/src/dag.ts` + `HistoryStore.dagExport()`）** —— 只读投影，资产 → 事实 → 意图 → 漏洞 全链路；`findings` 稳定暴露 `intentId / factIds / trafficIds / qualification / evidence / validations`，前端图谱与漏洞表共用一份字段口径；缺依据的边标 `proposed` / `broken`，不编造父节点与时间。
+
+**因果绑定（治本 Fact 断链）** —— `HistoryStore.bindActiveIntent` / `resolveActiveIntentId`：`claimIntent` / `heartbeatIntent` 的成功 CAS 即绑定（relay 重启后第一轮 heartbeat 恢复），`concludeIntent` / `expireStaleIntents` 即解绑。Explore 内 `history_append_fact` / `asset_record` / `credential_record` / `finding_record` 未显式传 `intentId` 时自动继承；显式 `null` 表示「明确不挂父节点」。控制面进程从不 claim/heartbeat，因此操作员写入的事实不会被误挂。`Intent.assetRoot` 经 `groundedAssetRoot` 边界校验：只接受前驱 Fact 已确认或资产清单已登记的资产，拒绝 oos / 通配 / CIDR。
+
+**状态**：以上条目单测实跑（泳道 D 提交树：history 108 / worker 96，`typecheck` 0 错误；共享工作区全仓 `pnpm -r run test` 515 通过 / 0 失败，含并行泳道未提交改动）；真实委托联调（MITM 录制 → DAG 投影 → 控制台 6 Tab）**待联调验证**。Phase 0 已冻结的 `TrafficRecord`（MITM 流量录制）、`FindingValidateRun*`（独立复核）、`FindingQualification`（三档定级）与本轮控制台 6 Tab 收敛，实现侧在各自泳道实跑验收前一律标「待联调验证」。
 
 ### Worker 任务原语（Cairn 三件套 → GongYuAI）
 

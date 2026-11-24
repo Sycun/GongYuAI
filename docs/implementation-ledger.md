@@ -199,3 +199,41 @@
 - 真实授权委托盲评、三层模型路由真实正确率/费用差分仍缺外部材料与真实运行，不在本轮。
 - 拆小重派（拒绝处理链第 4 步）以「结构化单步重问」近似实现；未做把复合 Intent 自动拆成多个子 Intent 的完整重派。
 
+## 10. 第十二轮：生产级升级（泳道 D —— DAG 因果绑定 / 符号边校验 / 全链路单测）
+
+> 基线：`feat/prod-upgrade-base`（含 Phase 0 冻结契约 `packages/contracts/src/`）；本泳道分支 `feat/lane-d-dag-tests`。
+> 本轮为多泳道并行：本节只登记泳道 D 的代码与**实跑单测**；其余泳道的条目在代码未实跑验收前一律标**待联调验证**，不提前标「已验证」。
+> 红线：未改 `packages/contracts/`；未触 `apps/console/`、`packages/exec/`、`packages/worker/src/pi-loop.ts`、`packages/control-plane/src/server.ts`。
+
+### 10.1 泳道 D：代码落点与实跑证据（单测）
+
+| 项 | 代码落点 | 正常入口 | 单测 / 证据 | 状态 |
+| --- | --- | --- | --- | --- |
+| 伞形 Intent 数据断链（治本） | `packages/history/src/index.ts`（`activeIntentBindings` / `bindActiveIntent` / `resolveActiveIntentId` / `resolveIntentIdForWrite`；`claimIntent`/`heartbeatIntent`/`concludeIntent`/`expireStaleIntents` 维护绑定；`appendFact`/`recordAsset`/`recordCredential`（新增可选 `intentId`）/`recordFinding` 未传即继承）；`packages/worker/src/graph-phase.ts`（claim/conclude 显式绑定） | worker `history_append_fact` / `asset_record` / `credential_record` / `finding_record` 在 Explore 相位不传 `intentId` | `packages/history/src/active-intent.test.ts` 6 例（继承、显式优先、无活跃即孤立、conclude 解绑、relay 重启 heartbeat 恢复、非认领人不绑、过期解绑） | 已验证（单测实跑） |
+| DAG 导出（findings 稳定暴露） | `packages/history/src/dag.ts`（`buildDagExport`）、`packages/history/src/index.ts`（`HistoryStore.dagExport(taskId)`） | 只读取数接口，供前端图谱投影直接使用 | `packages/history/src/dag-export.test.ts` 5 例（资产→事实→意图→漏洞 连线、findings 的 `intentId/factIds/trafficIds/qualification` 透传、origin 不参与校验、Finding→Finding 派生、时间倒挂 proposed） | 已验证（单测实跑） |
+| 确定性符号因果边校验器 | `packages/history/src/edge-verifier.ts`（`verifyCausalEdge` / `sharedArtifacts` / `artifactsFromTags` / `evidenceArtifacts` / `applyCausalVerdict` / `summarizeCausalEdges`）；**100% 纯函数规则：不调 LLM、不读时钟、不做 I/O** | `GraphEdge.verification` / `abstentionReason`（Phase 0 契约字段） | `packages/history/src/edge-verifier.test.ts` 13 例（共享资产/凭据 → proven；时间倒挂 → proposed+`timestamp_inversion`；无共同证据 → proposed+`missing_shared_artifact`；端点缺失 → `ungrounded_reference`；时间不可解析 → `missing_timestamp`；确定性排序/幂等/不改输入） | 已验证（单测实跑） |
+| `Intent.assetRoot` 边界校验 | `packages/history/src/index.ts`（`groundedAssetRoot`）、`packages/worker/src/graph-phase.ts`（`intent_propose` 拒绝未确认根） | worker `intent_propose(assetRoot=…)` | `packages/history/src/asset-root.test.ts` 3 例（前驱 Fact 精确/父域/CIDR 覆盖 → 通过；资产清单回落；oos/通配/CIDR/未登记 → 拒绝） | 已验证（单测实跑） |
+| 换面边界用例 | `packages/worker/src/evidence-rotation.test.ts` 新增 3 例 | `maybeForceEvidenceStall` | 同面 exhausted → 换面；同面仅 tentative → 不算 traction 仍换面；跨面新 verified 证据 → 任务级牵引延续（**已知边界**） | 已验证（单测实跑）；按面锚定 = 待联调验证 |
+| 回归 | — | 泳道 D 提交树（干净 worktree）：`pnpm -F @gongyuai/history test` **108/108**、`pnpm -F @gongyuai/worker test` **96/96**、`pnpm -r run typecheck` **0 错误**（全 7 个含 typecheck 的项目）；共享工作区（并行泳道未提交改动共存，读数时点 23:33）`pnpm -r run test` **515 通过 / 0 失败**；并行泳道仍在改动，最终读数以各自提交树为准 | — | 已验证 |
+
+口径（避免把「规则可证明」说成「结论正确」）：
+
+- `proven` 只代表确定性规则可证明：前驱 `createdAt` ≤ 后继 + 显式引用（`sourceFactIds`/`factIds`/`intentId`）或对象/指纹交集（asset / endpoint / credential / SHA-256 / `http:<id>` / 证据路径）；不代表漏洞结论正确、也不代表已人工复核。
+- 时间倒挂、无共同证据、引用缺失一律 `proposed` + 确定性 `abstentionReason`；`origin` 是伪 Fact，`origin → Intent` 边为结构挂靠，不参与因果校验。
+- `activeIntentId` 绑定来自 claim / heartbeat 的成功 CAS（进程内，不落库）：relay 重启后第一轮 heartbeat 恢复；控制面进程从不 claim/heartbeat，因此操作员写入的事实不会被误挂到 worker Intent。
+
+### 10.2 本轮其余泳道（代码未实跑验收 → 待联调验证）
+
+| 项 | 已冻结契约 / 现有锚点 | 状态 |
+| --- | --- | --- |
+| MITM 流量录制 | `packages/contracts/src/traffic.ts`（`TrafficRecord` / `TrafficSearchQuery` / `TrafficBlobSlice`，Phase 0 冻结）；既有 `http_transactions` 只记录请求/响应指纹 | 待联调验证（契约已冻结；录制入口、回放与证据闸未在本泳道实跑） |
+| 独立复核 | `packages/contracts/src/finding.ts`（`FindingValidateRunRequest/Response`，Phase 0 冻结）；既有 `finding_validations` + `hasConfirmedValidation` 单测通过；DAG 导出已暴露每个 Finding 的 validations 汇总 | 部分可用（既有入口已验证）；本轮新增的后台作业式复核入口待联调验证 |
+| 三档定级 | `packages/contracts/src/finding.ts`（`FindingQualification` = exploited/confirmed/unconfirmed，Phase 0 冻结）；DAG 导出透传 `qualification` | 待联调验证（本泳道只做透传与展示口径，无定级写入入口） |
+| 控制台 6 Tab 收敛 | `apps/console/`（不在本泳道写入范围） | 待联调验证（控制台泳道交付后按真实页面走查再标状态） |
+| 符号边校验 → 控制台投影 | `HistoryStore.dagExport()` + `GraphEdge.verification/abstentionReason` | 单测已验证；前端接线与真实委托联调待联调验证 |
+
+### 10.3 本轮没有做的事（如实登记）
+
+- 未给 `graph-phase.ts` 新增独立测试文件：本轮写入范围只允许 `packages/history/src/*.test.ts` 与 `packages/worker/src/evidence-rotation.test.ts`；handler 的判定逻辑由其调用的 history 纯逻辑单测覆盖，worker 既有 97 例（含 claim/conclude 路径）全绿。
+- 未实现按资产面（asset root）锚定的 evidence 牵引：需要改 `evidence-rotation.ts`，超出本泳道写入范围；已在上表标「已知边界 / 待联调验证」。
+- 未跑真实委托联调（MITM 录制 → DAG 投影 → 控制台 6 Tab 全链路）；未做外部 TSA / 第三方复核。
