@@ -75,7 +75,12 @@ export {
   type RetestRequestInput,
   type RetestRequestStatus,
 } from "./collaboration.js";
-export type { ExecutionStep, ExecutionTracePage, ShellTraceCall } from "./execution-trace.js";
+export {
+  ExecutionStepSchema,
+  type ExecutionStep,
+  type ExecutionTracePage,
+  type ShellTraceCall,
+} from "./execution-trace.js";
 export * from "./integration-usage.js";
 import {
   DEFAULT_EXPLORE_TIMEOUT_MS,
@@ -256,6 +261,7 @@ export * from "./fanout.js";
 export * from "./family-key.js";
 export * from "./finding.js";
 export * from "./http.js";
+export * from "./traffic.js";
 export * from "./oast.js";
 export * from "./plan.js";
 export * from "./host-profile.js";

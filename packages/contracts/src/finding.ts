@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { JobStatusSchema } from "./ops.js";
 import { matchTarget, normalizeTargetPattern } from "./scope.js";
 
 /**
@@ -30,6 +31,10 @@ export const FindingStatusSchema = z.enum([
   "retracted",
 ]);
 export type FindingStatus = z.infer<typeof FindingStatusSchema>;
+
+/** Evidence qualification recorded independently of the finding lifecycle. */
+export const FindingQualificationSchema = z.enum(["exploited", "confirmed", "unconfirmed"]);
+export type FindingQualification = z.infer<typeof FindingQualificationSchema>;
 
 /** One-way lifecycle; retracted is terminal and rows are never deleted. */
 const FINDING_STATUS_ORDER: FindingStatus[] = [
@@ -93,8 +98,15 @@ export const FindingSchema = z.object({
   verifiedAt: z.string().datetime().nullable().default(null),
   /** P15-C1 — worker/operator that moved tentative → verified. */
   verifiedBy: z.string().nullable().default(null),
+  rootCause: z.string().optional(),
+  /** Existing evidence excerpt for human readers of the report. */
+  pocCurl: z.string().optional(),
+  trafficIds: z.array(z.string().uuid()).optional(),
+  qualification: FindingQualificationSchema.optional(),
 });
 export type Finding = z.infer<typeof FindingSchema>;
+export const FindingRecordSchema = FindingSchema;
+export type FindingRecord = Finding;
 
 /**
  * P15-C1 — Finder ≠ Validator.
@@ -149,6 +161,21 @@ export const FindingValidationDraftSchema = z.object({
   validator: z.string().min(1),
 });
 export type FindingValidationDraft = z.infer<typeof FindingValidationDraftSchema>;
+
+/** Requests independent review of a finding's archived evidence. */
+export const FindingValidateRunRequestSchema = z.strictObject({
+  findingId: z.string().uuid(),
+  /** Re-review the archived evidence even when a prior review exists. */
+  force: z.boolean().optional(),
+});
+export type FindingValidateRunRequest = z.infer<typeof FindingValidateRunRequestSchema>;
+
+export const FindingValidateRunResponseSchema = z.object({
+  jobId: z.string().uuid(),
+  status: JobStatusSchema,
+  validationId: z.string().uuid().optional(),
+});
+export type FindingValidateRunResponse = z.infer<typeof FindingValidateRunResponseSchema>;
 
 /**
  * Goal 级 finding 闸：assert_goal 时按 findings 表实测。

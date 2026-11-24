@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   FINDING_SEVERITY_RANK,
+  FindingRecordSchema,
   FindingSchema,
+  FindingValidateRunRequestSchema,
+  FindingValidateRunResponseSchema,
   FindingsGateSchema,
   GoalSpecSchema,
   findingDedupKey,
@@ -28,6 +31,31 @@ test("FindingSchema fills defaults and keeps cvss vector as raw text", () => {
   assert.deepEqual(parsed.evidence, []);
   assert.equal(parsed.repro, "");
   assert.equal(parsed.verifiedAt, null);
+  assert.equal(parsed.qualification, undefined);
+  assert.equal(parsed.trafficIds, undefined);
+
+  const report = {
+    ...parsed,
+    rootCause: "Access check omitted",
+    pocCurl: "Archived report excerpt",
+    trafficIds: ["6fb1bc99-7c16-44ec-9e22-4dfdb4f7e2a1"],
+    qualification: "unconfirmed",
+  };
+  assert.deepEqual(FindingRecordSchema.parse(report), report);
+  assert.equal(FindingRecordSchema.safeParse({ ...report, qualification: "unknown" }).success, false);
+});
+
+test("independent evidence review uses finding and durable job IDs", () => {
+  const findingId = "24065a72-d198-482a-a417-d9fdff377a9f";
+  const jobId = "fc881516-492d-4500-8a4e-acaa8aa07d9a";
+  const validationId = "d7da6527-d96f-4fd5-ad88-4320563d36db";
+  assert.deepEqual(FindingValidateRunRequestSchema.parse({ findingId }), { findingId });
+  assert.deepEqual(FindingValidateRunRequestSchema.parse({ findingId, force: true }), { findingId, force: true });
+  assert.equal(FindingValidateRunRequestSchema.safeParse({ findingId, method: "replay" }).success, false);
+  const queued = { jobId, status: "queued" };
+  const succeeded = { jobId, status: "succeeded", validationId };
+  assert.deepEqual(FindingValidateRunResponseSchema.parse(queued), queued);
+  assert.deepEqual(FindingValidateRunResponseSchema.parse(succeeded), succeeded);
 });
 
 test("finding lifecycle is one-way and retracted is terminal", () => {

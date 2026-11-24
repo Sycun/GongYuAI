@@ -2,9 +2,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CreateTaskRequestSchema,
+  ExecutionStepSchema,
   MAX_CONCURRENT_EXPLORES,
   resolveExploreWorkerCount,
 } from "./index.js";
+
+test("execution step grouping metadata is optional for existing summaries", () => {
+  const step = {
+    id: "worker-0-round-1",
+    at: "2026-11-24T01:00:00.000Z",
+    number: 1,
+    workerSlot: 0,
+    tools: [],
+    tokens: 12,
+    shellCallCount: 0,
+  };
+  assert.deepEqual(ExecutionStepSchema.parse(step), step);
+  const grouped = { ...step, intentId: "7158aeb3-76a0-4d8f-85f6-e54840646a3e", durationMs: 0 };
+  assert.deepEqual(ExecutionStepSchema.parse(grouped), grouped);
+  assert.equal(ExecutionStepSchema.safeParse({ ...step, durationMs: -1 }).success, false);
+});
 
 test("resolveExploreWorkerCount caps by targets and configured max", () => {
   assert.equal(

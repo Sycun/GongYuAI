@@ -834,6 +834,10 @@ export const GraphNodeSchema = z.object({
 });
 export type GraphNode = z.infer<typeof GraphNodeSchema>;
 
+/** Evidence assessment of a causal edge in a read-only graph projection. */
+export const DagEdgeVerificationSchema = z.enum(["proven", "proposed"]);
+export type DagEdgeVerification = z.infer<typeof DagEdgeVerificationSchema>;
+
 export const GraphEdgeSchema = z.object({
   id: z.string().min(1),
   from: z.string().min(1),
@@ -841,6 +845,8 @@ export const GraphEdgeSchema = z.object({
   kind: z.string().min(1),
   label: z.string().default(""),
   broken: z.boolean().default(false),
+  verification: DagEdgeVerificationSchema.optional(),
+  abstentionReason: z.string().optional(),
 });
 export type GraphEdge = z.infer<typeof GraphEdgeSchema>;
 

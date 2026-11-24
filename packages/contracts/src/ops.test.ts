@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CONSULT_BLOCKING_TTL_MS,
+  GraphEdgeSchema,
   deriveCoverageMatrix,
   enforceRoleAction,
   findingMetrics,
@@ -19,6 +20,18 @@ import {
 } from "./index.js";
 
 const DAY = 86_400_000;
+
+test("graph edges keep legacy defaults and optional causal verification", () => {
+  const edge = { id: "edge-1", from: "fact-1", to: "intent-1", kind: "trigger" };
+  const legacy = { ...edge, label: "", broken: false };
+  assert.deepEqual(GraphEdgeSchema.parse(edge), legacy);
+  for (const verification of ["proven", "proposed"]) {
+    const abstentionReason = verification === "proposed" ? "Evidence pending" : undefined;
+    const annotated = { ...legacy, verification, abstentionReason };
+    assert.deepEqual(GraphEdgeSchema.parse(annotated), annotated);
+  }
+  assert.equal(GraphEdgeSchema.safeParse({ ...edge, verification: "unknown" }).success, false);
+});
 
 function memory(id: string, overrides: Partial<MemoryNode> = {}): MemoryNode {
   return {
