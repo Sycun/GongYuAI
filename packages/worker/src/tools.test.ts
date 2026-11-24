@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { openHistory } from "@gongyuai/history";
+import { openHistory, readEvidenceBytes } from "@gongyuai/history";
 import {
   appendProgress,
   assertCommandAllowed,
@@ -302,6 +303,67 @@ test("repeated-command breaker blocks the same attempt but exempts polling", asy
     if (previous === undefined) delete process.env.GY_REPEAT_COMMAND_LIMIT;
     else process.env.GY_REPEAT_COMMAND_LIMIT = previous;
   }
+});
+
+test("shell keeps small output inline and archives oversized captures with private, verifiable files", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-shell-evidence-"));
+  const m = manifest(["example.invalid"]);
+  m.dataDir = root;
+  m.workspaceDir = root;
+  m.evidenceDir = join(root, "evidence");
+  const history = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir: m.evidenceDir });
+  const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+  const previousLimit = process.env.GY_SHELL_INLINE_OUTPUT_BYTES;
+  delete process.env.GY_SHELL_INLINE_OUTPUT_BYTES;
+  t.after(() => {
+    if (previousLimit !== undefined) process.env.GY_SHELL_INLINE_OUTPUT_BYTES = previousLimit;
+    else delete process.env.GY_SHELL_INLINE_OUTPUT_BYTES;
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const inline = await runShell(ctx, "printf '%04095d' 0; printf e >&2");
+  assert.equal(inline.stdout, "0".repeat(4095));
+  assert.equal(inline.stderr, "e");
+
+  const stdout = `首!\n${"界".repeat(950)}\nSTDOUT_MIDDLE\n${"界".repeat(180)}\n尾\n`;
+  const stderr = `err-start\n${"x".repeat(700)}\nSTDERR_MIDDLE\n${"y".repeat(700)}\nerr-end\n`;
+  writeFileSync(join(root, "stdout-fixture"), stdout);
+  writeFileSync(join(root, "stderr-fixture"), stderr);
+  const [oversized, concurrent] = await Promise.all([
+    runShell(ctx, "cat stdout-fixture; cat stderr-fixture >&2; exit 7"),
+    runShell(ctx, "printf '%05000d' 0"),
+  ]);
+  assert.equal(oversized.exitCode, 7);
+  assert.match(oversized.stdout, /首![\s\S]*省略[\s\S]*尾\n$/);
+  assert.match(oversized.stderr, /err-start[\s\S]*省略[\s\S]*err-end\n$/);
+  assert.doesNotMatch(oversized.stdout + oversized.stderr, /MIDDLE|\ufffd/);
+  assert.ok(Buffer.byteLength(oversized.stdout + oversized.stderr) < 2048);
+
+  for (const [stream, expected] of Object.entries({ stdout, stderr }) as ["stdout" | "stderr", string][]) {
+    const reference = oversized[stream].match(/SHA-256 ([0-9a-f]{64}) · (exec\/cmd-[0-9a-f-]+\/(?:stdout|stderr)\.txt)/);
+    assert.ok(reference);
+    const path = reference[2]!;
+    const bytes = readEvidenceBytes(m.evidenceDir, path);
+    assert.deepEqual(bytes, Buffer.from(expected));
+    assert.equal(reference[1], createHash("sha256").update(bytes).digest("hex"));
+    assert.equal(statSync(join(m.evidenceDir, path)).mode & 0o777, 0o600);
+    const audit = readFileSync(join(m.evidenceDir, dirname(path), "command.md"), "utf8");
+    assert.match(audit, /退出码：7/);
+    assert.ok(audit.includes(path));
+    assert.ok(!concurrent.stdout.includes(dirname(path)));
+  }
+  assert.match(concurrent.stdout, /stdout 5000 B/);
+
+  const capped = await runShell(ctx, "printf '%0400001d' 0");
+  assert.match(capped.stdout, /执行器已达到采集上限/);
+  const cappedPath = capped.stdout.match(/exec\/cmd-[0-9a-f-]+\/stdout\.txt/)?.[0];
+  assert.ok(cappedPath);
+  assert.equal(readEvidenceBytes(m.evidenceDir, cappedPath).length, 400_000);
+
+  process.env.GY_SHELL_INLINE_OUTPUT_BYTES = "16";
+  const configured = await runShell(ctx, "printf '%017d' 0");
+  assert.match(configured.stdout, /stdout 17 B/);
 });
 
 test("shell parser lane: machine-readable nmap is transported, free text gets a mandatory flag hint", async (t) => {

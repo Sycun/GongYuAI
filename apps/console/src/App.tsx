@@ -4,7 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Button, Input, Modal, SideSheet, Toast } from "@douyinfe/semi-ui";
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { api, type Overview, type TaskRecord } from "./api";
-import { DETAIL_TABS, ROUTE_META, SETTINGS_SECTIONS, isSettingsRoute, settingsSectionOf, type DetailTab, type SettingsRoute } from "./labels";
+import { DETAIL_TABS, ROUTE_META, SETTINGS_SECTIONS, isSettingsRoute, resolveDetailTab, settingsSectionOf, type DetailTab, type SettingsRoute } from "./labels";
 import { newId } from "./chat/id";
 import { storeFiles, type DraftFile } from "./chat/attachments";
 import { useConversations } from "./chat/useConversations";
@@ -52,12 +52,11 @@ function parseHash(): Location {
   const located = (route: Route, nextId: string | null = null): Location => ({ route, id: nextId, query });
   if (part === "settings" || part === "settings-tools") return located("settings-model");
   if (part === "dive") return located("live", id || null);
-  // Previously generated intent links pointed to the goals tab.
-  if (part === "goals" && id && query.intent) return located("history", id);
   if (part === "graphs" || part === "demo" || part === "knowledge") return located(part, id || null);
-  if (part === "tasks" || part === "overview" || part === "chat" || isDetail(part)) {
-    return located(part, id || null);
-  }
+  if (part === "tasks" || part === "overview" || part === "chat") return located(part, id || null);
+  // 旧版 10 Tab 路由（goals/history/evidence/report/p14/p15）收敛到 6 Tab，保留 query 焦点。
+  const detailTab = resolveDetailTab(part);
+  if (detailTab) return located(detailTab, id || null);
   const section = SETTINGS_SECTIONS.find(item => item.key === part);
   return located(section?.key ?? "chat", section?.key === "settings-model" ? id || null : null);
 }

@@ -1,3 +1,5 @@
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { accessSync, constants } from "node:fs";
 import { commandProposal, reviewBeforeDispatch } from "../command-guard.js";
 import {
   isIpv4Cidr,
@@ -21,13 +23,118 @@ import { loadToolsRuntime, saveToolsRuntime } from "../tools-runtime.js";
 import { createBuiltinFromRoot } from "./builtin/from-manifest.js";
 import { parseAndRecord, parseSummaryLine, toolForServer } from "../tool-output.js";
 import { openHttpSession } from "./http-session.js";
-import { openStdioSession } from "./stdio-session.js";
 import {
   mcpToolName,
   parseMcpToolName,
   type McpServerSession,
   type OpenAiFunctionTool,
 } from "./types.js";
+
+export type McpFailureCode =
+  | "missing-binary"
+  | "port-failure"
+  | "timeout"
+  | "config"
+  | "unreachable"
+  | "startup-failed";
+
+export class McpStartupError extends Error {
+  readonly code: McpFailureCode;
+  readonly serverId: string;
+  constructor(serverId: string, code: McpFailureCode, reason: string) {
+    super(`${reason} {"code":"${code}","serverId":"${serverId}"}`);
+    this.name = "McpStartupError";
+    this.code = code;
+    this.serverId = serverId;
+  }
+}
+
+export type McpHealth =
+  | { ok: true }
+  | { ok: false; code: McpFailureCode; reason: string };
+
+/** Startup probe budget. Explicit short tool timeouts stay short; long tool budgets do not block startup. */
+export function startupBudget(cfg: { timeoutMs?: number }): number {
+  const requested = cfg.timeoutMs ?? 8_000;
+  if (!Number.isFinite(requested) || requested <= 0) return 8_000;
+  return Math.min(Math.max(Math.floor(requested), 50), 8_000);
+}
+
+function commandExists(command: string): boolean {
+  if (command.includes("/") || command.includes("\\")) {
+    try {
+      accessSync(command, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const found = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(command)}`], {
+    encoding: "utf8",
+    timeout: 2_000,
+  });
+  return (found.status ?? 1) === 0 && Boolean(found.stdout?.trim());
+}
+
+function failureCode(err: unknown): McpFailureCode {
+  const cause = err instanceof Error ? (err as Error & { cause?: { code?: string } }).cause : undefined;
+  const code = cause?.code ?? (err as { code?: string }).code ?? "";
+  const name = err instanceof Error ? err.name : "";
+  if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EADDRNOTAVAIL") return "port-failure";
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return "unreachable";
+  if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT" || name === "TimeoutError" || name === "AbortError") {
+    return "timeout";
+  }
+  return "unreachable";
+}
+
+async function probeHttp(url: string, timeoutMs: number): Promise<McpHealth> {
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "gongyuai-health", version: "0" } },
+      }),
+    });
+    if (response.status === 502 || response.status === 503) {
+      return { ok: false, code: "port-failure", reason: `HTTP ${response.status}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    const code = failureCode(err);
+    const reason = err instanceof Error ? err.message : String(err);
+    return { ok: false, code, reason };
+  }
+}
+
+/** Lightweight check before a session is kept. Does not mutate process environment. */
+export async function probeMcpHealth(cfg: WorkerMcpServer, timeoutMs = startupBudget(cfg)): Promise<McpHealth> {
+  if (cfg.transport === "builtin") {
+    if (!cfg.rootDir) return { ok: false, code: "config", reason: "缺少 rootDir" };
+    if (cfg.binary && !builtinBinaryAvailable(cfg.binary, { refresh: true })) {
+      return { ok: false, code: "missing-binary", reason: `MCP 二进制不存在：${cfg.binary}（未安装或自动安装失败）` };
+    }
+    return { ok: true };
+  }
+  if (cfg.transport === "stdio") {
+    if (!cfg.command) return { ok: false, code: "config", reason: "缺少 command" };
+    if (!commandExists(cfg.command)) {
+      return { ok: false, code: "missing-binary", reason: `MCP 二进制不存在：${cfg.command}` };
+    }
+    return { ok: true };
+  }
+  if (cfg.transport === "http") {
+    if (!cfg.url) return { ok: false, code: "config", reason: "缺少 url" };
+    return probeHttp(cfg.url, timeoutMs);
+  }
+  return { ok: false, code: "config", reason: "未知 MCP transport" };
+}
 
 export type McpHub = {
   openaiTools: OpenAiFunctionTool[];
@@ -64,6 +171,7 @@ export async function openMcpHub(
 
   const startCall = ctx.history.trackIntegrationCalls(manifest.taskId);
   const sessions = new Map<string, McpServerSession>();
+  const blocked = new Map<string, McpStartupError>();
   const openaiTools: OpenAiFunctionTool[] = [];
   const promptLines: string[] = [];
   const enabled = new Set<string>();
@@ -99,6 +207,14 @@ export async function openMcpHub(
       assertCapabilityAllows(manifest, mcpActionForServer(id, manifest));
       return server;
     }, { serverId: id });
+    const prior = blocked.get(cfg.id);
+    if (prior) {
+      const healed = prior.code === "missing-binary"
+        && Boolean(cfg.binary)
+        && builtinBinaryAvailable(cfg.binary, { refresh: true });
+      if (!healed) throw prior;
+      blocked.delete(cfg.id);
+    }
 
     let autoInstalledNote = "";
     if (cfg.transport === "builtin" && !builtinBinaryAvailable(cfg.binary, { refresh: true })) {
@@ -118,15 +234,37 @@ export async function openMcpHub(
         }
       }
       if (!builtinBinaryAvailable(cfg.binary, { refresh: true })) {
-        throw new Error(`MCP 二进制不存在：${cfg.binary ?? cfg.id}（未安装或自动安装失败）`);
+        const err = new McpStartupError(
+          cfg.id,
+          "missing-binary",
+          `MCP 二进制不存在：${cfg.binary ?? cfg.id}（未安装或自动安装失败）`,
+        );
+        blocked.set(cfg.id, err);
+        throw err;
       }
     }
+    const health = await probeMcpHealth(cfg, startupBudget(cfg));
+    if (!health.ok) {
+      const err = new McpStartupError(cfg.id, health.code, health.reason);
+      blocked.set(cfg.id, err);
+      throw err;
+    }
+    blocked.delete(cfg.id);
 
     if (sessions.has(cfg.id)) {
       enabled.add(cfg.id);
       return `MCP ${cfg.id} 已启用${autoInstalledNote}`;
     }
-    const session = await openOne(cfg, ctx);
+    let session: McpServerSession | null;
+    try {
+      session = await openOne(cfg, ctx);
+    } catch (err) {
+      const wrapped = err instanceof McpStartupError
+        ? err
+        : new McpStartupError(cfg.id, "startup-failed", err instanceof Error ? err.message : String(err));
+      blocked.set(cfg.id, wrapped);
+      throw wrapped;
+    }
     if (!session) {
       return `MCP ${cfg.id} 无法连接（配置不全或 adapter 缺失）`;
     }
@@ -205,6 +343,10 @@ export async function openMcpHub(
     const finish = startCall("mcp", serverId, toolName);
     let success = false;
     try {
+      const prior = blocked.get(serverId);
+      if (prior) {
+        return { text: JSON.stringify({ ok: false, code: prior.code, serverId, reason: prior.message }) };
+      }
       const session = gateTool(ctx, "mcp", () => {
         assertCapabilityAllows(manifest, mcpActionForServer(serverId, manifest));
         if (!enabled.has(serverId)) {
@@ -234,7 +376,18 @@ export async function openMcpHub(
           ...(declaredTarget ? { hosts: [declaredTarget] } : {}),
         });
       }
-      const result = await session.callTool(toolName, args);
+      const budget = Math.min(Math.max(pool.get(serverId)?.timeoutMs ?? 120_000, 50), 30 * 60_000);
+      let result;
+      try {
+        result = await withTimeout(session.callTool(toolName, args), budget, serverId, toolName);
+      } catch (err) {
+        if (err instanceof McpStartupError && err.code === "timeout") {
+          return {
+            text: JSON.stringify({ ok: false, code: "timeout", serverId, toolName, reason: err.message }),
+          };
+        }
+        throw err;
+      }
       success = result.ok;
       return {
         text: result.text.slice(0, 12_000),
@@ -359,6 +512,9 @@ async function openOne(
   }
   if (cfg.transport === "stdio") {
     if (!cfg.command) return null;
+    if (!commandExists(cfg.command)) {
+      throw new McpStartupError(cfg.id, "missing-binary", `MCP 二进制不存在：${cfg.command}`);
+    }
     if (ctx.manifest.commandFence) {
       await reviewBeforeDispatch(ctx.manifest, {
         ...commandProposal("stdio", cfg.command, cfg.args ?? []),
@@ -367,7 +523,7 @@ async function openOne(
         need: "scan",
       });
     }
-    return openStdioSession(cfg.id, cfg.command, cfg.args ?? [], cfg.env ?? {});
+    return openStdioDeadline(cfg.id, cfg.command, cfg.args ?? [], cfg.env ?? {}, startupBudget(cfg));
   }
   if (cfg.transport === "http") {
     if (!cfg.url) return null;
@@ -378,4 +534,188 @@ async function openOne(
 
 export function isMcpToolName(name: string): boolean {
   return Boolean(parseMcpToolName(name));
+}
+
+function withTimeout<T>(work: Promise<T>, timeoutMs: number, serverId: string, toolName: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new McpStartupError(serverId, "timeout", `${toolName} exceeded ${timeoutMs}ms`));
+    }, timeoutMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+class DeadlineRpc {
+  private nextId = 1;
+  private buffer = "";
+  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (err: Error) => void }>();
+
+  constructor(private readonly child: ChildProcessWithoutNullStreams) {
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => this.onData(chunk));
+    child.on("error", (err) => {
+      for (const pending of this.pending.values()) pending.reject(err);
+      this.pending.clear();
+    });
+    child.on("exit", () => {
+      for (const pending of this.pending.values()) pending.reject(new Error("MCP process exited"));
+      this.pending.clear();
+    });
+  }
+
+  private onData(chunk: string): void {
+    this.buffer += chunk;
+    while (true) {
+      const headerEnd = this.buffer.indexOf("\r\n\r\n");
+      if (headerEnd < 0) {
+        const nl = this.buffer.indexOf("\n");
+        if (nl < 0) return;
+        const line = this.buffer.slice(0, nl).trim();
+        this.buffer = this.buffer.slice(nl + 1);
+        if (!line || line.startsWith("Content-Length")) continue;
+        try {
+          this.handleMessage(JSON.parse(line) as Record<string, unknown>);
+        } catch {
+          /* ignore partial noise */
+        }
+        continue;
+      }
+      const header = this.buffer.slice(0, headerEnd);
+      const match = /Content-Length:\s*(\d+)/i.exec(header);
+      if (!match) {
+        this.buffer = this.buffer.slice(headerEnd + 4);
+        continue;
+      }
+      const length = Number(match[1]);
+      const bodyStart = headerEnd + 4;
+      if (this.buffer.length < bodyStart + length) return;
+      const body = this.buffer.slice(bodyStart, bodyStart + length);
+      this.buffer = this.buffer.slice(bodyStart + length);
+      try {
+        this.handleMessage(JSON.parse(body) as Record<string, unknown>);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  private handleMessage(msg: Record<string, unknown>): void {
+    if (typeof msg.id !== "number" || !this.pending.has(msg.id)) return;
+    const pending = this.pending.get(msg.id)!;
+    this.pending.delete(msg.id);
+    if (msg.error) pending.reject(new Error(JSON.stringify(msg.error)));
+    else pending.resolve(msg.result);
+  }
+
+  request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    const id = this.nextId++;
+    const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+    const frame = `Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
+        this.pending.delete(id);
+        reject(new McpStartupError("stdio", "timeout", `${method} exceeded ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
+      this.child.stdin.write(frame, (err) => {
+        if (!err) return;
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(err);
+      });
+    });
+  }
+
+  notify(method: string, params: unknown): void {
+    const payload = JSON.stringify({ jsonrpc: "2.0", method, params });
+    this.child.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+  }
+
+  close(): void {
+    try {
+      this.child.stdin.end();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+async function openStdioDeadline(
+  serverId: string,
+  command: string,
+  args: string[],
+  env: Record<string, string>,
+  timeoutMs: number,
+): Promise<McpServerSession> {
+  const child = spawn(command, args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, ...env },
+  });
+  child.stderr.on("data", () => {});
+  const rpc = new DeadlineRpc(child);
+  const kill = () => {
+    try { child.kill("SIGKILL"); } catch { /* already gone */ }
+  };
+  try {
+    await rpc.request("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "gongyuai-worker", version: "0.1.0" },
+    }, timeoutMs);
+    rpc.notify("notifications/initialized", {});
+  } catch (err) {
+    kill();
+    if (err instanceof McpStartupError) throw new McpStartupError(serverId, err.code, err.message);
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") throw new McpStartupError(serverId, "missing-binary", `MCP 二进制不存在：${command}`);
+    throw new McpStartupError(serverId, "startup-failed", err instanceof Error ? err.message : String(err));
+  }
+  return {
+    serverId,
+    async listTools() {
+      const res = await rpc.request("tools/list", {}, 60_000) as {
+        tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
+      };
+      return (res.tools ?? []).map((tool) => ({
+        name: tool.name,
+        description: tool.description ?? tool.name,
+        inputSchema: tool.inputSchema ?? { type: "object", properties: {} },
+      }));
+    },
+    async callTool(name, toolArgs) {
+      try {
+        const res = await rpc.request("tools/call", { name, arguments: toolArgs }, 60_000) as {
+          content?: Array<{ text?: string }>;
+          isError?: boolean;
+        };
+        const text = (res.content ?? []).map((item) => item.text ?? "").filter(Boolean).join("\n");
+        return { ok: !res.isError, text: text || JSON.stringify(res) };
+      } catch (err) {
+        return { ok: false, text: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    async close() {
+      rpc.close();
+      kill();
+    },
+  };
 }

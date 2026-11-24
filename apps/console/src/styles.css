@@ -119,6 +119,26 @@ body {
   background: var(--semi-color-fill-0);
 }
 
+/* 执行与日志：撑满视口剩余高度，双视图 */
+.gy-logs { display: flex; flex-direction: column; height: calc(100vh - 250px); min-height: 420px; border: 1px solid var(--semi-color-border); border-radius: 12px; background: var(--semi-color-bg-1); overflow: hidden; }
+.gy-logs-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 14px; border-bottom: 1px solid var(--semi-color-border); }
+.gy-logs-autoscroll { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--semi-color-text-2); cursor: pointer; }
+.gy-logs-steps { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+.gy-logs-raw { flex: 1; min-height: 0; overflow: auto; background: var(--semi-color-fill-0); }
+.gy-logs-raw-inner { padding: 10px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.6; }
+.gy-log-line { white-space: pre-wrap; word-break: break-word; }
+.gy-log-error { color: var(--semi-color-danger); }
+.gy-log-warn { color: var(--semi-color-warning); }
+.gy-log-progress { color: var(--semi-color-text-1); }
+.gy-log-other { color: var(--semi-color-text-2); }
+.gy-log-line mark { background: var(--semi-color-warning-light-default); color: inherit; padding: 0 1px; border-radius: 2px; }
+.gy-exec-group { border: 1px solid var(--semi-color-border); border-radius: 10px; margin-bottom: 10px; padding: 6px 10px; }
+.gy-exec-group-head { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; padding: 4px 0; cursor: pointer; text-align: left; color: inherit; }
+.gy-logs-plan { margin-top: 12px; border-top: 1px solid var(--semi-color-border); padding-top: 10px; }
+.gy-battlefield { display: flex; flex-direction: column; }
+.gy-graph-tab { display: flex; flex-direction: column; gap: 16px; }
+.gy-graph-goals { margin-bottom: 0; }
+
 .gy-task-heading {
   display: flex;
   flex-wrap: wrap;
@@ -197,6 +217,10 @@ body {
 
 .gy-dag-node-fact { --gy-kind-color: var(--semi-color-primary); }
 .gy-dag-node-intent { --gy-kind-color: var(--semi-color-warning); }
+.gy-dag-node-asset { --gy-kind-color: var(--semi-color-success); }
+.gy-dag-node-finding { --gy-kind-color: var(--semi-color-danger); }
+.gy-dag-node-asset .gy-dag-node-meta i { border-radius: 2px; }
+.gy-dag-node-finding .gy-dag-node-meta i { border-radius: 2px; transform: rotate(45deg); }
 .gy-dag-node-meta { gap: 6px; color: var(--semi-color-text-1); font-size: 11px; line-height: 18px; }
 .gy-dag-node-meta i { width: 7px; height: 7px; border-radius: 50%; background: var(--gy-kind-color); flex: none; }
 .gy-dag-node-intent .gy-dag-node-meta i { border-radius: 1px; transform: rotate(45deg); }
@@ -210,13 +234,27 @@ body {
 }
 
 .gy-dag .react-flow__edge-path { stroke: var(--semi-color-text-2); stroke-width: 1.4; stroke-linejoin: round; }
-.gy-dag-edge-produce .react-flow__edge-path { stroke-dasharray: 5 4; }
+.gy-dag-edge-proven .react-flow__edge-path { stroke: var(--semi-color-text-1); }
+.gy-dag-edge-proposed .react-flow__edge-path { stroke-dasharray: 5 4; }
+.gy-dag-edge-structural .react-flow__edge-path { stroke: var(--semi-color-text-3); stroke-width: 1.1; }
+.gy-dag-edge-broken .react-flow__edge-path { stroke: var(--semi-color-danger); stroke-dasharray: 3 3; }
 .gy-dag .gy-dag-edge-active .react-flow__edge-path { stroke: var(--semi-color-primary); stroke-width: 2; }
+
+.gy-dag-toolbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.gy-dag-orphan-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--semi-color-text-2); cursor: pointer; }
+.gy-dag-detail-edges { margin-top: 10px; }
+.gy-dag-detail-edges > strong { font-size: 12px; color: var(--semi-color-text-2); }
+.gy-dag-detail-edges ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.gy-dag-detail-edges li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.gy-dag-edge-direction { color: var(--semi-color-text-3); font-family: ui-monospace, monospace; }
+.gy-dag-edge-other { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--semi-color-text-1); }
+.gy-dag-abstention { color: var(--semi-color-warning); }
 
 .gy-dag-legend { flex-wrap: wrap; gap: 6px 16px; padding: 10px 16px; border-top: 1px solid var(--semi-color-border); }
 .gy-dag-legend > span { gap: 6px; }
 .gy-dag-legend i { width: 18px; border-top: 2px solid var(--semi-color-text-2); }
 .gy-dag-legend .gy-dashed { border-top-style: dashed; }
+.gy-dag-legend .gy-structural { border-top-color: var(--semi-color-text-3); border-top-width: 1px; }
 .gy-dag-hint { margin-left: auto; }
 .gy-dag-empty { padding: 36px 16px; text-align: center; }
 
@@ -228,12 +266,95 @@ body {
 .gy-dag-detail dt { color: var(--semi-color-text-2); }
 .gy-dag-detail dd { margin: 0; color: var(--semi-color-text-1); font-family: ui-monospace, monospace; }
 
+/* 流量记录（ARTEX 风格审计页） */
+.gy-traffic { display: flex; flex-direction: column; gap: 12px; }
+.gy-traffic-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.gy-traffic-body { display: flex; gap: 12px; height: calc(100vh - 320px); min-height: 420px; }
+.gy-traffic-list { width: 340px; flex: none; overflow: auto; border: 1px solid var(--semi-color-border); border-radius: 12px; background: var(--semi-color-bg-1); padding: 8px; }
+.gy-traffic-empty { padding: 32px 12px; text-align: center; color: var(--semi-color-text-2); display: flex; gap: 8px; align-items: center; justify-content: center; }
+.gy-traffic-row { display: block; width: 100%; text-align: left; border: 1px solid transparent; background: transparent; border-radius: 9px; padding: 8px 10px; cursor: pointer; margin-bottom: 4px; }
+.gy-traffic-row:hover { background: var(--semi-color-fill-0); }
+.gy-traffic-row-active { background: var(--semi-color-primary-light-default); border-color: var(--semi-color-primary); }
+.gy-traffic-row-top { display: flex; align-items: center; gap: 6px; }
+.gy-traffic-row-time { margin-left: auto; font-size: 11px; color: var(--semi-color-text-3); }
+.gy-traffic-row-path { display: block; margin: 4px 0 2px; font-size: 12px; font-family: ui-monospace, Menlo, monospace; color: var(--semi-color-text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gy-traffic-row-meta { display: block; font-size: 11px; color: var(--semi-color-text-2); }
+.gy-traffic-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--semi-color-border); border-radius: 12px; background: var(--semi-color-bg-1); padding: 12px 14px; overflow: hidden; }
+.gy-traffic-detail-head { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--semi-color-border); }
+.gy-traffic-detail-head > .semi-space:first-child { justify-content: space-between; width: 100%; }
+.gy-traffic-raw { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.gy-traffic-raw-pane { display: flex; flex-direction: column; min-height: 0; }
+.gy-traffic-raw-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.gy-traffic-raw-pre { flex: 1; min-height: 0; max-height: none; overflow: auto; padding: 10px; border-radius: 8px; background: var(--semi-color-fill-0); border: 1px solid var(--semi-color-border); }
+@media (max-width: 900px) {
+  .gy-traffic-body { flex-direction: column; height: auto; }
+  .gy-traffic-list { width: 100%; max-height: 320px; }
+  .gy-traffic-raw { grid-template-columns: 1fr; }
+  .gy-traffic-raw-pre { max-height: 360px; }
+}
+
 @media (max-width: 760px) {
   .gy-shell-header { padding: 0 14px; gap: 8px; }
   .gy-shell-content { padding: 16px 12px; }
   .gy-dag-toolbar, .gy-dag-legend { padding-inline: 12px; }
   .gy-dag-controls .semi-button { height: 34px; min-width: 36px; }
 }
+
+/* 漏洞与报告（ARTEX 风格台账 + 专业报告视图） */
+.gy-findings { display: flex; flex-direction: column; gap: 16px; }
+.gy-findings-overview-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.gy-findings-observations { margin-top: 12px; border-top: 1px solid var(--semi-color-border); padding-top: 10px; }
+.gy-findings-observations-toggle { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; padding: 4px 0; cursor: pointer; color: var(--semi-color-text-1); font-size: 13px; text-align: left; }
+.gy-findings-observations-toggle .semi-icon { color: var(--semi-color-warning); }
+.gy-findings-observations-chevron { margin-left: auto; color: var(--semi-color-text-2); font-size: 12px; }
+.gy-findings-observations-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.gy-findings-observations-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+.gy-findings-report { display: flex; flex-direction: column; gap: 16px; }
+.gy-findings-loose { margin-top: 0; }
+
+.gy-report { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
+.gy-report-toc { position: sticky; top: 0; max-height: calc(100vh - 280px); overflow: auto; border-right: 1px solid var(--semi-color-border); padding-right: 16px; }
+.gy-report-toc ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.gy-report-toc a { color: var(--semi-color-text-2); text-decoration: none; font-size: 12px; line-height: 1.5; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gy-report-toc a:hover { color: var(--semi-color-primary); }
+.gy-report-toc-l1 { font-weight: 600; }
+.gy-report-toc-l2 { padding-left: 0; }
+.gy-report-toc-l3 { padding-left: 12px; }
+.gy-report-toc-l4 { padding-left: 24px; }
+.gy-report-body { min-width: 0; }
+.gy-report-heading { scroll-margin-top: 16px; }
+.gy-report-body :is(h1, h2) { font-size: 1.3em; border-bottom: 1px solid var(--semi-color-border); padding-bottom: .3em; }
+.gy-report-body h3 { font-size: 1.1em; }
+@media (max-width: 900px) {
+  .gy-report { grid-template-columns: 1fr; }
+  .gy-report-toc { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--semi-color-border); padding: 0 0 12px; }
+}
+
+.gy-code { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.6; }
+.gy-tok-comment { color: var(--semi-color-text-3); font-style: italic; }
+.gy-tok-string { color: var(--semi-color-success); }
+.gy-tok-number { color: var(--semi-color-warning); }
+.gy-tok-keyword { color: var(--semi-color-primary); font-weight: 600; }
+
+.gy-finding-drawer { display: flex; flex-direction: column; gap: 4px; }
+.gy-finding-section { border-top: 1px solid var(--semi-color-border); padding: 12px 0; }
+.gy-finding-section:first-of-type { border-top: none; }
+.gy-finding-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.gy-finding-block { max-height: 280px; padding: 10px; border-radius: 8px; background: var(--semi-color-fill-0); border: 1px solid var(--semi-color-border); margin: 6px 0; }
+.gy-finding-evidence { padding: 8px 0; border-bottom: 1px dashed var(--semi-color-border); }
+.gy-finding-evidence-md { margin-top: 8px; padding: 10px; border-radius: 8px; background: var(--semi-color-fill-0); }
+.gy-finding-traffic { display: grid; gap: 8px; }
+.gy-finding-traffic-row { border: 1px solid var(--semi-color-border); border-radius: 8px; padding: 6px 8px; }
+.gy-finding-traffic-toggle { display: flex; align-items: center; gap: 6px; width: 100%; background: transparent; border: none; padding: 2px 0; cursor: pointer; text-align: left; }
+.gy-finding-traffic-path { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--semi-color-text-1); }
+.gy-finding-traffic-meta { font-size: 11px; color: var(--semi-color-text-2); white-space: nowrap; }
+.gy-finding-traffic-raw { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+@media (max-width: 760px) { .gy-finding-traffic-raw { grid-template-columns: 1fr; } }
+
+.gy-loose-evidence { padding-top: 8px; }
+.gy-loose-list { display: grid; gap: 6px; margin-bottom: 12px; }
+.gy-loose-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gy-loose-import { margin-top: 12px; border-top: 1px solid var(--semi-color-border); padding-top: 12px; }
 
 .gy-knowledge { display: grid; gap: 16px; align-content: start; }
 /* 文件输入保留在可访问树里（键盘与自动化可用），视觉上不占位。 */

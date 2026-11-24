@@ -1,4 +1,4 @@
-import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, FindingValidation, HttpTransaction, EngagementAudit, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
+import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, FindingValidation, FindingValidateRunResponse, HostProfile, HttpTransaction, EngagementAudit, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage, TrafficRecord } from "@gongyuai/contracts";
 import type { TaskArchiveState } from "@gongyuai/contracts";
 import type {
   KnowledgeEmbeddingPatch,
@@ -116,12 +116,17 @@ export type FindingRecord = {
   dedupKey: string;
   intentId?: string | null;
   factIds?: string[];
-  evidence: Array<{ path: string; sha256: string }>;
+  evidence: Array<{ path: string; sha256: string; role?: string; note?: string }>;
   repro?: string;
   impact?: string;
   fix?: string;
+  rootCause?: string;
+  pocCurl?: string;
+  trafficIds?: string[];
+  qualification?: "exploited" | "confirmed" | "unconfirmed" | null;
   createdAt: string;
   verifiedAt?: string | null;
+  verifiedBy?: string | null;
 };
 
 export type HistoryPayload = {
@@ -146,6 +151,8 @@ export type HistoryPayload = {
     status: string;
     summary?: string;
     sourceFactIds?: string[];
+    technique?: string | null;
+    assetRoot?: string | null;
     claimedBy?: string | null;
     createdAt?: string;
     updatedAt?: string;
@@ -341,6 +348,43 @@ export type TaskP14Payload = {
   oastTokens: OastToken[];
   oastHits: OastHit[];
   tunnels?: TunnelMeta[];
+  /** 主机画像（泳道 B 扩展投影；未提供时为空数组）。 */
+  hostProfiles?: HostProfile[];
+};
+
+/** 流量检索参数（对接冻结契约 TrafficSearchQuery；keyword 为前端本地匹配）。 */
+export type TrafficQuery = {
+  host?: string;
+  method?: string;
+  status?: number;
+  path?: string;
+  intentId?: string;
+  workerId?: string;
+  findingId?: string;
+  offset?: number;
+  limit?: number;
+};
+
+/** GET /tasks/:id/traffic 响应：按 offset/limit 分页的流量索引。 */
+export type TrafficPage = {
+  traffic: TrafficRecord[];
+  /** 服务端可选返回的下一页偏移；缺省时按本页条数推断。 */
+  nextOffset?: number | null;
+};
+
+/**
+ * GET /tasks/:id/traffic/:tid/blob 响应（泳道 B 约定）：
+ * 按 side=req|res 取请求/响应体，offset/maxBytes 分段；body 为该段 utf8 文本，
+ * nextOffset 为 null 表示已到末尾。size 为整个 blob 的字节数。
+ */
+export type TrafficBlobPayload = {
+  sha256: string;
+  side: "req" | "res";
+  offset: number;
+  size: number;
+  contentType?: string;
+  body: string;
+  nextOffset: number | null;
 };
 
 export type AssetHistoryHit = {
@@ -673,6 +717,32 @@ export const api = {
     request<{ validations: FindingValidation[] }>(
       `/tasks/${encodeURIComponent(id)}/validations${findingId ? `?findingId=${encodeURIComponent(findingId)}` : ""}`,
       { signal },
+    ),
+  /** 流量索引检索（泳道 B）：host/method/status/intentId 等走服务端，keyword 前端匹配。 */
+  traffic: (id: string, query: TrafficQuery = {}, signal?: AbortSignal) => {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null || value === "") continue;
+      params.set(key, String(value));
+    }
+    const qs = params.toString();
+    return request<TrafficPage>(`/tasks/${encodeURIComponent(id)}/traffic${qs ? `?${qs}` : ""}`, { signal });
+  },
+  /** 按 offset 分段读取某条流量的请求/响应体（泳道 B）。 */
+  trafficBlob: (id: string, tid: string, side: "req" | "res", offset = 0, maxBytes = 8192, signal?: AbortSignal) =>
+    request<TrafficBlobPayload>(
+      `/tasks/${encodeURIComponent(id)}/traffic/${encodeURIComponent(tid)}/blob?side=${side}&offset=${offset}&maxBytes=${maxBytes}`,
+      { signal },
+    ),
+  /** 触发一次独立复核作业（泳道 B）；返回 jobId 后轮询 validations 刷新台账。 */
+  validateRun: (id: string, findingId: string, force = false) =>
+    request<FindingValidateRunResponse>(
+      `/tasks/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}/validate-run`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ findingId, ...(force ? { force: true } : {}) }),
+      },
     ),
   getAssetHistory: (id: string, address: string, signal?: AbortSignal) =>
     request<AssetHistoryPayload>(

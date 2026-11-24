@@ -122,16 +122,12 @@ export function formatWorkerStatus(ws: unknown): Array<{ key: string; value: str
 export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   overview: { title: "总览", subtitle: "系统态势 · 活跃任务与恢复" },
   tasks: { title: "任务", subtitle: "任务列表 · 已暂停或终态可归档 · 点选进入深潜" },
-  live: { title: "运行态", subtitle: "相位 · 租约 · 预算 · Hint" },
-  assets: { title: "资产", subtitle: "授权靶标 · 发现 · 与 Observe 同表" },
-  goals: { title: "目标", subtitle: "验收条件 · 证据 · 覆盖记录" },
-  findings: { title: "漏洞", subtitle: "Finding 台账 · 严重性 · 状态 · 封存证据" },
-  history: { title: "历史", subtitle: "事实与意图的关系 · 执行结果" },
-  evidence: { title: "证据", subtitle: "证据文件" },
-  report: { title: "报告", subtitle: "任务报告" },
-  logs: { title: "日志", subtitle: "执行节点日志" },
-  p14: { title: "执行记录", subtitle: "事务证据 · 计划 · 凭据 · 复测 · 带外回调" },
-  p15: { title: "观察与复核", subtitle: "观察员 · 记分卡 · 独立确认台账" },
+  live: { title: "运行态", subtitle: "相位 · 租约 · 预算 · 战术提示 · 待审批命令" },
+  assets: { title: "资产与战场", subtitle: "授权靶标 · 主机画像 · 凭据 · 驻留会话 · 隧道 · 带外回调" },
+  graph: { title: "意图图谱", subtitle: "目标契约 · 资产 → 事实 → 意图 → 漏洞 因果联动" },
+  traffic: { title: "流量记录", subtitle: "HTTP/HTTPS 请求审计 · Raw 报文 · 复现 cURL" },
+  findings: { title: "漏洞与报告", subtitle: "漏洞台账 · 独立复核 · 证据原件 · 交付报告" },
+  logs: { title: "执行与日志", subtitle: "结构化步骤流 · 实时原始日志" },
   settings: { title: "设置", subtitle: "模型 · 资产 · MCP · Skill · Token · 更新" },
   "settings-model": { title: "模型配置", subtitle: "OpenAI 兼容 API · 视觉能力" },
   "settings-approval": { title: "命令审批", subtitle: "审批模型与风险范围" },
@@ -157,16 +153,32 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
 
 export const DETAIL_TABS = [
   { key: "live", label: "运行态" },
-  { key: "assets", label: "资产" },
-  { key: "goals", label: "目标" },
-  { key: "findings", label: "漏洞" },
-  { key: "history", label: "历史" },
-  { key: "evidence", label: "证据" },
-  { key: "report", label: "报告" },
-  { key: "logs", label: "日志" },
-  { key: "p14", label: ROUTE_META.p14.title },
-  { key: "p15", label: ROUTE_META.p15.title },
+  { key: "assets", label: "资产与战场" },
+  { key: "graph", label: "意图图谱" },
+  { key: "traffic", label: "流量记录" },
+  { key: "findings", label: "漏洞与报告" },
+  { key: "logs", label: "执行与日志" },
 ] as const;
+
+export type DetailTab = (typeof DETAIL_TABS)[number]["key"];
+
+/**
+ * 旧版 10 Tab 的 hash 路由收敛到 6 Tab，避免历史链接断链。
+ * 目标/历史 → 意图图谱；证据/报告/观察复核 → 漏洞与报告；执行记录 → 资产与战场。
+ */
+export const LEGACY_TAB_REDIRECTS: Record<string, DetailTab> = {
+  goals: "graph",
+  history: "graph",
+  evidence: "findings",
+  report: "findings",
+  p14: "assets",
+  p15: "findings",
+};
+
+export function resolveDetailTab(route: string): DetailTab | null {
+  if (DETAIL_TABS.some((tab) => tab.key === route)) return route as DetailTab;
+  return LEGACY_TAB_REDIRECTS[route] ?? null;
+}
 
 export const FINDING_STATUS_LABEL: Record<string, string> = {
   tentative: "线索",
@@ -212,7 +224,35 @@ export const ASSET_KIND_LABEL: Record<string, string> = {
   oos: "范围外",
 };
 
-export type DetailTab = (typeof DETAIL_TABS)[number]["key"];
+/** 三档定级徽章：实战利用 > 主动确认 > 未确认线索。 */
+export const FINDING_QUALIFICATION_LABEL: Record<string, string> = {
+  exploited: "已实战利用",
+  confirmed: "已主动确认",
+  unconfirmed: "未确认线索",
+};
+
+export function findingQualificationColor(
+  qualification: string,
+): "red" | "green" | "orange" | "grey" {
+  if (qualification === "exploited") return "red";
+  if (qualification === "confirmed") return "green";
+  if (qualification === "unconfirmed") return "orange";
+  return "grey";
+}
+
+/** 缺 qualification 时按生命周期保守推导：已复现/复测/接受视为主动确认，其余为线索。 */
+export function effectiveQualification(finding: {
+  qualification?: string | null;
+  status?: string;
+}): "exploited" | "confirmed" | "unconfirmed" {
+  if (finding.qualification === "exploited" || finding.qualification === "confirmed" || finding.qualification === "unconfirmed") {
+    return finding.qualification;
+  }
+  if (finding.status === "verified" || finding.status === "retested" || finding.status === "accepted") {
+    return "confirmed";
+  }
+  return "unconfirmed";
+}
 
 export const SETTINGS_SECTIONS = [
   { key: "settings-model", label: "模型配置", section: "model" },

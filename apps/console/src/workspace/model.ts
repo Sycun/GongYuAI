@@ -469,7 +469,7 @@ export function nodeNavigation(node: GNode, taskId: string):
   }
   if (node.kind === "intent") {
     const id = typeof data.intentId === "string" ? data.intentId : node.id.replace(/^intent:/, "");
-    return { kind: "link", href: `#/history/${enc}?intent=${encodeURIComponent(id)}`, label: "打开意图记录" };
+    return { kind: "link", href: `#/graph/${enc}?intent=${encodeURIComponent(id)}`, label: "打开意图记录" };
   }
   if (node.kind === "job") {
     const id = typeof data.jobId === "string" ? data.jobId : node.id.replace(/^job:/, "");
@@ -485,11 +485,11 @@ export function nodeNavigation(node: GNode, taskId: string):
   }
   if (node.kind === "step") {
     const id = typeof data.stepId === "string" ? data.stepId : node.id.replace(/^step:/, "");
-    return { kind: "link", href: `#/live/${enc}?step=${encodeURIComponent(id)}`, label: "打开执行步骤" };
+    return { kind: "link", href: `#/logs/${enc}?step=${encodeURIComponent(id)}`, label: "打开执行步骤" };
   }
   if (node.kind === "fact") {
     const id = typeof data.factId === "string" ? data.factId : node.id.replace(/^fact:/, "");
-    return { kind: "link", href: `#/history/${enc}?fact=${encodeURIComponent(id)}`, label: "打开历史记录" };
+    return { kind: "link", href: `#/graph/${enc}?fact=${encodeURIComponent(id)}`, label: "打开事实记录" };
   }
   if (node.kind === "technique") {
     return { kind: "link", href: `#/live/${enc}?section=coverage`, label: "打开覆盖表" };
