@@ -667,8 +667,8 @@ async function tryPiDurable(
               text: markUntrusted(
                 formatShellResult({
                   ...r,
-                  stdout: r.stdout.slice(0, 8000),
-                  stderr: r.stderr.slice(0, 4000),
+                  stdout: smartTruncateToolOutput(r.stdout, 12_000),
+                  stderr: smartTruncateToolOutput(r.stderr, 4_000),
                 }),
                 { tool: "shell" },
               ),
@@ -1923,6 +1923,8 @@ function runExploreTimeoutGate(
     exploreTimeoutMs: timeoutMs,
     leader: isExploreLeader(manifest),
     save: () => ckpt.save(state),
+    toolCalls: state.toolCalls,
+    hardToolLimit: 20,
   });
   return result.message;
 }
@@ -2021,6 +2023,18 @@ ${boardClearPolicyBlock(manifest)}${collectorsPromptBlock(manifest)}${mcpBlock}$
 function sessionBootstrapText(manifest: WorkerManifest, historyObserve: string): string {
   const relays = formatRelayInjection(listRelayProtocols(manifest.workspaceDir));
   return `${historyObserve}\n\n${relays}`;
+}
+
+/**
+ * Preserve both headers AND trailing payloads/flags/tracebacks when truncating large outputs,
+ * instead of chopping off everything after char 4000 where flags and error details appear.
+ */
+function smartTruncateToolOutput(text: string, maxChars = 12_000): string {
+  if (text.length <= maxChars) return text;
+  const head = Math.floor(maxChars * 0.67);
+  const tail = maxChars - head;
+  const omitted = text.length - head - tail;
+  return `${text.slice(0, head)}\n\n... [已省略中间 ${omitted} 字符，完整原始输出见 evidence/] ...\n\n${text.slice(-tail)}`;
 }
 
 type ChatMessage = {
@@ -3492,7 +3506,7 @@ async function runOpenAiToolLoop(
       messages.push({
         role: "tool",
         tool_call_id: call.id,
-        content: shown.slice(0, 4_000),
+        content: smartTruncateToolOutput(shown, 12_000),
       });
     }
 

@@ -25,11 +25,12 @@ export function maybeForceExploreTimeout(opts: {
   save: () => void;
   leader?: boolean;
   nowMs?: number;
+  /** Current cumulative tool calls; with toolsAtIntentClaim gives steps-on-intent. */
+  toolCalls?: number | null;
+  /** Hard step budget per intent; exceeded => force conclude regardless of wall time. */
+  hardToolLimit?: number;
 }): ExploreTimeoutResult {
   const timeoutMs = opts.exploreTimeoutMs;
-  if (timeoutMs <= 0) {
-    return { concluded: false, intentId: null, message: null };
-  }
   const intentId = opts.state.activeIntentId;
   const claimedAt = opts.state.activeIntentClaimedAt;
   if (!intentId || !claimedAt) {
@@ -40,15 +41,25 @@ export function maybeForceExploreTimeout(opts: {
     return { concluded: false, intentId: null, message: null };
   }
   const now = opts.nowMs ?? Date.now();
-  if (now - claimedMs < timeoutMs) {
+  const wallExceeded = timeoutMs > 0 && now - claimedMs >= timeoutMs;
+  const hardLimit = opts.hardToolLimit ?? 0;
+  const sinceClaim =
+    opts.toolCalls != null && opts.state.toolsAtIntentClaim != null
+      ? opts.toolCalls - opts.state.toolsAtIntentClaim
+      : null;
+  const stepsExceeded = hardLimit > 0 && sinceClaim != null && sinceClaim >= hardLimit;
+  if (!wallExceeded && !stepsExceeded) {
     return { concluded: false, intentId: null, message: null };
   }
+  const reason = stepsExceeded
+    ? `Explore hard step limit ${hardLimit} exceeded (stepsOnIntent=${sinceClaim}); force rotate`
+    : `Explore wall timeout ${timeoutMs}ms exceeded (claimedAt=${claimedAt})`;
 
   const done = opts.history.forceConcludeExploreTimeout({
     taskId: opts.taskId,
     intentId,
     workerId: opts.workerId,
-    reason: `Explore wall timeout ${timeoutMs}ms exceeded (claimedAt=${claimedAt})`,
+    reason,
   });
   opts.state.activeIntentId = null;
   opts.state.activeIntentClaimedAt = null;

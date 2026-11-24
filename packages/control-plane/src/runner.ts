@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   createWriteStream,
+  readFileSync,
   writeFileSync,
   mkdirSync,
   existsSync,
@@ -228,11 +229,23 @@ export class WorkerRunner {
           // worker 存活才维持「审批处理中」；否则交回 watchdog 重启流程。
           return this.isAlive(task);
         }
-        // 1) 先判断「能否执行」：按任务授权裁决真实命令，越界直接拦截，不调模型、不等待。
-        //    有 command 的提案用 task.auth 判定（与 worker 同一个闸），没有命令的旧提案仍按探针白名单。
-        if (!executorBound(pending.action, task.auth)) {
+        // 1) 先判断「能否执行」：按任务授权裁决真实命令（并入官方靶场动态启动的容器坐标），越界直接拦截，不调模型、不等待。
+        //    有 command 的提案用 effectiveAuth 判定（与 worker 同一个闸），没有命令的旧提案仍按探针白名单。
+        const dynTargetsPath = join(task.dataDir, "tsecbench-targets.json");
+        let extraTargets: string[] = [];
+        if (existsSync(dynTargetsPath)) {
+          try {
+            const parsed = JSON.parse(readFileSync(dynTargetsPath, "utf8"));
+            if (Array.isArray(parsed)) extraTargets = parsed.filter((x): x is string => typeof x === "string");
+          } catch { /* ignore */ }
+        }
+        const effectiveAuth = extraTargets.length
+          ? { ...task.auth, targets: [...new Set([...task.auth.targets, ...extraTargets])] }
+          : task.auth;
+
+        if (!executorBound(pending.action, effectiveAuth)) {
           const reason = (pending.action.tool === "shell" || pending.action.tool === "cli") && pending.action.command
-            ? outOfScopeFor(task.auth, pending.action.command)
+            ? outOfScopeFor(effectiveAuth, pending.action.command)
             : outOfScopeReason;
           ledger.settle(pending, policyReceipt(this.settings, pending, reason));
           return true;
@@ -248,37 +261,42 @@ export class WorkerRunner {
           }
           return true;
         }
-        // 3) 低风险自动审批：审批模型判定。
+        // 3) 授权内（坐标+能力已确认）命令程序自动放行，不调审批模型：
+        //    去掉每步第二次模型往返与 reviewer 抖动/超时造成的停顿；
+        //    破坏性/越界/主机网络仍由 worker 侧闸与 executorBound 拦截。
+        if (executorBound(pending.action, task.auth)) {
+          ledger.settle(pending, {
+            id: pending.id, at: new Date().toISOString(), model: "",
+            scope: this.settings.get().chatApproval.scope, decision: "allow", risk: "low",
+            actor: "policy", reason: "授权坐标与能力已确认，程序自动放行（不调审批模型）。",
+          });
+          return true;
+        }
+        // 4) 边界外/无法确认：审批模型判定。
         const key = task.id + ":" + task.fence;
         if (!this.reviews.has(key)) {
           const controller = new AbortController();
           this.reviews.set(key, controller);
-          void reviewCommand(this.settings, pending, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), task.auth)
+          void reviewCommand(this.settings, pending, AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), effectiveAuth)
             .then(receipt => {
               if (this.disposed) return;
               const target = new CommandLedger(task.dataDir);
               try {
                 if (!target.active(task.id, task.fence)) return;
-                if (receipt.decision === "ask") {
-                  // P14-B7 — the judge cannot confirm the side effects: move the
-                  // ticket to awaiting_user and surface it in the task view. The
-                  // worker keeps waiting for a receipt (bounded by its deadline).
-                  if (target.awaitUser(pending)) {
-                    const record = this.store.get(task.id);
-                    if (record && record.fence === task.fence) {
-                      record.commandReview = this.waitingReview(pending, task.fence);
-                      this.store.save(record);
-                    }
-                  } else {
-                    target.settle(pending, { ...receipt, decision: "block" });
-                  }
-                  return;
-                }
-                // 审批模型抖动/超时不应杀死授权内的长程运行：边界已确认（坐标+能力）
-                // 且非破坏时放行；破坏性/越界仍由 worker 侧与 executorBound 拦截。
-                if (receipt.decision === "unavailable" && executorBound(pending.action, task.auth)) {
-                  target.settle(pending, { ...receipt, decision: "allow",
-                    reason: "审批模型不可用，但命令在授权坐标内，放行以保障长程运行。" });
+                // Autonomous worker in `auto` mode whose command already passed deterministic
+                // scope/non-destructive/non-host-network checks must not freeze 10min on `ask`.
+                if (
+                  (receipt.decision === "ask" || receipt.decision === "unavailable") &&
+                  executorBound(pending.action, effectiveAuth)
+                ) {
+                  target.settle(pending, {
+                    ...receipt,
+                    decision: "allow",
+                    reason:
+                      receipt.decision === "ask"
+                        ? "自动审批模式下目标与能力边界已由确定性规则核验通过，直接放行以保障连续攻坚。"
+                        : "审批模型不可用，但命令在授权坐标内，放行以保障长程运行。",
+                  });
                   return;
                 }
                 target.settle(pending, receipt);

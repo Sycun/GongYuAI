@@ -67,3 +67,28 @@ test("maybeForceExploreTimeout concludes after wall timeout", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("hard step limit forces rotate even before wall timeout (resume-safe)", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-to-"));
+  const history = openHistory({ dbPath: join(root, "h.sqlite"), evidenceDir: join(root, "evidence") });
+  try {
+    const taskId = "t-steps";
+    const intent = history.proposeIntent({ taskId, title: "grind", sourceFactIds: [ORIGIN_FACT_ID] });
+    history.claimIntent(taskId, intent.id, "w0");
+    const ckpt = state({
+      activeIntentId: intent.id,
+      activeIntentClaimedAt: new Date().toISOString(), // just claimed: no wall timeout
+      toolsAtIntentClaim: 0,
+      toolCalls: 25,
+    });
+    const result = maybeForceExploreTimeout({
+      history, taskId, workerId: "w0", workspaceDir: root, state: ckpt,
+      exploreTimeoutMs: 900_000, save: () => {}, toolCalls: 25, hardToolLimit: 20,
+    });
+    assert.equal(result.concluded, true);
+    assert.equal(ckpt.activeIntentId, null);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
