@@ -8,7 +8,8 @@ import { DETAIL_TABS, ROUTE_META, SETTINGS_SECTIONS, isSettingsRoute, settingsSe
 import { newId } from "./chat/id";
 import { storeFiles, type DraftFile } from "./chat/attachments";
 import { useConversations } from "./chat/useConversations";
-import { defaultProject, useChatProjects } from "./chat/useChatProjects";
+import { defaultProject, defaultProjectLabel } from "./chat/projects";
+import { useChatProjects } from "./chat/useChatProjects";
 import { archiveKey, conversationTaskIds, submissionTasks, taskIdForChat, workspaceArchives, type ArchiveScope } from "./chat/archives";
 import { useTaskArchives } from "./chat/useTaskArchives";
 import { ChatSidebar } from "./components/ChatSidebar";
@@ -111,7 +112,7 @@ export function App() {
   });
   const activeProjects = workspace.projects.filter(name => !archivedProjects.has(name));
   const conversation = workspaceChats.find(c => c.id === id);
-  const project = !id && chat && archivedProjects.has(defaultProject) ? activeProjects[0] ?? defaultProject : workspace.projectOf(chatId);
+  const project = workspace.projectOf(chatId);
   const chatArchived = archivedChats.has(chatId) || archivedProjects.has(project);
   const draft = drafts[chatId] ?? "";
   const preferred = choices[chatId] ?? conversation?.turns.at(-1)?.selection;
@@ -199,13 +200,8 @@ export function App() {
     setPanel(null);
     setCreatingProject(true);
   }
-  function showProjectArchives() {
-    setShowArchived(true);
-    setCollapsed(false);
-    if (narrow) setPanel("history");
-  }
   const trimmedProjectName = projectName.trim();
-  const duplicateProject = workspace.projects.includes(trimmedProjectName);
+  const duplicateProject = trimmedProjectName === defaultProjectLabel || workspace.projects.includes(trimmedProjectName);
   function createProject() {
     if (changingArchive.current || !trimmedProjectName || duplicateProject) return;
     workspace.addProject(trimmedProjectName);
@@ -218,7 +214,6 @@ export function App() {
   const files = fileDrafts[chatId] ?? [];
   async function submit() {
     if (chatArchived || changingArchive.current || !selected || (!draft.trim() && !files.length) || isSubmitting(chatId)) return;
-    if (!id && project !== defaultProject) workspace.moveChat(chatId, project);
     const originalHash = location.hash;
     preparing.current.add(chatId); setStoring(old => ({ ...old, [chatId]: true }));
     try {
@@ -231,7 +226,7 @@ export function App() {
     finally { preparing.current.delete(chatId); setStoring(old => ({ ...old, [chatId]: false })); }
   }
   async function changeArchive(scope: ArchiveScope, archived: boolean) {
-    if (changingArchive.current) return;
+    if (changingArchive.current || (scope.kind === "project" && scope.id === defaultProject)) return;
     const affected = scope.kind === "project" ? chatsByProject.get(scope.id) ?? [] :
       scope.kind === "chat" ? workspaceChats.filter(item => item.id === scope.id) : [];
     const preparingInProject = scope.kind === "project" && [...preparing.current].some(id => workspace.projectOf(id) === scope.id);
@@ -365,19 +360,18 @@ export function App() {
         onDraft={value => setDrafts(old => ({ ...old, [chatId]: value }))} onSend={submit}
         catalog={catalog} selected={selected} modelError={modelError}
         projects={activeProjects} project={project} taskLink={taskLink} archived={chatArchived} archiveBusy={archiveBusy}
-        onCreateProject={openProjectCreator} onShowProjectArchives={showProjectArchives}
         taskArchives={archiveRecords}
         onArchive={archived => void changeArchive({ kind: "chat", id: chatId }, archived)}
         onTaskArchive={(id, archived) => void changeArchive({ kind: "task", id }, archived)}
         onMove={name => {
-          if (chatArchived || changingArchive.current || !activeProjects.includes(name)) return;
+          if ((conversation && chatArchived) || changingArchive.current || isSubmitting(chatId) || !activeProjects.includes(name)) return;
           workspace.moveChat(chatId, name);
           if (workspace.folded(name)) workspace.setFolded(name, false);
+          setShowArchived(false);
           addressChat();
         }}
         onLink={next => {
           if (chatArchived || changingArchive.current) return;
-          if (!id && project !== defaultProject) workspace.moveChat(chatId, project);
           workspace.linkTask(chatId, next ? { id: next, turnId: conversation?.turns.at(-1)?.id } : undefined);
           if (next) pinTask(next);
           addressChat();

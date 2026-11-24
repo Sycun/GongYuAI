@@ -31,9 +31,6 @@
 }
 .gy-chat-sidebar .gy-new-chat:hover { background: #fdfdff; border-color: #b9c6e7; }
 .gy-new-chat .semi-icon { color: var(--gy-accent); }
-.gy-new-chat .gy-new-chat-caret { margin-left: 6px; color: var(--gy-muted); }
-.gy-new-chat-projects { min-width: 156px; max-width: min(260px, calc(100vw - 24px)); max-height: min(320px, 50dvh); overflow: auto; }
-.gy-new-chat-projects .semi-dropdown-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gy-history { display: flex; flex: 1; min-height: 0; flex-direction: column; margin-top: 30px; }
 .gy-history-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 6px; font-size: 13px; color: var(--gy-muted); }
 .gy-history-search { margin-top: 8px; flex-shrink: 0; }
@@ -232,8 +229,13 @@ body {
 .gy-work-path i { font-style: normal; color: #b7bdc7; }
 .gy-work-path h1 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 580; color: var(--gy-ink); }
 .gy-work-header > .semi-button { flex: none; color: var(--gy-muted); }
-.gy-workspace-context { display: flex; align-items: center; gap: 7px; color: #5d6b85; font-size: 13px; }
-.gy-workspace-context .semi-icon { color: var(--gy-accent); }
+.gy-workspace-context.semi-select {
+  width: fit-content; max-width: min(100%, 300px); min-height: 30px; border-radius: 8px; background: #f4f6fb;
+}
+.gy-workspace-context.semi-select:hover { background: #eaf0fc; }
+.gy-workspace-context .semi-select-prefix { padding-left: 8px; }
+.gy-workspace-context .semi-select-prefix .semi-icon { color: var(--gy-accent); }
+.gy-workspace-options { min-width: 156px; max-width: min(300px, calc(100vw - 24px)); }
 .gy-project-row, .gy-current-blank { display: flex; align-items: center; gap: 8px; padding: 9px 7px; min-width: 0; font-size: 14px; }
 .gy-project-row { margin-top: 5px; border: none; border-radius: 8px; background: transparent; text-align: left; font-family: inherit; font-weight: 600; cursor: pointer; }
 .gy-project-row:hover { background: #edefF4; }
@@ -277,7 +279,7 @@ body {
 .gy-project-row:disabled { color: inherit; opacity: 1; cursor: default; }
 .gy-work-path > .gy-path-project { flex: 0 1 auto; max-width: 40%; }
 .gy-project-group + .gy-project-group { margin-top: 3px; }
-.gy-project-recovery, .gy-create-project-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.gy-create-project-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .gy-create-project { display: grid; gap: 12px; }
 .gy-create-project-actions { justify-content: flex-end; }
 .gy-session-meta select {

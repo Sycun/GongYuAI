@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, SideSheet, TextArea } from "@douyinfe/semi-ui";
+import { Button, Select, SideSheet, TextArea } from "@douyinfe/semi-ui";
 import { IconArrowUp, IconClose, IconFile, IconCommentStroked, IconFolder, IconList, IconRefresh } from "@douyinfe/semi-icons";
 import type { ChatCatalog, ChatSelection, TaskArchiveState } from "@gongyuai/contracts";
 import { ChatModelPicker, effortLabels } from "../components/ChatModelPicker";
@@ -9,6 +9,7 @@ import { ChatMarkdown } from "../components/ChatMarkdown";
 import { STATUS_LABEL } from "../labels";
 import { ChatTaskSelect } from "../components/ChatTaskProgress";
 import type { TaskLink } from "../chat/useChatProjects";
+import { projectLabel } from "../chat/projects";
 import { ComposerSafety, ReviewRecord, decisions } from "../components/ComposerSafety";
 import type { DraftFile } from "../chat/attachments";
 import { BrandMark } from "../components/ChatSidebar";
@@ -25,7 +26,6 @@ type Props = {
   conversation?: Conversation; pending?: string; draft: string; onDraft: (text: string) => void;
   projects: string[]; project: string; onMove: (name: string) => void;
   archived: boolean; archiveBusy: boolean; onArchive: (archived: boolean) => void;
-  onCreateProject: () => void; onShowProjectArchives: () => void;
   taskArchives: Map<string, TaskArchiveState>; onTaskArchive: (id: string, archived: boolean) => void;
   taskLink?: TaskLink; onLink: (id: string) => void;
   onSend: () => void; onTask: (t: Turn, view: AssignmentView) => void; onRetry: (turn: Turn) => void;
@@ -51,7 +51,7 @@ function stateOf(turn: Turn, pending?: string) {
 
 export function ChatPage({ catalog, selected, modelError, onSelectModel, onApprovalSettings, files, storing, onFiles, onRemoveFile, conversation, pending, draft, onDraft, onSend, onTask, onRetry, onCancel,
   projects, project, onMove, taskLink, onLink, narrow, viewedTaskId, viewMode, taskChoices, onPin, onFollow,
-  archived, archiveBusy, onArchive, onCreateProject, onShowProjectArchives, taskArchives, onTaskArchive }: Props) {
+  archived, archiveBusy, onArchive, taskArchives, onTaskArchive }: Props) {
   const [modelOpen, setModelOpen] = useState(false);
   const [reading, setReading] = useState(false);
   const [details, setDetails] = useState(false);
@@ -70,6 +70,7 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
   const last = conversation?.turns.at(-1);
   const contentKey = `${last?.id ?? ""}:${last?.answer ?? ""}:${last?.taskStatus ?? ""}:${notices.length}`;
   const showRail = Boolean(conversation);
+  const projectName = projectLabel(project);
 
   useEffect(() => {
     const view = transcript.current;
@@ -136,7 +137,7 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
   return <section className="gy-chat-page">
     <header className="gy-work-header">
       <div className="gy-work-path">{conversation
-          ? <><IconFolder aria-hidden="true" /><span className="gy-path-project" title={project}>{project}</span><i>/</i></>
+          ? <><IconFolder aria-hidden="true" /><span className="gy-path-project" title={projectName}>{projectName}</span><i>/</i></>
           : <IconCommentStroked aria-hidden="true" />}
         <h1 title={conversation?.title}>{conversation?.title ?? "新会话"}</h1></div>
       {narrow && showRail && <Button theme="borderless" type="tertiary" aria-label="任务图谱" onClick={() => setGraphsOpen(true)}>任务图谱</Button>}
@@ -198,15 +199,16 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
             <Button size="small" disabled={archiveBusy} onClick={() => onArchive(false)}>取消归档会话</Button>
           </div> : composer}</div>
         </> : <div className="gy-session-start"><div className="gy-welcome-inner">
-          <div className="gy-workspace-context"><IconFolder size="small" />{project} 工作区</div>
+          <span id="gy-project-switch-label" hidden>切换项目</span>
+          <Select className="gy-workspace-context" dropdownClassName="gy-workspace-options" size="small" borderless motion={false}
+            aria-labelledby="gy-project-switch-label" prefix={<IconFolder size="small" aria-hidden="true" />}
+            value={project} disabled={archiveBusy || storing || Boolean(pending)} maxHeight={250}
+            dropdownMatchSelectWidth={false} onChange={value => { if (typeof value === "string") onMove(value); }}>
+            {projects.map(name => <Select.Option key={name} value={name} showTick={false}>{projectLabel(name)}</Select.Option>)}
+            {archived && <Select.Option value={project} disabled showTick={false}>{projectName}（已归档）</Select.Option>}
+          </Select>
           <h2>今天要处理什么任务？</h2>
-          {archived ? <>
-            <p role="status">{projects.length ? "此项目已归档。" : "暂无活跃项目。"}在活跃项目中可以开始新会话。</p>
-            <div className="gy-project-recovery">
-              <Button theme="solid" disabled={archiveBusy} aria-haspopup="dialog" onClick={onCreateProject}>新建项目</Button>
-              <Button onClick={onShowProjectArchives}>查看已归档项目</Button>
-            </div>
-          </> : composer}
+          {archived ? <p role="status">此项目已归档，请切换项目后开始会话。</p> : composer}
         </div></div>}
       </div>
       {!narrow && rail}
@@ -221,8 +223,8 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
         }
       }}>
       <dl className="gy-session-meta">
-        <dt>所属项目</dt><dd>{archived ? project : <select aria-label="所属项目" disabled={archiveBusy} value={project} onChange={e => onMove(e.target.value)}>
-          {projects.map(name => <option key={name}>{name}</option>)}
+        <dt>所属项目</dt><dd>{archived ? projectName : <select aria-label="所属项目" disabled={archiveBusy || storing || Boolean(pending)} value={project} onChange={e => onMove(e.target.value)}>
+          {projects.map(name => <option key={name} value={name}>{projectLabel(name)}</option>)}
         </select>}</dd>
         <dt>关联任务</dt><dd>{archived ? taskArchives.get(taskLink?.id ?? "")?.name ?? taskLink?.id ?? "未手动关联" :
           details && <ChatTaskSelect value={taskLink?.id ?? ""} onChange={onLink} disabled={archiveBusy} />}</dd>

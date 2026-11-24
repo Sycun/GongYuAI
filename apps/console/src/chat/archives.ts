@@ -1,4 +1,5 @@
 import type { TaskArchiveState } from "@gongyuai/contracts";
+import { defaultProject } from "./projects";
 import type { Conversation } from "./useConversations";
 
 export type ArchiveScope = { kind: "project" | "chat" | "task"; id: string };
@@ -51,6 +52,7 @@ export function workspaceArchives({ projects, conversations, projectOf, linkedTa
   }
   const archivedProjects = new Set<string>();
   for (const [project, chats] of chatsByProject) {
+    if (project === defaultProject) continue;
     if (chats.length ? chats.every(chat => archivedChats.has(chat.id)) : localArchives.has(archiveKey("project", project))) {
       archivedProjects.add(project);
     }

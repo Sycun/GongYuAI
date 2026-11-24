@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Toast } from "@douyinfe/semi-ui";
+import { defaultProject } from "./projects";
 
-export const defaultProject = "GongYuAI";
 const prefix = "gongyuai.chat.workspace.v1.";
 export type TaskLink = { id: string; turnId?: string };
 

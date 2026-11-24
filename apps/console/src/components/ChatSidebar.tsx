@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Button, Dropdown, Input } from "@douyinfe/semi-ui";
+import { Button, Input } from "@douyinfe/semi-ui";
 import { IconArchive, IconChevronDown, IconChevronRight, IconChevronUp, IconFolder, IconCommentStroked, IconPlus, IconSearchStroked, IconSettingStroked, IconSidebar, IconUndo } from "@douyinfe/semi-icons";
 import type { ArchiveScope } from "../chat/archives";
+import { defaultProject, projectLabel } from "../chat/projects";
 import type { Conversation } from "../chat/useConversations";
 
 export function BrandMark() {
@@ -37,8 +38,9 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
   }
   const visible = projects.map(project => {
     const items = grouped.get(project) ?? [];
-    const matches = project.toLocaleLowerCase().includes(filter);
-    return { project, items: matches ? items : items.filter(c => c.title.toLocaleLowerCase().includes(filter)), matches,
+    const label = projectLabel(project);
+    const matches = label.toLocaleLowerCase().includes(filter) || project.toLocaleLowerCase().includes(filter);
+    return { project, label, items: matches ? items : items.filter(c => c.title.toLocaleLowerCase().includes(filter)), matches,
       archived: archivedProjects.has(project) };
   }).filter(group => (group.matches && group.archived === showArchived) || group.items.length);
 
@@ -47,35 +49,16 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
     onNew(project);
   }
 
-  const activeProjects = projects.filter(project => !archivedProjects.has(project));
-  const canChooseProject = activeProjects.length > 1;
-  function handleNewChat() {
-    const [activeProject] = activeProjects;
-    if (activeProject) startChat(activeProject);
-    else onCreateProject();
-  }
-  const newChatButton = <Button className="gy-new-chat" icon={<IconPlus />} aria-label="新建会话"
-    disabled={archiveBusy} aria-haspopup={!activeProjects.length ? "dialog" : undefined}
-    title={!activeProjects.length ? "新建项目并开始会话" : canChooseProject ? "选择项目后新建会话" : "新建会话"}
-    onClick={canChooseProject ? undefined : handleNewChat}>
-    {!collapsed && <>
-      新建会话{canChooseProject && <IconChevronDown className="gy-new-chat-caret" size="small" aria-hidden="true" />}
-    </>}
-  </Button>;
-
   return <aside aria-label="会话侧栏" className={'gy-chat-sidebar' + (collapsed ? " gy-collapsed" : "")}>
     <div className="gy-sidebar-top">
       <div className="gy-brand"><BrandMark /><span>GongYu<span className="gy-brand-ai">AI</span></span></div>
       <Button className="gy-toggle" theme="borderless" type="tertiary" icon={<IconSidebar />}
         aria-label={collapsed ? "展开侧栏" : "收起侧栏"} title={collapsed ? "展开侧栏" : "收起侧栏"} onClick={onToggle} />
     </div>
-    {canChooseProject && !archiveBusy ? <Dropdown trigger="click" position="bottomLeft" role="presentation" clickToHide motion={false}
-      render={<Dropdown.Menu className="gy-new-chat-projects" aria-label="选择项目">
-        {activeProjects.map(project => <Dropdown.Item key={project} icon={<IconFolder aria-hidden="true" />}
-          onClick={() => startChat(project)}><span title={project}>{project}</span></Dropdown.Item>)}
-      </Dropdown.Menu>}>
-      {newChatButton}
-    </Dropdown> : newChatButton}
+    <Button className="gy-new-chat" icon={<IconPlus aria-hidden="true" />} aria-label="新建会话"
+      disabled={archiveBusy} title="在默认对话区新建会话" onClick={() => startChat(defaultProject)}>
+      {!collapsed && "新建会话"}
+    </Button>
     {!collapsed && <section className="gy-history" aria-label="工作区会话">
       <div className="gy-history-heading"><span>{showArchived ? "已归档" : "项目"}</span><div>
         <Button theme="borderless" type="tertiary" size="small" icon={<IconPlus />}
@@ -92,24 +75,24 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
         placeholder="搜索项目或会话" value={query} onChange={setQuery} />}
       <div className="gy-history-list">
         {visible.length === 0 && <p className="gy-history-empty">{filter ? "没有匹配的项目或会话" : showArchived ? "暂无归档" : "暂无活跃项目"}</p>}
-        {visible.map(({ project, items, archived }) => {
+        {visible.map(({ project, label, items, archived }) => {
           const expanded = !!filter || !folded(project);
           const currentBlank = !showArchived && !archived && blank && currentProject === project && !filter;
           return <section key={project} className="gy-project-group">
             <div className="gy-project-heading">
-              <button type="button" className="gy-project-row" aria-expanded={expanded} title={project}
-                aria-label={project} disabled={!!filter} onClick={() => onFold(project, expanded)}>
+              <button type="button" className="gy-project-row" aria-expanded={expanded} title={label}
+                aria-label={label} disabled={!!filter} onClick={() => onFold(project, expanded)}>
                 {expanded ? <IconChevronDown size="small" /> : <IconChevronRight size="small" />}
-                <IconFolder /><span>{project}</span>
+                <IconFolder /><span>{label}</span>
               </button>
-              {!showArchived && <Button className="gy-project-new" theme="borderless" type="tertiary" size="small" icon={<IconPlus />} disabled={archiveBusy}
-                aria-label={`在「${project}」中新建会话`} title={`在「${project}」中新建会话`}
-                onClick={() => startChat(project)} />}
-              {archived === showArchived && <Button className="gy-sidebar-archive" theme="borderless" type="tertiary" size="small"
+              {project !== defaultProject && archived === showArchived && <Button className="gy-sidebar-archive" theme="borderless" type="tertiary" size="small"
                 disabled={archiveBusy} icon={archived ? <IconUndo /> : <IconArchive />}
-                aria-label={`${archived ? "取消归档项目" : "归档项目"}「${project}」`}
+                aria-label={`${archived ? "取消归档项目" : "归档项目"}「${label}」`}
                 title={archived ? "取消项目及其会话、任务的归档" : "归档项目及其会话、任务"}
                 onClick={() => onArchive({ kind: "project", id: project }, !archived)} />}
+              {!showArchived && <Button className="gy-project-new" theme="borderless" type="tertiary" size="small" icon={<IconPlus />} disabled={archiveBusy}
+                aria-label={`在「${label}」中新建会话`} title={`在「${label}」中新建会话`}
+                onClick={() => startChat(project)} />}
             </div>
             {expanded && <div className="gy-session-tree">
               {currentBlank && <div className="gy-current-blank" aria-current="page"><IconCommentStroked />新会话</div>}

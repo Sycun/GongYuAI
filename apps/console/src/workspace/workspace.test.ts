@@ -20,6 +20,7 @@ import {
 import type { Probe } from "../api";
 import type { TaskArchiveState } from "@gongyuai/contracts";
 import { archiveKey, workspaceArchives } from "../chat/archives";
+import { defaultProject } from "../chat/projects";
 import type { Conversation } from "../chat/useConversations";
 import { loadAssetGraph, loadMemoryGraph, loadSurface, type Getter } from "./loadGraphs.js";
 
@@ -54,6 +55,21 @@ test("task archives move conversations and projects only after all of their chil
   tasks.get("a")!.archivedAt = null;
   assert.deepEqual([...state().archivedChats], ["second"]);
   assert.equal(state().archivedProjects.has("材料核对"), false);
+});
+
+test("the default conversation area stays active with a legacy archive flag or all its chats archived", () => {
+  const state = (conversations: Conversation[]) => workspaceArchives({
+    projects: [defaultProject, "另一个项目"], conversations, tasks: new Map(), projectOf: () => defaultProject,
+    linkedTaskOf: () => undefined, isSubmitting: () => false,
+    localArchives: new Set([
+      archiveKey("project", defaultProject), archiveKey("project", "另一个项目"), archiveKey("chat", "old-chat"),
+    ]),
+  });
+
+  assert.deepEqual([...state([]).archivedProjects], ["另一个项目"]);
+  const populated = state([{ id: "old-chat", title: "旧会话", updated: 0, turns: [] }]);
+  assert.deepEqual([...populated.archivedChats], ["old-chat"]);
+  assert.deepEqual([...populated.archivedProjects], ["另一个项目"]);
 });
 
 function ok(json: unknown): Promise<Probe<unknown>> {
