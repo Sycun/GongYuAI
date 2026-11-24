@@ -229,14 +229,17 @@ export class WorkerRunner {
           // worker 存活才维持「审批处理中」；否则交回 watchdog 重启流程。
           return this.isAlive(task);
         }
-        // 1) 先判断「能否执行」：按任务授权裁决真实命令（并入官方靶场动态启动的容器坐标），越界直接拦截，不调模型、不等待。
+        // 1) 先判断「能否执行」：按任务授权裁决真实命令（并入受控适配器动态准入的子目标坐标），越界直接拦截，不调模型、不等待。
         //    有 command 的提案用 effectiveAuth 判定（与 worker 同一个闸），没有命令的旧提案仍按探针白名单。
-        const dynTargetsPath = join(task.dataDir, "tsecbench-targets.json");
         let extraTargets: string[] = [];
-        if (existsSync(dynTargetsPath)) {
+        for (const sidecar of ["admitted-targets.json", "tsecbench-targets.json"]) {
+          const dynTargetsPath = join(task.dataDir, sidecar);
+          if (!existsSync(dynTargetsPath)) continue;
           try {
             const parsed = JSON.parse(readFileSync(dynTargetsPath, "utf8"));
-            if (Array.isArray(parsed)) extraTargets = parsed.filter((x): x is string => typeof x === "string");
+            if (Array.isArray(parsed)) {
+              extraTargets.push(...parsed.filter((x): x is string => typeof x === "string"));
+            }
           } catch { /* ignore */ }
         }
         const effectiveAuth = extraTargets.length

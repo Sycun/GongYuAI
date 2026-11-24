@@ -18,11 +18,18 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "gy-exec-"));
 }
 
-test("extractHosts 抽 URL/IP/CIDR 内主机，忽略 loopback", () => {
+test("extractHosts 抽 URL/IP/CIDR 内主机，忽略 loopback 与路径/载荷/版本号误报", () => {
   assert.deepEqual(extractHosts("curl -s http://10.10.1.5:8080/a?b=1").sort(), ["10.10.1.5"]);
   assert.deepEqual(extractHosts("nmap -sV 10.10.2.3").sort(), ["10.10.2.3"]);
   assert.deepEqual(extractHosts("ffuf -u https://api.example.test/FUZZ -w w.txt").sort(), ["api.example.test"]);
   assert.deepEqual(extractHosts("curl http://127.0.0.1:8080/").sort(), []);
+  // Path segments (/socket.io), query params (email=admin@evil.com), POST -d payloads, and version numbers must NOT be mistaken for target hosts.
+  assert.deepEqual(
+    extractHosts(`curl -s "http://10.10.1.5:8080/socket.io/?email=admin@evil.com&v=2.4.49.1" -d '{"user":"a@outside.org"}'`),
+    ["10.10.1.5"],
+  );
+  assert.equal(authorizeCommand(AUTH, "nxc smb 10.10.1.5 -u guest -p ''").allowed, true);
+  assert.equal(authorizeCommand(AUTH, "chisel client 10.10.1.5:8000 R:socks").allowed, true);
 });
 
 test("authorizeCommand：坐标内放行、越界拒绝、能力档位不足拒绝", () => {

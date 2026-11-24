@@ -1,66 +1,71 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { WorkerManifest } from "@gongyuai/contracts";
 
 /**
- * Board / lab policy vs enterprise engagement policy.
+ * Engagement & vulnerability discovery policy.
  *
- * Philosophical split:
- * - **Breach / Lab Mode (`tsecbench` / `clear-board`)**: Zero objective dilution.
- *   Focus 100% on fast reconnaissance, deep vulnerability hypothesis, stateful PoC
- *   scripts, flag verification, and clean container rotation. Do NOT waste turns
- *   writing corporate remediation essays mid-exploit (terminal report renders from DAG).
- * - **Engagement Report Mode (`engagement-report` without `tsecbench`)**: Full enterprise
- *   surface management, verified findings, impact & remediation narrative.
+ * Design invariant (Goodhart guard):
+ * The system's objective function is ALWAYS real-world attack-surface understanding
+ * and root-cause verified Findings (`finding_record` → control/test differential proof
+ * → `finding_verify` with sealed `http:<id>` / `oast:<token>` / `evidence/` artifacts),
+ * NEVER competition score chasing or unverified speculation.
  */
-export function isTsecBenchMission(manifest: WorkerManifest): boolean {
-  const ids = new Set(manifest.goals.map((g) => g.id));
-  const titles = manifest.goals.map((g) => g.title.toLowerCase()).join(" ");
-  return ids.has("clear-board") || /clear.*board|清板|tsecbench|全部.*挑战/.test(titles);
+export function hasBenchmarkHarness(manifest: WorkerManifest): boolean {
+  const ids = new Set((manifest.goals ?? []).map((g) => g.id));
+  const titles = (manifest.goals ?? []).map((g) => g.title.toLowerCase()).join(" ");
+  if (
+    ids.has("clear-board") ||
+    (manifest.goals ?? []).some((g) => g.boardGate === "tsecbench") ||
+    /clear.*board|清板|tsecbench|全部.*挑战/.test(titles)
+  ) {
+    return true;
+  }
+  if (process.env.BENCHMARK_BASE_URL && process.env.BENCHMARK_TOKEN) return true;
+  if (manifest.dataDir) {
+    const envPath = join(dirname(dirname(manifest.dataDir)), "tsecbench", "env");
+    if (existsSync(envPath)) return true;
+  }
+  return false;
 }
 
 export function isBoardClearMission(manifest: WorkerManifest): boolean {
-  if (isTsecBenchMission(manifest)) return true;
-  const ids = new Set(manifest.goals.map((g) => g.id));
-  const titles = manifest.goals.map((g) => g.title.toLowerCase()).join(" ");
-  return ids.has("engagement-report") || /engagement/.test(titles);
+  const ids = new Set((manifest.goals ?? []).map((g) => g.id));
+  const titles = (manifest.goals ?? []).map((g) => g.title.toLowerCase()).join(" ");
+  return (
+    ids.has("clear-board") ||
+    ids.has("engagement-report") ||
+    /clear.*board|清板|tsecbench|全部.*挑战|engagement/.test(titles)
+  );
 }
 
 export function boardClearPolicyBlock(manifest: WorkerManifest): string {
   if (!isBoardClearMission(manifest)) return "";
 
-  if (isTsecBenchMission(manifest)) {
-    return `
-## 靶场攻坚模式（Breach Mode — 轻装快打、深度突破）
-唯一核心 KPI：**高效攻破所有题目容器、提交正确 flag 并通过目标证据闸**（终态报告由系统从 History 图自动生成，攻坚中途勿分心写冗长合规报告或修复建议）。
+  const base = `
+## 授权渗透测试与深度漏洞挖掘纪律（防异化原则）
+目标函数：在授权坐标内**系统化建图攻击面、定位真实安全缺陷成因、产出经对照验证且可独立复核的 Finding**。任何外部回执或凭证仅作为漏洞影响证明（PoC），绝不能用猜测或无证据结论替代成因验证。
 
-### 平台入口与零摩擦流转（必守）
-1. **一步开题准入**：先调 \`tsecbench(action="list")\` 拿题单 → 选未完成题调 \`tsecbench(action="start", code="...")\`（系统会自动将 \`container_addr\` 加入合法目标并生成 \`live\` 资产 Fact）→ 单 Worker 直接 \`intent_propose(title, sourceFactIds, claim="true")\` **一步认领进入 Explore**。
-2. **预检地址勿打**：\`10.0.100.58\` / \`10.0.100.135\` 仅为 VPN 联通预检端点，绝不是题目靶机；只攻击 \`tsecbench start\` 返回的真实 \`container_addr\`。
-3. **并发容器上限 ≤3**：攻克 \`submit\` 成功或放弃某题后，立即调 \`tsecbench(action="close", code="...")\` 释放容器槽位再开新题。
-
-### 微观攻坚方法论（先读懂再出刀，禁止盲目爆破）
-1. **快速指纹与信息收集（前 2～3 步）**：先看 HTTP 响应头、首页源码、JS 路由接口、报错栈、Cookie/JWT 结构及常见泄露点（\`/robots.txt\`、\`/.git/\`、备份源码、API 文档、开启的端口服务）。
-2. **有状态脚本化利用**：遇到登录态、CSRF、多步逻辑绕过、加密签名、反序列化、SSTI、SQL 盲注或条件竞争，直接在工作区用 \`python3 -c\` 或编写短小 Python 脚本（\`requests.Session()\`）精确打印关键回显，比反复手拼复杂单行 curl 更稳更快。
-3. **决定性手法速查（先打这些，再考虑广谱侦察）**：
-   - IDOR：改 \`id/uid/contract_id/role\` 读他人/管理员对象；低权会话直访 admin/approve 接口（越权）。
-   - 路径穿越：\`download.php?file=../../../../etc/passwd\`、\`?id=../../flag\`、\`/challenge/flag\`、\`/flag*\`；双编码/....// 绕过。
-   - SQLi：单引号触发报错 → 联合/盲注拖库；登录处 \`admin'--\`。
-   - 反序列化：构造 gadget/\`__reduce__\` 读 flag；JS 沙箱用原型链/constructor/内置对象逃逸。
-   - 文件上传：改后缀/Content-Type/截断上传 webshell 或读源码。
-4. **闭环提交与止损轮换**：
-   - 拿到真实 flag 立即 \`tsecbench(action="submit", code="...", flag="...")\`（系统自动封存 \`evidence/tsecbench/<code>-submit.json\`）→ \`intent_conclude(status="succeeded", ...)\` → \`close\` 容器。
-   - 同一题连续约 20 次工具调用仍无新线索/突破时，果断 \`intent_conclude(status="failed", conclusion="已排除路径与卡点")\` + \`close\` 容器换下一题，先清易中题再回头攻坚难题。
-   - 平台返回 \`409 already finished\` 视为终态；全部题目完成后生成/确认 \`ALL_COMPLETE.json\` 并调 \`assert_goal\`。
+### 深度漏洞挖掘方法论
+1. **业务与信任边界建图（先读懂再出刀）**：
+   - 先梳理目标技术栈、路由端点、鉴权机制、角色状态流转与外部输入汇聚点（新主机/服务端点由工具自动或经 \`asset_record\` 建图）；
+   - 单节点探索可用 \`intent_propose(..., claim="true")\` 一步将明确的漏洞假设转化为当前活跃验证单元。
+2. **多角色会话与基线对照验证（排除误报）**：
+   - 涉及越权、状态机绕过或多步业务逻辑缺陷时，使用 \`http_request\` 的命名 \`session\`（如 \`admin\` / \`user_a\` / \`anon\`）隔离维持各身份态；
+   - 验证输入边界、访问控制或盲态差异时，用 \`http_request\` 的 \`compareWith="http:<baselineId>"\` 与正常基线事务做确定性响应差分，用对照组说话，禁止靠盲目字典爆破碰运气。
+3. **证据闭环与同源横向迁移**：
+   - 发现可疑线索先 \`finding_record\`（tentative）；完成复现后必须调用 \`finding_verify\` 绑定封存事务 \`http:<id>\`、带外命中 \`oast:<token>\` 或 \`evidence/\` 原件及精确复现步骤；
+   - 确认有效成因、凭据或立足点后，提炼组件/架构特征通过 \`technique_transfer\` 对同族资产扇出验证；
+   - 同一攻击面连续约 25 次工具调用无实质证据进展时，须 \`intent_conclude(status="failed", conclusion="已验证排除的假设与边界约束")\` 止损换面；交付报告（如 \`engagement/report.md\`）只纳入 \`verified\` 结论。
 `;
+
+  if (!hasBenchmarkHarness(manifest)) {
+    return base;
   }
 
-  return `
-## 授权渗透测试作业纪律（企业评估模式）
-目标函数：在 auth.targets 内**经营攻击面、验证影响、沉淀可审计 finding**。
-
-### 作业节奏
-1. **建图**：Bootstrap/Explore 先确认活主机与服务（asset_record）；单 Worker 可用 \`intent_propose(..., claim="true")\` 一步进入 Explore。
-2. **攻击面轮换**：同一主机/端点连续约 25 次工具仍无已验证进展 → \`intent_conclude(failed)\` 写清排除依据 → 换面推进，禁止无脑爆破。
-3. **链式复用**：新凭据/会话/RCE/路径穿越立刻沉淀 Fact（优先 transferable）+ \`technique_transfer\` 横向扇出。
-4. **验证与交付**：复现后用 \`finding_verify\`（附 \`evidence/\` 原件与 repro）提升为 verified；边打边推进目标要求的证据文件，未通过 \`assert_goal\` 前禁止提前收工。
+  return `${base}
+### 外部靶场环境适配器说明（仅作靶机生命周期管理，不改变漏洞挖掘标准）
+- 当前环境挂载了 \`tsecbench\` 靶机管理适配器：通过 \`tsecbench(action="list"|"start"|"submit"|"close")\` 获取并启停受测靶机实例（并发实例 ≤3，验证完毕及时 \`close\`）；系统会自动将启动实例的 \`container_addr\` 纳入目标范围并建档 \`live\` 资产。
+- 联通性预检端点仅用于网络健康检查，并非受测业务实例；针对受测实例发现的漏洞仍须保留完整验证证据链，平台 \`409 already finished\` 视为环境终态。
 `;
 }

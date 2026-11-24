@@ -159,7 +159,17 @@ export function gateTool<T>(
     authorized = check();
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    if (["shell", "install", "mcp"].includes(tool) && (/^denied:/.test(reason) || reason.includes("not in task targets"))) {
+    // Autonomous durable workers (`durableDb` present) receive localized tool_result errors
+    // so the model can self-correct typos/flags without killing the whole task; only host-network
+    // / destructive violations or unguided standalone callers escalate to supervisor pause.
+    const isCriticalHostViolation =
+      reason.includes("host network") || reason.includes("destructive");
+    const isStandaloneCaller = !ctx.manifest.durableDb;
+    if (
+      ["shell", "install", "mcp"].includes(tool) &&
+      (isCriticalHostViolation ||
+        (isStandaloneCaller && (/^denied:/.test(reason) || reason.includes("not in task targets"))))
+    ) {
       recordHardDenial(ctx.manifest, tool, reason);
     }
     ctx.history.recordToolGate(ctx.manifest.taskId, {

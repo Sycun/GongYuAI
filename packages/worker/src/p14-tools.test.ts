@@ -229,3 +229,94 @@ test("oast DNS channel issues hostname tokens and correlates a query", async () 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("http_request maintains isolated named session cookie jars, computes compareWith differentials, and auto-records endpoints", async () => {
+  const { root, history, ctx } = setup("gy-p14-http-diff-");
+  const server = createServer((req, res) => {
+    const cookie = req.headers.cookie ?? "";
+    if (req.url === "/login/alice") {
+      res.writeHead(200, { "set-cookie": "role=alice; Path=/; HttpOnly", "content-type": "application/json" });
+      res.end(JSON.stringify({ loggedIn: "alice" }));
+      return;
+    }
+    if (req.url === "/login/bob") {
+      res.writeHead(200, { "set-cookie": "role=bob; Path=/; HttpOnly", "content-type": "application/json" });
+      res.end(JSON.stringify({ loggedIn: "bob" }));
+      return;
+    }
+    if (req.url === "/api/profile") {
+      if (cookie.includes("role=alice")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("owner=alice\ntier=standard");
+        return;
+      }
+      if (cookie.includes("role=bob")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("owner=bob\ntier=admin-privileged");
+        return;
+      }
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("forbidden");
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  try {
+    // Unauthenticated baseline → 403
+    const anon = JSON.parse(
+      await httpRequestTool(ctx, { url: `http://127.0.0.1:${port}/api/profile`, session: "anon" }),
+    ) as { ok: boolean; status: number; ref: string };
+    assert.equal(anon.status, 403);
+
+    // Login two isolated sessions
+    await httpRequestTool(ctx, { url: `http://127.0.0.1:${port}/login/alice`, session: "alice" });
+    await httpRequestTool(ctx, { url: `http://127.0.0.1:${port}/login/bob`, session: "bob" });
+
+    // Alice session automatically sends role=alice and compares against anon baseline
+    const aliceProfile = JSON.parse(
+      await httpRequestTool(ctx, {
+        url: `http://127.0.0.1:${port}/api/profile`,
+        session: "alice",
+        compareWith: anon.ref,
+      }),
+    ) as {
+      status: number;
+      ref: string;
+      sessionCookies: number;
+      diff: { statusChanged: boolean; baselineStatus: number; currentStatus: number; identicalResponse: boolean };
+    };
+    assert.equal(aliceProfile.status, 200);
+    assert.equal(aliceProfile.sessionCookies, 1);
+    assert.equal(aliceProfile.diff.statusChanged, true);
+    assert.equal(aliceProfile.diff.baselineStatus, 403);
+    assert.equal(aliceProfile.diff.currentStatus, 200);
+    assert.equal(aliceProfile.diff.identicalResponse, false);
+
+    // Bob session stays isolated from Alice and computes line-level diff against Alice
+    const bobProfile = JSON.parse(
+      await httpRequestTool(ctx, {
+        url: `http://127.0.0.1:${port}/api/profile`,
+        session: "bob",
+        compareWith: aliceProfile.ref,
+      }),
+    ) as {
+      status: number;
+      diff: { statusChanged: boolean; identicalResponse: boolean; addedSample: string[] };
+    };
+    assert.equal(bobProfile.status, 200);
+    assert.equal(bobProfile.diff.statusChanged, false);
+    assert.equal(bobProfile.diff.identicalResponse, false);
+    assert.ok(bobProfile.diff.addedSample.some((line) => line.includes("owner=bob")));
+
+    // Responsive endpoints (/api/profile, /login/alice, /login/bob) are auto-projected into live assets
+    const endpoints = history.listAssets(TASK_ID).filter((a) => a.assetType === "endpoint");
+    assert.ok(endpoints.some((a) => a.address.endsWith("/api/profile")));
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

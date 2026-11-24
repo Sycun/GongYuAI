@@ -76,6 +76,12 @@ export function decideApproval(input: {
   // bounded=目标已在坐标内且能力满足（授权前置）。授权内非破坏性利用（路径穿越/
   // 读文件/注入等 external_action）是渗透正当动作，不因模型误判"未授权风险"拦截；
   // high 但非破坏亦放行，只有 destructive/unknown 才 block/ask。
+  if (input.risk === "high" && input.activity !== "external_action") {
+    return {
+      decision: "block",
+      reason: "本机高风险操作需人工确认或调整范围后执行。",
+    };
+  }
   if (input.activity === "local_validation" && input.scope !== "local-validation") {
     return {
       decision: "block",
@@ -123,8 +129,10 @@ export async function reviewCommand(
     }
     const text = responseText(profile.protocol, await response.json());
     if (typeof text !== "string") return receipt;
-    const raw = text.trim().replace(/^\x60\x60\x60(?:json)?\s*([\s\S]*?)\s*\x60\x60\x60$/i, "$1");
-    const verdict = JSON.parse(raw);
+    const stripped = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    const raw = stripped.replace(/^\x60\x60\x60(?:json)?\s*([\s\S]*?)\s*\x60\x60\x60$/i, "$1").trim();
+    const jsonMatch = /\{[\s\S]*\}/.exec(raw);
+    const verdict = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     if (!verdict || !["low", "medium", "high", "unknown"].includes(verdict.risk)
       || !["read_only", "local_validation", "external_action", "destructive", "unknown"].includes(verdict.activity)
       || typeof verdict.reason !== "string" || !verdict.reason.trim()) return receipt;

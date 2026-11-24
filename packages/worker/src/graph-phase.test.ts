@@ -515,6 +515,24 @@ test("multi-worker leader delegates execution; follower cannot enter Reason", ()
     // Once open Intents drain, multi-worker leader wakes from explore into reason; follower stays explore.
     assert.equal(syncGraphPhase(history, taskId, "explore", { leader: true, workerCount: 2 }), "reason");
     assert.equal(syncGraphPhase(history, taskId, "reason", { leader: false, workerCount: 2 }), "explore");
+
+    // tsecbench is accessible across bootstrap / explore / reason; single-worker claim='true' enters Explore in one step.
+    assert.equal(allowedToolNames("bootstrap").has("tsecbench"), true);
+    assert.equal(allowedToolNames("explore").has("tsecbench"), true);
+    assert.equal(allowedToolNames("reason").has("tsecbench"), true);
+
+    const soloState = tmpState("bootstrap");
+    const soloOut = JSON.parse(
+      handleGraphTool(
+        "intent_propose",
+        { title: "fast probe", sourceFactIds: ORIGIN_FACT_ID, claim: "true" },
+        { history, taskId, workspaceDir: root, state: soloState, workerId: "solo", leader: true, workerCount: 1, save: () => {} },
+      ) ?? "{}",
+    ) as { id: string; status: string; autoClaimed?: boolean };
+    assert.equal(soloOut.autoClaimed, true);
+    assert.equal(soloOut.status, "claimed");
+    assert.equal(soloState.phase, "explore");
+    assert.equal(soloState.activeIntentId, soloOut.id);
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

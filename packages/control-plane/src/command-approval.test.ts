@@ -64,11 +64,11 @@ test("independent worker dispatch is gated by task authorization and the supervi
     await plane.watchdog.tick(); await delay(40);
   }
   const paused = plane.store.get(task.id)!;
-  // 授权范围内的命令（真实 command 提案）不再被 localProbe 白名单拦死：送审并执行。
+  // 授权范围内的命令（真实 command 提案）由确定性边界核验直接放行，不调审批模型；越界命令同样不放给审批模型误放行。
   assert.equal(paused.status, "paused");
   assert.equal(paused.commandReview?.decision, "block");
   assert.match(paused.error!, /evil\.test/);
-  assert.deepEqual(calls, ["uname -m"]);
+  assert.deepEqual(calls, []);
   assert.ok(readFileSync(join(task.dataDir, "allowed.txt"), "utf8").trim());
   // 越界目标在 worker 侧就被拒，回执落到台账，控制面据此暂停。
   assert.match(readFileSync(join(task.dataDir, "denied.txt"), "utf8"), /evil\.test/);

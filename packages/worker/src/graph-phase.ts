@@ -44,6 +44,7 @@ const ALWAYS = new Set([
   "plan_list",
   "oast_hits",
   "host_profile_list",
+  "tsecbench",
 ]);
 
 const BOOTSTRAP = new Set([
@@ -160,7 +161,7 @@ export function phaseDirective(
   ];
   if (p === "bootstrap") {
     lines.push(
-      "Bootstrap（渗透建图）：确认资产清单（auth.targets 已 seed）→ 若已配置资产收集 API 可用 asset_search 扩发现 → 写首批 Fact / asset_record（主机/服务，不只题号）→ intent_propose（须 sourceFactIds）→ phase_set(explore)。禁止 shell / assert_goal。",
+      "Bootstrap（建图启动）：确认目标坐标（靶场任务先调 tsecbench list/start，系统会自动准入容器地址并建 live 资产 Fact）→ 写首批 Fact 或直接 intent_propose（单 Worker 可传 claim='true' 一步认领并直入 Explore，省去多余相位切换）。禁止 shell / assert_goal。",
     );
   } else if (p === "explore") {
     lines.push(
@@ -290,7 +291,7 @@ export const GRAPH_PHASE_TOOLS = [
     function: {
       name: "intent_propose",
       description:
-        "Propose Intent anchored on sourceFactIds (comma-separated Fact ids or origin). Required before Explore.",
+        "Propose Intent anchored on sourceFactIds (comma-separated Fact ids or origin). Set claim='true' in single-worker mode to immediately claim & enter Explore in one step.",
       parameters: {
         type: "object",
         properties: {
@@ -300,6 +301,7 @@ export const GRAPH_PHASE_TOOLS = [
           technique: { type: "string" },
           assetRoot: { type: "string" },
           planStepId: { type: "string" },
+          claim: { type: "string" },
         },
         required: ["title", "sourceFactIds"],
       },
@@ -637,6 +639,24 @@ export function handleGraphTool(
         rejectOosOnly: true,
         fanout: inReason ? fanout : undefined,
       });
+      const wantClaim =
+        (args.claim === "true" || args.claim === "1" || args.claim === "yes") &&
+        !(ctx.leader === true && (ctx.workerCount ?? 1) > 1) &&
+        !ctx.state.activeIntentId;
+      if (wantClaim) {
+        const claimed = ctx.history.claimIntent(ctx.taskId, intent.id, workerId);
+        if (claimed) {
+          if (inReason) ctx.history.releaseReasonLease(ctx.taskId, workerId);
+          ctx.state.activeIntentId = claimed.id;
+          ctx.state.activeIntentClaimedAt = new Date().toISOString();
+          ctx.state.toolsAtIntentClaim = ctx.state.toolCalls;
+          ctx.state.lastSoftSurfaceMilestone = 0;
+          ctx.state.phase = "explore";
+          ctx.save();
+          appendProgress(ctx.workspaceDir, `phase=explore propose+claim=${claimed.id}`);
+          return JSON.stringify({ ...claimed, autoClaimed: true });
+        }
+      }
       return JSON.stringify(intent);
     } catch (err) {
       return `错误: ${err instanceof Error ? err.message : String(err)}`;

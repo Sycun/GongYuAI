@@ -25,7 +25,7 @@ import {
   type ToolContext,
 } from "./tools.js";
 import { collectorsPromptBlock, runAssetSearch } from "./asset-collectors.js";
-import { boardClearPolicyBlock } from "./board-policy.js";
+import { boardClearPolicyBlock, hasBenchmarkHarness } from "./board-policy.js";
 import { takeSoftPaceAdvice } from "./soft-pace.js";
 import { writeWorkerStatus } from "./status.js";
 import { writeTerminalReport } from "./report.js";
@@ -1283,10 +1283,11 @@ async function tryPiDurable(
     const http_request = defineTool({
       name: "http_request",
       description:
-        "P14 事务证据：发一次 HTTP 请求并落内容寻址证据；GET/HEAD/OPTIONS 需 scan，写方法需 active-lab；重定向逐跳出 scope 即停。返回 ref=http:<id> 供 finding_verify 引用。",
+        "P14 事务证据与对照分析：发 HTTP 请求并封存内容寻址证据（返回 ref=http:<id> 供 finding_verify 引用）。支持 session（命名 Cookie 会话隔离，用于多角色越权与有状态业务流验证）与 compareWith（传入基线 http:<id> 做确定性响应差分）。",
       parameters: obj({
         method: str(), url: str(), headers: str(), body: str(),
         follow: str(), timeoutMs: str(), note: str(),
+        session: str(), compareWith: str(),
       }),
       replay: "none",
       execute: async (args: Record<string, string>) => {
@@ -1397,7 +1398,7 @@ async function tryPiDurable(
           asset_search,
           write_evidence,
           install_tool,
-          tsecbench,
+          ...(hasBenchmarkHarness(manifest) ? [tsecbench] : []),
           assert_goal,
           enable_mcp,
           disable_mcp,
@@ -2026,8 +2027,8 @@ function sessionBootstrapText(manifest: WorkerManifest, historyObserve: string):
 }
 
 /**
- * Preserve both headers AND trailing payloads/flags/tracebacks when truncating large outputs,
- * instead of chopping off everything after char 4000 where flags and error details appear.
+ * Preserve both leading headers/context and trailing diagnostics/tracebacks when truncating large outputs,
+ * instead of chopping off everything after char 4000 where key evidence and error details appear.
  */
 function smartTruncateToolOutput(text: string, maxChars = 12_000): string {
   if (text.length <= maxChars) return text;
@@ -2331,23 +2332,27 @@ async function runOpenAiToolLoop(
         },
       },
     },
-    {
-      type: "function" as const,
-      function: {
-        name: "tsecbench",
-        description:
-          "TSecBench board entry (use for clear-board missions): list challenges+addr, start container (<=3), submit flag, close, status. Real targets only from start addr; never attack the VPN healthcheck IP.",
-        parameters: {
-          type: "object",
-          properties: {
-            action: { type: "string", enum: ["list", "start", "submit", "close", "status"] },
-            code: { type: "string", description: "challenge unique_code" },
-            flag: { type: "string", description: "flag value for submit" },
+    ...(hasBenchmarkHarness(manifest)
+      ? [
+          {
+            type: "function" as const,
+            function: {
+              name: "tsecbench",
+              description:
+                "External benchmark environment adapter (only mounted in benchmark runs): list/start/submit/close challenge instances.",
+              parameters: {
+                type: "object",
+                properties: {
+                  action: { type: "string", enum: ["list", "start", "submit", "close", "status"] },
+                  code: { type: "string", description: "challenge unique_code" },
+                  flag: { type: "string", description: "flag value for submit" },
+                },
+                required: ["action"],
+              },
+            },
           },
-          required: ["action"],
-        },
-      },
-    },
+        ]
+      : []),
     {
       type: "function" as const,
       function: {
@@ -2658,14 +2663,16 @@ async function runOpenAiToolLoop(
       type: "function" as const,
       function: {
         name: "http_request",
-        description: "P14 发一次 HTTP 请求并封存事务证据（GET=scan，写方法=active-lab）。",
+        description:
+          "P14 事务证据与对照分析：发 HTTP 请求并封存证据（ref=http:<id>）。可选 session（多角色 Cookie 会话隔离）与 compareWith（传入基线 http:<id> 计算响应差分）。",
         parameters: {
           type: "object",
           properties: {
             method: { type: "string" }, url: { type: "string" },
             headers: { type: "string" }, body: { type: "string" },
             follow: { type: "string" }, timeoutMs: { type: "string" },
-            note: { type: "string" },
+            note: { type: "string" }, session: { type: "string" },
+            compareWith: { type: "string" },
           },
           required: ["url"],
         },

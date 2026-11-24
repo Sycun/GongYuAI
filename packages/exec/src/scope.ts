@@ -59,50 +59,102 @@ const RECON_VERBS = new Set([
 ]);
 
 const POST_VERBS = new Set([
-  "mimikatz", "secretsdump", "psexec", "wmiexec", "smbexec", "atexec", "dcomexec",
-  "meterpreter", "msfvenom", "empire", "cobaltstrike", "sliver", "havoc", "chisel", "ligolo",
-  "proxychains4", "rubeus", "certipy", "bloodhound", "sharphound", "kerbrute", "impacket",
-  "crackmapexec", "netexec", "nxc", "responder", "mitm6", "ntlmrelayx", "petitpotam",
+  "mimikatz", "cobaltstrike", "sliver", "havoc", "empire", "responder", "mitm6", "ntlmrelayx", "petitpotam",
 ]);
 
 const EXPLOIT_VERBS = new Set([
   "sqlmap", "hydra", "medusa", "patator", "nc", "ncat", "netcat", "socat", "ssh", "scp", "sftp",
-  "smbclient", "evil-winrm", "xfreerdp", "rdesktop", "msfconsole", "searchsploit", "commix",
-  "tplmap", "ysoserial", "jwt_tool", "hashcat", "john", "aircrack-ng", "reaver", "bettercap",
+  "smbclient", "evil-winrm", "xfreerdp", "rdesktop", "msfconsole", "msfvenom", "meterpreter",
+  "searchsploit", "commix", "tplmap", "ysoserial", "jwt_tool", "hashcat", "john", "aircrack-ng",
+  "reaver", "bettercap", "secretsdump", "psexec", "wmiexec", "smbexec", "atexec",
+  "dcomexec", "chisel", "ligolo", "proxychains4", "rubeus", "certipy", "bloodhound", "sharphound",
+  "kerbrute", "impacket", "crackmapexec", "netexec", "nxc",
 ]);
 
-/** 从命令里抽取外部主机；loopback 不算外部目标。 */
+function isValidIpv4(ip: string): boolean {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return false;
+  return parts.every((p) => {
+    if (!/^\d{1,3}$/.test(p)) return false;
+    const n = Number(p);
+    return n >= 0 && n <= 255;
+  });
+}
+
+/**
+ * 从命令里抽取真正的网络目标主机；loopback 不算外部目标。
+ * 先提取显式 URL 的 authority 并剥离 URL 路径/查询参数与 HTTP 请求体数据，
+ * 避免把 `/socket.io/`、查询串邮箱 `admin@example.com`、版本号 `Apache/2.4.49.1` 误判为越界主机。
+ */
 export function extractHosts(command: string): string[] {
   const hosts = new Set<string>();
   const push = (raw: string | undefined) => {
     if (!raw) return;
     let h = raw.trim().toLowerCase();
     h = h.replace(/^["'`(]+|["'`),;]+$/g, "");
-    h = h.replace(/^https?:\/\//, "");
+    h = h.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
     h = h.split("/")[0] ?? h;
     h = h.split("?")[0] ?? h;
     h = h.replace(/^\[|\]$/g, "");
+    // Strip userinfo@ prefix if present on authority
+    if (h.includes("@")) h = h.split("@").pop() ?? h;
     const m = /^([^:\s]+?)(?::\d+)?$/.exec(h);
     if (!m) return;
     h = m[1]!;
     if (!h || h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "0.0.0.0") return;
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(h) && !isValidIpv4(h)) return;
     hosts.add(h);
   };
 
-  const patterns: RegExp[] = [
-    /https?:\/\/([^/\s'"`]+)/gi,
-    /\b(?:[a-z0-9._%+-]+)@([a-z0-9.-]+\.[a-z]{2,}|\d{1,3}(?:\.\d{1,3}){3})\b/gi,
-    /\b(?:-h|--host|--url|-u|--target|-t|--domain|-d|--ip|--address|-H\s+Host:)\s+['"]?([a-z0-9.-]+(?::\d+)?)/gi,
-    /\bHost:\s*([a-z0-9.-]+)/gi,
-    /\b(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?\b/g,
-    /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|cn|co|info|biz|dev|app|cloud|site|xyz|top|me|tv|cc|edu|gov|mil|local|internal|lan|test|example)(?::\d+)?\b/gi,
+  // 1) Extract explicit scheme://authority URLs first, then blank out the full URL (including path & query)
+  // so path segments like `/socket.io/` or `?email=a@example.com` are not re-scanned as hosts.
+  const urlRe = /\b(?:https?|wss?|ftp|ldap|ldaps|smb|ssh|redis|mysql|postgres|postgresql):\/\/([^/\s'"`]+)(?:\/[^\s'"`]*)?/gi;
+  let scrubbed = command.replace(urlRe, (_full, authority: string) => {
+    push(authority);
+    return " __URL__ ";
+  });
+
+  // 2) If command already has an explicit URL target, strip inline curl/http body flags (-d / --data*)
+  // so form/JSON payload fields (like `{"email":"admin@example.com"}`) do not trigger false OOS blocks.
+  if (hosts.size > 0) {
+    scrubbed = scrubbed.replace(
+      /\s(?:-d|--data|--data-raw|--data-binary|--data-urlencode)\s+(?:'[^']*'|"[^"]*"|\S+)/g,
+      " ",
+    );
+  }
+
+  // 3) Explicit host flags (-h / --host / -u / --target / Host: header)
+  const flagPatterns: RegExp[] = [
+    /\b(?:-h|--host|--url|-u|--target|-t|--domain|--ip|--address)\s+['"]?([a-z0-9.-]+(?::\d+)?)/gi,
+    /\bHost:\s*([a-z0-9.-]+(?::\d+)?)/gi,
   ];
-  for (const re of patterns) {
+  for (const re of flagPatterns) {
     re.lastIndex = 0;
     let m: RegExpExecArray | null;
-    while ((m = re.exec(command))) push(m[1]);
+    while ((m = re.exec(scrubbed))) push(m[1]);
   }
-  // 纯 host 形式（nmap 10.0.0.5 / dig @8.8.8.8）已由 IP 规则覆盖。
+
+  // 4) SSH/SCP user@host (only when preceded by whitespace or quote, avoiding inline JSON/form emails when possible)
+  const sshRe = /(?:^|[\s'"`])(?:[a-z0-9._-]+)@(\d{1,3}(?:\.\d{1,3}){3}|(?:[a-z0-9-]+\.)+(?:local|internal|lan|test|example|com|net|org|io|cn))\b/gi;
+  {
+    let m: RegExpExecArray | null;
+    while ((m = sshRe.exec(scrubbed))) push(m[1]);
+  }
+
+  // 5) Bare IPv4 addresses (exclude version strings like `v1.2.3.4` or `/2.4.49.1` or `1.2.3.4.5`)
+  const ipRe = /(?<![a-zA-Z0-9./-])(\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?![.\d])/g;
+  {
+    let m: RegExpExecArray | null;
+    while ((m = ipRe.exec(scrubbed))) push(m[1]);
+  }
+
+  // 6) Bare domain names (must NOT be preceded by `/`, `.`, or `@` so file paths like `/socket.io` are ignored)
+  const domainRe = /(?<![a-zA-Z0-9/_.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|cn|co|info|biz|dev|app|cloud|site|xyz|top|me|tv|cc|edu|gov|mil|local|internal|lan|test|example)(?::\d+)?\b/gi;
+  {
+    let m: RegExpExecArray | null;
+    while ((m = domainRe.exec(scrubbed))) push(m[0]);
+  }
+
   return [...hosts];
 }
 
