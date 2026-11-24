@@ -2,6 +2,14 @@
 
 本目录是项目**权威设计与开发入口**。后续沿 Fact–Intent 图 + Durable + Evidence + Relay 方向开发时，从这里读起。
 
+## 三份总览入口
+
+| 文件 | 回答什么 | 推荐读者 |
+| --- | --- | --- |
+| [project-overview.md](./project-overview.md) | 为什么做 GongYuAI、采用什么框架、各部分如何协作 | 新成员、项目评审、合作方 |
+| [project-flow.html](./project-flow.html) | 一次任务如何从目标走到可复核交付，异常如何恢复 | 操作员、架构评审、培训讲解 |
+| [project-guide.md](./project-guide.md) | 如何启动、建档、运行、接管、验收、排障与继续开发 | 操作员、开发者、复核人 |
+
 > **产品定调（最高权威）**：[red-team-positioning.md](./red-team-positioning.md)——目标默认授权、不设授权层、运行期零目标拒绝、完全红队化、上游优秀机制全量吸收矩阵。与任何文档冲突时以此为准。
 > **实施台账**：[implementation-ledger.md](./implementation-ledger.md)（P0–P12→代码/入口/证据/差距，阶段 1–7 实际状态）。  
 > **交付记录**：[delivery-record.md](./delivery-record.md)（发布提交/SHA、测试与验收、Kali 部署与一致性证据、复核清单）。
@@ -70,11 +78,14 @@
 
 ## 推荐阅读顺序
 
-1. [red-team-positioning.md](./red-team-positioning.md) — 定调层（授权、拒绝、能力边界）  
-2. [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) — 信仰层  
-3. [architecture.md](./architecture.md) — 怎么落成系统  
-4. [long-run-contract.md](./long-run-contract.md) — 运行硬约束  
-5. [dev-handbook.md](./dev-handbook.md) — 下一件做什么  
+1. [project-overview.md](./project-overview.md) — 项目原因、框架与全局协作
+2. [project-flow.html](./project-flow.html) — 一次任务的完整流程与恢复旁路
+3. [project-guide.md](./project-guide.md) — 实际操作、开发、验收与排障
+4. [red-team-positioning.md](./red-team-positioning.md) — 定调层（授权、拒绝、能力边界）
+5. [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) — 信仰层
+6. [architecture.md](./architecture.md) — 怎么落成系统
+7. [long-run-contract.md](./long-run-contract.md) — 运行硬约束
+8. [dev-handbook.md](./dev-handbook.md) — 下一件做什么
 
 示例与跑法不在本目录：
 

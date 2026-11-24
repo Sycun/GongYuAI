@@ -1,0 +1,1059 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>GongYuAI 项目流程图</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #64748b;
+      --line: #d8e1ee;
+      --paper: #f4f7fb;
+      --card: #ffffff;
+      --navy: #101b35;
+      --blue: #2563eb;
+      --cyan: #0891b2;
+      --violet: #7c3aed;
+      --green: #059669;
+      --amber: #d97706;
+      --rose: #e11d48;
+      --shadow: 0 14px 35px rgba(30, 55, 90, .09);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 0%, rgba(37, 99, 235, .09), transparent 28rem),
+        radial-gradient(circle at 95% 18%, rgba(124, 58, 237, .08), transparent 30rem),
+        var(--paper);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+    }
+
+    button, a { -webkit-tap-highlight-color: transparent; }
+
+    button { font: inherit; }
+
+    .page {
+      width: min(1440px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 28px 0 54px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 38px 42px 32px;
+      color: #fff;
+      border-radius: 26px;
+      background:
+        radial-gradient(circle at 82% 12%, rgba(34, 211, 238, .24), transparent 24rem),
+        radial-gradient(circle at 15% 120%, rgba(124, 58, 237, .32), transparent 30rem),
+        linear-gradient(135deg, #111d38 0%, #16264a 58%, #1d1850 100%);
+      box-shadow: 0 24px 60px rgba(15, 27, 53, .22);
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: .16;
+      background-image:
+        linear-gradient(rgba(255,255,255,.16) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.16) 1px, transparent 1px);
+      background-size: 34px 34px;
+      mask-image: linear-gradient(to left, #000, transparent 72%);
+    }
+
+    .hero > * { position: relative; z-index: 1; }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: #9fe7f4;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 52px);
+      line-height: 1.15;
+      letter-spacing: -.035em;
+    }
+
+    .hero-subtitle {
+      max-width: 900px;
+      margin: 16px 0 0;
+      color: #d8e4f7;
+      font-size: clamp(15px, 1.6vw, 19px);
+    }
+
+    .hero-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin-top: 22px;
+    }
+
+    .chip {
+      padding: 6px 11px;
+      color: #eaf2ff;
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 22px 0 14px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,.86);
+      box-shadow: 0 8px 24px rgba(30, 55, 90, .05);
+      backdrop-filter: blur(12px);
+    }
+
+    .filters, .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .filter-btn, .print-btn {
+      padding: 8px 13px;
+      color: #475569;
+      border: 1px solid #dbe4f0;
+      border-radius: 10px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 750;
+      transition: .18s ease;
+    }
+
+    .filter-btn:hover, .print-btn:hover { transform: translateY(-1px); border-color: #a9bcd8; }
+
+    .filter-btn[aria-pressed="true"] {
+      color: #fff;
+      border-color: var(--blue);
+      background: var(--blue);
+      box-shadow: 0 7px 16px rgba(37, 99, 235, .2);
+    }
+
+    .print-btn { color: #fff; border-color: var(--navy); background: var(--navy); }
+
+    .hint {
+      margin: 0 0 22px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .foundations {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    .foundation {
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+    }
+
+    .foundation .num {
+      display: inline-grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      margin-right: 9px;
+      color: #fff;
+      border-radius: 9px;
+      background: var(--blue);
+      font-size: 12px;
+      font-weight: 900;
+      vertical-align: middle;
+    }
+
+    .foundation:nth-child(2) .num { background: var(--violet); }
+    .foundation:nth-child(3) .num { background: var(--cyan); }
+
+    .foundation h2 {
+      display: inline;
+      margin: 0;
+      font-size: 18px;
+      vertical-align: middle;
+    }
+
+    .foundation p { margin: 10px 0 0; color: #526177; font-size: 13px; }
+    .foundation strong { color: var(--ink); }
+
+    .section-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 28px 2px 14px;
+    }
+
+    .section-title h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+    .section-title span { color: var(--muted); font-size: 12px; }
+
+    .flow-board {
+      padding: 28px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background:
+        linear-gradient(rgba(255,255,255,.92), rgba(255,255,255,.92)),
+        radial-gradient(circle at 1px 1px, #9fb1c9 1px, transparent 0);
+      background-size: auto, 22px 22px;
+      box-shadow: var(--shadow);
+    }
+
+    .flow-row {
+      display: flex;
+      align-items: stretch;
+      gap: 14px;
+    }
+
+    .flow-row + .flow-row { margin-top: 8px; }
+    .flow-row.reverse { flex-direction: row-reverse; }
+
+    .flow-node {
+      position: relative;
+      flex: 1 1 0;
+      min-width: 0;
+      padding: 17px 17px 15px;
+      text-align: left;
+      color: var(--ink);
+      border: 1px solid #d7e1ef;
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: 0 8px 18px rgba(31, 55, 90, .07);
+      cursor: pointer;
+      transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease, border-color .18s ease;
+    }
+
+    .flow-node::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 18px;
+      right: 18px;
+      height: 4px;
+      border-radius: 0 0 6px 6px;
+      background: var(--node-color, var(--blue));
+    }
+
+    .flow-node:hover, .flow-node:focus-visible {
+      z-index: 2;
+      transform: translateY(-3px);
+      border-color: var(--node-color, var(--blue));
+      box-shadow: 0 15px 30px rgba(31, 55, 90, .14);
+      outline: none;
+    }
+
+    .flow-node[data-group="delivery"] { --node-color: var(--green); }
+    .flow-node[data-group="memory"] { --node-color: var(--violet); }
+    .flow-node[data-node="explore"] { --node-color: var(--cyan); }
+    .flow-node[data-node="gate"] { --node-color: var(--amber); }
+    .flow-node[data-node="precondition"] { --node-color: #475569; }
+
+    .node-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 9px;
+    }
+
+    .node-index {
+      display: inline-grid;
+      width: 25px;
+      height: 25px;
+      place-items: center;
+      color: var(--node-color, var(--blue));
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--node-color, var(--blue)) 11%, white);
+      font-size: 11px;
+      font-weight: 900;
+    }
+
+    .node-tag {
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .flow-node h3 { margin: 0; font-size: 16px; line-height: 1.35; }
+    .flow-node p { min-height: 42px; margin: 8px 0 12px; color: #5d6c82; font-size: 12px; line-height: 1.55; }
+
+    .node-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      color: #526177;
+      border-radius: 999px;
+      background: #f1f5f9;
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .node-status::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #94a3b8;
+    }
+
+    .node-status.done { color: #047857; background: #ecfdf5; }
+    .node-status.done::before { background: var(--green); }
+    .node-status.partial { color: #b45309; background: #fffbeb; }
+    .node-status.partial::before { background: var(--amber); }
+    .node-status.policy { color: #6d28d9; background: #f5f3ff; }
+    .node-status.policy::before { background: var(--violet); }
+
+    .arrow {
+      display: grid;
+      flex: 0 0 30px;
+      place-items: center;
+      color: #93a4bd;
+      font-size: 26px;
+      font-weight: 400;
+      user-select: none;
+    }
+
+    .reverse .arrow { transform: rotate(180deg); }
+
+    .row-connector {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      width: 25%;
+      height: 45px;
+      padding-right: 10%;
+      color: #93a4bd;
+      font-size: 27px;
+    }
+
+    .row-connector.left { justify-content: flex-start; padding-right: 0; padding-left: 10%; }
+
+    .gate-branches {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0 8px;
+      padding: 14px;
+      border: 1px dashed #e4c893;
+      border-radius: 16px;
+      background: #fffaf0;
+    }
+
+    .gate-branch {
+      padding: 11px 13px;
+      border-radius: 11px;
+      background: rgba(255,255,255,.8);
+    }
+
+    .gate-branch strong { display: block; margin-bottom: 3px; color: #92400e; font-size: 12px; }
+    .gate-branch span { color: #78634a; font-size: 11px; }
+
+    .memory-loop {
+      margin-top: 12px;
+      color: #6d28d9;
+      font-size: 12px;
+      font-weight: 750;
+      text-align: center;
+    }
+
+    .recovery-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .recovery-card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: #fff;
+      box-shadow: 0 7px 18px rgba(31, 55, 90, .05);
+    }
+
+    .recovery-card h3 { margin: 0 0 6px; font-size: 14px; }
+    .recovery-card p { margin: 0; color: #64748b; font-size: 12px; }
+    .recovery-card code { color: #7c3aed; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+
+    .boundaries {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .boundary {
+      padding: 16px 18px;
+      color: #e8f0ff;
+      border-radius: 15px;
+      background: var(--navy);
+    }
+
+    .boundary strong { display: block; margin-bottom: 4px; color: #fff; font-size: 13px; }
+    .boundary span { color: #b9c8e2; font-size: 12px; }
+
+    .doc-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin-top: 20px;
+    }
+
+    .doc-links a {
+      padding: 8px 12px;
+      color: #1d4ed8;
+      border: 1px solid #cddbf3;
+      border-radius: 10px;
+      background: #fff;
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .doc-links a:hover { border-color: var(--blue); }
+
+    .footer {
+      margin-top: 26px;
+      color: #7b889d;
+      font-size: 11px;
+      text-align: center;
+    }
+
+    .is-dimmed { opacity: .2 !important; filter: grayscale(.65); }
+
+    dialog {
+      width: min(680px, calc(100% - 32px));
+      max-height: min(82vh, 760px);
+      padding: 0;
+      color: var(--ink);
+      border: 1px solid #d6e0ee;
+      border-radius: 20px;
+      background: #fff;
+      box-shadow: 0 30px 90px rgba(10, 22, 45, .3);
+    }
+
+    dialog::backdrop { background: rgba(11, 21, 40, .58); backdrop-filter: blur(5px); }
+
+    .dialog-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 24px 26px 18px;
+      color: #fff;
+      background: linear-gradient(135deg, #152342, #27205c);
+    }
+
+    .dialog-tag { margin: 0 0 7px; color: #a8e8f2; font-size: 11px; font-weight: 850; letter-spacing: .1em; }
+    .dialog-head h2 { margin: 0; font-size: 24px; line-height: 1.3; }
+
+    .close-btn {
+      display: grid;
+      flex: 0 0 34px;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      color: #fff;
+      border: 1px solid rgba(255,255,255,.24);
+      border-radius: 10px;
+      background: rgba(255,255,255,.1);
+      cursor: pointer;
+      font-size: 20px;
+    }
+
+    .dialog-body { padding: 22px 26px 26px; }
+    .dialog-summary { margin: 0 0 18px; color: #425269; font-size: 15px; }
+    .io-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+
+    .io-card {
+      padding: 13px 14px;
+      border: 1px solid #e0e7f1;
+      border-radius: 12px;
+      background: #f8fafc;
+    }
+
+    .io-card strong { display: block; margin-bottom: 5px; color: #334155; font-size: 11px; letter-spacing: .08em; }
+    .io-card span { color: #64748b; font-size: 12px; }
+
+    .rule-box {
+      margin-bottom: 18px;
+      padding: 13px 15px;
+      color: #6b4b16;
+      border-left: 4px solid var(--amber);
+      border-radius: 0 10px 10px 0;
+      background: #fffbeb;
+      font-size: 13px;
+    }
+
+    .detail-links { display: flex; flex-wrap: wrap; gap: 8px; }
+    .detail-links a { color: #1d4ed8; font-size: 12px; font-weight: 750; text-underline-offset: 3px; }
+
+    @media (max-width: 1050px) {
+      .flow-board { padding: 20px; }
+      .flow-row { gap: 9px; }
+      .flow-node { padding: 14px 13px; }
+      .flow-node h3 { font-size: 14px; }
+      .flow-node p { font-size: 11px; }
+      .arrow { flex-basis: 22px; font-size: 22px; }
+      .recovery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 760px) {
+      .page { width: min(100% - 22px, 1440px); padding-top: 12px; }
+      .hero { padding: 28px 22px 24px; border-radius: 20px; }
+      .toolbar { align-items: flex-start; flex-direction: column; }
+      .foundations, .boundaries { grid-template-columns: 1fr; }
+      .flow-board { padding: 16px; border-radius: 18px; }
+      .flow-row, .flow-row.reverse { flex-direction: column; gap: 8px; }
+      .flow-node { width: 100%; }
+      .flow-node p { min-height: 0; }
+      .arrow, .reverse .arrow { height: 24px; transform: rotate(90deg); }
+      .row-connector { width: 100%; height: 30px; justify-content: center; padding: 0; }
+      .gate-branches { grid-template-columns: 1fr; }
+      .recovery-grid { grid-template-columns: 1fr; }
+      .io-grid { grid-template-columns: 1fr; }
+      .section-title { align-items: flex-start; flex-direction: column; gap: 3px; }
+    }
+
+    @media print {
+      @page { size: A4 landscape; margin: 9mm; }
+      body { background: #fff; color: #111827; font-size: 10px; }
+      .page { width: 100%; padding: 0; }
+      .hero { padding: 16px 20px; border-radius: 10px; background: #152342 !important; box-shadow: none; }
+      .hero h1 { font-size: 25px; }
+      .hero-subtitle { margin-top: 7px; font-size: 11px; }
+      .hero-chips { margin-top: 10px; }
+      .chip { padding: 3px 7px; font-size: 8px; }
+      .toolbar, .hint, dialog, .footer { display: none !important; }
+      .foundations { gap: 8px; margin-bottom: 10px; }
+      .foundation { padding: 9px 11px; border-radius: 9px; box-shadow: none; break-inside: avoid; }
+      .foundation h2 { font-size: 12px; }
+      .foundation p { margin-top: 4px; font-size: 9px; }
+      .foundation .num { width: 21px; height: 21px; font-size: 9px; }
+      .section-title { margin: 12px 0 7px; }
+      .section-title h2 { font-size: 14px; }
+      .section-title span { font-size: 8px; }
+      .flow-board { padding: 12px; border-radius: 10px; box-shadow: none; break-inside: avoid; }
+      .flow-row { gap: 7px; }
+      .flow-node { padding: 9px 10px 8px; border-radius: 9px; box-shadow: none; break-inside: avoid; }
+      .flow-node::before { left: 10px; right: 10px; height: 3px; }
+      .node-top { margin-bottom: 4px; }
+      .node-index { width: 19px; height: 19px; font-size: 8px; }
+      .node-tag { font-size: 7px; }
+      .flow-node h3 { font-size: 11px; }
+      .flow-node p { min-height: 30px; margin: 4px 0 6px; font-size: 8px; }
+      .node-status { padding: 2px 5px; font-size: 7px; }
+      .arrow { flex-basis: 18px; font-size: 17px; }
+      .row-connector { height: 24px; font-size: 17px; }
+      .gate-branches { gap: 6px; margin: 8px 0 4px; padding: 7px; }
+      .gate-branch { padding: 6px 8px; }
+      .gate-branch strong { font-size: 8px; }
+      .gate-branch span { font-size: 7px; }
+      .memory-loop { margin-top: 5px; font-size: 8px; }
+      .recovery-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+      .recovery-card { padding: 8px 9px; border-radius: 8px; box-shadow: none; break-inside: avoid; }
+      .recovery-card h3 { font-size: 9px; }
+      .recovery-card p { font-size: 7px; }
+      .recovery-card code { font-size: 7px; }
+      .boundaries { gap: 6px; margin-top: 10px; }
+      .boundary { padding: 8px 10px; border-radius: 8px; background: #152342 !important; }
+      .boundary strong { font-size: 8px; }
+      .boundary span { font-size: 7px; }
+      .doc-links { display: none; }
+      .is-dimmed { opacity: 1 !important; filter: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">GongYuAI · Runtime Map · 2026-11-24</p>
+      <h1>从目标到可复核交付</h1>
+      <p class="hero-subtitle">目标进入任务即默认授权。女娲保证作业活着，Fact–Intent DAG 保证路径可信，Evidence 保证结论可复核，Super-agent 保证预算花在更可能出结论的面上。</p>
+      <div class="hero-chips">
+        <span class="chip">目标默认授权</span>
+        <span class="chip">运行期零目标拒绝</span>
+        <span class="chip">图驱动执行</span>
+        <span class="chip">证据硬闸</span>
+        <span class="chip">断点续跑</span>
+        <span class="chip">经验繁衍</span>
+      </div>
+    </header>
+
+    <nav class="toolbar" aria-label="流程图筛选与打印">
+      <div class="filters" role="group" aria-label="显示范围">
+        <button class="filter-btn" type="button" data-filter="all" aria-pressed="true">全部</button>
+        <button class="filter-btn" type="button" data-filter="main" aria-pressed="false">执行主流程</button>
+        <button class="filter-btn" type="button" data-filter="recovery" aria-pressed="false">异常与恢复</button>
+        <button class="filter-btn" type="button" data-filter="memory" aria-pressed="false">交付与记忆</button>
+      </div>
+      <div class="actions">
+        <button class="print-btn" type="button" id="printFlow">打印 / 导出 PDF</button>
+      </div>
+    </nav>
+
+    <p class="hint">点击任意流程节点查看输入、产出、硬约束与对应文档。筛选只改变强调范围，不改变流程顺序。</p>
+
+    <section class="foundations" aria-label="三条理论基础">
+      <article class="foundation">
+        <span class="num">01</span><h2>女娲 · 活与繁衍</h2>
+        <p><strong>Lease / Watchdog / Durable / Relay</strong> 让个体可死、作业不死；全局记忆与飞轮让经验可传承。</p>
+      </article>
+      <article class="foundation">
+        <span class="num">02</span><h2>DAG · 路径与真相</h2>
+        <p><strong>Fact / Intent / Goal / Evidence</strong> 禁止无因探索；只有图状态生成任务，结论可撤回、可复算。</p>
+      </article>
+      <article class="foundation">
+        <span class="num">03</span><h2>Super-agent · 调度经济</h2>
+        <p><strong>脑手分离 / 并行 Explore / 模型分层</strong> 让主脑不拿执行工具，让预算花在高价值攻击面。</p>
+      </article>
+    </section>
+
+    <div class="section-title">
+      <h2>任务主流程</h2>
+      <span>蛇形阅读：第一行向右，第二行向左，第三行向右，繁衍行向左</span>
+    </div>
+
+    <section class="flow-board" aria-label="GongYuAI 任务流程图">
+      <div class="flow-row">
+        <button class="flow-node" type="button" data-node="precondition" data-group="main">
+          <span class="node-top"><span class="node-index">01</span><span class="node-tag">使用者 · 工具外</span></span>
+          <h3>授权前提</h3>
+          <p>部署者取得授权；目标交给工具即视为授权，不进入运行时审查。</p>
+          <span class="node-status policy">产品语义</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="task" data-group="main">
+          <span class="node-top"><span class="node-index">02</span><span class="node-tag">Control plane</span></span>
+          <h3>任务坐标与 Goal</h3>
+          <p>targets / outOfScope / roe / 能力档位 / 证据判据 / 可选预算。</p>
+          <span class="node-status partial">P16 待收敛</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="bootstrap" data-group="main">
+          <span class="node-top"><span class="node-index">03</span><span class="node-tag">Worker · slot 0</span></span>
+          <h3>Bootstrap</h3>
+          <p>读取 Goal 与 origin，生成首批 Fact 和候选 Intent。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="dag" data-group="main">
+          <span class="node-top"><span class="node-index">04</span><span class="node-tag">History · 唯一执行权</span></span>
+          <h3>Fact–Intent DAG</h3>
+          <p>因果继承、CAS claim、无因探索禁令；图状态生成任务。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+      </div>
+
+      <div class="row-connector" aria-hidden="true">↓</div>
+
+      <div class="flow-row reverse">
+        <button class="flow-node" type="button" data-node="explore" data-group="main">
+          <span class="node-top"><span class="node-index">05</span><span class="node-tag">Worker × N</span></span>
+          <h3>并行 Explore</h3>
+          <p>每个 Worker 一次 claim 一个 Intent，按资产动态扩容。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="act" data-group="main">
+          <span class="node-top"><span class="node-index">06</span><span class="node-tag">Exec · 工具面</span></span>
+          <h3>工具执行</h3>
+          <p>shell / MCP / Skill / HTTP / OAST / C2 / PTY / tunnel。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="evidence" data-group="main">
+          <span class="node-top"><span class="node-index">07</span><span class="node-tag">Evidence</span></span>
+          <h3>证据留存</h3>
+          <p>原始事务、内容寻址 blob、SHA-256、角色与版本。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="conclude" data-group="main">
+          <span class="node-top"><span class="node-index">08</span><span class="node-tag">History · 同事务</span></span>
+          <h3>Conclude → Fact</h3>
+          <p>成功必须回写 Fact 与 Intent 因果边；失败也保留约束。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+      </div>
+
+      <div class="row-connector left" aria-hidden="true">↓</div>
+
+      <div class="flow-row">
+        <button class="flow-node" type="button" data-node="reason" data-group="main">
+          <span class="node-top"><span class="node-index">09</span><span class="node-tag">Worker · leader</span></span>
+          <h3>Reason</h3>
+          <p>无 open Explore 时判断完成、换面、更新计划、提出下一批 Intent。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="finding" data-group="main">
+          <span class="node-top"><span class="node-index">10</span><span class="node-tag">Finder ≠ Validator</span></span>
+          <h3>Finding + 独立复核</h3>
+          <p>tentative → verified；独立会话确认、反驳或标记不确定。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="gate" data-group="main">
+          <span class="node-top"><span class="node-index">11</span><span class="node-tag">Goal Gate · 硬闸</span></span>
+          <h3>目标与证据判定</h3>
+          <p>证据、内容判据、Finding 门槛、资产归属在同一事务核对。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="delivery" data-group="delivery">
+          <span class="node-top"><span class="node-index">12</span><span class="node-tag">History → Report</span></span>
+          <h3>报告与交付</h3>
+          <p>report / snapshot / scorecard / 事件链；更正、复测、处置分列。</p>
+          <span class="node-status done">已实现</span>
+        </button>
+      </div>
+
+      <div class="gate-branches" aria-label="Goal Gate 分支">
+        <div class="gate-branch"><strong>未通过</strong><span>回到 Reason / Explore，继续补证据或换攻击面。</span></div>
+        <div class="gate-branch"><strong>缺材料或不可达</strong><span><code>needs_input</code> / <code>paused</code> / 人工求助，不是授权申请。</span></div>
+        <div class="gate-branch"><strong>工程自保</strong><span>确定性 <code>blocked</code>：保护运行宿主，不针对目标。</span></div>
+      </div>
+
+      <div class="row-connector" aria-hidden="true">↓</div>
+
+      <div class="flow-row reverse">
+        <button class="flow-node" type="button" data-node="candidate" data-group="memory">
+          <span class="node-top"><span class="node-index">13</span><span class="node-tag">终态钩子</span></span>
+          <h3>经验候选</h3>
+          <p>只列素材：verified finding、撤回、partial Fact、工具遗产。</p>
+          <span class="node-status partial">入口待闭环</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="review" data-group="memory">
+          <span class="node-top"><span class="node-index">14</span><span class="node-tag">Human review</span></span>
+          <h3>人工复核</h3>
+          <p>draft 永不自动 confirmed；署名、理由、来源哈希缺一不可。</p>
+          <span class="node-status done">后端已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="memory" data-group="memory">
+          <span class="node-top"><span class="node-index">15</span><span class="node-tag">Platform memory</span></span>
+          <h3>全局记忆</h3>
+          <p>Lesson / Playbook / Counterexample / ToolArtifact / SourceRef。</p>
+          <span class="node-status done">后端已实现</span>
+        </button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="flow-node" type="button" data-node="inject" data-group="memory">
+          <span class="node-top"><span class="node-index">16</span><span class="node-tag">Hint · 建议层</span></span>
+          <h3>注入下一任务</h3>
+          <p>按 MatchKey 注入 title 层 Hint；不写 Fact、不直接派 Intent。</p>
+          <span class="node-status partial">Worker 待接线</span>
+        </button>
+      </div>
+
+      <p class="memory-loop">反馈回写 reuseCount / 反例 / 降级 → 形成飞轮；下一任务从 Bootstrap 重新建立自己的图与证据。</p>
+    </section>
+
+    <div class="section-title">
+      <h2>长跑与异常恢复旁路</h2>
+      <span>这些机制贯穿主流程，不是额外阶段</span>
+    </div>
+
+    <section class="recovery-grid" aria-label="长跑与异常恢复机制">
+      <article class="recovery-card" data-group="recovery">
+        <h3>进程崩溃</h3>
+        <p><code>Lease + Watchdog + Durable</code> 用同一任务卷重启；崩溃不写 Relay π。</p>
+      </article>
+      <article class="recovery-card" data-group="recovery">
+        <h3>上下文饱和</h3>
+        <p><code>Relay πₙ</code> 在 token 阈值或自然检查点换班；History 仍是权威。</p>
+      </article>
+      <article class="recovery-card" data-group="recovery">
+        <h3>长作业阻塞</h3>
+        <p>后台作业完成通知 durable 回流，不轮询；回执幂等，迟到结果可审计。</p>
+      </article>
+      <article class="recovery-card" data-group="recovery">
+        <h3>缺件 / 等人</h3>
+        <p><code>operator_consult</code> 可 blocking；24h 无回复转非阻塞，回复写成 human Hint。</p>
+      </article>
+      <article class="recovery-card" data-group="recovery">
+        <h3>暂停 / 恢复</h3>
+        <p>保留 History、证据、checkpoint 与持久会话；恢复读取最新操作配置。</p>
+      </article>
+      <article class="recovery-card" data-group="recovery">
+        <h3>模型拒绝</h3>
+        <p>上下文重问 → 结构化重问 → 换模型 → 拆小重派；永不作为终态或 Fact。</p>
+      </article>
+      <article class="recovery-card" data-group="recovery">
+        <h3>重复失败</h3>
+        <p>观察员与记分卡识别无进展；建议换面，不把“磨不动”解释成“无漏洞”。</p>
+      </article>
+      <article class="recovery-card" data-group="recovery">
+        <h3>宿主保护</h3>
+        <p>主机路由 / VPN / 代理变更永拒；只读状态查询放行。这是工程自保。</p>
+      </article>
+    </section>
+
+    <section class="boundaries" aria-label="三条职责边界">
+      <article class="boundary"><strong>目标合法性：使用者的事</strong><span>授权在工具外取得，产品不登记、不验证、不询问。</span></article>
+      <article class="boundary"><strong>路径合法性：DAG 的事</strong><span>无因探索、证据不足、因果断裂，由结构与硬闸裁决。</span></article>
+      <article class="boundary"><strong>运行环境安全：工程的事</strong><span>确定性规则保护宿主，不允许模型扩大解释。</span></article>
+    </section>
+
+    <nav class="doc-links" aria-label="延伸阅读">
+      <a href="./project-overview.md">项目说明</a>
+      <a href="./project-guide.md">项目指导方案</a>
+      <a href="./red-team-positioning.md">产品定调</a>
+      <a href="./long-run-contract.md">长跑契约</a>
+      <a href="./pentest-completeness.md">能力完备性</a>
+      <a href="./implementation-ledger.md">实施台账</a>
+    </nav>
+
+    <p class="footer">单文件离线 HTML · 无外部依赖 · 支持移动端与打印 · 流程状态以项目文档台账为准</p>
+  </main>
+
+  <dialog id="nodeDialog" aria-labelledby="dialogTitle">
+    <div class="dialog-head">
+      <div>
+        <p class="dialog-tag" id="dialogTag"></p>
+        <h2 id="dialogTitle"></h2>
+      </div>
+      <button class="close-btn" type="button" id="closeDialog" aria-label="关闭详情">×</button>
+    </div>
+    <div class="dialog-body">
+      <p class="dialog-summary" id="dialogSummary"></p>
+      <div class="io-grid">
+        <div class="io-card"><strong>输入</strong><span id="dialogInput"></span></div>
+        <div class="io-card"><strong>产出</strong><span id="dialogOutput"></span></div>
+      </div>
+      <div class="rule-box" id="dialogRule"></div>
+      <div class="detail-links" id="dialogLinks"></div>
+    </div>
+  </dialog>
+
+  <script>
+    const details = {
+      precondition: {
+        tag: "PRODUCT POLICY",
+        title: "授权前提",
+        summary: "授权由部署者或使用者在工具之外取得。目标进入任务即视为授权，产品不设授权登记、目标白名单审查或授权版本。",
+        input: "已获授权的委托、靶场或规则范围。",
+        output: "可执行的任务目标；不产生运行时授权审批。",
+        rule: "目标合法性是使用者的事。工具只判断作业坐标、路径合法性与工程边界。",
+        links: [["产品定调 §3", "./red-team-positioning.md"], ["DISCLAIMER", "../DISCLAIMER.md"]]
+      },
+      task: {
+        tag: "CONTROL PLANE",
+        title: "任务坐标与 Goal",
+        summary: "把操作者意图转成机器可执行配置：目标、排除项、节奏建议、能力档位、预算、Goal 与证据判据。",
+        input: "targets、outOfScope、roe/rateGuidance、capability、budget、goals。",
+        output: "manifest、seed 资产、Goal 契约、初始任务状态。",
+        rule: "这些字段是作业坐标与操作配置，不是授权闸。当前代码仍保留旧 auth 形状，P16 将收敛。",
+        links: [["产品定调 §3", "./red-team-positioning.md"], ["长跑契约", "./long-run-contract.md"]]
+      },
+      bootstrap: {
+        tag: "WORKER · SLOT 0",
+        title: "Bootstrap",
+        summary: "任务只有 origin 与 Goal 时，由 Worker 读取必要上下文，生成首批 Fact 和候选 Intent。",
+        input: "manifest、Goals、origin、资产清单、已确认的经验 Hint。",
+        output: "首批 Fact、proposed Intent、Durable phase=bootstrap。",
+        rule: "Bootstrap 不持有 shell/MCP 执行权；它只建立图状态，真正执行交给 Explore。",
+        links: [["架构", "./architecture.md"], ["长跑契约 · 相位工具", "./long-run-contract.md"]]
+      },
+      dag: {
+        tag: "HISTORY · EXECUTION AUTHORITY",
+        title: "Fact–Intent DAG",
+        summary: "外置结构化图是跨会话唯一真相。Intent 必须挂在已有 Fact 上，claim 使用 CAS，成功后同事务回写 Fact。",
+        input: "Fact、Hint、Goal、资产状态、开放 Intent。",
+        output: "可 claim 的 Intent、因果边、可复核的路径状态。",
+        rule: "禁止无因探索；聊天、Relay、记忆和四图投影都不是第二真相源。",
+        links: [["Fact–Intent 理论", "./theory-fact-intent-dag.md"], ["长跑契约", "./long-run-contract.md"]]
+      },
+      explore: {
+        tag: "WORKER × N",
+        title: "并行 Explore",
+        summary: "多个 Worker 共享 History，通过 Intent CAS 并行探索不同攻击面；每个 Worker 一次只执行一个 active Intent。",
+        input: "proposed Intent、工具面、预算、资产与 family Hint。",
+        output: "工具调用、证据、临时观测、conclude 请求。",
+        rule: "有效并发=min(配置上限, max(靶标数, admitted/live 资产数))，运行中只扩不缩；硬顶 16。",
+        links: [["并发扩容", "./parallel-explore-scaling.md"], ["执行面", "./pentest-exec-c2-enhancement.md"]]
+      },
+      act: {
+        tag: "EXEC · SINGLE GATE",
+        title: "工具执行",
+        summary: "Explore 通过统一工具闸调用 shell、MCP、Skill、HTTP、OAST、C2、PTY 与隧道。控制面只发现工具，不直接执行。",
+        input: "Intent、工具参数、能力档位、作业坐标、预算。",
+        output: "原始输出、退出码、会话/作业句柄、tool_gate 事件。",
+        rule: "主机路由/VPN/代理修改属于工程自保，永拒；目标内容只作为数据，不作为指令。",
+        links: [["执行面与 C2", "./pentest-exec-c2-enhancement.md"], ["P14 执行边界", "./pentest-capability-extension.md"]]
+      },
+      evidence: {
+        tag: "EVIDENCE",
+        title: "证据留存",
+        summary: "把工具输出转成可封存、可复算、可引用的证据：HTTP 事务、OAST 命中、内容寻址 blob、SHA-256、角色与版本。",
+        input: "原始响应、命令输出、OOB 回调、文件字节。",
+        output: "evidence 文件、http:<id>、proof blob、哈希与版本记录。",
+        rule: "证据路径必须位于 evidence/ 内； traversal、符号链接与硬链接会被拒绝。证据最小化不等于不取证。",
+        links: [["P14 事务与 OAST", "./pentest-capability-extension.md"], ["证据复核", "./evidence-review.md"]]
+      },
+      conclude: {
+        tag: "HISTORY · ATOMIC WRITE",
+        title: "Conclude → Fact",
+        summary: "Explore 结束一个 Intent 时，conclude 与 Fact 回写在同一事务中完成，形成 Fact←Intent 因果边。",
+        input: "Intent 状态、conclusion、新 Fact、证据引用。",
+        output: "succeeded/failed Intent、新 Fact、history event。",
+        rule: "成功必须附至少一个新 Fact；失败结论要写清否定证据或约束，不能只回一句“不行”。",
+        links: [["长跑契约 · Fact–Intent", "./long-run-contract.md"], ["理论", "./theory-fact-intent-dag.md"]]
+      },
+      reason: {
+        tag: "WORKER · LEADER",
+        title: "Reason",
+        summary: "当没有 open Explore 时，Leader 综合新 Fact、Hint、Finding 与 Goal 状态，决定完成、换面、更新计划或提出下一批 Intent。",
+        input: "title 层 History、open/closed Intent、Findings、Hint、Goal 状态。",
+        output: "新 Intent、计划更新、Goal 判定建议、no-op。",
+        rule: "Reason 不拿 shell/MCP；有 open Intent 时必须回 Explore。扇出受每轮与每资产硬顶约束。",
+        links: [["架构 · Worker 原语", "./architecture.md"], ["计划链", "./pentest-capability-extension.md"]]
+      },
+      finding: {
+        tag: "FINDER ≠ VALIDATOR",
+        title: "Finding + 独立复核",
+        summary: "漏洞从 tentative 开始，具备证据与复现步骤后才能 verified；独立 Validator 给出 confirmed/refuted/inconclusive/out-of-scope。",
+        input: "资产、漏洞类型、端点、证据、repro、验证方法。",
+        output: "Finding 状态、proof、validation 记录、报告候选。",
+        rule: " tentative 不进正式报告；验证与整改复测分列；撤回不删除历史。Finder 不能自证。",
+        links: [["P15 独立确认", "./absorb-offensive-landscape.md"], ["长跑契约 · Finding", "./long-run-contract.md"]]
+      },
+      gate: {
+        tag: "GOAL GATE · HARD GATE",
+        title: "目标与证据判定",
+        summary: "系统在同一事务里核对证据文件、内容判据、Finding 门槛与目标资产归属，模型不能自行宣布完成。",
+        input: "Goal、evidencePaths、evidenceChecks、findingsGate、当前 Finding 状态。",
+        output: "passes=true/false、首次通过依据、审计事件。",
+        rule: "未通过就回 Reason/Explore；首次通过后证据撤回不抹掉历史，但当前支持度会重新计算。",
+        links: [["长跑契约 · Evidence Gate", "./long-run-contract.md"], ["交付可信度", "./delivery-assurance-plan.md"]]
+      },
+      delivery: {
+        tag: "DELIVERY",
+        title: "报告与交付",
+        summary: "从 History 渲染报告，生成可复算快照、记分卡与事件链头；交付后的更正、复测、客户处置分别追加。",
+        input: "Facts、Findings、证据版本、验证、覆盖、事件链。",
+        output: "report.md、delivery snapshot、scorecard、chain head、通知记录。",
+        rule: "报告不是第二真相源；任何数字都应能从快照复算，任何结论都应能下钻到原件。",
+        links: [["交付记录", "./delivery-record.md"], ["实施台账", "./implementation-ledger.md"]]
+      },
+      candidate: {
+        tag: "DISTILL · CANDIDATES ONLY",
+        title: "经验候选",
+        summary: "终态只列可蒸馏素材，不自动生成“真相”：verified finding、复核撤回、超时 partial Fact、工具遗产等。",
+        input: "终态 History、Finding、复核记录、workspace 产物。",
+        output: "候选清单；等待操作员选择。",
+        rule: "自动产物永远 draft；无源素材不得进入候选，凭据明文不得进入全局记忆。",
+        links: [["记忆层", "./memory-layer.md"], ["数据飞轮", "./data-flywheel.md"]]
+      },
+      review: {
+        tag: "HUMAN REVIEW",
+        title: "人工复核",
+        summary: "操作员选择候选后生成 draft，复核人核对来源、适用条件与反例，署名确认或撤回。",
+        input: "draft、SourceRef、源证据哈希、适用条件、反例。",
+        output: "confirmed/retracted 记忆节点与复核事件。",
+        rule: "draft 不注入、不执行；confirmed 也必须保留溯源，后续可追加反例或 supersedes。",
+        links: [["记忆层生命周期", "./memory-layer.md"], ["知识库", "./knowledge-library-console.md"]]
+      },
+      memory: {
+        tag: "PLATFORM MEMORY",
+        title: "全局记忆",
+        summary: "保存经复核的经验与方法：Lesson、Playbook、Counterexample、ToolArtifact、SourceRef、MatchKey、SkillPack。",
+        input: "confirmed 节点、来源指针、匹配键、反例、反馈。",
+        output: "可检索记忆图、注入候选、复用统计、降级/取代关系。",
+        rule: "全局记忆只存指针与哈希，不拷贝源任务证据；旧 Fact 不直写新任务；默认不出本机。",
+        links: [["记忆层", "./memory-layer.md"], ["全局记忆 API", "./api-contract-r9.md"]]
+      },
+      inject: {
+        tag: "HINT · SUGGESTION ONLY",
+        title: "注入下一任务",
+        summary: "新任务按硬键/软键匹配 confirmed 经验，以 title 层 Hint 注入；Explore 命中当前资产时可有限追加。",
+        input: "MatchKey、当前资产/stack、任务坐标、confirmed 记忆。",
+        output: "source=system Hint、injected_as 事件、后续反馈锚点。",
+        rule: "记忆注入不绕过 DAG，不直接派 Intent，不改变作业坐标。当前 Worker 自动注入仍需接线。",
+        links: [["记忆注入规则", "./memory-layer.md"], ["长跑契约 · Hint", "./long-run-contract.md"]]
+      }
+    };
+
+    const dialog = document.getElementById("nodeDialog");
+    const filterGroups = {
+      all: null,
+      main: ["main"],
+      recovery: ["recovery"],
+      memory: ["delivery", "memory"]
+    };
+
+    document.querySelectorAll(".filter-btn").forEach((button) => {
+      button.addEventListener("click", () => {
+        const filter = button.dataset.filter;
+        const activeGroups = filterGroups[filter];
+        document.querySelectorAll(".filter-btn").forEach((item) => {
+          item.setAttribute("aria-pressed", String(item === button));
+        });
+        document.querySelectorAll("[data-group]").forEach((item) => {
+          const active = activeGroups === null || activeGroups.includes(item.dataset.group);
+          item.classList.toggle("is-dimmed", !active);
+        });
+      });
+    });
+
+    document.querySelectorAll(".flow-node").forEach((button) => {
+      button.addEventListener("click", () => {
+        const detail = details[button.dataset.node];
+        if (!detail) return;
+        document.getElementById("dialogTag").textContent = detail.tag;
+        document.getElementById("dialogTitle").textContent = detail.title;
+        document.getElementById("dialogSummary").textContent = detail.summary;
+        document.getElementById("dialogInput").textContent = detail.input;
+        document.getElementById("dialogOutput").textContent = detail.output;
+        document.getElementById("dialogRule").textContent = detail.rule;
+        const links = document.getElementById("dialogLinks");
+        links.replaceChildren();
+        detail.links.forEach(([label, href]) => {
+          const anchor = document.createElement("a");
+          anchor.href = href;
+          anchor.textContent = label;
+          links.appendChild(anchor);
+        });
+        dialog.showModal();
+      });
+    });
+
+    document.getElementById("closeDialog").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    document.getElementById("printFlow").addEventListener("click", () => window.print());
+  </script>
+</body>
+</html>
