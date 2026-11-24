@@ -15,7 +15,9 @@ import {
 import type { Context } from "@earendil-works/chord/context";
 import type { EntryId, HookApi } from "@earendil-works/pi-durable";
 import { openHistory } from "@gongyuai/history";
+import { startTrafficProxy, type TrafficProxy } from "@gongyuai/exec";
 import { CheckpointStore, type CheckpointState } from "./checkpoint.js";
+import { runTrafficTool } from "./traffic-tools.js";
 import {
   appendProgress,
   installTool,
@@ -307,6 +309,22 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
 
     const mcpHub = await openMcpHub(manifest, ctx);
     const skillHub = openSkillHub(manifest, history);
+    let trafficProxy: TrafficProxy | null = null;
+    if (process.env.GY_DISABLE_TRAFFIC_PROXY !== "1") {
+      try {
+        trafficProxy = await startTrafficProxy({
+          taskId: manifest.taskId,
+          taskDir: manifest.dataDir,
+          workerId: manifest.workerId,
+          intentId: state.activeIntentId ?? undefined,
+          insecureUpstream: true,
+        });
+        ctx.proxyEnv = trafficProxy.getProxyEnv();
+      } catch {
+        // Sandboxed or port-restricted environment: degrade gracefully without blocking worker.
+        trafficProxy = null;
+      }
+    }
     try {
       const started = await tryPiDurable(
         manifest,
@@ -329,6 +347,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
         );
       }
     } finally {
+      await trafficProxy?.close().catch(() => {});
       await mcpHub.close();
     }
 
@@ -1423,11 +1442,56 @@ async function tryPiDurable(
       } as never);
     });
 
-    const registry = createRegistry();
-    registry.install(
-      defineExtension({
-        name: "gongyuai",
-        tools: [
+    const traffic_search = defineTool({
+      name: "traffic_search",
+      description: "检索本地 MITM 代理捕获的目标 HTTP/HTTPS 流量索引（可按 host/method/status/path/keyword/intentId 过滤）。",
+      parameters: obj({
+        host: str(),
+        method: str(),
+        status: str(),
+        path: str(),
+        keyword: str(),
+        intentId: str(),
+        limit: str(),
+      }),
+      replay: "none",
+      execute: async (args: Record<string, unknown>) =>
+        textOut(() => runTrafficTool(manifest.dataDir, manifest.taskId, "traffic_search", args)),
+    } as never);
+    const traffic_get = defineTool({
+      name: "traffic_get",
+      description: "读取单条录制流量的完整请求头、响应头、blob 元数据与证据引用 http:<id>。",
+      parameters: obj({ id: str() }),
+      replay: "none",
+      execute: async (args: Record<string, unknown>) =>
+        textOut(() => runTrafficTool(manifest.dataDir, manifest.taskId, "traffic_get", args)),
+    } as never);
+    const traffic_blob = defineTool({
+      name: "traffic_blob",
+      description: "按字节 offset 分段读取录制流量的请求体或响应体（side=req|res，防大包撑爆上下文）。",
+      parameters: obj({ id: str(), side: str(), offset: str(), maxBytes: str() }),
+      replay: "none",
+      execute: async (args: Record<string, unknown>) =>
+        textOut(() => runTrafficTool(manifest.dataDir, manifest.taskId, "traffic_blob", args)),
+    } as never);
+
+    const FOLLOWER_ONLY_EXEC_TOOLS = new Set([
+      "shell",
+      "shell_job",
+      "shell_session",
+      "c2",
+      "http_request",
+      "tunnel_open",
+      "tunnel_close",
+      "mcp_invoke",
+      "tsecbench",
+    ]);
+    const pruneLeaderExecTools = isExploreLeader(manifest) && readPoolSize() > 1;
+    let relayPending = false;
+    let rotatePending: string | null = null;
+    let stepsSinceRotateCheck = 0;
+
+    const allPiTools = [
           shell,
           shellJobTool,
           shellSessionTool,
@@ -1457,6 +1521,9 @@ async function tryPiDurable(
           enable_skill,
           disable_skill,
           http_request,
+          traffic_search,
+          traffic_get,
+          traffic_blob,
           host_profile_record,
           host_profile_parse,
           attack_graph_record,
@@ -1472,11 +1539,34 @@ async function tryPiDurable(
           mcp_invoke,
           ...graphPiTools,
           ...mcpPiTools,
-        ],
+        ];
+    const registeredPiTools = pruneLeaderExecTools
+      ? allPiTools.filter((t) => {
+          const name = (t as { name?: string }).name ?? "";
+          return !FOLLOWER_ONLY_EXEC_TOOLS.has(name) && !isMcpToolName(name);
+        })
+      : allPiTools;
+
+    const registry = createRegistry();
+    registry.install(
+      defineExtension({
+        name: "gongyuai",
+        tools: registeredPiTools,
         hooks: [
           hook(ToolTask, {
             beforeTool: (call: { name: string; parent?: unknown; args?: Record<string, unknown> }) => {
               if (call.parent) return undefined;
+              if (relayPending && call.name !== "relay" && call.name !== "intent_conclude") {
+                return {
+                  block:
+                    "Session Relay 阈值已触发：请立即停止调用新工具并输出简短交接摘要，系统将自动落盘 π 并开启干净新会话。",
+                };
+              }
+              if (rotatePending && call.name !== "intent_conclude" && call.name !== "relay") {
+                return {
+                  block: `当前攻击面已触发证据耗尽轮换（${rotatePending}）：请停止旧面调用并简短总结，系统将立即切回 Reason 换面。`,
+                };
+              }
               const block = phaseToolDenial(ctx, state, call.name, mcpHub, call.args);
               return block ? { block } : undefined;
             },
@@ -1551,6 +1641,25 @@ async function tryPiDurable(
               // Soft pace during long Pi sessions: queue for next continue/kickoff inject.
               const softDuring = maybeSoftPaceMessage(state, ctx, workerStartedAt);
               if (softDuring) state.pendingSoftPaceMessage = softDuring;
+              // Mid-submission Session Relay trigger: stop Pi internal compaction from masking π handoffs.
+              if (
+                !relayPending &&
+                canRelay({
+                  manifest,
+                  tokensSinceRelay: state.tokensSinceRelay,
+                  toolCallsSinceRelay: state.toolCallsSinceRelay,
+                  forceAgent: false,
+                }).ok
+              ) {
+                relayPending = true;
+              }
+              // Mid-submission evidence-exhaustion rotation check (every 5 tool steps).
+              stepsSinceRotateCheck += 1;
+              if (!rotatePending && state.phase === "explore" && state.activeIntentId && stepsSinceRotateCheck >= 5) {
+                stepsSinceRotateCheck = 0;
+                const rot = runExploreTimeoutGate(manifest, ctx.history, state, ckpt);
+                if (rot) rotatePending = rot;
+              }
               ckpt.save(state);
               return undefined;
             },
@@ -1645,27 +1754,32 @@ async function tryPiDurable(
           state.relayGeneration += 1;
           state.tokensSinceRelay = 0;
           state.toolCallsSinceRelay = 0;
+          relayPending = false;
           ckpt.save(state);
           appendProgress(manifest.workspaceDir, `relay π${protocol.generation} (auto reset)`);
           await root.reset(
-            `会话已自动 Relay（π${protocol.generation}）。请依据以下 History 图与交接继续推进：\n\n${buildTurnObserveBlock(manifest, ctx.history, state)}`,
+            `会话已自动 Relay（π${protocol.generation}）。请依据以下 History 图与交接继续推进：\n\n${buildTurnObserveBlock(manifest, ctx.history, state, skillHub)}`,
             context,
           );
         }
 
         round += 1;
-        const timeoutNote = runExploreTimeoutGate(
-          manifest,
-          ctx.history,
-          state,
-          ckpt,
-        );
+        const timeoutNote =
+          rotatePending ??
+          runExploreTimeoutGate(
+            manifest,
+            ctx.history,
+            state,
+            ckpt,
+          );
+        rotatePending = null;
+        stepsSinceRotateCheck = 0;
         const pending = consumePendingSoftPace(state);
         const softPace =
           pending ?? maybeSoftPaceMessage(state, ctx, workerStartedAt);
         if (softPace || timeoutNote || pending) ckpt.save(state);
 
-        const observeBlock = buildTurnObserveBlock(manifest, ctx.history, state);
+        const observeBlock = buildTurnObserveBlock(manifest, ctx.history, state, skillHub);
         const content = pendingRefusalPrompt
           ? `${pendingRefusalPrompt}\n\n${observeBlock}`
           : round === 1
@@ -1974,6 +2088,7 @@ function buildTurnObserveBlock(
   manifest: WorkerManifest,
   history: ReturnType<typeof openHistory>,
   state: CheckpointState,
+  skillHub?: SkillHub,
 ): string {
   state.phase = syncGraphPhase(history, manifest.taskId, state.phase, {
     leader: isExploreLeader(manifest),
@@ -1984,10 +2099,16 @@ function buildTurnObserveBlock(
     openIntentCount: open.length,
     activeIntentId: state.activeIntentId,
   });
-  return `${phaseBlock}\n\n${sessionBootstrapText(
-    manifest,
-    history.observe(manifest.taskId),
-  )}`;
+  const autoSkillBlock = skillHub
+    ? skillHub.autoInjectForFacts(history.listFacts(manifest.taskId))
+    : "";
+  return [
+    phaseBlock,
+    sessionBootstrapText(manifest, history.observe(manifest.taskId)),
+    autoSkillBlock,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function systemPrompt(

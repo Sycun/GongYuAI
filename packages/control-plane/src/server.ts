@@ -1116,6 +1116,7 @@ export function startControlServer(opts: ServerOptions) {
               assets: history.listAssets(task.id),
               hints: history.listHints(task.id, 50),
               findings: history.listFindings(task.id),
+              dag: history.dagExport(task.id),
               retestRequests: history.listRetestRequests(task.id),
               peerReviews: history.listPeerReviews(task.id),
             });

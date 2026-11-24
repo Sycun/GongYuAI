@@ -81,14 +81,17 @@ function isValidIpv4(ip: string): boolean {
   });
 }
 
+const RFC2606_PLACEHOLDER_RE = /^(?:(?:[a-z0-9-]+\.)*example\.(?:com|org|net)|(?:[a-z0-9-]+\.)*example)$/i;
+
 /**
  * 从命令里抽取真正的网络目标主机；loopback 不算外部目标。
  * 先提取显式 URL 的 authority 并剥离 URL 路径/查询参数与 HTTP 请求体数据，
- * 避免把 `/socket.io/`、查询串邮箱 `admin@example.com`、版本号 `Apache/2.4.49.1` 误判为越界主机。
+ * 避免把 `/socket.io/`、查询串邮箱 `admin@example.com`、版本号 `Apache/2.4.49.1`、
+ * 以及未展开的 shell 变量片段（`$h`、`10.0.188.64$p`）误判为越界主机。
  */
 export function extractHosts(command: string): string[] {
   const hosts = new Set<string>();
-  const push = (raw: string | undefined) => {
+  const push = (raw: string | undefined, opts?: { allowPlaceholderSkip?: boolean }) => {
     if (!raw) return;
     let h = raw.trim().toLowerCase();
     h = h.replace(/^["'`(]+|["'`),;]+$/g, "");
@@ -98,11 +101,19 @@ export function extractHosts(command: string): string[] {
     h = h.replace(/^\[|\]$/g, "");
     // Strip userinfo@ prefix if present on authority
     if (h.includes("@")) h = h.split("@").pop() ?? h;
+    // Unexpanded shell variables: strip trailing `$var` / `:$var` (e.g. `10.0.188.64$p` -> `10.0.188.64`),
+    // and skip pure shell variable tokens like `$h` or `${host}`.
+    if (h.includes("$")) {
+      const stripped = h.replace(/:?\$(?:\{[^}]*\}|[a-z0-9_]*)/gi, "").replace(/:$/, "");
+      if (!stripped || stripped.includes("$")) return;
+      h = stripped;
+    }
     const m = /^([^:\s]+?)(?::\d+)?$/.exec(h);
     if (!m) return;
     h = m[1]!;
     if (!h || h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "0.0.0.0") return;
     if (/^\d+\.\d+\.\d+\.\d+$/.test(h) && !isValidIpv4(h)) return;
+    if (opts?.allowPlaceholderSkip && hosts.size > 0 && RFC2606_PLACEHOLDER_RE.test(h)) return;
     hosts.add(h);
   };
 
@@ -138,7 +149,7 @@ export function extractHosts(command: string): string[] {
   const sshRe = /(?:^|[\s'"`])(?:[a-z0-9._-]+)@(\d{1,3}(?:\.\d{1,3}){3}|(?:[a-z0-9-]+\.)+(?:local|internal|lan|test|example|com|net|org|io|cn))\b/gi;
   {
     let m: RegExpExecArray | null;
-    while ((m = sshRe.exec(scrubbed))) push(m[1]);
+    while ((m = sshRe.exec(scrubbed))) push(m[1], { allowPlaceholderSkip: true });
   }
 
   // 5) Bare IPv4 addresses (exclude version strings like `v1.2.3.4` or `/2.4.49.1` or `1.2.3.4.5`)
@@ -152,7 +163,7 @@ export function extractHosts(command: string): string[] {
   const domainRe = /(?<![a-zA-Z0-9/_.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|net|org|io|cn|co|info|biz|dev|app|cloud|site|xyz|top|me|tv|cc|edu|gov|mil|local|internal|lan|test|example)(?::\d+)?\b/gi;
   {
     let m: RegExpExecArray | null;
-    while ((m = domainRe.exec(scrubbed))) push(m[0]);
+    while ((m = domainRe.exec(scrubbed))) push(m[0], { allowPlaceholderSkip: true });
   }
 
   return [...hosts];

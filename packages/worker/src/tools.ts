@@ -123,6 +123,8 @@ export type ToolContext = {
   manifest: WorkerManifest;
   history: HistoryStore;
   usage: { toolCalls: number; installs: number };
+  /** Child-process-only proxy env from task-local MITM traffic proxy (never mutates host). */
+  proxyEnv?: Record<string, string>;
 };
 
 /** Formal scope match (CIDR / wildcard / suffix / *) — see @gongyuai/contracts scope. */
@@ -309,6 +311,7 @@ export async function runShell(
       cwd: ctx.manifest.workspaceDir,
       timeoutMs,
       maxBytes: 400_000,
+      ...(ctx.proxyEnv ? { env: { ...process.env, ...ctx.proxyEnv } } : {}),
     });
     if (ticketId) {
       reportCommandOutcome(

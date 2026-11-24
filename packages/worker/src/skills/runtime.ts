@@ -15,6 +15,14 @@ export type SkillHub = {
   register(pack: WorkerSkillPack, catalogEntry?: ToolCatalogEntry): void;
   /** Load full SKILL.md (or an optional reference file under references/) into tool result. */
   load(id: string, reason: string, ref?: string): string;
+  /**
+   * Dark-Moon reactive triggering: match recent asset/fingerprint facts against routing.json
+   * triggers and return compact Skill excerpts (deduped per session, hard token/char cap).
+   */
+  autoInjectForFacts(
+    facts: ReadonlyArray<{ title: string; summary?: string; tags?: readonly string[] }>,
+    opts?: { maxChars?: number; maxSkills?: number },
+  ): string;
   /** Which skills have been loaded this run (for progress). */
   loadedIds(): string[];
 };
@@ -98,6 +106,7 @@ export function openSkillHub(
 
   const startCall = history.trackIntegrationCalls(manifest.taskId);
   const loaded = new Set<string>();
+  const autoInjected = new Set<string>();
 
   function triggersFor(id: string, rootDir?: string): string[] {
     if (routeFile.has(id)) return routeFile.get(id)!;
@@ -233,6 +242,73 @@ export function openSkillHub(
       } finally {
         finish(success);
       }
+    },
+
+    autoInjectForFacts(facts, opts) {
+      if (!facts.length) return "";
+      const maxChars = Math.max(400, Math.min(opts?.maxChars ?? 4500, 6000));
+      const maxSkills = Math.max(1, Math.min(opts?.maxSkills ?? 2, 3));
+      const hay = facts
+        .slice(-25)
+        .map((f) => `${f.title} ${f.summary ?? ""} ${(f.tags ?? []).join(" ")}`)
+        .join(" ")
+        .toLowerCase();
+      if (!hay.trim()) return "";
+
+      const scored: Array<{ id: string; score: number; matched: string[] }> = [];
+      for (const c of catalog) {
+        if (loaded.has(c.id) || autoInjected.has(c.id)) continue;
+        const pack = pool.get(c.id);
+        if (!pack) continue;
+        const trig = triggersFor(c.id, pack.rootDir);
+        const matched: string[] = [];
+        for (const t of trig) {
+          const needle = t.trim().toLowerCase();
+          if (needle.length >= 2 && hay.includes(needle)) matched.push(t);
+        }
+        if (matched.length > 0) {
+          scored.push({ id: c.id, score: matched.length, matched });
+        }
+      }
+      if (!scored.length) return "";
+      scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+
+      const sections: string[] = [];
+      let used = 0;
+      const perSkillCap = Math.min(1800, Math.floor(maxChars / Math.min(scored.length, maxSkills)));
+
+      for (const pick of scored.slice(0, maxSkills)) {
+        const pack = pool.get(pick.id);
+        if (!pack) continue;
+        const skillFile = join(pack.rootDir, "SKILL.md");
+        if (!existsSync(skillFile)) continue;
+        const finish = startCall("skill", pick.id);
+        let ok = false;
+        try {
+          const body = stripFrontmatter(readFileSync(skillFile, "utf8")).trim();
+          if (!body) continue;
+          const remaining = maxChars - used;
+          if (remaining < 200) break;
+          const cap = Math.min(perSkillCap, remaining);
+          const excerpt =
+            body.length > cap ? `${body.slice(0, cap)}\n…（自动精简注入；完整内容可 load_skill("${pick.id}")）` : body;
+          const block = `### 指纹触发 Skill：${pack.name} (\`${pick.id}\` · 命中: ${pick.matched.slice(0, 4).join(", ")})\n${excerpt}`;
+          sections.push(block);
+          used += block.length;
+          autoInjected.add(pick.id);
+          ok = true;
+          appendProgress(
+            manifest.workspaceDir,
+            `auto_skill ${pick.id} (triggers=${pick.matched.slice(0, 3).join(",")}, chars=${excerpt.length})`,
+          );
+        } catch {
+          /* skip unreadable skill */
+        } finally {
+          finish(ok);
+        }
+      }
+      if (!sections.length) return "";
+      return `## 指纹自动注入专精指南（每会话去重 · 预算硬顶 ≤1500 tokens）\n${sections.join("\n\n")}`;
     },
 
     loadedIds: () => [...loaded],

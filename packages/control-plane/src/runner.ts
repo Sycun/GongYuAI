@@ -141,6 +141,8 @@ export class WorkerRunner {
   private readonly maxPoolSize = new Map<string, number>();
   /** taskId → last reconcile timestamp (throttle; in-memory only) */
   private readonly lastScaleCheck = new Map<string, number>();
+  /** `${taskId}:${slot}` → restart backoff state to prevent follower crash-restart storms */
+  private readonly slotBackoff = new Map<string, { count: number; lastSpawnAt: number }>();
   /** Set by boot shutdown: detached workers may outlive this control plane. */
   private disposed = false;
   private readonly imageForRun = new Map<string, string>();
@@ -687,11 +689,32 @@ export class WorkerRunner {
         }
       }
 
+      const now = Date.now();
+      const readySlots: number[] = [];
+      for (const slot of missingSlots) {
+        const key = `${taskId}:${slot}`;
+        const prev = this.slotBackoff.get(key);
+        if (prev) {
+          const aliveLongEnough = now - prev.lastSpawnAt >= 60_000;
+          const nextCount = aliveLongEnough ? 0 : prev.count;
+          // Allow immediate first respawn for a single transient exit; apply exponential backoff on repeated rapid crashes.
+          const cooldownMs = nextCount >= 2 ? Math.min(60_000, 5_000 * 2 ** (nextCount - 2)) : 0;
+          if (cooldownMs > 0 && now - prev.lastSpawnAt < cooldownMs) {
+            continue;
+          }
+          this.slotBackoff.set(key, { count: nextCount + 1, lastSpawnAt: now });
+        } else {
+          this.slotBackoff.set(key, { count: 1, lastSpawnAt: now });
+        }
+        readySlots.push(slot);
+      }
+      if (readySlots.length === 0) return;
+
       this.maxPoolSize.set(taskId, targetPool);
       for (let slot = 0; slot < targetPool; slot++) {
         writeManifestForSlot(task, this.settings, slot, targetPool);
       }
-      for (const slot of missingSlots) {
+      for (const slot of readySlots) {
         const child = this.spawnLocalSlot(task, slot, targetPool);
         if (child.pid && !(task.workerPids ?? []).includes(child.pid)) {
           task.workerPids = [...(task.workerPids ?? []), child.pid];

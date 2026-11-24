@@ -30,6 +30,12 @@ test("extractHosts 抽 URL/IP/CIDR 内主机，忽略 loopback 与路径/载荷/
   );
   assert.equal(authorizeCommand(AUTH, "nxc smb 10.10.1.5 -u guest -p ''").allowed, true);
   assert.equal(authorizeCommand(AUTH, "chisel client 10.10.1.5:8000 R:socks").allowed, true);
+  // Shell variables ($h, 10.10.1.5$p) and RFC2606 placeholder domains alongside real targets must not false-block.
+  assert.deepEqual(extractHosts("curl -s http://10.10.1.5$p/api"), ["10.10.1.5"]);
+  assert.deepEqual(extractHosts("curl -s -h $h http://10.10.1.5/test"), ["10.10.1.5"]);
+  assert.deepEqual(extractHosts("curl -s http://10.10.1.5/register -F email=u@example.com"), ["10.10.1.5"]);
+  // Standalone out-of-scope example.com without any in-scope target is still caught.
+  assert.deepEqual(extractHosts("curl -s https://example.com/"), ["example.com"]);
 });
 
 test("authorizeCommand：坐标内放行、越界拒绝、能力档位不足拒绝", () => {
