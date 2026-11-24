@@ -31,6 +31,9 @@
 }
 .gy-chat-sidebar .gy-new-chat:hover { background: #fdfdff; border-color: #b9c6e7; }
 .gy-new-chat .semi-icon { color: var(--gy-accent); }
+.gy-new-chat .gy-new-chat-caret { margin-left: 6px; color: var(--gy-muted); }
+.gy-new-chat-projects { min-width: 156px; max-width: min(260px, calc(100vw - 24px)); max-height: min(320px, 50dvh); overflow: auto; }
+.gy-new-chat-projects .semi-dropdown-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gy-history { display: flex; flex: 1; min-height: 0; flex-direction: column; margin-top: 30px; }
 .gy-history-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 6px; font-size: 13px; color: var(--gy-muted); }
 .gy-history-search { margin-top: 8px; flex-shrink: 0; }
@@ -258,6 +261,7 @@ body {
 
 .gy-project-heading { display: flex; gap: 3px; align-items: center; }
 .gy-project-heading .gy-project-row { flex: 1; margin: 0; }
+.gy-project-heading .gy-project-new { flex: none; color: var(--gy-muted); }
 .gy-project-row span:last-child, .gy-work-path > .gy-path-project {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }

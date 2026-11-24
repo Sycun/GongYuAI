@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input } from "@douyinfe/semi-ui";
+import { Button, Dropdown, Input } from "@douyinfe/semi-ui";
 import { IconChevronDown, IconChevronRight, IconChevronUp, IconFolder, IconCommentStroked, IconPlus, IconSearchStroked, IconSettingStroked, IconSidebar } from "@douyinfe/semi-icons";
 import type { Conversation } from "../chat/useConversations";
 
@@ -36,15 +36,34 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
     const matches = project.toLocaleLowerCase().includes(filter);
     return { project, items: matches ? items : items.filter(c => c.title.toLocaleLowerCase().includes(filter)), matches };
   }).filter(group => group.matches || group.items.length);
+
+  function startChat(project: string) {
+    setQuery("");
+    onNew(project);
+  }
+
+  const canChooseProject = projects.length > 1;
+  const newChatButton = <Button className="gy-new-chat" icon={<IconPlus />} aria-label="新建会话"
+    title={canChooseProject ? "选择项目后新建会话" : "新建会话"}
+    onClick={canChooseProject ? undefined : () => startChat(projects[0] ?? currentProject)}>
+    {!collapsed && <>
+      新建会话{canChooseProject && <IconChevronDown className="gy-new-chat-caret" size="small" aria-hidden="true" />}
+    </>}
+  </Button>;
+
   return <aside aria-label="会话侧栏" className={'gy-chat-sidebar' + (collapsed ? " gy-collapsed" : "")}>
     <div className="gy-sidebar-top">
       <div className="gy-brand"><BrandMark /><span>GongYu<span className="gy-brand-ai">AI</span></span></div>
       <Button className="gy-toggle" theme="borderless" type="tertiary" icon={<IconSidebar />}
         aria-label={collapsed ? "展开侧栏" : "收起侧栏"} title={collapsed ? "展开侧栏" : "收起侧栏"} onClick={onToggle} />
     </div>
-    <Button className="gy-new-chat" icon={<IconPlus />} onClick={() => { setQuery(""); onNew(currentProject); }} aria-label="新建会话" title="新建会话">
-      {collapsed ? null : "新建会话"}
-    </Button>
+    {canChooseProject ? <Dropdown trigger="click" position="bottomLeft" role="presentation" clickToHide motion={false}
+      render={<Dropdown.Menu className="gy-new-chat-projects" aria-label="选择项目">
+        {projects.map(project => <Dropdown.Item key={project} icon={<IconFolder aria-hidden="true" />}
+          onClick={() => startChat(project)}><span title={project}>{project}</span></Dropdown.Item>)}
+      </Dropdown.Menu>}>
+      {newChatButton}
+    </Dropdown> : newChatButton}
     {!collapsed && <section className="gy-history" aria-label="工作区会话">
       <div className="gy-history-heading"><span>项目</span><div>
         <Button theme="borderless" type="tertiary" size="small" icon={<IconPlus />}
@@ -77,6 +96,9 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
                 {expanded ? <IconChevronDown size="small" /> : <IconChevronRight size="small" />}
                 <IconFolder /><span>{project}</span>
               </button>
+              <Button className="gy-project-new" theme="borderless" type="tertiary" size="small" icon={<IconPlus />}
+                aria-label={`在「${project}」中新建会话`} title={`在「${project}」中新建会话`}
+                onClick={() => startChat(project)} />
             </div>
             {expanded && <div className="gy-session-tree">
               {currentBlank && <div className="gy-current-blank" aria-current="page"><IconCommentStroked />新会话</div>}
