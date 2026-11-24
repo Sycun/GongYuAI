@@ -11,7 +11,8 @@ import {
   type InstallMethod,
 } from "./tool-installer.js";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AuthCapability, WorkerManifest } from "@gongyuai/contracts";
 import { isBudgetHit, targetAllows } from "@gongyuai/contracts";
@@ -200,6 +201,80 @@ export function chargeToolCall(ctx: ToolContext): void {
   }
 }
 
+const DEFAULT_SHELL_INLINE_BYTES = 4 * 1024;
+
+function shellInlineBytes(): number {
+  const limit = Number(process.env.GY_SHELL_INLINE_OUTPUT_BYTES);
+  return Number.isSafeInteger(limit) && limit > 0 ? limit : DEFAULT_SHELL_INLINE_BYTES;
+}
+
+function previewShellOutput(bytes: Buffer, edgeBytes: number): string {
+  if (bytes.length <= edgeBytes * 2) return bytes.toString("utf8");
+  if (edgeBytes === 0) return "";
+
+  // Move inward to UTF-8 character boundaries so neither preview cuts a character.
+  let headEnd = edgeBytes;
+  while ((bytes[headEnd]! & 0xc0) === 0x80) headEnd -= 1;
+  let tailStart = bytes.length - edgeBytes;
+  while ((bytes[tailStart]! & 0xc0) === 0x80) tailStart += 1;
+  return `${bytes.toString("utf8", 0, headEnd)}\n…（省略 ${tailStart - headEnd} 字节）…\n${bytes.toString("utf8", tailStart)}`;
+}
+
+function recordShellOutput(
+  evidenceRoot: string,
+  audit: string,
+  result: { stdout: string; stderr: string; truncated: boolean; timedOut: boolean; durationMs: number },
+): { stdout: string; stderr: string } {
+  mkdirSync(evidenceRoot, { recursive: true });
+  if (!lstatSync(evidenceRoot).isDirectory()) throw new Error("invalid evidence directory");
+  const directory = join(evidenceRoot, "exec");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  if (!lstatSync(directory).isDirectory()) throw new Error("invalid shell evidence directory");
+
+  const base = `cmd-${randomUUID()}`;
+  const privateFile = { mode: 0o600, flag: "wx" };
+  const { stdout, stderr } = result;
+  const stdoutBytes = Buffer.byteLength(stdout);
+  const stderrBytes = Buffer.byteLength(stderr);
+  const inlineBytes = shellInlineBytes();
+  if (!result.truncated && stdoutBytes + stderrBytes <= inlineBytes) {
+    writeFileSync(
+      join(directory, `${base}.md`),
+      `${audit}\n## stdout\n\n\`\`\`\n${stdout}\n\`\`\`\n\n## stderr\n\n\`\`\`\n${stderr}\n\`\`\`\n`,
+      privateFile,
+    );
+    return { stdout, stderr };
+  }
+
+  const staging = mkdtempSync(join(directory, ".cmd-"));
+  const status = `[shell] stdout=${stdoutBytes} B, stderr=${stderrBytes} B, timedOut=${result.timedOut}, durationMs=${result.durationMs}`;
+  const capture = result.truncated ? `${status}\n[shell] 执行器已达到采集上限，证据仅包含已捕获文本。` : status;
+  const descriptions: string[] = [];
+  const shown = { stdout: capture, stderr: "" };
+  const previewEdge = Math.floor(Math.min(inlineBytes, 1024) / 4);
+  try {
+    for (const stream of ["stdout", "stderr"] as const) {
+      if (!result[stream]) continue;
+      const bytes = Buffer.from(result[stream], "utf8");
+      const fileName = `${stream}.txt`;
+      const path = `exec/${base}/${fileName}`;
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      writeFileSync(join(staging, fileName), bytes, privateFile);
+      const description = `${stream} ${bytes.length} B · SHA-256 ${sha256} · ${path}`;
+      descriptions.push(description);
+      const preview = previewShellOutput(bytes, previewEdge);
+      const reference = `[shell] ${description}\n可从任务证据下载，按字节区间分段查阅。`;
+      shown[stream] = [shown[stream], reference, preview].filter(Boolean).join("\n");
+    }
+    writeFileSync(join(staging, "command.md"), `${audit}\n${capture}\n${descriptions.join("\n")}\n`, privateFile);
+    renameSync(staging, join(directory, base));
+    return shown;
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 export async function runShell(
   ctx: ToolContext,
   command: string,
@@ -243,20 +318,16 @@ export async function runShell(
         (result.stdout || result.stderr || "").slice(0, 200),
       );
     }
-    // 每条命令留一份可复核记录（命令、退出码、耗时、范围裁决）；输出截断另行标注。
-    const evidenceDir = join(ctx.manifest.evidenceDir, "exec");
-    mkdirSync(evidenceDir, { recursive: true });
-    const file = join(evidenceDir, `cmd-${Date.now().toString(36)}.md`);
-    writeFileSync(
-      file,
-      `# 命令执行\n\n- 命令：\`${command}\`\n- 目录：${ctx.manifest.workspaceDir}\n- 退出码：${result.exitCode}\n- 超时：${result.timedOut}\n- 耗时：${result.durationMs}ms\n- 范围：${verdict.reason}\n\n## stdout\n\n\`\`\`\n${result.stdout.slice(0, 32_000)}\n\`\`\`\n\n## stderr\n\n\`\`\`\n${result.stderr.slice(0, 8_000)}\n\`\`\`\n`,
-      { mode: 0o600 },
+    const output = recordShellOutput(
+      ctx.manifest.evidenceDir,
+      `# 命令执行\n\n- 命令：\`${command}\`\n- 目录：${ctx.manifest.workspaceDir}\n- 退出码：${result.exitCode}\n- 超时：${result.timedOut}\n- 耗时：${result.durationMs}ms\n- 范围：${verdict.reason}\n`,
+      result,
     );
     const parserNote = parseShellOutput(ctx, command, result.stdout);
     return {
       exitCode: result.exitCode ?? (result.timedOut ? 124 : 1),
-      stdout: parserNote ? `${result.stdout}${parserNote}` : result.stdout,
-      stderr: result.stderr,
+      stdout: `${output.stdout}${parserNote}`,
+      stderr: output.stderr,
       timedOut: result.timedOut,
       durationMs: result.durationMs,
     };
