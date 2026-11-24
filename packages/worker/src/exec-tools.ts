@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type CommandVerdict } from "@gongyuai/exec";
 import { commandProposal, reviewBeforeDispatch, reportCommandOutcome } from "./command-guard.js";
-import { assertCapabilityAllows, capabilityAtLeast, chargeToolCall, gateTool, type ToolContext } from "./tools.js";
+import { assertCapabilityAllows, assertRepeatAllowed, capabilityAtLeast, chargeToolCall, gateTool, type ToolContext } from "./tools.js";
 import { appendProgress } from "./tools.js";
 
 /**
@@ -67,6 +67,7 @@ export async function shellJob(ctx: ToolContext, input: ShellJobInput): Promise<
       const v = runtime.authorize(command);
       if (!v.allowed) throw new Error(`denied: ${v.reason}`);
       chargeToolCall(ctx);
+      assertRepeatAllowed(ctx, command);
       return v;
     });
     const ticket = await approve(ctx, "shell", command, verdict, "后台作业");
@@ -155,6 +156,7 @@ export async function shellSession(ctx: ToolContext, input: ShellSessionInput): 
     const verdict = gateTool(ctx, "shell", () => {
       const v = runtime.authorize(data);
       if (!v.allowed) throw new Error(`denied: ${v.reason}`);
+      assertRepeatAllowed(ctx, data);
       return v;
     });
     const ticket = await approve(ctx, "shell", data, verdict, "会话输入");
@@ -285,6 +287,7 @@ export async function c2Tool(ctx: ToolContext, input: C2Input): Promise<string> 
       if (command) {
         const verdict = runtime.authorize(command);
         if (!verdict.allowed) return JSON.stringify({ ok: false, error: verdict.reason });
+        assertRepeatAllowed(ctx, command);
         ticket = await approve(ctx, "shell", command, verdict, "C2 任务");
       }
       const task = await c2.task(input.sessionId, {

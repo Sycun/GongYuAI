@@ -6,11 +6,16 @@
   "transport": "builtin",
   "binary": "nmap",
   "defaultEnabled": true,
-  "defaultFlags": "-sV -T4 --top-ports 100",
+  "defaultFlags": "-sV -T4 --top-ports 100 -oX -",
   "toolName": "run",
   "toolDescription": "Run nmap against an authorized target. Pass target and optional flags.",
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "parser": "nmap",
+  "whenToUse": "Use for TCP/UDP port and service discovery. Prefer -oX - so the parser lane can record services.",
+  "targetFlag": ""
 }

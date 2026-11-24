@@ -620,6 +620,7 @@ export function startControlServer(opts: ServerOptions) {
               repro: typeof body.repro === "string" ? body.repro : "",
               impact: typeof body.impact === "string" ? body.impact : undefined,
               fix: typeof body.fix === "string" ? body.fix : undefined,
+              verifiedBy: typeof body.verifiedBy === "string" ? body.verifiedBy : "operator:api",
             });
             refreshTerminalReport(history);
             return send(res, 200, { finding });
@@ -629,7 +630,7 @@ export function startControlServer(opts: ServerOptions) {
             history.close();
           }
         }
-        const findingAction = /^\/findings\/([^/]+)\/(retest|accept)$/.exec(rest);
+        const findingAction = /^\/findings\/([^/]+)\/(retest|accept|validate)$/.exec(rest);
         if (method === "POST" && findingAction) {
           const findingId = decodeURIComponent(findingAction[1]!);
           const action = findingAction[2]!;
@@ -638,6 +639,41 @@ export function startControlServer(opts: ServerOptions) {
           if (!existsSync(paths.historyDb)) return send(res, 409, { error: "缺少任务历史" });
           const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
           try {
+            if (action === "validate") {
+              const verdict = body.verdict;
+              if (
+                verdict !== "confirmed" && verdict !== "refuted" &&
+                verdict !== "inconclusive" && verdict !== "out-of-scope"
+              ) {
+                return send(res, 400, {
+                  error: "verdict must be confirmed|refuted|inconclusive|out-of-scope",
+                });
+              }
+              const method = body.method;
+              if (
+                method !== "evidence-only" && method !== "replay" &&
+                method !== "control-compare" && method !== "manual"
+              ) {
+                return send(res, 400, {
+                  error: "method must be evidence-only|replay|control-compare|manual",
+                });
+              }
+              const evidencePaths = Array.isArray(body.evidencePaths)
+                ? body.evidencePaths.filter((v): v is string => typeof v === "string")
+                : [];
+              const outcome = history.recordFindingValidation(task.id, findingId, {
+                verdict,
+                method,
+                evidencePaths,
+                note: typeof body.note === "string" ? body.note : "",
+                validator:
+                  typeof body.validator === "string" && body.validator.trim()
+                    ? body.validator
+                    : "operator:local",
+              });
+              refreshTerminalReport(history);
+              return send(res, 201, outcome);
+            }
             if (action === "retest") {
               const result = body.result;
               if (result !== "fixed" && result !== "still-present" && result !== "partially-fixed") {

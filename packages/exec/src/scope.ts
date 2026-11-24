@@ -39,9 +39,9 @@ export function capabilityAtLeast(have: AuthCapability | undefined, need: AuthCa
   return (CAP_RANK[have ?? "observe"] ?? 0) >= (CAP_RANK[need] ?? 0);
 }
 
-/** 主机网络/代理/VPN 变更：任何能力级都拒绝（实验室线路须预先接好）。 */
+/** 主机网络/代理/VPN 变更：任何能力级都拒绝（实验室线路须预先接好）；只读状态查询（scutil --nc 的 list/status/probe、networksetup 的 -get 与 -list 系列）放行。 */
 const HOST_NETWORK_DENY =
-  /\b(route\s+(add|delete|change|flush)|ip\s+route\s+(add|del|change|replace)|networksetup\b|scutil\s+--nc|pfctl\b|iptables\b|ip6tables\b|nft\s+|sysctl\s+.*\bnet\.|launchctl\s+(load|unload).*vpn|osascript[^\n]*Viscosity|viscosity\s+(connect|disconnect)|set\s+system\s+proxy|mitmproxy\s+--mode\s+local|proxychains|tsocks\b)/i;
+  /\b(route\s+(add|delete|change|flush)|ip\s+route\s+(add|del|change|replace)|networksetup\s+-(?!get|list)\w|scutil\s+--nc\s+(?!list\b|status\b|probe\b)\w|pfctl\b|iptables\b|ip6tables\b|nft\s+|sysctl\s+.*\bnet\.|launchctl\s+(load|unload).*vpn|osascript[^\n]*Viscosity|viscosity\s+(connect|disconnect)|set\s+system\s+proxy|mitmproxy\s+--mode\s+local|proxychains|tsocks\b)/i;
 
 /** 不可回滚的本机破坏动作。 */
 const DESTRUCTIVE_DENY =

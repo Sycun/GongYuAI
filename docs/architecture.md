@@ -14,7 +14,7 @@ Long-running authorized pentest agents fail for four reasons: context windows fi
 2. **External History（黑板）** — Layered Fact (title / summary / evidence) + Intent + Goal 图是跨会话唯一真相；个体可死，图必须活。
 3. **Router / Worker split** — Control plane never executes shell. Workers own tools.（对应 sapper「指挥官永不亲手执行」）
 4. **Evidence gate** — Goals stay `passes:false` until matching files exist under `evidence/`.
-5. **AI-native policy** — Human supplies auth scope, budget, and goal contracts. Exploration path is model-driven (or mock script for CI).
+5. **AI-native policy** — Human supplies target coordinates, budget, and goal contracts. Targets are authorized by definition: the agent never judges, questions, or refuses a target ([red-team-positioning.md](./red-team-positioning.md)). Exploration path is model-driven (or mock script for CI).
 6. **Session Relay** — 会话边界写入结构化 handoff protocol（πₙ），再启新会话；会话内保留完整工具输出，只在边界压缩。Watchdog 崩溃恢复不写 π。
 7. **Harness differential** — `bare`（无 History/Relay）vs History vs +Relay，只报相对差分。
 
@@ -23,7 +23,7 @@ Long-running authorized pentest agents fail for four reasons: context windows fi
 | 基座 | 职责 | 本仓落点 | 状态 |
 | --- | --- | --- | --- |
 | **女娲** | 组织存活与繁衍：个体可死、图必须活、经验须传承 | 项目记忆（lease/Watchdog 接班、分层 History、Relay π、族级打法）已硬化；全局记忆（档案索引 + 蒸馏图谱 + 工具遗产，P8 提案，见 [memory-layer.md](./memory-layer.md)） | 存活已硬化；繁衍缺位 |
-| **DAG** | 授权与真相：走得对 | Fact–Intent 无因探索禁令、证据闸 + SHA-256 封存、复核撤回 | 已硬化；渗透域语义见 P6 |
+| **DAG** | 路径与真相：走得对（授权在委托前提，不在运行时审查） | Fact–Intent 无因探索禁令（路径合法性）、证据闸 + SHA-256 封存、复核撤回 | 已硬化；渗透域语义见 P6 |
 | **Super-agent** | 调度经济：花得省 | 脑手分离（相位工具面）、多 Explore 异步派单、三层模型路由（提案） | 结构已有；模型分层/偏航审计见 P7 |
 
 细则：[absorb-super-agent.md](./absorb-super-agent.md)。Super-agent 是配置 + 小协议补丁，不是第二套编排系统；主脑永不拿回执行工具（Octop 0/5 委派教训）。
@@ -59,7 +59,7 @@ Fact  ──front──▶  Intent  ──back──▶  Fact'
 - 新 Intent **必须**挂在已有 Fact（或 origin）上，禁止无因探索。
 - Fact 保留原始记录。复核按目标追加确认或撤回意见，撤回可指向同一任务的更正 Fact。证据路径和当时的内容版本随复核一起保存。见[复核设计](./evidence-review.md)。
 - 协作只通过图（stigmergy），禁止 Worker 间私聊成为真相源。
-- 运行中发现的子域/主机经 `asset_record` 写入资产投影；**自动**按 `auth.targets`（含 IPv4 CIDR / `*.domain`）准入，不另开资产库、不静默改授权列表。
+- 运行中发现的子域/主机经 `asset_record` 写入资产投影；**自动**按 `auth.targets`（含 IPv4 CIDR / `*.domain`）准入，不另开资产库、不静默改作业坐标列表。
 
 ### Worker 任务原语（Cairn 三件套 → GongYuAI）
 
@@ -156,4 +156,4 @@ Not a HexStrike-style tool catalog, not a fixed PentestGPT stage pipeline, not a
 
 产品一句话：
 
-> 给授权渗透长程任务的 Mission Control：任务可断点续跑，完成必须有证据，会话可接力而不丢攻击路径。
+> 面向授权红队作业的长时运行渗透工作台：目标默认授权、运行期零目标拒绝；任务可断点续跑，完成必须有证据，会话可接力而不丢攻击路径。

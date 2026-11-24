@@ -36,6 +36,7 @@ const ALWAYS = new Set([
   "enable_skill",
   "disable_skill",
   "phase_set",
+  "engagement_audit",
   "relay",
   "operator_consult",
   "credential_list",
@@ -64,6 +65,7 @@ const EXPLORE = new Set([
   "technique_transfer",
   "finding_record",
   "finding_verify",
+  "finding_validate",
   "finding_retract",
   "finding_retest_context",
   "finding_retest_conclude",
@@ -76,6 +78,10 @@ const EXPLORE = new Set([
   "http_request",
   "oast_issue",
   "host_profile_record",
+  "host_profile_parse",
+  "attack_graph_record",
+  "bloodhound_import",
+  "cloud_record",
   "tunnel_open",
   "tunnel_list",
   "tunnel_close",
@@ -98,6 +104,7 @@ const REASON = new Set([
   "technique_transfer",
   "finding_record",
   "finding_verify",
+  "finding_validate",
   "finding_retract",
   "write_evidence",
   "assert_goal",
@@ -148,11 +155,11 @@ export function phaseDirective(
     );
   } else if (p === "explore") {
     lines.push(
-      "Explore（验证影响）：拿到 foothold 先 host_profile_record（OS/域/用户/权限/服务/共享），再按 T1046/T1069/T1087/T1135/T1021/T1550 族验证内网推进；一次只 claim 一个 Intent → 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro）才可进交付。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。有 open Explore 时禁止进入 Reason。",
+      "Explore（验证影响）：拿到 foothold 先 host_profile_record（OS/域/用户/权限/服务/共享），再按 T1046/T1069/T1087/T1135/T1021/T1550 族验证内网推进；一次只 claim 一个 Intent → 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro）才可进交付；high/critical 另找 worker/operator 用 finding_validate 独立确认（同一 worker 自证会被拒）。nmap/httpx/nuclei/ffuf 必须用机读输出（-oX - / -json / -jsonl / -of json），看到 [parser] mandatory 就重跑。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。有 open Explore 时禁止进入 Reason。",
     );
   } else if (p === "reason") {
     lines.push(
-      "Reason（战役调度）：读资产清单 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 有 ready 步骤时 intent_propose 必须带 planStepId（计划≠授权）→ 扇出跨资产 Intent / technique_transfer / 更新 engagement 叙事。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。交付叙述只引用 verified finding。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
+      "Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 有 ready 步骤时 intent_propose 必须带 planStepId（计划≠授权）→ 扇出跨资产 Intent / technique_transfer / 更新 engagement 叙事。repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset 出现时先处理，不要继续磨。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。交付叙述只引用 verified finding；high/critical 须有独立确认。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
     );
   }
   return lines.join("\n");
@@ -197,6 +204,19 @@ export const GRAPH_PHASE_TOOLS = [
           reason: { type: "string" },
         },
         required: ["phase"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "engagement_audit",
+      description:
+        "Read-only deterministic audit: repeat failures, duplicate/stalled Intents, tentative backlog, untouched high-weight assets, idle credentials + engagement scorecard (confirmation rate / gaps). Suggestions only — no dispatch, no scope change.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
       },
     },
   },
@@ -312,6 +332,25 @@ export const GRAPH_PHASE_TOOLS = [
           cvss: { type: "string" },
         },
         required: ["findingId", "evidencePaths", "repro"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "finding_validate",
+      description:
+        "P15-C1 independent validation of an already-verified Finding. The calling worker must NOT be the verifier; History refuses self-validation. verdict=confirmed|refuted|inconclusive|out-of-scope; method=evidence-only|replay|control-compare|manual. confirmed/refuted require evidence; rows are append-only and do not mutate the Finding.",
+      parameters: {
+        type: "object",
+        properties: {
+          findingId: { type: "string" },
+          verdict: { type: "string" },
+          method: { type: "string" },
+          evidencePaths: { type: "string" },
+          note: { type: "string" },
+        },
+        required: ["findingId", "verdict", "method"],
       },
     },
   },
@@ -492,6 +531,11 @@ export function handleGraphTool(
     ctx.save();
     appendProgress(ctx.workspaceDir, `phase=${next}${args.reason ? ` (${args.reason})` : ""}`);
     return JSON.stringify({ ok: true, phase: next });
+  }
+
+  if (name === "engagement_audit") {
+    // Read-only: no Intent / Fact / Goal write, no lease, no scope mutation.
+    return JSON.stringify(ctx.history.engagementAudit(ctx.taskId));
   }
 
   if (name === "intent_propose") {
@@ -735,6 +779,7 @@ export function handleGraphTool(
           impact: args.impact,
           fix: args.fix,
           cvss: args.cvss?.trim() || undefined,
+          verifiedBy: workerId,
         },
       );
       appendProgress(
@@ -742,6 +787,43 @@ export function handleGraphTool(
         `finding_verify ${finding.id} → ${finding.status} evidence=${finding.evidence.length}`,
       );
       return JSON.stringify(finding);
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (name === "finding_validate") {
+    const verdictRaw = (args.verdict ?? "").trim().toLowerCase();
+    const verdict =
+      verdictRaw === "confirmed" || verdictRaw === "refuted" ||
+      verdictRaw === "inconclusive" || verdictRaw === "out-of-scope"
+        ? verdictRaw
+        : null;
+    const methodRaw = (args.method ?? "").trim().toLowerCase();
+    const method =
+      methodRaw === "evidence-only" || methodRaw === "replay" ||
+      methodRaw === "control-compare" || methodRaw === "manual"
+        ? methodRaw
+        : null;
+    if (!verdict) return "错误: verdict must be confirmed|refuted|inconclusive|out-of-scope";
+    if (!method) return "错误: method must be evidence-only|replay|control-compare|manual";
+    try {
+      const result = ctx.history.recordFindingValidation(
+        ctx.taskId,
+        args.findingId ?? "",
+        {
+          verdict,
+          method,
+          evidencePaths: parseFactIds(args.evidencePaths ?? ""),
+          note: args.note ?? "",
+          validator: workerId,
+        },
+      );
+      appendProgress(
+        ctx.workspaceDir,
+        `finding_validate ${result.validation.findingId} → ${result.validation.verdict} by ${workerId}`,
+      );
+      return JSON.stringify(result);
     } catch (err) {
       return `错误: ${err instanceof Error ? err.message : String(err)}`;
     }

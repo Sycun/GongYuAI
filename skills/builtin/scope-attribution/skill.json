@@ -1,0 +1,9 @@
+{
+  "id": "scope-attribution",
+  "name": "scope-attribution",
+  "description": "归属≠授权：whois/ASN/CDN/内网 pivot 的边界与证据写法。",
+  "defaultEnabled": true,
+  "source": "gongyuai",
+  "refs": ["P15-C5", "pentest-completeness"],
+  "triggers": ["归属", "attribution", "whois", "ASN", "ICP", "pivot", "CDN", "扩围"]
+}

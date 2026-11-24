@@ -12,16 +12,18 @@
 
 ## 三层边界（保留旧设计）
 
+> 字段名 `auth.targets` 是历史包袱，语义是**作业坐标**：目标进入任务即视为授权，不设授权审查（[red-team-positioning.md](./red-team-positioning.md)）。坐标只能人改，是工程纪律，不是授权闸。
+
 | 层 | 权威 | 可变性 |
 | --- | --- | --- |
-| **授权边界** | `auth.targets` + `outOfScope` | 仅人类改任务契约；Agent **禁止**静默扩围 |
+| **作业边界** | `auth.targets`（作业坐标）+ `outOfScope` | 仅人类改任务坐标；Agent **禁止**静默扩围 |
 | **资产清单** | Fact 投影（本页） | 运行中 append；控制台与 AI 同读 |
 | **待探索** | open Intents | Reason 对 admitted/live 扇出 |
 
 ## 生命周期
 
 ```text
-创建 auth.targets（人类）
+创建作业坐标 targets（人类）
             │
             ▼
    seedAssetsFromAuth → Fact kind=seed     ← 创建任务即写；控制台立刻可见
@@ -42,9 +44,9 @@
 
 | kind | 含义 |
 | --- | --- |
-| `seed` | 来自 `auth.targets` 的授权靶标 / 模式（含 CIDR、`*.domain`） |
+| `seed` | 来自 `auth.targets` 的作业靶标 / 模式（含 CIDR、`*.domain`） |
 | `candidate` | 保留语义；默认发现路径直接走自动准入，少用 |
-| `admitted` | 已在授权范围内，可继续测 |
+| `admitted` | 已在作业坐标内，可继续测 |
 | `live` | 已核实存活（`asset_record(..., live=true)`） |
 | `oos` | 范围外；可记账，**不可**作为利用 Intent 的唯一前驱 |
 
@@ -63,9 +65,9 @@ Worker shell 闸门与资产准入共用同一套规则。
 | `example.com` | 精确或 `*.example.com` 后缀 |
 | `https://host:8443/path` | 规范化后按 host 匹配 |
 
-`outOfScope` 命中时 **覆盖** targets（拒绝执行 / 记为 oos）。
+`outOfScope` 命中时 **覆盖** targets（按作业坐标拦截 / 记为 oos）。
 
-能自动的一律自动：发现写入时默认 `admitAddress`，不弹人审。扩授权围仍须人改 `auth.targets`。
+能自动的一律自动：发现写入时默认 `admitAddress`，不弹人审。扩作业坐标仍须人改 `auth.targets`。
 
 ## 双向读写
 
@@ -100,7 +102,7 @@ Worker shell 闸门与资产准入共用同一套规则。
 
 ## 反模式
 
-1. 发现即 `auth.targets.push`  
+1. 发现即 `auth.targets.push`（模型自改作业坐标）  
 2. 独立 assets 表与 Fact 双写  
 3. 只更新控制台、不写 History（AI 看不见）  
 4. 只写 chat、不写 asset Fact（刷新即丢）  

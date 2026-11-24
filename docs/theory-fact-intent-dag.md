@@ -112,6 +112,8 @@ GongYuAI 现状 schema：`proposed → claimed → running → succeeded | faile
 
 ## 4. 推荐层 vs 授权层（理论安全语义）
 
+> **术语修订（2026-11-24）**：这里说的「授权层」只指**路径合法性**——Intent 必须有已验证 Fact 支撑。目标本身是否可打不在 DAG 的审查范围：目标进入任务即视为授权（[red-team-positioning.md](./red-team-positioning.md)）。DAG 拒绝的是「无因探索」，不是「敏感目标」；它管的是走得对不对，不是能不能打。
+
 论文把「无因探索禁令」抬成强制访问控制：
 
 1. **结构层（授权）**  
@@ -128,12 +130,12 @@ GongYuAI 现状 schema：`proposed → claimed → running → succeeded | faile
 ```text
 建议层（可错、可 LLM / 可后置五段检索）
     ↓
-授权层（Fact–Intent DAG，硬约束）  ← 先做实这一层
+路径层（Fact–Intent DAG，因果硬约束；不问目标合法性）
     ↓
-执行层（工具 / MCP / Skill）
+执行层（工具 / MCP / Skill；拒绝只有工程自保）
 ```
 
-MVP 只强制授权层；离线 ATT&CK 意图图与五段同构检索属 P3+ 加速器，不是信仰本体。
+MVP 只强制路径层；离线 ATT&CK 意图图与五段同构检索属 P3+ 加速器，不是信仰本体。
 
 ---
 

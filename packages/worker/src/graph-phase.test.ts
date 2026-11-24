@@ -243,3 +243,120 @@ test("finding_record → verify → retract through handleGraphTool", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("engagement_audit is read-only and visible in every phase", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-audit-tool-"));
+  const history = openHistory({
+    dbPath: join(root, "h.sqlite"),
+    evidenceDir: join(root, "evidence"),
+  });
+  try {
+    const taskId = "t-audit";
+    const seed = history.recordAsset({
+      taskId,
+      address: "lab.example.com",
+      auth: { targets: ["*.example.com"], outOfScope: [] },
+      live: true,
+    }).fact;
+    for (let i = 0; i < 3; i += 1) {
+      const proposed = history.proposeIntent({
+        taskId,
+        title: `sqli-${i}`,
+        sourceFactIds: [seed.id],
+        technique: "CWE-89",
+        assetRoot: "lab.example.com",
+      });
+      history.claimIntent(taskId, proposed.id, "worker-test");
+      history.concludeIntent(taskId, proposed.id, "failed", "no injection point");
+    }
+
+    const before = history.listIntents(taskId).length;
+    const factsBefore = history.listFacts(taskId).length;
+    const text = handleGraphTool("engagement_audit", {}, {
+      history,
+      taskId,
+      workspaceDir: root,
+      state: tmpState("reason"),
+      save: () => {},
+    });
+    assert.ok(text);
+    const audit = JSON.parse(text) as {
+      observations: Array<{ code: string }>;
+      scorecard: { intents: { failed: number }; findings: { gaps: string[] } };
+    };
+    assert.equal(audit.scorecard.intents.failed, 3);
+    assert.ok(audit.observations.some((item) => item.code === "repeat-failure"));
+    assert.ok(audit.scorecard.findings.gaps.length > 0);
+    // No writes: the audit is a projection, not a Fact / Intent.
+    assert.equal(history.listIntents(taskId).length, before);
+    assert.equal(history.listFacts(taskId).length, factsBefore);
+    assert.equal(allowedToolNames("bootstrap").has("engagement_audit"), true);
+    assert.equal(allowedToolNames("explore").has("engagement_audit"), true);
+    assert.equal(allowedToolNames("reason").has("engagement_audit"), true);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("finding_validate refuses self-validation and accepts an independent worker", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-validation-tool-"));
+  const history = openHistory({
+    dbPath: join(root, "h.sqlite"),
+    evidenceDir: join(root, "evidence"),
+  });
+  try {
+    const taskId = "t-validation";
+    writeEvidenceFile(join(root, "evidence"), "proof.txt", "proof\n");
+    const { finding } = history.recordFinding({
+      taskId,
+      title: "sqli",
+      asset: "lab.example.com",
+      vulnClass: "CWE-89",
+      severity: "high",
+    });
+    history.verifyFinding(taskId, finding.id, {
+      evidencePaths: ["proof.txt"],
+      repro: "curl …",
+      verifiedBy: "worker-test",
+    });
+
+    const self = handleGraphTool("finding_validate", {
+      findingId: finding.id,
+      verdict: "confirmed",
+      method: "replay",
+      evidencePaths: "proof.txt",
+    }, {
+      history,
+      taskId,
+      workspaceDir: root,
+      state: tmpState("reason"),
+      workerId: "worker-test",
+      save: () => {},
+    });
+    assert.match(self ?? "", /self-validation refused/);
+
+    const other = handleGraphTool("finding_validate", {
+      findingId: finding.id,
+      verdict: "confirmed",
+      method: "replay",
+      evidencePaths: "proof.txt",
+    }, {
+      history,
+      taskId,
+      workspaceDir: root,
+      state: tmpState("reason"),
+      workerId: "worker-b",
+      save: () => {},
+    });
+    const parsed = JSON.parse(other ?? "{}") as {
+      validation: { verdict: string; independent: boolean };
+    };
+    assert.equal(parsed.validation.verdict, "confirmed");
+    assert.equal(parsed.validation.independent, true);
+    assert.equal(history.listFindingValidations(taskId, finding.id).length, 1);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

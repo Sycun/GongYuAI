@@ -16,7 +16,7 @@ Agientry 的解读说明了为什么要把工作认领和结果写回放进共�
 | --- | --- |
 | 如何判断上班的人做完了什么？ | 每个任务有一份 SQLite History。认领 Intent 时检查原状态。将 Intent 记为成功时，必须在同一事务写入至少一条关联 Fact。接手人可以沿引用查到本次工作的产出，再核对它能支持什么结论。[History 实现](../packages/history/src/index.ts) |
 | 进程重启后，谁负责续接？ | Watchdog 检查存活、租约和预算，必要时重启 Worker。Session Relay 记录当前进度、已尝试事项、未结 Intent 和已用预算。交接笔记与任务记录冲突时，以 History 为准。控制台保留任务总览，具体工具和技能按需加载。[Watchdog](../packages/control-plane/src/watchdog.ts) · [Session Relay](../packages/worker/src/relay.ts) · [项目架构](./architecture.md) |
-| 暂停期间委托范围缩小了怎么办？ | 恢复时控制面按最新授权版本重建 Worker 配置。旧 Fact 仍可解释先前的工作，旧交接笔记没有恢复原授权的效力。外部工具适配器仍需对自身的网络动作落实隔离。SapperLens 记录过执行者接触范围外设施后才收到停止指令，这说明仅在交接文字里传达范围会留下时间差。[长任务契约](./long-run-contract.md) · [SapperLens 范围事件，第 8.6 节](https://github.com/inwpu/SapperLens#86-范围近失硬线在-skill-里执行靠-commander-兜底) |
+| 暂停期间委托范围缩小了怎么办？ | 恢复时控制面按最新作业坐标重建 Worker 配置。旧 Fact 仍可解释先前的工作，旧交接笔记没有恢复原作业坐标的效力。外部工具适配器仍需对自身的网络动作落实隔离。SapperLens 记录过执行者接触范围外设施后才收到停止指令，这说明仅在交接文字里传达范围会留下时间差。[长任务契约](./long-run-contract.md) · [SapperLens 范围事件，第 8.6 节](https://github.com/inwpu/SapperLens#86-范围近失硬线在-skill-里执行靠-commander-兜底) |
 | 原结论后来被撤回，报告怎么写？ | History 保留首次通过时封存的原件，以及后续的署名复核、撤回和更正。交付时分别列出历史通过、当前证据支持、人工覆盖。一笔模拟跨日委托中，4 个目标都曾通过，交付时仍有证据支持的只有 2 个。覆盖登记分别是已测、部分覆盖、受阻、未登记各 1 个。[证据复核](./evidence-review.md) · [交付验收记录](./delivery-record.md) |
 
 一次委托中的交接已经有运行记录。跨项目复用经验还涉及客户数据隔离和独立留出评测，全局记忆仍是设计项。分角色选用模型、增加独立审查会话也仍是提案，其收益需要分别验证。[实现台账](./implementation-ledger.md) · [记忆层设计](./memory-layer.md)

@@ -12,5 +12,9 @@
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for directory/DNS/vhost brute force when ffuf is not a fit.",
+  "targetFlag": "-u"
 }

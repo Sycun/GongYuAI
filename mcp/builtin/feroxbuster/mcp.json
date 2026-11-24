@@ -6,11 +6,15 @@
   "transport": "builtin",
   "binary": "feroxbuster",
   "defaultEnabled": false,
-  "defaultFlags": "-u",
+  "defaultFlags": "",
   "toolName": "run",
   "toolDescription": "Run feroxbuster against an authorized target. Pass target and optional flags.",
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for recursive content discovery; keep rate bounded.",
+  "targetFlag": "-u"
 }

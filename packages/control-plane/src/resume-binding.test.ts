@@ -124,6 +124,7 @@ test("续接意图绑定同线程既有任务；未命中意图才新建", async
   assert.equal(store.list().length, before + 1);
   const created = store.get(fresh.taskId)! as TaskRecord;
   assert.equal(created.threadId, "default");
+  assert.equal(created.auth.capability, "active-lab");
   const untouched = JSON.parse(readFileSync(join(task.dataDir, "assignment-input.json"), "utf8")) as {
     messages: Array<{ content: string }>;
   };

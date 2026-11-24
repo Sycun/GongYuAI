@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { commandProposal, reviewBeforeDispatch } from "../command-guard.js";
 import {
   isIpv4Cidr,
@@ -9,6 +10,7 @@ import type { ToolContext } from "../tools.js";
 import { appendProgress, assertCapabilityAllows, chargeToolCall, gateTool, mcpActionForServer } from "../tools.js";
 import { loadToolsRuntime, saveToolsRuntime } from "../tools-runtime.js";
 import { createBuiltinFromRoot } from "./builtin/from-manifest.js";
+import { parseAndRecord, parseSummaryLine, toolForServer } from "../tool-output.js";
 import { openHttpSession } from "./http-session.js";
 import { openStdioSession } from "./stdio-session.js";
 import {
@@ -28,8 +30,25 @@ export type McpHub = {
   call(fullName: string, args: Record<string, unknown>): Promise<string>;
   /** Call by serverId + toolName (for Pi after mid-run unlock). */
   invoke(serverId: string, toolName: string, args: Record<string, unknown>): Promise<string>;
+  /** Same call, plus the untruncated stdout for the parser lane (P15-C4). */
+  invokeWithRaw(serverId: string, toolName: string, args: Record<string, unknown>): Promise<{ text: string; raw?: string }>;
   close(): Promise<void>;
 };
+
+/** Builtin MCP health: a missing binary stays in the catalog but cannot enable. */
+const BINARY_HEALTH = new Map<string, boolean>();
+function builtinBinaryAvailable(binary: string | undefined): boolean {
+  if (!binary) return true;
+  const cached = BINARY_HEALTH.get(binary);
+  if (cached !== undefined) return cached;
+  const probe = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(binary)}`], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  const ok = (probe.status ?? 1) === 0;
+  BINARY_HEALTH.set(binary, ok);
+  return ok;
+}
 
 export async function openMcpHub(
   manifest: WorkerManifest,
@@ -60,7 +79,10 @@ export async function openMcpHub(
     const cfg = gateTool(ctx, "enable_mcp", () => {
       const server = pool.get(id);
       if (!server) throw new Error(`未知 MCP id：${id}（不在 mcpPool/目录中）`);
-      assertCapabilityAllows(manifest, mcpActionForServer(id));
+      assertCapabilityAllows(manifest, mcpActionForServer(id, manifest));
+      if (server.transport === "builtin" && !builtinBinaryAvailable(server.binary)) {
+        throw new Error(`MCP 二进制不存在：${server.binary ?? server.id}（Kali 未安装）`);
+      }
       return server;
     }, { serverId: id });
     if (sessions.has(cfg.id)) {
@@ -120,8 +142,13 @@ export async function openMcpHub(
           }));
     for (const c of catalog) {
       if (enabled.has(c.id)) continue;
+      const cfg = pool.get(c.id);
+      const unavailable =
+        cfg?.transport === "builtin" && !builtinBinaryAvailable(cfg.binary)
+          ? "（未安装）"
+          : "";
       lines.push(
-        `- \`${c.id}\` [${c.category}] ${c.name}${c.description ? ` — ${c.description}` : ""}`,
+        `- \`${c.id}\` [${c.category}] ${c.name}${unavailable}${c.description ? ` — ${c.description}` : ""}`,
       );
     }
     return lines;
@@ -142,12 +169,16 @@ export async function openMcpHub(
   }
   persist();
 
-  async function invoke(serverId: string, toolName: string, args: Record<string, unknown>) {
+  async function invokeWithRaw(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<{ text: string; raw?: string }> {
     const finish = startCall("mcp", serverId, toolName);
     let success = false;
     try {
       const session = gateTool(ctx, "mcp", () => {
-        assertCapabilityAllows(manifest, mcpActionForServer(serverId));
+        assertCapabilityAllows(manifest, mcpActionForServer(serverId, manifest));
         if (!enabled.has(serverId)) {
           throw new Error(`MCP 未启用: ${serverId}。先调用 enable_mcp。`);
         }
@@ -173,10 +204,21 @@ export async function openMcpHub(
       }
       const result = await session.callTool(toolName, args);
       success = result.ok;
-      return result.text.slice(0, 12_000);
+      return {
+        text: result.text.slice(0, 12_000),
+        ...(result.raw !== undefined ? { raw: result.raw } : {}),
+      };
     } finally {
       finish(success);
     }
+  }
+
+  async function invoke(
+    serverId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<string> {
+    return (await invokeWithRaw(serverId, toolName, args)).text;
   }
 
   return {
@@ -234,9 +276,18 @@ export async function openMcpHub(
           throw new Error(`不是 MCP 工具: ${fullName}`);
         });
       }
-      return invoke(parsed.serverId, parsed.toolName, args);
+      const called = await invokeWithRaw(parsed.serverId, parsed.toolName, args);
+      // P15-C4: direct MCP tool calls get the same parser lane as mcp_invoke.
+      const parserTool = toolForServer(parsed.serverId);
+      if (!parserTool) return called.text;
+      return called.text + parseSummaryLine(
+        parseAndRecord(ctx, parserTool, called.raw ?? called.text, {
+          intentId: null,
+        }),
+      );
     },
     invoke,
+    invokeWithRaw,
     async close() {
       for (const s of sessions.values()) {
         try {

@@ -661,6 +661,13 @@ export class SettingsStore {
       args: s.args ?? [],
       url: s.url,
       env: s.env ?? {},
+      binary: s.binary,
+      defaultFlags: s.defaultFlags,
+      targetFlag: s.targetFlag,
+      capability: s.capability,
+      parser: s.parser,
+      timeoutMs: s.timeoutMs,
+      whenToUse: s.whenToUse,
     };
   }
 

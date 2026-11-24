@@ -6,11 +6,15 @@
   "transport": "builtin",
   "binary": "theHarvester",
   "defaultEnabled": false,
-  "defaultFlags": "-d",
+  "defaultFlags": "",
   "toolName": "run",
   "toolDescription": "Run theHarvester against an authorized target. Pass target and optional flags.",
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for OSINT emails/hosts/domains.",
+  "targetFlag": "-d"
 }

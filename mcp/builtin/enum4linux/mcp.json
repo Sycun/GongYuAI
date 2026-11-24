@@ -12,5 +12,8 @@
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "active-lab",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for SMB/AD null or credentialed enumeration."
 }

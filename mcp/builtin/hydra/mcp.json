@@ -12,5 +12,9 @@
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "active-lab",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for authorized credential spraying with a small list; watch lockouts.",
+  "targetFlag": ""
 }

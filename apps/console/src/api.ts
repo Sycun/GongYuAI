@@ -1,4 +1,4 @@
-import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, HttpTransaction, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
+import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, FindingValidation, HttpTransaction, EngagementAudit, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage } from "@gongyuai/contracts";
 import type {
   KnowledgeEmbeddingPatch,
   KnowledgeEmbeddingTestInput,
@@ -335,6 +335,7 @@ export type TaskP14Payload = {
   plan: PlanStep[];
   credentials: Credential[];
   retests: FindingRetest[];
+  validations?: FindingValidation[];
   oastTokens: OastToken[];
   oastHits: OastHit[];
   tunnels?: TunnelMeta[];
@@ -658,6 +659,14 @@ export const api = {
   getTaskP14: (id: string, signal?: AbortSignal) =>
     request<TaskP14Payload>(`/tasks/${encodeURIComponent(id)}/p14`, { signal }),
   /** 跨任务历史接触（只读线索）；address 可为 host 或 URL。 */
+  /** P15 read-only engagement audit (observations + scorecard). */
+  getAudit: (id: string, signal?: AbortSignal) =>
+    request<EngagementAudit>(`/tasks/${encodeURIComponent(id)}/audit`, { signal }),
+  getValidations: (id: string, findingId?: string, signal?: AbortSignal) =>
+    request<{ validations: FindingValidation[] }>(
+      `/tasks/${encodeURIComponent(id)}/validations${findingId ? `?findingId=${encodeURIComponent(findingId)}` : ""}`,
+      { signal },
+    ),
   getAssetHistory: (id: string, address: string, signal?: AbortSignal) =>
     request<AssetHistoryPayload>(
       `/tasks/${encodeURIComponent(id)}/asset-history?address=${encodeURIComponent(address)}`,

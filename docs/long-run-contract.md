@@ -66,7 +66,7 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 
 ### 资产清单与范围匹配
 
-- 创建任务即 `seedAssetsFromAuth`：每条 `auth.targets` → 一行 seed 资产（控制台立刻可见）。  
+- 创建任务即 `seedAssetsFromAuth`：每条 `auth.targets`（作业坐标）→ 一行 seed 资产（控制台立刻可见）。  
 - 发现物经 `asset_record` 写入；`admitAddress` **自动**判定 admitted / oos（IPv4 CIDR、`*.domain`、裸域后缀、`*`）。  
 - `outOfScope` 覆盖 targets。  
 - Observe 注入「资产清单」；`GET /tasks/:id/assets` 供控制台轮询。  
@@ -204,7 +204,7 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 - 从终态重新开始时重新计墙钟，保留操作者设定的四项预算。Token、调用和安装沿用任务累计口径。详情 API 同时返回本轮增量 `runUsage` 和累计 `usage`。
 - **预算尽仍出报告（P5）**：硬闸或 incomplete 收卷仍落盘 `report.md`。控制面墙钟截止时停止 Worker，用当前 History 写报告，再发布 `budget_exhausted`。如果收卷写盘失败，任务记为 `failed` 并保留错误原因。
 - Tool results are truncated for the chat buffer；权威细节在 evidence + History。
-- Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`；只读状态查询放行（`scutil --nc list|status|probe`、`networksetup -get*/-list*`，任何能力级可查）。
+- Host network / VPN / proxy mutations are denied even if `auth.targets` contains `*`；只读状态查询放行（`scutil --nc list|status|probe`、`networksetup -get*/-list*`，任何能力级可查）。这是**工程自保**（保护运行主机），不是目标审查。
 
 ## Tool single gate（P5）
 
@@ -212,7 +212,9 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 - MCP 初始化和启用应用同一能力策略。直接调用与别名调用共享启用状态、工具注册、显式目标及预算检查。外部适配器需要对其自身的网络动作落实隔离和授权。
 - 不引入第二套审批产品面；人工 `ask` 闸属后续可选，非本刀。
 
-## Auth capability ladder
+## Capability ladder（操作档位）
+
+> 档位决定工具面可见性与风险敞口，是**操作配置**，不是目标合法性审查。目标进入任务即视为授权；拒绝只有工程自保（[red-team-positioning.md](./red-team-positioning.md)）。
 
 在 prompt 白名单之上，工程化阶梯（对照 AutoRedTeam-Orchestrator）：
 
@@ -225,13 +227,13 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 | active-lab | + 主动利用类 MCP |
 | full | 全部 Worker 工具面（仍禁主机 VPN/代理变更） |
 
-新任务 schema 默认 `observe`；聊天/控制台任务与 `gy run` 默认 `active-lab`（2026-11-23 定调：联网渗透默认放开，范围外目标仍须授权绑定）。VPN/代理变更永远拒绝（只读状态查询除外）。
+新任务 schema 现状默认 `observe`，聊天/控制台任务与 `gy run` 默认 `active-lab`（2026-11-23 定调：联网渗透默认放开）。**目标语义（P16 待收敛）**：新任务默认 `active-lab`，`full` 由操作者显式选择；档位不是授权审查。VPN/代理变更永远拒绝（只读状态查询除外）——这是工程自保，与目标无关。
 
 ## Pause / resume / scope revision（阶段 2）
 
 - **状态分层**：`pause_requested`（已请求、worker 收尾中）与 `stopping` 是活动过渡态；`paused` 非活动、非终态；`stopped` 才是终态。看门狗不重启也不提升过渡态。
 - **暂停确认**：`pause` 先写请求，再向 worker 发 SIGTERM，轮询确认进程消失后才写 `paused`。超时未确认则回 `recovering` 并报错——不发布"假暂停"。Checkpoint / History / 证据 / 用量全部保留；不写终态报告。
-- **恢复**：`resume` 从最新控制面记录重建 manifest，因此**恢复即读取最新授权版本**；范围更新（`POST /tasks/:id/scope`）只能在无 worker 运行时进行，`scopeVersion` 递增并写一条 summary Fact。旧的 π/图事实不会恢复旧范围。
+- **恢复**：`resume` 从最新控制面记录重建 manifest，因此**恢复即读取最新操作配置**；范围更新（`POST /tasks/:id/scope`）只能在无 worker 运行时进行，`scopeVersion` 递增并写一条 summary Fact。旧的 π/图事实不会恢复旧范围。`scopeVersion` 只表示作业坐标变更，不是授权版本。
 - **外部状态**：`GET /runtime` 返回 `externalState = running | pause_requested | stopping | paused | stopped | unknown` 与 `lastConfirmedAt`。活动记录但无存活 worker、无新心跳时如实报 `unknown`，不以进程启动或端口监听冒充健康。
 - **未实现**：`operator_consult` 与"24h 无回复自动转非阻塞"仍属提案（P11 S2）。
 
@@ -302,7 +304,7 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 - `provenance` 至少一条（无源不记忆）；`contradicts`/`supersedes` 只追加不删除。
 - 注入：只取 `confirmed`；硬键命中正常注入，仅 ≥2 软键算参考；标题层 N=5，命中当前资产追加 ≤2；只写 `source=system` Hint，不写 Fact。
 - 注入事件 `memory_injections{memoryId,taskId,engagementId,hintId,layer,matchedKeys,injectedAt}` 可回查"哪些任务引用过它"。
-- 档案索引 `/archive/contact` 只回指针，非阻塞，`历史接触 ≠ 本次授权`。
+- 档案索引 `/archive/contact` 只回指针，非阻塞，`历史接触 ≠ 本次作业坐标`。
 
 ### 9.8 飞轮与角色
 

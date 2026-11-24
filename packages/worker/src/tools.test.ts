@@ -10,9 +10,11 @@ import {
   extractHosts,
   hostInTargets,
   runShell,
+  mcpActionForServer,
   type ToolContext,
 } from "./tools.js";
 import { writeTerminalReport } from "./report.js";
+import { parseShellOutput } from "./tool-output.js";
 import { openMcpHub } from "./mcp/client.js";
 import { openSkillHub } from "./skills/runtime.js";
 import { runAssetSearch } from "./asset-collectors.js";
@@ -255,5 +257,133 @@ test("skill and MCP outcomes follow returned content and protocol status", async
     ]);
   } finally {
     await mcp.close();
+  }
+});
+
+test("repeated-command breaker blocks the same attempt but exempts polling", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-repeat-"));
+  const evidenceDir = join(root, "evidence");
+  const workspaceDir = join(root, "workspace");
+  mkdirSync(evidenceDir, { recursive: true });
+  mkdirSync(workspaceDir, { recursive: true });
+  const history = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  t.after(() => {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const m = manifest(["example.com"]);
+  m.taskId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  m.dataDir = root;
+  m.workspaceDir = workspaceDir;
+  m.evidenceDir = evidenceDir;
+  m.auth.capability = "full";
+  m.budget.maxToolCalls = 100;
+  const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+
+  const previous = process.env.GY_REPEAT_COMMAND_LIMIT;
+  process.env.GY_REPEAT_COMMAND_LIMIT = "3";
+  try {
+    for (let i = 0; i < 3; i += 1) {
+      assert.equal((await runShell(ctx, "printf repeat")).stdout, "repeat");
+    }
+    await assert.rejects(() => runShell(ctx, "printf repeat"), /repeat-guard/);
+    // Different arguments are a different attempt.
+    assert.equal((await runShell(ctx, "printf repeat-2")).stdout, "repeat-2");
+    // Polling is exempt.
+    for (let i = 0; i < 5; i += 1) {
+      assert.equal((await runShell(ctx, "sleep 0")).exitCode, 0);
+    }
+    history.resetCommandAttempts(m.taskId, "test reset");
+    assert.equal((await runShell(ctx, "printf repeat")).stdout, "repeat");
+  } finally {
+    if (previous === undefined) delete process.env.GY_REPEAT_COMMAND_LIMIT;
+    else process.env.GY_REPEAT_COMMAND_LIMIT = previous;
+  }
+});
+
+test("shell parser lane: machine-readable nmap is transported, free text gets a mandatory flag hint", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-shell-parse-"));
+  const evidenceDir = join(root, "evidence");
+  const workspaceDir = join(root, "workspace");
+  mkdirSync(evidenceDir, { recursive: true });
+  mkdirSync(workspaceDir, { recursive: true });
+  const history = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  t.after(() => {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const m = manifest(["lab.example.com"]);
+  m.taskId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  m.dataDir = root;
+  m.workspaceDir = workspaceDir;
+  m.evidenceDir = evidenceDir;
+  const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+
+  const xml = `<?xml version="1.0"?>
+<nmaprun scanner="nmap" args="nmap -oX - lab.example.com">
+  <host><status state="up"/><address addr="lab.example.com" addrtype="ipv4"/>
+    <ports><port protocol="tcp" portid="443"><state state="open"/><service name="https"/></port></ports>
+  </host>
+</nmaprun>`;
+  const good = parseShellOutput(ctx, "nmap -oX - lab.example.com", xml);
+  assert.match(good, /\[parser\] assets=1/);
+  assert.equal(history.listAssets(m.taskId).length, 1);
+
+  const bad = parseShellOutput(ctx, "nmap -sV lab.example.com", "PORT STATE SERVICE\n443/tcp open https");
+  assert.match(bad, /mandatory/);
+  assert.match(bad, /-oX -/);
+});
+
+test("per-MCP capability metadata drives the gate; missing binaries are marked unavailable", async (t) => {
+  assert.equal(
+    mcpActionForServer("sqlmap", {
+      mcpPool: [{ id: "sqlmap", capability: "active-lab" }],
+    } as unknown as WorkerManifest),
+    "mcp-active",
+  );
+  assert.equal(
+    mcpActionForServer("nmap", {
+      mcpPool: [{ id: "nmap", capability: "scan" }],
+    } as unknown as WorkerManifest),
+    "mcp-scan",
+  );
+
+  const root = mkdtempSync(join(tmpdir(), "gy-mcp-health-"));
+  const m = manifest(["health.invalid"]);
+  m.dataDir = root;
+  m.workspaceDir = join(root, "workspace");
+  m.evidenceDir = join(root, "evidence");
+  m.auth.capability = "active-lab";
+  mkdirSync(m.workspaceDir);
+  mkdirSync(m.evidenceDir, { recursive: true });
+  const history = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir: m.evidenceDir });
+  t.after(() => {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeFileSync(join(root, "mcp.json"), JSON.stringify({ binary: "/nonexistent/dalfox" }));
+  m.mcpServers = [{
+    id: "dalfox",
+    name: "Dalfox fixture",
+    transport: "builtin",
+    rootDir: root,
+    binary: "/nonexistent/dalfox",
+    capability: "active-lab",
+    args: [],
+    env: {},
+  }];
+  const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+  const hub = await openMcpHub(m, ctx);
+  try {
+    assert.match(hub.catalogLines().join("\n"), /未安装/);
+    await assert.rejects(hub.enable("dalfox", "health probe"), /二进制不存在/);
+  } finally {
+    await hub.close();
   }
 });

@@ -7,6 +7,9 @@ import {
   isWallHit,
   type ShellTraceCall,
   type WorkerManifest,
+  type ModelRef,
+  type ModelTier,
+  selectModelRoute,
 } from "@gongyuai/contracts";
 import type { Context } from "@earendil-works/chord/context";
 import type { EntryId, HookApi } from "@earendil-works/pi-durable";
@@ -61,6 +64,10 @@ import {
   skillEnableTool,
   hostProfileListTool,
   hostProfileRecordTool,
+  hostProfileParseTool,
+  attackGraphRecordTool,
+  bloodhoundImportTool,
+  cloudRecordTool,
 } from "./ops-tools.js";
 
 function phaseToolDenial(
@@ -297,18 +304,37 @@ export function resolvePiModelRef(manifest: WorkerManifest): {
   apiKeyEnv: string;
   visionEnabled: boolean;
   visionModelId: string;
+  /** P17 — selected tier and ordered fallback chain (startup decision). */
+  tier: ModelTier;
+  fallbacks: ModelRef[];
 } {
-  const modelId = manifest.model?.modelId ?? process.env.GY_MODEL ?? "gpt-4.1-mini";
+  const settings = manifest.model;
+  const base: ModelRef = {
+    provider: settings?.provider || "openai",
+    modelId: settings?.modelId || process.env.GY_MODEL || "gpt-4.1-mini",
+    ...(settings?.baseUrl || process.env.OPENAI_BASE_URL
+      ? { baseUrl: (settings?.baseUrl ?? process.env.OPENAI_BASE_URL ?? "").replace(/\/$/, "") }
+      : {}),
+    ...(settings?.apiKeyEnv ? { apiKeyEnv: settings.apiKeyEnv } : {}),
+  };
+  const route = selectModelRoute({
+    base,
+    tiers: manifest.execution?.models,
+    providers: manifest.execution?.providers,
+    slot: manifest.workerSlot ?? 0,
+  });
+  const modelId = route.ref.modelId;
   const baseUrl = (
-    manifest.model?.baseUrl ??
+    route.ref.baseUrl ??
+    settings?.baseUrl ??
     process.env.OPENAI_BASE_URL ??
     "https://api.openai.com/v1"
   ).replace(/\/$/, "");
-  const apiKeyEnv = manifest.model?.apiKeyEnv ?? "OPENAI_API_KEY";
-  const visionEnabled = manifest.model?.visionEnabled !== false;
-  const visionModelId = manifest.model?.visionModelId || modelId;
+  const apiKeyEnv = route.ref.apiKeyEnv ?? settings?.apiKeyEnv ?? "OPENAI_API_KEY";
+  const visionEnabled = settings?.visionEnabled !== false;
+  const visionModelId = settings?.visionModelId || modelId;
 
-  let provider = (manifest.model?.provider || "openai").trim().toLowerCase() || "openai";
+  let provider = (route.ref.provider || "openai").trim().toLowerCase() || "openai";
   // Settings UI is OpenAI-compatible: users often leave provider=openai while pointing
   // baseUrl at DeepSeek / proxies. Map those so Pi's catalog lookup + compat detect work.
   if (provider === "openai" || provider === "openai-compatible" || provider === "compat") {
@@ -318,7 +344,16 @@ export function resolvePiModelRef(manifest: WorkerManifest): {
     else if (!host.includes("api.openai.com")) provider = "openai-compatible";
   }
 
-  return { provider, modelId, baseUrl, apiKeyEnv, visionEnabled, visionModelId };
+  return {
+    provider,
+    modelId,
+    baseUrl,
+    apiKeyEnv,
+    visionEnabled,
+    visionModelId,
+    tier: route.tier,
+    fallbacks: route.fallbacks,
+  };
 }
 
 async function buildConfiguredModels(manifest: WorkerManifest) {
@@ -1022,6 +1057,45 @@ async function tryPiDurable(
       replay: "none",
       execute: async (args: Record<string, string>) => textOut(() => hostProfileRecordTool(opsCtx(), args)),
     } as never);
+    const host_profile_parse = defineTool({
+      name: "host_profile_parse",
+      description:
+        "P17 解析只读主机枚举输出（Linux id/uname/os-release/sudo -l/getcap/ss；Windows systeminfo/whoami /all/net localgroup/net user/net share/ipconfig）为 HostProfile。未识别时返回 skipped，不编造。",
+      parameters: obj({ asset: str(), text: str(), evidencePath: str() }),
+      replay: "none",
+      execute: async (args: Record<string, string>) =>
+        textOut(() => hostProfileParseTool(opsCtx(), args)),
+    } as never);
+    const attack_graph_record = defineTool({
+      name: "attack_graph_record",
+      description:
+        "P17 记录一个 AD/云攻击图节点或边（Fact 投影）。type=node|edge；json 为 {id,kind,name,domain?,provider?,account?,owned?} 或 {from,to,kind}。",
+      parameters: obj({ type: str(), json: str() }),
+      replay: "none",
+      execute: async (args: Record<string, string>) =>
+        textOut(() => attackGraphRecordTool(opsCtx(), args)),
+    } as never);
+    const bloodhound_import = defineTool({
+      name: "bloodhound_import",
+      description:
+        "P17 导入 BloodHound/SharpHound JSON（users/groups/computers/domains + Members/Aces/Sessions/LocalAdmins），写 AD 图并返回最短 Domain Admin 路径。",
+      parameters: obj({ text: str() }),
+      replay: "none",
+      execute: async (args: Record<string, string>) =>
+        textOut(() => bloodhoundImportTool(opsCtx(), args)),
+    } as never);
+    const cloud_record = defineTool({
+      name: "cloud_record",
+      description:
+        "P17 记录云资产/角色/策略节点，可选同时记录一条边（provider/kind/id/name/account + edgeFrom/edgeTo/edgeKind）。",
+      parameters: obj({
+        provider: str(), kind: str(), id: str(), name: str(), account: str(),
+        edgeFrom: str(), edgeTo: str(), edgeKind: str(),
+      }),
+      replay: "none",
+      execute: async (args: Record<string, string>) =>
+        textOut(() => cloudRecordTool(opsCtx(), args)),
+    } as never);
     const host_profile_list = defineTool({
       name: "host_profile_list",
       description: "P14 列出本任务 foothold 主机画像。",
@@ -1083,12 +1157,20 @@ async function tryPiDurable(
             parsed = { raw: args.argsJson };
           }
         }
-        const text = await mcpHub.invoke(args.serverId, args.toolName, parsed);
+        const { text, raw } = await mcpHub.invokeWithRaw(
+          args.serverId,
+          args.toolName,
+          parsed,
+        );
         state.toolCalls = ctx.usage.toolCalls;
         ckpt.save(state);
         const parserTool = toolForServer(args.serverId);
         const parsedLine = parserTool
-          ? parseSummaryLine(parseAndRecord(ctx, parserTool, text, { intentId: state.activeIntentId }))
+          ? parseSummaryLine(
+              parseAndRecord(ctx, parserTool, raw ?? text, {
+                intentId: state.activeIntentId,
+              }),
+            )
           : "";
         return {
           output: [{
@@ -1282,7 +1364,8 @@ async function tryPiDurable(
     harness.resume();
     appendProgress(
       manifest.workspaceDir,
-      `Pi Durable 使用模型 ${ref.provider}/${ref.modelId}`,
+      `Pi Durable 使用模型 ${ref.provider}/${ref.modelId}（tier=${ref.tier}` +
+        `${ref.fallbacks.length ? `, fallbacks=${ref.fallbacks.map((item) => `${item.provider}/${item.modelId}`).join(",")}` : ""}）`,
     );
     flushUsage(manifest, ctx, state);
 
@@ -2172,6 +2255,62 @@ async function runOpenAiToolLoop(
     {
       type: "function" as const,
       function: {
+        name: "host_profile_parse",
+        description: "P17 解析主机枚举输出为结构化 HostProfile（未识别则 skipped）。",
+        parameters: {
+          type: "object",
+          properties: {
+            asset: { type: "string" },
+            text: { type: "string" },
+            evidencePath: { type: "string" },
+          },
+          required: ["asset", "text"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "attack_graph_record",
+        description: "P17 记录 AD/云攻击图节点或边（type=node|edge + json）。",
+        parameters: {
+          type: "object",
+          properties: { type: { type: "string" }, json: { type: "string" } },
+          required: ["type", "json"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "bloodhound_import",
+        description: "P17 导入 BloodHound/SharpHound JSON 并返回 DA 路径。",
+        parameters: {
+          type: "object",
+          properties: { text: { type: "string" } },
+          required: ["text"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "cloud_record",
+        description: "P17 记录云节点/边（provider/kind/id/name/account + edge*）。",
+        parameters: {
+          type: "object",
+          properties: {
+            provider: { type: "string" }, kind: { type: "string" }, id: { type: "string" },
+            name: { type: "string" }, account: { type: "string" },
+            edgeFrom: { type: "string" }, edgeTo: { type: "string" }, edgeKind: { type: "string" },
+          },
+          required: ["provider", "id"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
         name: "host_profile_list",
         description: "P14 列出 foothold 主机画像。",
         parameters: { type: "object", properties: {}, required: [] },
@@ -2755,6 +2894,34 @@ async function runOpenAiToolLoop(
               result = `错误: ${err instanceof Error ? err.message : String(err)}`;
             }
             break;
+          case "host_profile_parse":
+            try {
+              result = hostProfileParseTool(opsCtx(), args);
+            } catch (err) {
+              result = `错误: ${err instanceof Error ? err.message : String(err)}`;
+            }
+            break;
+          case "attack_graph_record":
+            try {
+              result = attackGraphRecordTool(opsCtx(), args);
+            } catch (err) {
+              result = `错误: ${err instanceof Error ? err.message : String(err)}`;
+            }
+            break;
+          case "bloodhound_import":
+            try {
+              result = bloodhoundImportTool(opsCtx(), args);
+            } catch (err) {
+              result = `错误: ${err instanceof Error ? err.message : String(err)}`;
+            }
+            break;
+          case "cloud_record":
+            try {
+              result = cloudRecordTool(opsCtx(), args);
+            } catch (err) {
+              result = `错误: ${err instanceof Error ? err.message : String(err)}`;
+            }
+            break;
           case "host_profile_list":
             result = hostProfileListTool(opsCtx());
             break;
@@ -2813,16 +2980,19 @@ async function runOpenAiToolLoop(
                 parsed = { raw: args.argsJson };
               }
             }
-            result = await mcpHub.invoke(
-              args.serverId ?? "",
-              args.toolName ?? "",
-              parsed,
-            );
             {
+              const called = await mcpHub.invokeWithRaw(
+                args.serverId ?? "",
+                args.toolName ?? "",
+                parsed,
+              );
+              result = called.text;
               const parserTool = toolForServer(args.serverId ?? "");
               if (parserTool) {
                 result += parseSummaryLine(
-                  parseAndRecord(ctx, parserTool, result, { intentId: state.activeIntentId }),
+                  parseAndRecord(ctx, parserTool, called.raw ?? result, {
+                    intentId: state.activeIntentId,
+                  }),
                 );
               }
             }

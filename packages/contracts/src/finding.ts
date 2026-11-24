@@ -91,8 +91,64 @@ export const FindingSchema = z.object({
   fix: z.string().default(""),
   createdAt: z.string().datetime(),
   verifiedAt: z.string().datetime().nullable().default(null),
+  /** P15-C1 — worker/operator that moved tentative → verified. */
+  verifiedBy: z.string().nullable().default(null),
 });
 export type Finding = z.infer<typeof FindingSchema>;
+
+/**
+ * P15-C1 — Finder ≠ Validator.
+ *
+ * A validation is an append-only opinion about an already-verified finding:
+ * - `confirmed`     independent replay/control shows the conclusion stands;
+ * - `refuted`       the evidence does not support the conclusion;
+ * - `inconclusive`  target/evidence unavailable; neither confirms nor refutes;
+ * - `out-of-scope`  reproduction would require exceeding the original authorization.
+ *
+ * `validator` must differ from `Finding.verifiedBy`; the history layer rejects
+ * self-validation. `independent` is derived by the store, not trusted from input.
+ */
+export const FindingValidationVerdictSchema = z.enum([
+  "confirmed",
+  "refuted",
+  "inconclusive",
+  "out-of-scope",
+]);
+export type FindingValidationVerdict = z.infer<typeof FindingValidationVerdictSchema>;
+
+export const FindingValidationMethodSchema = z.enum([
+  "evidence-only",
+  "replay",
+  "control-compare",
+  "manual",
+]);
+export type FindingValidationMethod = z.infer<typeof FindingValidationMethodSchema>;
+
+export const FindingValidationSchema = z.object({
+  id: z.string().uuid(),
+  taskId: z.string().uuid(),
+  findingId: z.string().uuid(),
+  verdict: FindingValidationVerdictSchema,
+  method: FindingValidationMethodSchema,
+  evidence: z.array(FindingEvidenceSchema).default([]),
+  note: z.string().default(""),
+  /** Worker id, `operator:<name>`, or external reviewer identity. */
+  validator: z.string().min(1),
+  /** Derived: validator !== finding.verifiedBy. */
+  independent: z.boolean(),
+  createdAt: z.string().datetime(),
+});
+export type FindingValidation = z.infer<typeof FindingValidationSchema>;
+
+export const FindingValidationDraftSchema = z.object({
+  verdict: FindingValidationVerdictSchema,
+  method: FindingValidationMethodSchema,
+  /** Evidence files / refs; confirmed/refuted require at least one. */
+  evidencePaths: z.array(z.string()).default([]),
+  note: z.string().default(""),
+  validator: z.string().min(1),
+});
+export type FindingValidationDraft = z.infer<typeof FindingValidationDraftSchema>;
 
 /**
  * Goal 级 finding 闸：assert_goal 时按 findings 表实测。
@@ -110,6 +166,8 @@ export const FindingsGateSchema = z.object({
   scope: z.enum(["goal", "task"]).default("goal"),
   /** Explicit asset set for a goal-scoped gate; overrides goal.assets. */
   assets: z.array(z.string().min(1)).optional(),
+  /** P15-C1 — every supporting finding needs a `confirmed` independent validation. */
+  requireIndependent: z.boolean().optional(),
 });
 export type FindingsGate = z.infer<typeof FindingsGateSchema>;
 

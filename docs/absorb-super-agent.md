@@ -21,7 +21,7 @@
 
 | 阅读材料 | 作者讨论的问题 | 对 GongYuAI 的取舍 |
 | --- | --- | --- |
-| DeepSeekAgent.io 架构指南 | 持续接收事件的系统要区分消息归属与授权。公开原型用 Ticket 保存工作项，Assignment 表示一次派工，Mandate 限定范围。订阅线程可把后续消息送回原工单，消息本身不扩大权限。 | 报告复核沿用原任务、原授权版本和证据引用。一次会话结束后，操作员仍能回到同一项工作。[指南](https://deepseekagent.io/guides/deepseek-super-agent-architecture) · [原型领域模型](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/main/docs/001-domain.md) · [授权规则](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/main/docs/002-authorization.md) |
+| DeepSeekAgent.io 架构指南 | 持续接收事件的系统要区分消息归属与权限。公开原型用 Ticket 保存工作项，Assignment 表示一次派工，Mandate 限定范围。订阅线程可把后续消息送回原工单，消息本身不扩大权限。 | 报告复核沿用原任务、原作业坐标和证据引用（本仓不设授权层：Mandate 收敛为任务坐标）。一次会话结束后，操作员仍能回到同一项工作。[指南](https://deepseekagent.io/guides/deepseek-super-agent-architecture) · [原型领域模型](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/main/docs/001-domain.md) · [授权规则](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/main/docs/002-authorization.md) |
 | MacOpenClaw 架构拆解 | 已订阅的事件可以直达原工作项，耗时工作的结果可稍后返回。近期信息留在上下文，长材料保存在外部，按引用逐层读回（Inline & Spill、链式召回）。文章还讨论了云端状态、本地执行和判断偏航的 Watchdog。 | 任务摘要应指回原件；换班时保留记录编号、证据版本和待复核项。这篇与上一篇解读同一项 DeepSeek 设计。团队说明公开原型经过改编，部分设计尚未实现。[文章](https://macopenclaw.com/super-agent/super-agent-architecture/) · [原型说明](https://github.com/deepseek-ai/dsh-superagent-prototype) |
 | *Toward Super Agent System with Hybrid AI Routers* | 意图路由选择处理哪类工作，模型路由在质量、延迟和费用约束下选择模型。端云选择还受数据可外发范围和设备资源约束。作者把端到端基准列为后续研究。 | 论文给 P7 提供了实验假设。一次明确指向原任务的更正不需要模型猜测归属。若采用端云分流，先按材料允许的处理位置筛选，再比较可用模型。[论文 §3–§5](https://arxiv.org/html/2504.10519v2) |
 
@@ -69,10 +69,10 @@
 
 | 步骤 | 操作 | 预期结果与核对依据 |
 | --- | --- | --- |
-| 1. 定位原任务 | 操作员收到注明任务 ID 和 R-017 的更正回函。通过 `GET /tasks/<id>/history` 核对目标和 A、B 的记录编号，用 `gy evidence <id> --path review/R-017.json --file 回函.json` 导入。 | 回函写明 R-017 归属 B，未提供签收人。记录任务 ID、授权版本和终态。用另一任务的 Fact ID 提交本次复核，接口应返回 400，原任务复核条数不变；单号相同不能替代任务归属。 |
+| 1. 定位原任务 | 操作员收到注明任务 ID 和 R-017 的更正回函。通过 `GET /tasks/<id>/history` 核对目标和 A、B 的记录编号，用 `gy evidence <id> --path review/R-017.json --file 回函.json` 导入。 | 回函写明 R-017 归属 B，未提供签收人。记录任务 ID、作业坐标和终态。用另一任务的 Fact ID 提交本次复核，接口应返回 400，原任务复核条数不变；单号相同不能替代任务归属。 |
 | 2. 撤回 A 并重放来件 | 对 `ownership` 提交署名复核，填 A 的 `factId`、`decision=retracted`、B 的 `replacementFactId`、误读理由及回函的 `evidencePath`。通过 `POST /tasks/<id>/reviews` 或 `gy review <id> --file review.json` 连续提交两次，保持字段与附件字节相同。 | 两次返回同一 `review.id`，仅新增一条撤回意见。报告中 A 已撤回，B 显示为更正指向，尚无独立确认。连续重复提交由复核存储去重；跨渠道消息去重须另测。[复核字段示例](./evidence-review.md) |
 | 3. 独立确认 B | 复核员核对收件原件与回函中的单号和归属，再为 B 单独提交 `decision=confirmed`、署名、理由和回函路径。 | 修订报告保留初核依据及撤回理由，B 显示已另行复核。只依赖 A 的下游汇总显示“依据已撤回，待复核”。签收目标仍为“未验证”，列出所缺的有效签收材料。 |
-| 4. 核验报告和附件版本 | 将工作区收件路径的内容改成 C，读回当前报告及两个证据链接。用首次交付摘要定位任务目录下的 `reports/report-<摘要前12位>.md`。 | 归档报告的完整 SHA-256 与首交值相等；从修订报告的 `report-evidence/<sha256>` 分别读回原件 B 与更正回函，字节摘要与链接相符。任务仍为同一终态，授权版本和累计执行用量保持首交值。[报告归档与证据发布](../packages/history/src/report.ts) |
+| 4. 核验报告和附件版本 | 将工作区收件路径的内容改成 C，读回当前报告及两个证据链接。用首次交付摘要定位任务目录下的 `reports/report-<摘要前12位>.md`。 | 归档报告的完整 SHA-256 与首交值相等；从修订报告的 `report-evidence/<sha256>` 分别读回原件 B 与更正回函，字节摘要与链接相符。任务仍为同一终态，作业坐标版本和累计执行用量保持首交值。[报告归档与证据发布](../packages/history/src/report.ts) |
 | 5. 由另一位读者验收 | 交给读者修订版 `report.md` 与同目录的 `report-evidence/`。请其标出当前归属、已撤回记录、受影响汇总和签收缺口，并指出各结论的原始依据。 | 四项答案依次为 B、A、沿用 A 的汇总待复核、缺有效签收。读者能从相对链接打开 R-017 原件和回函。误挂任务、重复入账、丢失首交版本、独立复核前确认 B，或将缺凭据的签收记为通过，任一项均判失败。 |
 
 **交付边界。** 此例更正的是 Fact，终态复核会重新发布任务报告。项目另有编号交付更正，适用于曾支撑已通过目标的 Finding 被撤回，可记录受影响的目标、报告摘要和通知状态。本例预期编号更正列表为空。报告生成也不能证明收件人已经收到修订版；如需验收送达，应另留收悉凭据。[交付更正规则](../packages/history/src/index.ts) · [交付验收设计](./delivery-assurance-plan.md)

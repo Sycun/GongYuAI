@@ -28,6 +28,7 @@ import {
   classifyMaterial,
   deriveCoverageMatrix,
   detectMaterialKind,
+  findAttackPaths,
   freshnessOf,
   matchMemory,
   noProgressAlarm,
@@ -169,7 +170,7 @@ export async function handleOpsRoute(
 
   /* ------------------------------ 任务级路由 ------------------------------ */
   const taskMatch = path.match(
-    /^\/tasks\/([^/]+)\/(handoff|consults|jobs|materials|coverage-matrix|coverage-cells|freshness|changes|rollback|graphs|causality|roles|provider|model-request|memory|alerts|p14|asset-history)(\/.*)?$/,
+    /^\/tasks\/([^/]+)\/(handoff|consults|jobs|materials|coverage-matrix|coverage-cells|freshness|changes|rollback|graphs|causality|roles|provider|model-request|memory|alerts|p14|asset-history|audit|validations|command-reset|chain)(\/.*)?$/,
   );
   if (!taskMatch) return handlePlatformRoute(req, res, method, url, deps);
 
@@ -606,6 +607,51 @@ export async function handleOpsRoute(
       return send(res, 200, assetHistory(store, task, address)), true;
     }
 
+    // P17 — event hash-chain head + verification.
+    if (group === "chain" && method === "GET") {
+      const history = open(task, true);
+      try {
+        return send(res, 200, history.verifyEventChain(taskId)), true;
+      } finally {
+        history.close();
+      }
+    }
+
+    // P15-C2 — operator reset for the repeated-command breaker.
+    if (group === "command-reset" && method === "POST") {
+      const body = (await readJson(req).catch(() => ({}))) as { reason?: unknown };
+      const history = open(task);
+      try {
+        history.resetCommandAttempts(taskId, typeof body.reason === "string" ? body.reason : "");
+        return send(res, 200, { ok: true }), true;
+      } finally {
+        history.close();
+      }
+    }
+
+    // P15 — read-only engagement audit (observations + confirmation scorecard).
+    if (group === "audit" && method === "GET") {
+      const history = open(task, true);
+      try {
+        return send(res, 200, history.engagementAudit(taskId)), true;
+      } finally {
+        history.close();
+      }
+    }
+
+    // P15-C1 — append-only independent validations for this task.
+    if (group === "validations" && method === "GET") {
+      const history = open(task, true);
+      try {
+        const findingId = url.searchParams.get("findingId") ?? undefined;
+        return send(res, 200, {
+          validations: history.listFindingValidations(taskId, findingId),
+        }), true;
+      } finally {
+        history.close();
+      }
+    }
+
     // P14 — read-only projection of transactions / plan / credentials / retests / OAST.
     if (group === "p14" && method === "GET") {
       const history = open(task, true);
@@ -618,6 +664,7 @@ export async function handleOpsRoute(
             secretRef: redactSecretRef(credential.secretRef),
           })),
           retests: history.listFindingRetests(taskId),
+          validations: history.listFindingValidations(taskId),
           oastTokens: history.listOastTokens(taskId),
           oastHits: history.listOastHits(taskId),
           tunnels: (() => {
@@ -646,6 +693,29 @@ export async function handleOpsRoute(
         const intents = history.listIntents(taskId);
         const events = history.listEvents(taskId, 1000);
         let graph: GraphView;
+        if (view === "ad" || view === "cloud") {
+          const all = history.attackGraph(taskId);
+          const prefix = view === "ad" ? "ad-" : "cloud-";
+          const nodes = all.nodes.filter((node) => node.kind.startsWith(prefix));
+          const ids = new Set(nodes.map((node) => node.id));
+          const edges = all.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
+          return send(res, 200, {
+            view,
+            nodes,
+            edges,
+            paths: findAttackPaths({ nodes, edges }, {
+              maxDepth: 8,
+              maxPaths: 20,
+              ...(view === "cloud"
+                ? {
+                    targets: nodes
+                      .filter((node) => node.kind === "cloud-role" || /admin|owner|root/i.test(node.name))
+                      .map((node) => node.id),
+                  }
+                : {}),
+            }),
+          }), true;
+        }
         if (view === "assets") {
           graph = buildAssetGraph({
             taskId,

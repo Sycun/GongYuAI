@@ -6,11 +6,15 @@
   "transport": "builtin",
   "binary": "smbmap",
   "defaultEnabled": false,
-  "defaultFlags": "-H",
+  "defaultFlags": "",
   "toolName": "run",
   "toolDescription": "Run smbmap against an authorized target. Pass target and optional flags.",
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "active-lab",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for SMB share enumeration with authorized credentials.",
+  "targetFlag": "-H"
 }

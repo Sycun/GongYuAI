@@ -6,11 +6,15 @@
   "transport": "builtin",
   "binary": "wapiti",
   "defaultEnabled": false,
-  "defaultFlags": "-u",
+  "defaultFlags": "",
   "toolName": "run",
   "toolDescription": "Run wapiti against an authorized target. Pass target and optional flags.",
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "active-lab",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for black-box web scanning; active traffic.",
+  "targetFlag": "-u"
 }

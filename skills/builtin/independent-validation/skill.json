@@ -1,0 +1,9 @@
+{
+  "id": "independent-validation",
+  "name": "independent-validation",
+  "description": "Finder ≠ Validator：四态独立复核 finding，先对照后结论，自证被拒。",
+  "defaultEnabled": true,
+  "source": "gongyuai",
+  "refs": ["P15-C1", "MASTER-DESIGN"],
+  "triggers": ["独立确认", "复核", "validator", "confirmed", "refuted", "inconclusive", "requireIndependent"]
+}

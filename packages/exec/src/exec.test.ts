@@ -42,11 +42,16 @@ test("authorizeCommand：范围内放行、越界拒绝、能力级不足拒绝"
   assert.equal(local.allowed, true, local.reason);
 });
 
-test("authorizeCommand：主机网络变更与破坏命令始终拒绝", () => {
+test("authorizeCommand：主机网络变更与破坏命令始终拒绝；只读状态查询放行", () => {
   assert.equal(classifyCommand("iptables -A INPUT -j DROP"), "host-network");
   assert.equal(authorizeCommand({ ...AUTH, capability: "full" }, "iptables -A INPUT -j DROP").allowed, false);
   assert.equal(classifyCommand("rm -rf / --no-preserve-root"), "destructive");
   assert.equal(authorizeCommand({ ...AUTH, capability: "full" }, "rm -rf / --no-preserve-root").allowed, false);
+  assert.equal(classifyCommand("networksetup -setwebproxy Wi-Fi 127.0.0.1 8080"), "host-network");
+  assert.equal(classifyCommand("scutil --nc start ViscosityLab"), "host-network");
+  assert.equal(authorizeCommand(AUTH, "scutil --nc list").allowed, true);
+  assert.equal(authorizeCommand(AUTH, "scutil --nc status ViscosityLab").allowed, true);
+  assert.equal(authorizeCommand(AUTH, "networksetup -getinfo Wi-Fi").allowed, true);
 });
 
 test("capabilityAtLeast 阶梯", () => {

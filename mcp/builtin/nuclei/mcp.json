@@ -6,11 +6,16 @@
   "transport": "builtin",
   "binary": "nuclei",
   "defaultEnabled": true,
-  "defaultFlags": "-silent",
+  "defaultFlags": "-silent -jsonl",
   "toolName": "run",
   "toolDescription": "Run nuclei against an authorized target. Pass target and optional flags.",
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "active-lab",
+  "timeoutMs": 600000,
+  "parser": "nuclei",
+  "whenToUse": "Use for template-based checks; templates are active traffic. Prefer -jsonl.",
+  "targetFlag": "-u"
 }

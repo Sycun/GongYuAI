@@ -9,7 +9,7 @@ import { bootControlPlane, taskPaths } from "./index.js";
 
 test("task, project and report retain repeated calls, interruptions and untracked history", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "gy-usage-api-"));
-  const plane = await bootControlPlane({ dataRoot: root, host: "127.0.0.1", port: 0, runtime: "local", watchdogMs: 60_000 });
+  const plane = await bootControlPlane({ dataRoot: root, host: "127.0.0.1", port: 0, runtime: "local", watchdogMs: 60_000, isolated: true });
   t.after(async () => { await plane.close(); rmSync(root, { recursive: true, force: true }); });
   const request = CreateTaskRequestSchema.parse({ name: "台账复核", mock: true,
     auth: { targets: ["archive.invalid"], authorizationNote: "仅限本地合成台账复核" },

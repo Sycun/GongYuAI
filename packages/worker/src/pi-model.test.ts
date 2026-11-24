@@ -88,3 +88,28 @@ test("maps custom proxy to openai-compatible", () => {
   );
   assert.equal(ref.provider, "openai-compatible");
 });
+
+test("P17 tier routing: leader uses reason, execution slot uses explore", () => {
+  const manifest = baseManifest({
+    provider: "openai",
+    modelId: "base-model",
+    baseUrl: "https://api.openai.com/v1",
+    apiKeyEnv: "OPENAI_API_KEY",
+    visionEnabled: true,
+  });
+  manifest.execution = {
+    ...manifest.execution!,
+    models: {
+      reason: { provider: "deepseek", modelId: "deepseek-reasoner" },
+      explore: { provider: "openai", modelId: "gpt-4.1-mini" },
+    },
+  };
+  manifest.workerSlot = 0;
+  const leader = resolvePiModelRef(manifest);
+  assert.equal(leader.modelId, "deepseek-reasoner");
+  assert.equal(leader.tier, "reason");
+  manifest.workerSlot = 3;
+  const worker = resolvePiModelRef(manifest);
+  assert.equal(worker.modelId, "gpt-4.1-mini");
+  assert.equal(worker.tier, "explore");
+});

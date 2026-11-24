@@ -1,0 +1,53 @@
+{
+  "note": "Synthetic command/stage regression fixture; replace actual with model output before scoring.",
+  "cases": [
+    {
+      "id": "recon-1",
+      "stage": "recon",
+      "intent": "service discovery",
+      "expected": [
+        "nmap -sV -p 80,443 host"
+      ]
+    },
+    {
+      "id": "web-1",
+      "stage": "web",
+      "intent": "probe endpoints",
+      "expected": [
+        "httpx -json -u https://host"
+      ],
+      "aliases": {
+        "httpx": [
+          "http"
+        ]
+      }
+    },
+    {
+      "id": "verify-1",
+      "stage": "verify",
+      "intent": "control request",
+      "expected": [
+        "curl -s -o /dev/null -w '%{http_code}' https://host"
+      ]
+    },
+    {
+      "id": "chain-1",
+      "stage": "chain",
+      "intent": "credential reuse",
+      "expected": [
+        "netexec smb 10.0.0.5 -u alice -p pass"
+      ]
+    }
+  ],
+  "actual": {
+    "recon-1": "nmap -sV -p 80,443 host",
+    "web-1": "http -json -u https://host",
+    "verify-1": "curl -s -o /dev/null -w '%{http_code}' https://host",
+    "chain-1": "netexec smb 10.0.0.5 -u alice -p pass"
+  },
+  "covered": [
+    "recon-1",
+    "web-1",
+    "chain-1"
+  ]
+}

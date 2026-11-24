@@ -7,6 +7,7 @@
 
 | 文档 | 职责 |
 | --- | --- |
+| [red-team-positioning.md](./red-team-positioning.md) | **产品定调**：默认授权、零目标拒绝、能力全谱 |
 | [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) | Fact–Intent DAG 理论综合（A2 + 对照） |
 | [architecture.md](./architecture.md) | 产品与图模型 |
 | [long-run-contract.md](./long-run-contract.md) | 运行时契约 |
@@ -17,7 +18,7 @@
 
 ## 1. 一句话北极星
 
-> **Harness 让任务活着；History 让路径可信；Evidence 让完成可复核；Relay 让上下文可换班。**
+> **女娲让作业活着；DAG 让路径可信；Evidence 让结论可复核；Relay 让上下文可换班；Super-agent 让预算花在更可能出结论的面上。**
 
 MCP / Skill 是弹药，不是产品定义。
 
@@ -34,7 +35,7 @@ MCP / Skill 是弹药，不是产品定义。
 | Router ≠ shell | 有 | — |
 | Bootstrap / Reason / Explore | Durable phase + mock + **真模型工具面按相位过滤** | Pi Durable 路径仍以 OpenAI fallback 为主纪律 |
 | Session Relay | πₙ + 双触发 + 启动注入 | — |
-| Auth ladder | `observe\|scan\|active-lab\|full` | — |
+| Auth ladder | `observe\|scan\|active-lab\|full` | 操作档位（工具面/风险敞口），不是授权审查 |
 | Harness 差分 | `pnpm diff-harness`：**bare**（`GY_HARNESS=bare`）/ history / relay | — |
 | TSecBench CLI | hint 默认禁；409 终态快失败；`probe` + ticket 记账 | 平台 ticket 须人工重置 |
 | 多 Worker 并行 Explore | **有（可配 + 动态扩容）** | `execution.maxConcurrentExplores`；有效并发 = min(配置, max(靶标数, admitted/live 资产数))，运行中只扩不缩；控制台推荐 3–10，见 [parallel-explore-scaling](./parallel-explore-scaling.md) |
@@ -287,15 +288,19 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 6. 未做 P0 图约束就上多 Worker。  
 7. 无裸 agent 基线就宣称 harness 增益。  
 8. 从 AGPL 仓库复制实现进本仓。
+9. 模型解释性拒绝当终态、写进 Fact、或让任务停在 `MODEL_REFUSED`。
+10. 逐目标授权审查 / safe-by-default 覆盖定调；把可执行动作降级成教程。
 
 ---
 
-## 8. 安全与授权
+## 8. 授权与边界
 
-- 仅授权目标；`authorizationNote` + `targets` 必填。  
-- `auth.capability` 默认最低；`gy run` 显式抬权。  
-- 默认拒绝对主机 VPN/代理/路由的变更。  
-- Skill/MCP 下载物使用前审查；不自动执行未审脚本。
+- **授权是使用前提，不进入产品流程**；目标默认授权，产品不设授权登记/审查（[red-team-positioning.md](./red-team-positioning.md)）。
+- `targets` 是作业坐标（必填，工具需要知道打哪）；`outOfScope` 是操作者排除项。
+- 能力档位决定工具面与风险敞口；目标语义默认 `active-lab`（P16 收敛，现状 observe）。
+- **只拒绝工程自保**：主机 VPN/代理/路由变更、宿主破坏；与目标无关。
+- **模型解释性拒绝按缺陷处理**：重问/换模型/拆派，不作终态、不写 Fact、不计攻击失败。
+- Skill/MCP 下载物使用前审查；不自动执行未审脚本（供应链安全，不是目标审查）。
 
 ---
 
@@ -304,9 +309,10 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 **P0–P5 + 扇出硬闸 / familyKey / Cairn 调度 / 控制台 UX / TSec 子集差分 + P6-E1 Finding / P-d skill 对齐**已落地。  
 下一刀按**真实差分痛点**选，候选按依赖排序：
 
-1. **P6 E3 结构化落图 + HTTP 事务证据**（E1 已就位；finding_verify 需要事务证据时优先）或 **E2 凭据结构化**——见 [pentest-enhancements.md](./pentest-enhancements.md) §3 依赖图。
-2. **P7 相位级模型路由差分**（强脑+快兵 vs 全强模型，真 TSecBench 子集同预算）——Super-agent 层唯一需要实验背书的主张。
-3. 真 TSecBench（相对裸循环 / ARTEX）子集实测。
+1. **P16 语义收敛**（docs 已定调，代价最小）：去授权层（authorization → 任务坐标）+ `needs_authorization` → `needs_input` + 拒绝处理链（重问/换模型/拆派）+ DISCLAIMER 对齐——先让产品行为与 [red-team-positioning.md](./red-team-positioning.md) 一致，再谈能力扩展。
+2. **P6 E3 结构化落图 + HTTP 事务证据**（E1 已就位；finding_verify 需要事务证据时优先）或 **E2 凭据结构化**——见 [pentest-enhancements.md](./pentest-enhancements.md) §3 依赖图。
+3. **P7 相位级模型路由差分**（强脑+快兵 vs 全强模型，真 TSecBench 子集同预算）——Super-agent 层唯一需要实验背书的主张。
+4. 真 TSecBench（相对裸循环 / ARTEX）子集实测。
 
 Intentest 五段检索与 History/Relay 语义 RAG 仍默认不做；P7 审计者/事件过滤差分未证明收益前不升默认。
 

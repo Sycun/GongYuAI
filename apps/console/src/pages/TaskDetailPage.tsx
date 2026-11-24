@@ -55,6 +55,7 @@ import { CommandReviewCard } from "../components/CommandReviewCard";
 import { ExecutionTrace } from "../components/ExecutionTrace";
 import { IntegrationUsage } from "../components/IntegrationUsage";
 import { P14Panel } from "../components/P14Panel";
+import { P15Panel } from "../components/P15Panel";
 import { formatDateTime } from "../time";
 
 const FactIntentDag = lazy(() => import("../components/dag/FactIntentDag"));
@@ -1301,6 +1302,8 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
         )}
 
         {tab === "p14" && <P14Panel taskId={task.id} />}
+
+        {tab === "p15" && <P15Panel taskId={task.id} />}
       </div>
     </div>
   );

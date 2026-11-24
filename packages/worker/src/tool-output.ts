@@ -5,6 +5,47 @@ import {
 } from "@gongyuai/contracts";
 import type { ToolContext } from "./tools.js";
 
+/** Shell-invoked tools that have a structured parser (P15-C4). */
+const SHELL_TOOLS: Record<string, SupportedTool> = {
+  nmap: "nmap",
+  httpx: "httpx",
+  nuclei: "nuclei",
+  ffuf: "ffuf",
+};
+
+const MACHINE_FLAGS: Record<SupportedTool, string> = {
+  nmap: "-oX -",
+  httpx: "-json",
+  nuclei: "-jsonl",
+  ffuf: "-of json -o <file>",
+};
+
+export function shellParserTool(command: string): SupportedTool | null {
+  const first = command.trim().split(/\s+/)[0] ?? "";
+  const base = first.split("/").pop() ?? "";
+  return SHELL_TOOLS[base] ?? null;
+}
+
+/**
+ * P15-C4 — shell output is parsed too, not only MCP output. If the command
+ * belongs to a parser-backed tool but the output is not machine-readable, the
+ * model gets an explicit instruction to re-run with the right flag; we never
+ * silently treat free text as a structured result.
+ */
+export function parseShellOutput(
+  ctx: ToolContext,
+  command: string,
+  stdout: string,
+): string {
+  const tool = shellParserTool(command);
+  if (!tool) return "";
+  const result = parseAndRecord(ctx, tool, stdout);
+  if (result.skipped) {
+    return `\n[parser] mandatory: ${tool} output is not machine-readable; re-run with ${MACHINE_FLAGS[tool]}`;
+  }
+  return parseSummaryLine(result);
+}
+
 /** Server ids that ship machine-readable output we know how to parse. */
 const TOOL_BY_SERVER: Record<string, SupportedTool> = {
   nmap: "nmap",

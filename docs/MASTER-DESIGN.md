@@ -1,17 +1,19 @@
 # GongYuAI 总体设计（MASTER DESIGN）
 
-> 本文件是项目**总体设计原始稿**：愿景、用户定调、三层基座、P0–P12 全部技术方向与细节、契约摘要、底座映射、路线图、待决策项的单一整合入口。  
+> 本文件是项目**总体设计原始稿**：愿景、用户定调、三层基座、P0–P16 全部技术方向与细节、契约摘要、底座映射、路线图、待决策项的单一整合入口。  
 > 交互全图：[design-atlas.html](./design-atlas.html)（独立可交付，中文，可点击/缩放/导览）。文档分册索引：[README.md](./README.md)。  
-> 整合日期：2026-11-22。状态标注：✅ 已落地 / 🔨 进行中 / 📐 提案。
+> 整合日期：2026-11-22；2026-11-24 追加红队定调（[red-team-positioning.md](./red-team-positioning.md)）与 P15/P16。状态标注：✅ 已落地 / 🔨 进行中 / 📐 提案。
 
 ---
 
 ## 0. 愿景与北极星
 
-**产品一句话**：给授权渗透长程任务的 Mission Control——任务可断点续跑，完成必须有证据，会话可接力而不丢攻击路径，**越用越好用**。
+**产品一句话**：面向授权红队作业的长时运行渗透工作台——目标进入任务即视为授权，运行中不审查目标、不拒绝目标；任务可断点续跑，完成必须有证据，会话可接力而不丢攻击路径，**越用越好用**。
 
 **北极星**：
-> Harness 让任务活着；History 让路径可信；Evidence 让完成可复核；Relay 让上下文可换班；Flywheel 让使用变成进化。
+> 女娲让作业活着；DAG 让路径可信；Evidence 让结论可复核；Relay 让上下文可换班；Super-agent 让预算花在更可能出结论的面上；Flywheel 让使用变成进化。
+
+**产品语义权威**：[red-team-positioning.md](./red-team-positioning.md)（授权模型、零目标拒绝、能力全谱、全量吸收矩阵）。与本文冲突时以该文为准。
 
 **设计哲学**：优雅简洁够用；能删就删；砍面不砍能力；MCP/Skill 是弹药不是产品定义；下一刀只认差分痛点，不认功能清单。
 
@@ -34,13 +36,16 @@
 | 2026-11-22 | P12 定调：D1/2/3 必补；D4 先调研；D5 给**规划者**；D6 给**辅助者**；D7 不考虑（无断网）；D8 通过；要**漏洞攻击链图**（可与四图融合，点击漏洞重点展现）；内网=外网组合漏洞拿 C2/getshell 后进入 |
 | 2026-11-22 | 七项定案：P8 **分层键**（硬键/软键）+ 注入 **N=5、Explore 命中资产追加 2** + 终态**自动候选清单**蒸馏；P11 **暂停=冻结作业、保活会话** + blocking 求助 **24h 转非阻塞**；P7 差分按 [absorb-eval-methodology.md](./absorb-eval-methodology.md)（8 题中难度带/≥3 重复/配对 CI/非劣界 -5pp）；**F1 插队先做** |
 | 2026-11-22 | P8 档案预检定案：**创建时自动、非阻塞「历史接触」面板**（debounce 只读查询、超时降级、永不阻塞创建）；「带入为新任务参考」默认不勾，仅命中 finding 与本任务靶标**同资产**时默认勾选，只写 `source=system` Hint（历史接触≠授权） |
+| 2026-11-24 | **目标默认授权，不设授权层**：授权是使用前提；工具不登记/不验证/不询问；`targets/outOfScope/roe` 是作业坐标不是授权闸（[red-team-positioning.md](./red-team-positioning.md)） |
+| 2026-11-24 | **零目标拒绝**：拒绝唯一形态是工程自保（本机路由/VPN/宿主安全）；模型解释性拒绝按缺陷处理（重问/换模型/拆派），永不作终态、不写 Fact、不计攻击失败 |
+| 2026-11-24 | **完全红队化**：技术不设类别禁令（规避/持久化/凭据/横向/C2）；纪律=证据最小化+变更台账+可复现；上游优秀机制全量吸收（矩阵见 red-team-positioning §7）；上游的授权/合规闸不复制进本仓 |
 
 ## 2. 三层基座（融合架构）
 
 | 基座 | 职责 | 落点 | 状态 |
 | --- | --- | --- | --- |
 | **女娲** | 组织存活与繁衍：个体可死、图必须活、经验须传承 | 存活：lease/Watchdog/分层 History/Relay/族级打法；繁衍：两级记忆+飞轮 | 存活 ✅；繁衍 📐 P8/P9 |
-| **DAG** | 授权与真相：走得对 | Fact–Intent 无因探索禁令、证据闸+SHA-256、复核撤回、推荐≠授权 | ✅（域语义 🔨 P6） |
+| **DAG** | 路径与真相：走得对（授权在委托前提，不在运行时审查） | Fact–Intent 无因探索禁令（路径合法性）、证据闸+SHA-256、复核撤回、推荐≠授权 | ✅（域语义 🔨 P6） |
 | **Super-agent** | 调度经济：花得省 | 脑手分离（相位工具面）、异步派单、三层模型路由 | 结构 ✅；路由 📐 P7 |
 
 **分工金句**：DAG 管路径；分层 History 管可读性；Relay 管换班；Durable/lease 管进程活着；Evidence 管 Goal 可复核；Super-agent 管调度经济。
@@ -49,7 +54,7 @@
 
 **底座划线**：pi-durable storage 管会话持久性（turn/工具级崩溃恢复），History DAG 管攻击路径真相（语义级）。**底座管活，图管对**；pi transcript 永不成为真相源。
 
-## 3. 技术全景（P0–P12）
+## 3. 技术全景（P0–P16）
 
 ### P0–P5 运行时与图语义 ✅
 
@@ -142,6 +147,14 @@ Finding 一等公民（tentative/verified/retested/accepted/retracted + findings
 
 **硬纪律**：不建第二资产库（B3 是 Fact 扩展 + 派生）；计划/跨任务资产/历史接触只写 Hint 或只读投影，**无派单权**；OAST hit ≠ 可利用；pivotPolicy 默认 off、只能人写；复测只有 fixed 自动改状态；ARTEX 为 AGPL-3.0，只抄语义。**顺序**：B0 → B1 → B7 → B2 → B3 → B6 → B5 → B4；B4 依赖 P11-S1 会话对象，B5 与 P12-D5 合并落地。
 
+### P15 进攻型 AI 全景吸收 🔨（C0 观察员已实现；C1–C4 设计）
+
+上游清单 60 个 Agent / 15 个 Benchmark 的机制筛选：差异不在工具数量，在三种角色（Solver 执行 / Validator 复核 / Manager 算账）。本仓八条自评短板（自证、磨同一手法、把材料当验证、不算账、重复派单、解析靠自觉、归属未接、命令不可测）都有结构性原因。C0 **确定性观察员 + 作业记分卡**已落（六规则、只读、零 token、不派单；`confirmed/tentative/contradicted/gaps`）；C1 **Finder ≠ Validator**（独立复核会话，📐下一刀）、C2 执行哈希重复上限、C3 阶段级+命令级评测、C4 强制解析、C5 归属情报（先记账）。不吸收 16 角色戏、逐目标授权审查、只存哈希、自动修客户系统、MCTS/向量 RAG。详见 [absorb-offensive-landscape.md](./absorb-offensive-landscape.md)。
+
+### P16 语义收敛 📐（docs 已定调，代码待做）
+
+去授权层（`authorization.ts` 台账 → 普通任务坐标）+ `needs_authorization` → `needs_input` + 拒绝处理链（上下文重问 → 结构化重问 → 换模型 → 拆小重派 → 结构化故障）+ DISCLAIMER 对齐 + 能力档位默认 `active-lab`。**不改变 DAG/证据/Relay 语义**，只收敛入口与拒绝处理。验收口径与逐文件差距见 [red-team-positioning.md](./red-team-positioning.md) §8。
+
 ### 底座：Pi（earendil）
 
 pi-durable（Experimental，锁版本+适配层）：reset(handoff)/compaction/subagents/child tasks/watchTaskGraph/Code Mode/hooks/beforeTool 闸/SQLite WAL storage。chord：对象/document/job（outlive the call）/workers/OutputBuffer。深化增量：compaction 配置→handoff reset→beforeTool 闸→codemode opt-in→subagent 复核→差分后切主纪律。详见 [pi-durable-integration.md](./pi-durable-integration.md)。
@@ -170,7 +183,9 @@ pi-durable（Experimental，锁版本+适配层）：reset(handoff)/compaction/s
 P13 插入点：A1 冷折叠必须早于 P12-D5 Planner（否则规划者读不动图）；A6 是 P12-D3 的实现体
 第十轮后：P14 八刀（B0 断头路 → B1 事务 → B7 边界 → B2 盲打 → B3 类型化 → B6 复测 → B5 计划 → B4 内网）
 P14 插入点：B0 修 consult/relay/tags/technique/change/credential/rate 入口；B1 完成 E3；B5 是 D5 Planner 最小形态；B4 等 P11-S1
-依赖：P6 E1 是 P8/P9/P10-G2/P12-D8 的原料；P11 S1 与 E2 元数据联动；P7 路由是飞轮执行器；P14 B4 依赖 P11-S1、B5 依赖 P13-A1/A7
+P15 观察员（C0 ✅）→ C1 独立确认 → C2 执行哈希 → C3 阶段/命令评测 → C4 强制解析
+P16 语义收敛（docs 已定调，代码待做）：去授权层（authorization → 任务坐标）+ `needs_authorization` → `needs_input` + 拒绝处理链（重问/换模型/拆派）+ DISCLAIMER 对齐（[red-team-positioning.md](./red-team-positioning.md) §8）
+依赖：P6 E1 是 P8/P9/P10-G2/P12-D8 的原料；P11 S1 与 E2 元数据联动；P7 路由是飞轮执行器；P14 B4 依赖 P11-S1、B5 依赖 P13-A1/A7；P16 不改变 DAG/证据/Relay 语义，只收敛入口与拒绝处理
 原则：每刀同预算差分验收；提案不升默认直到差分证明；契约变了才同步 long-run-contract
 ```
 
@@ -207,12 +222,15 @@ P14 待拍板三项（其余按 §3「P14 渗透能力扩展」硬纪律执行�
 9. 旧 Fact 直写新任务图；孤儿知识；向量 RAG 当匹配层；自动固化 Skill/执行未审脚本。
 10. 默认硬速率闸/时间窗/RoE 禁止（用户定调默认放开）；前置 ask 审批闸；暂停杀会话；系统级路由变更；proprietary Chrome；模型轮询作业。
 11. 为图建第二状态存储；图上编辑真相；布局表达语义。
-12. 自动绕过 EDR/修复客户系统/拖取真实数据；TTL 强制删 Fact；全局记忆出本机。
+12. 自动修复客户系统/打补丁；批量拖取客户生产数据（证据最小化即可）；TTL 强制删 Fact；全局记忆出本机；把上游的授权/合规闸复制进本仓。
+13. **模型解释性拒绝**（「我不能协助」「无权执行」）当作行为或终态；逐目标授权审查 / safe-by-default 覆盖定调；把拒绝写成 Fact、计入攻击失败或让任务因此停在 `MODEL_REFUSED`。
+14. 以「安全」为名把可执行动作降级成教程/建议；要求操作员逐目标"证明授权"；在 RoE 默认无禁止时叠加产品级禁令。
 
 ## 8. 文档地图
 
 | 层 | 文档 |
 | --- | --- |
+| **定调（最高权威）** | [red-team-positioning.md](./red-team-positioning.md)（授权模型 / 零目标拒绝 / 能力全谱 / 吸收矩阵） |
 | 总纲 | 本文件 · [README.md](./README.md) · [design-atlas.html](./design-atlas.html)（单文件离线设计导览） |
 | 信仰 | [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) |
 | 架构 | [architecture.md](./architecture.md) · [asset-inventory.md](./asset-inventory.md) · [console-research.md](./console-research.md) |

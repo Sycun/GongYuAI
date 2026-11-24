@@ -12,7 +12,11 @@ import {
   credentialListTool,
   credentialRecordTool,
   hostProfileListTool,
+  hostProfileParseTool,
   hostProfileRecordTool,
+  attackGraphRecordTool,
+  bloodhoundImportTool,
+  cloudRecordTool,
   type OpsToolContext,
 } from "./ops-tools.js";
 
@@ -192,6 +196,89 @@ test("host_profile_record stores foothold fields and rejects out-of-scope asset"
       () => hostProfileRecordTool(ctx, { asset: "evil.example.net" }),
       /out of scope/,
     );
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("host_profile_parse structures Linux enumeration and skips unknown text", () => {
+  const { root, history, ctx } = setup("gy-host-parse-");
+  try {
+    const parsed = JSON.parse(hostProfileParseTool(ctx, {
+      asset: "lab.example.com",
+      text: `uid=0(root) gid=0(root) groups=0(root),27(sudo)
+Linux web01 6.8.0-45-generic aarch64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.1 LTS"
+LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=1,fd=3))`,
+    })) as { ok: boolean; matched: string[]; profile: { users: string[]; privileges: string[]; services: string[]; os: string | null } };
+    assert.equal(parsed.ok, true);
+    assert.deepEqual(parsed.profile.users, ["root"]);
+    assert.ok(parsed.profile.privileges.includes("group:sudo"));
+    assert.ok(parsed.profile.services.includes("sshd/22"));
+    assert.match(parsed.profile.os ?? "", /Ubuntu 24\.04/);
+    assert.equal(history.listHostProfiles(TASK_ID).length, 1);
+
+    const skipped = JSON.parse(hostProfileParseTool(ctx, {
+      asset: "lab.example.com",
+      text: "nothing useful",
+    })) as { ok: boolean; skipped: boolean };
+    assert.equal(skipped.ok, false);
+    assert.equal(skipped.skipped, true);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("BloodHound import writes an AD graph and finds a Domain Admin path", () => {
+  const { root, history, ctx } = setup("gy-bloodhound-");
+  try {
+    const data = JSON.stringify({
+      users: [{ ObjectIdentifier: "U1", Properties: { name: "alice@CORP.LOCAL", domain: "CORP.LOCAL", owned: true } }],
+      groups: [
+        { ObjectIdentifier: "G1", Properties: { name: "HELPDESK@CORP.LOCAL" }, Members: [{ ObjectIdentifier: "U1" }] },
+        { ObjectIdentifier: "G2", Properties: { name: "DOMAIN ADMINS@CORP.LOCAL" }, Members: [{ ObjectIdentifier: "G1" }] },
+      ],
+    });
+    const result = JSON.parse(bloodhoundImportTool(ctx, { text: data })) as {
+      ok: boolean; nodes: number; edges: number; paths: Array<{ nodes: string[]; depth: number }>;
+    };
+    assert.equal(result.ok, true);
+    assert.equal(result.nodes, 3);
+    assert.equal(result.edges, 2);
+    assert.equal(result.paths[0]!.depth, 2);
+    assert.deepEqual(result.paths[0]!.nodes, ["U1", "G1", "G2"]);
+    const graph = history.attackGraph(TASK_ID);
+    assert.equal(graph.nodes.length, 3);
+    assert.equal(graph.edges.length, 2);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cloud_record and attack_graph_record write typed cloud nodes/edges", () => {
+  const { root, history, ctx } = setup("gy-cloud-graph-");
+  try {
+    const a = JSON.parse(cloudRecordTool(ctx, {
+      provider: "aws", kind: "cloud-role", id: "arn:aws:iam::1:role/alice", name: "alice", account: "1",
+    })) as { ok: boolean; factId: string };
+    assert.equal(a.ok, true);
+    const b = JSON.parse(cloudRecordTool(ctx, {
+      provider: "aws", kind: "cloud-resource", id: "arn:aws:s3:::secret", name: "secret", account: "1",
+      edgeFrom: "arn:aws:iam::1:role/alice", edgeTo: "arn:aws:s3:::secret", edgeKind: "can-access",
+    })) as { ok: boolean; edgeFactId: string };
+    assert.ok(b.edgeFactId);
+    const graph = history.attackGraph(TASK_ID);
+    assert.equal(graph.nodes.length, 2);
+    assert.equal(graph.edges[0]!.kind, "can-access");
+
+    const node = JSON.parse(attackGraphRecordTool(ctx, {
+      type: "node",
+      json: JSON.stringify({ id: "S-1-5-21-512", kind: "ad-group", name: "Domain Admins" }),
+    })) as { ok: boolean };
+    assert.equal(node.ok, true);
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

@@ -1,0 +1,9 @@
+{
+  "id": "mcp-health-and-parser",
+  "name": "mcp-health-and-parser",
+  "description": "MCP 健康检查、能力级别与 nmap/httpx/nuclei/ffuf 机读输出强制解析。",
+  "defaultEnabled": true,
+  "source": "gongyuai",
+  "refs": ["P15-C4", "mcp/README.md"],
+  "triggers": ["MCP", "未安装", "parser", "-json", "-oX", "工具调不动", "资产图"]
+}

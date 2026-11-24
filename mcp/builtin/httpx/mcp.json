@@ -6,11 +6,16 @@
   "transport": "builtin",
   "binary": "httpx",
   "defaultEnabled": true,
-  "defaultFlags": "-silent -status-code -title -tech-detect",
+  "defaultFlags": "-silent -json -status-code -title -tech-detect",
   "toolName": "run",
   "toolDescription": "Run httpx against an authorized target. Pass target and optional flags.",
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "parser": "httpx",
+  "whenToUse": "Use for HTTP probing, status/title/tech. Prefer -json so endpoints are recorded.",
+  "targetFlag": "-u"
 }

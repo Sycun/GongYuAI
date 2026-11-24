@@ -1,0 +1,16 @@
+{
+  "id": "amass",
+  "name": "amass",
+  "description": "DNS/资产枚举（被动优先）",
+  "category": "recon",
+  "transport": "builtin",
+  "binary": "amass",
+  "defaultEnabled": false,
+  "defaultFlags": "enum",
+  "toolName": "run",
+  "toolDescription": "Run amass against an authorized domain. Passive-first; pass optional flags.",
+  "whenToUse": "Use for DNS/asset enumeration (passive-first).",
+  "capability": "scan",
+  "timeoutMs": 900000,
+  "targetFlag": "-d"
+}

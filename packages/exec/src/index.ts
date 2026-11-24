@@ -5,6 +5,7 @@ import { C2Manager } from "./c2.js";
 import { authorizeCommand, type AuthSnapshot, type CommandVerdict } from "./scope.js";
 
 export * from "./scope.js";
+export * from "./repeat.js";
 export * from "./proc.js";
 export * from "./jobs.js";
 export * from "./sessions.js";

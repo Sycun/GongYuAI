@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { coverageLabels, knowledgeSourceKindLabels, type TaskStatus, type TaskRecord, type WorkerManifest, type Fact, type KnowledgeVersionStatus } from "@gongyuai/contracts";
 import type { HistoryStore, FactReview } from "./index.js";
 import { describeGoalEvidence, formatAccounting } from "./delivery.js";
-import { integrationSuccessRate, totalIntegrationCalls } from "@gongyuai/contracts";
+import { findAttackPaths, integrationSuccessRate, totalIntegrationCalls } from "@gongyuai/contracts";
 
 export type TerminalReportStatus = Extract<TaskStatus, "completed" | "budget_exhausted" | "incomplete" | "failed" | "stopped">;
 
@@ -133,7 +133,41 @@ export function writeTaskReport(
       if (f.fix) lines.push(`- 修复建议：${label(f.fix)}`);
       for (const e of f.evidence) lines.push(`- 证据：${link(e.path, e.sha256)}`);
       if (f.verifiedAt) lines.push(`- 验证时间：${f.verifiedAt}`);
+      if (f.verifiedBy) lines.push(`- 验证者：${label(f.verifiedBy)}`);
+      // P15-C1 — independence is a separate axis from "verified".
+      const validations = history
+        .listFindingValidations(id, f.id)
+        .filter((validation) => validation.independent);
+      const latestValidation = validations.at(-1);
+      if (!latestValidation) {
+        lines.push("- 独立确认：未确认（需另一 worker/操作员 finding_validate）");
+      } else {
+        lines.push(
+          `- 独立确认：${latestValidation.verdict} · ${label(latestValidation.validator)}` +
+            ` · method=${latestValidation.method} · ${latestValidation.createdAt}`,
+        );
+        if (latestValidation.note) lines.push(`  - 说明：${label(latestValidation.note)}`);
+        for (const e of latestValidation.evidence) {
+          lines.push(`  - 复核证据：${link(e.path, e.sha256)}`);
+        }
+      }
       lines.push("");
+    }
+    const independentlyConfirmed = deliverable.filter((finding) =>
+      history.hasConfirmedValidation(id, finding.id),
+    );
+    const unconfirmedSerious = deliverable.filter(
+      (finding) =>
+        ["high", "critical"].includes(finding.severity) &&
+        !history.hasConfirmedValidation(id, finding.id),
+    );
+    if (deliverable.length) {
+      lines.push(
+        `独立确认：${independentlyConfirmed.length}/${deliverable.length}` +
+          `；高/严重未确认 ${unconfirmedSerious.length} 条` +
+          `${unconfirmedSerious.length ? "（交付前需复核或写明缺口）" : ""}。`,
+        "",
+      );
     }
     const tentativeCount = findings.filter((f) => f.status === "tentative").length;
     const retractedCount = findings.filter((f) => f.status === "retracted").length;
@@ -152,6 +186,30 @@ export function writeTaskReport(
         if (retest.repro) lines.push(`  - 复测步骤：${label(retest.repro)}`);
         if (retest.note) lines.push(`  - 说明：${label(retest.note)}`);
         for (const e of retest.evidence) lines.push(`  - 证据：${link(e.path, e.sha256)}`);
+      }
+    }
+
+    // P17 — AD / cloud attack paths from the Fact projection.
+    {
+      const attack = history.attackGraph(id);
+      if (attack.nodes.length > 0) {
+        lines.push("", "## AD / 云攻击路径", "");
+        lines.push(
+          `图规模：节点 ${attack.nodes.length} / 边 ${attack.edges.length}。` +
+            "路径只表示可推导的权限关系，不代表已利用；每条边可回查 Fact。",
+        );
+        const paths = findAttackPaths(attack, { maxDepth: 8, maxPaths: 10 });
+        if (paths.length === 0) {
+          lines.push("- 未发现指向 Domain/Enterprise/Schema Admins 的路径（或缺少 owned 起点）。");
+        } else {
+          const label = (nodeId: string) =>
+            attack.nodes.find((node) => node.id === nodeId)?.name ?? nodeId;
+          for (const path of paths) {
+            lines.push(
+              `- ${path.nodes.map(label).join(" → ")}（${path.edges.join(" / ")}，depth ${path.depth}）`,
+            );
+          }
+        }
       }
     }
 
@@ -194,6 +252,7 @@ export function writeTaskReport(
       "## 覆盖与当前支持", "",
       `统计时点　${card.capturedAt}（实时读数；不可变凭据以交付快照 SHA-256 为准）`,
       `分母　本次约定目标总数 ${card.denominator}${card.applicable ? "" : "（不适用：无目标）"}`,
+      `事件链头　${history.eventChainHead(id) ?? "（未封链）"}`,
       "",
       `- 历史通过　${card.historicallyPassed} / ${card.denominator}`,
       `- 当前证据足以支持　${card.currentlySupported} / ${card.denominator}`,

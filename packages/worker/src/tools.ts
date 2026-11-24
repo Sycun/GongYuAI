@@ -1,6 +1,7 @@
 import { checkCommandRun, commandProposal, recordHardDenial, reportCommandOutcome, reviewBeforeDispatch } from "./command-guard.js";
-import { authorizeCommand, extractHosts as execExtractHosts } from "@gongyuai/exec";
+import { authorizeCommand, commandRepeatHash, extractHosts as execExtractHosts, isRepeatExemptCommand } from "@gongyuai/exec";
 import { execRuntimeFor } from "./exec-runtime.js";
+import { parseShellOutput } from "./tool-output.js";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +15,37 @@ const CAPABILITY_RANK: Record<AuthCapability, number> = {
   "active-lab": 2,
   full: 3,
 };
+
+
+/**
+ * P15-C2 — repeated-command circuit breaker.
+ *
+ * AutoRedTeam stops a loop after the same execution hash runs more than three
+ * times. We keep the same idea but make the limit configurable and exempt
+ * read-only polling. The counter lives in History, so it survives restarts and
+ * covers shell / shell_job / PTY write / C2 task.
+ */
+export function repeatCommandLimit(): number {
+  const raw = Number(process.env.GY_REPEAT_COMMAND_LIMIT ?? 4);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 4;
+}
+
+export function assertRepeatAllowed(
+  ctx: ToolContext,
+  command: string,
+): number {
+  if (isRepeatExemptCommand(command)) return 0;
+  const hash = commandRepeatHash(command);
+  const seen = ctx.history.commandAttemptCount(ctx.manifest.taskId, hash);
+  const limit = repeatCommandLimit();
+  if (seen >= limit) {
+    throw new Error(
+      `repeat-guard: 同一命令已执行 ${seen} 次（上限 ${limit}）。` +
+        "改参数/换手法；确需重跑由操作员先 gy command-reset 再继续，不要重复爆破。",
+    );
+  }
+  return ctx.history.recordCommandAttempt(ctx.manifest.taskId, hash);
+}
 
 /** True if task capability is at least `need`. */
 export function capabilityAtLeast(
@@ -55,10 +87,26 @@ export function assertCapabilityAllows(
   }
 }
 
-/** Core recon MCP ids allowed at scan; the rest need active-lab+. */
+/** Fallback when the manifest does not carry a per-server capability. */
 const SCAN_MCP_IDS = new Set(["nmap", "httpx", "gobuster", "ffuf"]);
 
-export function mcpActionForServer(serverId: string): "mcp-scan" | "mcp-active" {
+/**
+ * P15 — per-MCP capability comes from mcp.json (`capability`), not a hardcoded
+ * id list. The legacy set remains only for manifests without metadata.
+ */
+export function mcpActionForServer(
+  serverId: string,
+  manifest?: WorkerManifest,
+): "mcp-scan" | "mcp-active" {
+  const cfg =
+    manifest?.mcpPool?.find((server) => server.id === serverId) ??
+    manifest?.mcpServers?.find((server) => server.id === serverId);
+  if (cfg?.capability === "active-lab" || cfg?.capability === "full") {
+    return "mcp-active";
+  }
+  if (cfg?.capability === "scan" || cfg?.capability === "observe") {
+    return "mcp-scan";
+  }
   return SCAN_MCP_IDS.has(serverId) ? "mcp-scan" : "mcp-active";
 }
 
@@ -148,7 +196,9 @@ export async function runShell(
   const verdict = gateTool(ctx, "shell", () => {
     assertCommandAllowed(ctx.manifest, command);
     chargeToolCall(ctx);
-    return authorizeCommand(ctx.manifest.auth, command);
+    const verdict = authorizeCommand(ctx.manifest.auth, command);
+    assertRepeatAllowed(ctx, command);
+    return verdict;
   });
   checkCommandRun(ctx.manifest);
   const proposal = {
@@ -184,9 +234,10 @@ export async function runShell(
       `# 命令执行\n\n- 命令：\`${command}\`\n- 目录：${ctx.manifest.workspaceDir}\n- 退出码：${result.exitCode}\n- 超时：${result.timedOut}\n- 耗时：${result.durationMs}ms\n- 范围：${verdict.reason}\n\n## stdout\n\n\`\`\`\n${result.stdout.slice(0, 32_000)}\n\`\`\`\n\n## stderr\n\n\`\`\`\n${result.stderr.slice(0, 8_000)}\n\`\`\`\n`,
       { mode: 0o600 },
     );
+    const parserNote = parseShellOutput(ctx, command, result.stdout);
     return {
       exitCode: result.exitCode ?? (result.timedOut ? 124 : 1),
-      stdout: result.stdout,
+      stdout: parserNote ? `${result.stdout}${parserNote}` : result.stdout,
       stderr: result.stderr,
       timedOut: result.timedOut,
       durationMs: result.durationMs,

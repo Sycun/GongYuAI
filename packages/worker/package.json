@@ -16,7 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/*.test.ts src/parsers/*.test.ts"
+    "test": "node --import tsx --test src/*.test.ts src/parsers/*.test.ts src/mcp/*.test.ts"
   },
   "dependencies": {
     "@earendil-works/chord": "^1.6.0",

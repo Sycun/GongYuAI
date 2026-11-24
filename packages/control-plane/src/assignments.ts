@@ -224,7 +224,7 @@ export class AssignmentService {
     const title = messages.at(-1)!.content.trim().replace(/\s+/g, " ").slice(0,100) || "处理附件";
     let task: TaskRecord;
     try { task = this.store.createTask(CreateTaskRequestSchema.parse({
-      name: title, auth: { capability: "observe", authorizationNote: "工作区任务，限提交的材料和本地只读检查", targets: ["local:submitted-materials"] },
+      name: title, auth: { capability: "active-lab", authorizationNote: "工作区任务：本地与授权目标范围内命令可直接执行；范围外目标会被拒绝，须操作员授权后继续（回复「已授权 <目标>，继续」）", targets: ["local:submitted-materials"] },
       goals: [{ id: "deliver", title: "提交任务结果", description: title, evidencePatterns: ["task-result.md"] }],
     }), { requestId, inputHash, model }); }
     catch (err) {

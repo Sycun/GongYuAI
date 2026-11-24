@@ -217,11 +217,11 @@ test("workspace submissions create durable tasks and review only actual command 
   assert.equal(reviewCalls.length, 1);
   assert.doesNotMatch(JSON.stringify(reviewCalls), /报告内容|image_url|上一轮回答/);
 
-  const marker = join(root, "not-executed");
-  const held = await run("touch " + marker);
+  // 范围外目标（授权范围外的外部主机）直接拦截：不调审批模型、不执行。
+  const held = await run("curl -s http://192.0.2.9/not-executed");
   assert.equal(held.status, "paused");
   assert.equal(held.commandReview?.decision, "block");
-  assert.equal(existsSync(marker), false);
+  assert.equal(held.result, undefined);
   assert.doesNotMatch(JSON.stringify(reviewCalls), /not-executed/);
 
   for (const [risk, activity] of [["high", "read_only"], ["unknown", "unknown"], ["low", "local_validation"]]) {
@@ -315,11 +315,10 @@ test("command confirmation: scope first, user decides in session, one execution 
   assert.equal(rejectedView.result, undefined);
 
   // 范围外操作直接拦截：逐次确认模式下也不进入等待、不调模型。
-  const outOfScope = await run("touch " + join(root, "never"));
+  const outOfScope = await run("curl -s http://192.0.2.9/");
   assert.equal(outOfScope.status, "paused");
   assert.equal(outOfScope.commandReview?.decision, "block");
   assert.match(outOfScope.commandReview?.reason ?? "", /超出任务授权范围或执行器支持范围/);
-  assert.equal(existsSync(join(root, "never")), false);
   assert.equal(reviewCalls.length, before);
 
   // 自动审批：模型不可用显示原因，重试入口就同一命令重审并执行。

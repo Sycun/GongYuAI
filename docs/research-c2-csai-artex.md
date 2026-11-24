@@ -242,7 +242,7 @@
 | 长任务 | detached 后台作业 + `exit.code` + 增量读（`jobs.ts:70-193`） | 已达标；缺"工具超时自动转后台"与完成通知 | 抄 norma `runBashManaged` 的判定分支 |
 | PTY | `python3 pty.spawn` 优先、`script(1)` 兜底（`sessions.ts:35-43`）；pattern/idle wait（`:186-220`） | 已达标；无会话数上限治理 | — |
 | 证据 | 每命令写 `evidence/exec/cmd-*.md`，mode 0600（`tools.ts:178-186`） | 无 sha256 索引、无 blob 去重、无分段读 | 抄 traffic 的内容寻址 |
-| 授权模型 | capability 阶梯 + `auth.targets` 形式化匹配（`scope.ts:132-179`、`packages/contracts/src/scope.ts:139-178`） | 无 RBAC/项目边界——**这是对的**（单用户），别引入 | — |
+| 范围模型 | capability 阶梯 + `auth.targets` 形式化匹配（`scope.ts:132-179`、`packages/contracts/src/scope.ts:139-178`）；语义是作业坐标，不是授权审查 | 无 RBAC/项目边界——**这是对的**（单用户），别引入 | — |
 | C2 侧范围闸 | `exec` 与本地 shell 共用 `authorizeCommand`，且把会话对端并入判定（`c2.ts:408-412`） | 已达标，且比 CS 更干净 | 保留 |
 
 ---

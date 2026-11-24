@@ -2,9 +2,10 @@
 
 本目录是项目**权威设计与开发入口**。后续沿 Fact–Intent 图 + Durable + Evidence + Relay 方向开发时，从这里读起。
 
+> **产品定调（最高权威）**：[red-team-positioning.md](./red-team-positioning.md)——目标默认授权、不设授权层、运行期零目标拒绝、完全红队化、上游优秀机制全量吸收矩阵。与任何文档冲突时以此为准。
 > **实施台账**：[implementation-ledger.md](./implementation-ledger.md)（P0–P12→代码/入口/证据/差距，阶段 1–7 实际状态）。  
 > **交付记录**：[delivery-record.md](./delivery-record.md)（发布提交/SHA、测试与验收、Kali 部署与一致性证据、复核清单）。
-> **总体设计原始稿**：[MASTER-DESIGN.md](./MASTER-DESIGN.md)（愿景/用户定调/P0–P12 全景/契约/路线图/待决策）。  
+> **总体设计原始稿**：[MASTER-DESIGN.md](./MASTER-DESIGN.md)（愿景/用户定调/P0–P16 全景/契约/路线图/待决策）。  
 > **单文件介绍版**　[打开 GongYuAI 项目设计导览](./design-atlas.html)。下载这一份 HTML 即可离线讲解。演示模式按讲解点翻页，目录和搜索可直接定位到专题。
 
 ## 讲解章节
@@ -23,7 +24,8 @@
 
 | 文档 | 职责 | 何时读 |
 | --- | --- | --- |
-| [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) | **理论综合**：A2 Fact–Intent DAG、遗忘/漂移、推荐≠授权；对照 Cairn / sapper / CHAP | 理解「为什么这么建」 |
+| [red-team-positioning.md](./red-team-positioning.md) | **产品定调**：目标默认授权、不设授权层、零目标拒绝、能力全谱、三基座分工、上游优秀机制全量吸收矩阵、落地差距 | **所有设计讨论的起点** |
+| [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) | **理论综合**：A2 Fact–Intent DAG、遗忘/漂移、推荐≠授权（路径合法性）；对照 Cairn / sapper / CHAP | 理解「为什么这么建」 |
 | [architecture.md](./architecture.md) | **架构**：问题、图原语、控制面/Worker、包职责、数据布局、差异化 | 改结构 / 对新人讲系统 |
 | [asset-inventory.md](./asset-inventory.md) | **资产清单**：seed↔发现双向投影、CIDR/通配自动准入、控制台与 Observe 同表 | 靶标回流 / 资产 Tab / FOFA 发现 |
 | [parallel-explore-scaling.md](./parallel-explore-scaling.md) | **Explore 并发**：智能推荐 3–10、按资产数动态扩容（只扩不缩）、非战术纪律 | 改并发 / runner / watchdog 调度前读 |
@@ -35,11 +37,13 @@
 | [data-flywheel.md](./data-flywheel.md) | **数据飞轮（P9 提案）**：采集→评测→蒸馏→改进→验证五环、质量闸、提案收件箱、越用越好用 | 改记分卡 / 趋势 / 自动蒸馏 / 晋升闸前读 |
 | [graph-views.md](./graph-views.md) | **图视图族（P10 提案）**：资产/攻击面/执行/记忆四图投影、跨图导航、图提示、Graph workspace | 改控制台图视图 / 投影 / 跨图跳转前读 |
 | [pentest-ops-design.md](./pentest-ops-design.md) | **渗透执行层与委托规则（P11 提案）**：会话管理器、后台作业异步回流、隧道/Chromium、时间窗/RoE/速率自判/模型求助、任务生命周期 | 改会话 / 作业 / 生命周期 / 委托契约前读 |
-| [pentest-exec-c2-enhancement.md](./pentest-exec-c2-enhancement.md) | **执行面与 C2（✅ 实现）**：真实 shell / 后台作业 / PTY / C2（listener·session·task·watchdog·token·文件）、授权台账与断点续接、模型拒绝纠偏、手动命令；303 测试 + 9 项验收 | 打真实目标 / 排查「授权了仍不动」前读 |
+| [pentest-exec-c2-enhancement.md](./pentest-exec-c2-enhancement.md) | **执行面与 C2（✅ 实现）**：真实 shell / 后台作业 / PTY / C2（listener·session·task·watchdog·token·文件）、范围裁决与断点续接、拒绝处理、手动命令；303 测试 + 9 项验收 | 打真实目标 / 排查「授权了仍不动」前读 |
 | [research-c2-csai-artex.md](./research-c2-csai-artex.md) | **对照调研**：CyberStrikeAI 的 C2 收敛逻辑与 8 个坑、ARTEX 的拦截与审查输入边界；能力差距表与三步增量（含 file:line 证据） | 决定 C2 下一步 / 复用上游设计前读 |
 | [pentest-adaptive-enhancement.md](./pentest-adaptive-enhancement.md) | **长跑自适应（P13 提案）**：三基座缺角盘点 + 七刀（拦截话术/冷折叠/steer·cancel/终态分型/证据角色化/凭据 grounded/LLM 韧性），ARTEX 语义对照，AGPL 边界与验收口径 | 长跑跑不动、图太大、跑偏停不下、拒绝后乱撞时读 |
 | [pentest-completeness.md](./pentest-completeness.md) | **渗透完备性清单（三基座）**：14 阶段 × 女娲/DAG/Super-agent 矩阵、缺口按影响排序、外部弹药边界 | 回答「还缺什么/能不能接完整委托」时读 |
 | [pentest-capability-extension.md](./pentest-capability-extension.md) | **渗透能力扩展（P14，✅ 已实现）**：十二域能力面盘点 + 三类缺口（断头路/域语义/新面）+ 八刀（事务证据/盲打 OAST/类型化攻击面/内网推进/计划链/复测/执行边界），ARTEX 与 norma 对照，pivot 授权语义 | 决定「交付能不能复核、攻击面能不能经营、拿 shell 后往哪走」时读 |
+| [p17-closing-gaps.md](./p17-closing-gaps.md) | **P17 补齐**：主机枚举解析、事件哈希链、AD/云攻击图与 BloodHound 导入、provider 池 + 三层模型路由、阶段/命令级离线评测；含边界与验收 | 查「还缺什么 / 这一轮怎么验」时读 |
+| [absorb-offensive-landscape.md](./absorb-offensive-landscape.md) | **进攻型 AI 全景吸收（P15）**：TSECBench 清单 60 个 Agent/15 个 Benchmark 的机制筛选；自评八条渗透短板；观察员（确定性审计 + 作业记分卡，✅）、独立确认/Finder≠Validator（✅）、执行哈希断路器（✅）、强制解析（✅）、阶段级评测（设计）与 Skill/MCP 硬化 | 决定「谁复核、谁算账、下一刀做什么」时读 |
 | [pi-durable-integration.md](./pi-durable-integration.md) | **Pi 底座盘点**：pi-durable/chord 原生能力映射、深化增量、底座管活图管对 | 改 worker 主循环 / 用底座能力前读 |
 | [long-range-completeness.md](./long-range-completeness.md) | **长程完备性（P12）**：D1/2/3 必补、D4 调研、D5 规划者、D6 辅助者、D8 通过、D7 删除 | 补长程时间维度缺口 / 角色设计前读 |
 | [attack-chain-graph.md](./attack-chain-graph.md) | **攻击链图（P10 扩展）**：漏洞因果链投影、外网→组合漏洞→C2/getshell→内网建模、点击漏洞聚焦、链模式融合 | 改攻击链 / provenance / 链模式前读 |
@@ -61,14 +65,16 @@
 | --- | --- |
 | [Staying on the Attack Path.pdf](./Staying%20on%20the%20Attack%20Path.pdf) | 论文 A2 原文（Intentest / Fact–Intent DAG） |
 | [Staying on the Attack Path_translated.pdf](./Staying%20on%20the%20Attack%20Path_translated.pdf) | A2 中文译本 |
+| [sapper-V2 vs ARTEX 对比文](https://mp.weixin.qq.com/s/VgGSQOKgjLH7d3TVTDp4wg) | 两类 AI 渗透工具的 12 维对比：编排机制（事实图/同族迁移/换将/看门狗/Key 池）与工程厚度（双图/MITM/五层重试/用量账本/一键更新）互补；1B vs 4.5B token 经济性（2026-11-24 吸收进 [red-team-positioning.md](./red-team-positioning.md) §1/§7） |
 | 女娲测试_CCF厦门分享_攻防迭代修订稿.pptx | 女娲 / sapper-v2 CCF 分享（28 页；正文多为图片，**机制细节在演讲备注**，摘录见 absorb-sapper-v2-nuwa.md）。**本地参考，28MB 未入库** |
 
 ## 推荐阅读顺序
 
-1. [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) — 信仰层  
-2. [architecture.md](./architecture.md) — 怎么落成系统  
-3. [long-run-contract.md](./long-run-contract.md) — 运行硬约束  
-4. [dev-handbook.md](./dev-handbook.md) — 下一件做什么  
+1. [red-team-positioning.md](./red-team-positioning.md) — 定调层（授权、拒绝、能力边界）  
+2. [theory-fact-intent-dag.md](./theory-fact-intent-dag.md) — 信仰层  
+3. [architecture.md](./architecture.md) — 怎么落成系统  
+4. [long-run-contract.md](./long-run-contract.md) — 运行硬约束  
+5. [dev-handbook.md](./dev-handbook.md) — 下一件做什么  
 
 示例与跑法不在本目录：
 
@@ -96,7 +102,7 @@
 
 ## 北极星
 
-> Harness 让任务活着；History 让路径可信；Evidence 让完成可复核；Relay 让上下文可换班。
+> 女娲让作业活着；DAG 让路径可信；Evidence 让结论可复核；Relay 让上下文可换班；Super-agent 让预算花在更可能出结论的面上。
 
 ## 跨会话记忆
 

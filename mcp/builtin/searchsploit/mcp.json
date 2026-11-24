@@ -12,5 +12,9 @@
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for local exploit-db lookup, not as proof of exploitability.",
+  "targetFlag": ""
 }

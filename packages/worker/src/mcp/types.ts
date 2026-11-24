@@ -4,7 +4,8 @@ export type McpToolDef = {
   inputSchema: Record<string, unknown>;
 };
 
-export type McpCallResult = { ok: boolean; text: string };
+/** `raw` is the full tool stdout for parsers; `text` is what the model sees. */
+export type McpCallResult = { ok: boolean; text: string; raw?: string };
 
 export type McpServerSession = {
   serverId: string;

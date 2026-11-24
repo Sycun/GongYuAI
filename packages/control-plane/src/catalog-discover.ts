@@ -14,11 +14,17 @@ type McpJson = {
   category?: string;
   transport?: "builtin" | "stdio" | "http";
   binary?: string;
+  defaultFlags?: string;
+  targetFlag?: string;
   defaultEnabled?: boolean;
   command?: string;
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  capability?: "observe" | "scan" | "active-lab" | "full";
+  parser?: "nmap" | "httpx" | "nuclei" | "ffuf";
+  timeoutMs?: number;
+  whenToUse?: string;
 };
 
 type SkillJson = {
@@ -66,6 +72,13 @@ function discoverMcpRoot(
           args: raw.args ?? [],
           url: raw.url,
           env: raw.env ?? {},
+          binary: raw.binary,
+          defaultFlags: raw.defaultFlags,
+          targetFlag: raw.targetFlag,
+          capability: raw.capability,
+          parser: raw.parser,
+          timeoutMs: raw.timeoutMs,
+          whenToUse: raw.whenToUse,
         }),
       );
     } catch {

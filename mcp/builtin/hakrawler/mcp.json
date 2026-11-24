@@ -12,5 +12,8 @@
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "whenToUse": "Use to crawl links/JS endpoints from a web target."
 }

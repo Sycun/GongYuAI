@@ -1,0 +1,9 @@
+{
+  "id": "engagement-observer",
+  "name": "engagement-observer",
+  "description": "读观察员/记分卡，识别重复失败、重复派单、停滞、tentative 积压与未经营资产。",
+  "defaultEnabled": true,
+  "source": "gongyuai",
+  "refs": ["P15-C0"],
+  "triggers": ["观察员", "记分卡", "repeat-failure", "stalled", "confirmationRate", "换面"]
+}

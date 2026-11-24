@@ -54,6 +54,13 @@ Usage:
   gy peer-reviews <taskId>
   gy evidence <taskId> --path P --file LOCAL   # 导入材料（utf8 文本）
   gy finding-verify <taskId> --finding ID --evidence FILE[,FILE] --repro TEXT
+  gy finding-validate <taskId> --finding ID --verdict confirmed|refuted|inconclusive|out-of-scope
+       --method evidence-only|replay|control-compare|manual [--evidence FILE[,FILE]]
+       [--note TEXT] [--validator NAME]
+  gy validations <taskId> [--finding ID]
+  gy audit <taskId>
+  gy chain <taskId>                 # 事件哈希链头 + 校验
+  gy command-reset <taskId> [--reason TEXT]
   gy finding-retract <taskId> --finding ID --reason TEXT
   gy findings <taskId>
   gy retest <taskId> --finding ID --result fixed|still-present|partially-fixed
@@ -407,6 +414,94 @@ async function main(): Promise<void> {
         `/tasks/${id}/findings/${finding}/${cmd === "finding-retract" ? "retract" : "verify"}`,
         body,
       );
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "finding-validate") {
+    const id = rest[0];
+    const finding = flag(rest, "--finding");
+    const verdict = flag(rest, "--verdict");
+    const method = flag(rest, "--method");
+    if (!id || !finding || !verdict || !method) {
+      throw new Error("gy finding-validate <taskId> --finding ID --verdict ... --method ...");
+    }
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/findings/${finding}/validate`, {
+        verdict,
+        method,
+        evidencePaths: (flag(rest, "--evidence") ?? "")
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean),
+        note: flag(rest, "--note") ?? "",
+        validator: flag(rest, "--validator") ?? "operator:cli",
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "validations") {
+    const id = rest[0];
+    if (!id) throw new Error("gy validations <taskId> [--finding ID]");
+    const owned = await ensureServer(opts);
+    try {
+      const findingId = flag(rest, "--finding");
+      const suffix = findingId ? `?findingId=${encodeURIComponent(findingId)}` : "";
+      const r = await api(opts, "GET", `/tasks/${id}/validations${suffix}`);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "chain") {
+    const id = rest[0];
+    if (!id) throw new Error("gy chain <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/chain`);
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "command-reset") {
+    const id = rest[0];
+    if (!id) throw new Error("gy command-reset <taskId> [--reason TEXT]");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "POST", `/tasks/${id}/command-reset`, {
+        reason: flag(rest, "--reason") ?? "operator reset",
+      });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "audit") {
+    const id = rest[0];
+    if (!id) throw new Error("gy audit <taskId>");
+    const owned = await ensureServer(opts);
+    try {
+      const r = await api(opts, "GET", `/tasks/${id}/audit`);
       if (r.status >= 400) throw new Error(r.text);
       console.log(r.text);
     } finally {

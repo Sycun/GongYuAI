@@ -12,6 +12,10 @@ import type {
   Finding,
   FindingConfidence,
   FindingSeverity,
+  FindingValidation,
+  FindingValidationDraft,
+  FindingValidationMethod,
+  FindingValidationVerdict,
   FindingStatus,
   FindingsGate,
   GoalState,
@@ -67,6 +71,17 @@ import {
   parseAssetWeightFromTags,
   type AssetType,
   suggestFamilyKey,
+  deriveEngagementAudit,
+  formatEngagementAuditSummary,
+  attackNodeTags,
+  attackEdgeTags,
+  buildAttackGraph,
+  findAttackPaths,
+  type AttackEdge,
+  type AttackNode,
+  type AttackGraph,
+  type AttackPath,
+  type EngagementAudit,
   businessConfigFromRequest,
   nextReconcileRevisionId,
   parseMaterial,
@@ -212,6 +227,17 @@ export type OpenHistoryOptions = {
   evidenceDir: string;
 };
 
+
+const eventHash = (
+  prev: string | null,
+  event: { id: string; taskId: string; kind: string; payloadJson: string; createdAt: string },
+): string =>
+  createHash("sha256")
+    .update(
+      [prev ?? "", event.id, event.taskId, event.kind, event.payloadJson, event.createdAt].join("\n"),
+    )
+    .digest("hex");
+
 export class HistoryStore {
   readonly dbPath: string;
   readonly evidenceDir: string;
@@ -260,6 +286,59 @@ export class HistoryStore {
     );
     if (!columns.has("fact_id")) {
       this.db.exec("ALTER TABLE credentials ADD COLUMN fact_id TEXT");
+    }
+    // P15-C1: legacy findings have no verifier identity. NULL means "unknown",
+    // so a later independent validation can still be recorded.
+    const findingCols = new Set(
+      (this.db.prepare("PRAGMA table_info(findings)").all() as Array<Record<string, unknown>>)
+        .map((row) => String(row.name)),
+    );
+    if (!findingCols.has("verified_by")) {
+      this.db.exec("ALTER TABLE findings ADD COLUMN verified_by TEXT");
+    }
+    this.ensureEventHashChain();
+  }
+
+  /** P17 — additive event-chain columns + backfill for pre-P17 rows. */
+  private ensureEventHashChain(): void {
+    const cols = new Set(
+      (this.db.prepare("PRAGMA table_info(events)").all() as Array<Record<string, unknown>>)
+        .map((row) => String(row.name)),
+    );
+    if (!cols.has("prev_hash")) this.db.exec("ALTER TABLE events ADD COLUMN prev_hash TEXT");
+    if (!cols.has("hash")) this.db.exec("ALTER TABLE events ADD COLUMN hash TEXT");
+    const legacy = this.db
+      .prepare("SELECT DISTINCT task_id FROM events WHERE hash IS NULL")
+      .all() as Array<{ task_id: string }>;
+    for (const row of legacy) {
+      const taskId = String(row.task_id);
+      const events = this.db
+        .prepare(
+          "SELECT id, task_id, kind, payload_json, created_at FROM events WHERE task_id = ? ORDER BY rowid",
+        )
+        .all(taskId) as Array<Record<string, unknown>>;
+      let prev: string | null = null;
+      const update = this.db.prepare(
+        "UPDATE events SET prev_hash = ?, hash = ? WHERE id = ?",
+      );
+      this.db.exec("BEGIN");
+      try {
+        for (const event of events) {
+          const hash = eventHash(prev, {
+            id: String(event.id),
+            taskId,
+            kind: String(event.kind),
+            payloadJson: String(event.payload_json),
+            createdAt: String(event.created_at),
+          });
+          update.run(prev, hash, String(event.id));
+          prev = hash;
+        }
+        this.db.exec("COMMIT");
+      } catch (err) {
+        this.db.exec("ROLLBACK");
+        throw err;
+      }
     }
   }
 
@@ -368,9 +447,21 @@ export class HistoryStore {
         task_id TEXT NOT NULL,
         kind TEXT NOT NULL,
         payload_json TEXT NOT NULL DEFAULT '{}',
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        prev_hash TEXT,
+        hash TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at);
+
+      -- P15-C2：同一命令（归一化哈希）在任务内的执行计数；断路器读它。
+      CREATE TABLE IF NOT EXISTS command_attempts (
+        task_id TEXT NOT NULL,
+        command_hash TEXT NOT NULL,
+        count INTEGER NOT NULL DEFAULT 0,
+        first_at TEXT NOT NULL,
+        last_at TEXT NOT NULL,
+        PRIMARY KEY(task_id, command_hash)
+      );
 
       CREATE TABLE IF NOT EXISTS hints (
         id TEXT PRIMARY KEY,
@@ -415,6 +506,22 @@ export class HistoryStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_retests_finding ON finding_retests(task_id, finding_id, created_at);
+
+      -- P15-C1：独立确认（append-only；validator 不得等于 finding.verified_by）。
+      CREATE TABLE IF NOT EXISTS finding_validations (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        finding_id TEXT NOT NULL,
+        verdict TEXT NOT NULL,
+        method TEXT NOT NULL,
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        note TEXT NOT NULL DEFAULT '',
+        validator TEXT NOT NULL,
+        independent INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_validations_finding
+        ON finding_validations(task_id, finding_id, created_at);
 
       -- P14-B5：跨唤醒作战计划（状态由系统派生，模型不能自报完成）。
       CREATE TABLE IF NOT EXISTS plan_steps (
@@ -529,6 +636,7 @@ export class HistoryStore {
         fix TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         verified_at TEXT,
+        verified_by TEXT,
         UNIQUE(task_id, dedup_key)
       );
       CREATE INDEX IF NOT EXISTS idx_findings_task ON findings(task_id, status);
@@ -730,20 +838,43 @@ export class HistoryStore {
     kind: HistoryEventKind,
     payload: Record<string, unknown> = {},
   ): HistoryEvent {
-    const event: HistoryEvent = {
-      id: randomUUID(),
-      taskId,
-      kind,
-      payload,
-      createdAt: this.now(),
-    };
-    this.db
-      .prepare(
-        `INSERT INTO events (id, task_id, kind, payload_json, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(event.id, event.taskId, event.kind, JSON.stringify(event.payload), event.createdAt);
-    return event;
+    // The hash must cover the previous event. When this is a top-level emit,
+    // take a write lock first so two worker processes cannot fork the chain.
+    // Nested emits (inside appendFact's transaction) keep the outer lock.
+    const ownTx = !this.db.isTransaction;
+    if (ownTx) this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const previous = this.db
+        .prepare("SELECT hash FROM events WHERE task_id = ? ORDER BY rowid DESC LIMIT 1")
+        .get(taskId) as { hash?: string | null } | undefined;
+      const prevHash = previous?.hash ?? null;
+      const payloadJson = JSON.stringify(payload);
+      const event: HistoryEvent = {
+        id: randomUUID(),
+        taskId,
+        kind,
+        payload,
+        createdAt: this.now(),
+      };
+      const hash = eventHash(prevHash, {
+        id: event.id,
+        taskId,
+        kind,
+        payloadJson,
+        createdAt: event.createdAt,
+      });
+      this.db
+        .prepare(
+          `INSERT INTO events (id, task_id, kind, payload_json, created_at, prev_hash, hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(event.id, taskId, kind, payloadJson, event.createdAt, prevHash, hash);
+      if (ownTx) this.db.exec("COMMIT");
+      return { ...event, prevHash, hash };
+    } catch (err) {
+      if (ownTx) this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   /** 公开的事件写入口（控制面用它记录状态迁移，例如补交后重新判定）。 */
@@ -2386,6 +2517,21 @@ export class HistoryStore {
               ` — 先 finding_record + finding_verify（附证据与 repro）`,
           };
         }
+        if (gate.requireIndependent) {
+          const missing = supporting.filter(
+            (finding) => !this.hasConfirmedValidation(taskId, finding.id),
+          );
+          if (missing.length > 0) {
+            this.db.exec("ROLLBACK");
+            const reason =
+              `findings gate: ${missing.length}/${supporting.length} 条发现缺独立确认` +
+              `（${missing.map((finding) => `${finding.id}:${finding.title}`).join("；").slice(0, 500)}）` +
+              " — 用另一个 worker 会话或 operator 执行 finding_validate（confirmed）；" +
+              "复核者不得与 finding.verifiedBy 相同";
+            this.recordGoalRejection(taskId, goalId, reason);
+            return { ok: false, reason };
+          }
+        }
       }
 
       const result = this.db
@@ -3417,6 +3563,7 @@ export class HistoryStore {
       fix: input.fix ?? "",
       createdAt: this.now(),
       verifiedAt: null,
+      verifiedBy: null,
     };
     this.db
       .prepare(
@@ -3456,6 +3603,8 @@ export class HistoryStore {
       impact?: string;
       fix?: string;
       cvss?: string | null;
+      /** P15-C1 — identity that performed the verification (worker id / operator). */
+      verifiedBy?: string;
     },
   ): Finding {
     const finding = this.getFinding(taskId, findingId);
@@ -3500,7 +3649,7 @@ export class HistoryStore {
         .prepare(
           `UPDATE findings
            SET status = 'verified', confidence = 'firm', evidence_json = ?,
-               repro = ?, impact = ?, fix = ?, cvss = ?, verified_at = ?
+               repro = ?, impact = ?, fix = ?, cvss = ?, verified_at = ?, verified_by = ?
            WHERE task_id = ? AND id = ? AND status = 'tentative'`,
         )
         .run(
@@ -3510,6 +3659,7 @@ export class HistoryStore {
           input.fix?.trim() || finding.fix,
           input.cvss?.trim() || finding.cvss,
           now,
+          input.verifiedBy?.trim() || finding.verifiedBy,
           taskId,
           findingId,
         );
@@ -3653,6 +3803,140 @@ export class HistoryStore {
     return this.getFinding(taskId, findingId)!;
   }
 
+  /**
+   * P15-C1 — record one independent opinion about a verified finding.
+   *
+   * Hard rules:
+   * - only verified/retested/accepted findings can be validated;
+   * - `validator` must differ from the recorded verifier (self-validation refused);
+   * - `confirmed` / `refuted` need at least one sealed evidence item;
+   * - rows are append-only; the finding itself is never mutated here.
+   */
+  recordFindingValidation(
+    taskId: string,
+    findingId: string,
+    input: FindingValidationDraft,
+  ): { validation: FindingValidation; finding: Finding } {
+    const finding = this.getFinding(taskId, findingId);
+    if (!finding) throw new Error(`unknown finding: ${findingId}`);
+    if (!["verified", "retested", "accepted"].includes(finding.status)) {
+      throw new Error(`finding ${findingId} is ${finding.status}; validate only verified findings`);
+    }
+    const validator = input.validator.trim();
+    if (!validator) throw new Error("finding_validate requires validator identity");
+    if (finding.verifiedBy && validator === finding.verifiedBy) {
+      throw new Error(
+        `self-validation refused: ${validator} is also the verifier; use another worker session or operator:<name>`,
+      );
+    }
+    const verdict = input.verdict;
+    const method = input.method;
+    const paths = [...new Set(input.evidencePaths.map((p) => p.trim()).filter(Boolean))];
+    if ((verdict === "confirmed" || verdict === "refuted") && paths.length === 0) {
+      throw new Error(`finding_validate(${verdict}) requires ≥1 evidence item`);
+    }
+    const files: EvidenceSnapshot[] = [];
+    for (const item of paths) {
+      const ref = this.resolveEvidenceRef(taskId, item);
+      if (ref) {
+        files.push(ref);
+        continue;
+      }
+      try {
+        files.push(captureEvidence(this.evidenceDir, item));
+      } catch {
+        throw new Error(`missing or invalid validation evidence: ${item}`);
+      }
+    }
+    const now = this.now();
+    const validation: FindingValidation = {
+      id: randomUUID(),
+      taskId,
+      findingId,
+      verdict,
+      method,
+      evidence: files.map((file) => ({ path: file.path, sha256: file.sha256 })),
+      note: input.note.trim(),
+      validator,
+      independent: !finding.verifiedBy || validator !== finding.verifiedBy,
+      createdAt: now,
+    };
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const file of files) this.saveVersion(file);
+      this.db
+        .prepare(
+          `INSERT INTO finding_validations
+             (id, task_id, finding_id, verdict, method, evidence_json, note, validator, independent, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          validation.id,
+          taskId,
+          findingId,
+          validation.verdict,
+          validation.method,
+          JSON.stringify(validation.evidence),
+          validation.note,
+          validation.validator,
+          validation.independent ? 1 : 0,
+          validation.createdAt,
+        );
+      this.emit(taskId, "finding_validated", {
+        findingId,
+        validationId: validation.id,
+        verdict: validation.verdict,
+        method: validation.method,
+        validator: validation.validator,
+        independent: validation.independent,
+      });
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    return { validation, finding: this.getFinding(taskId, findingId)! };
+  }
+
+  listFindingValidations(taskId: string, findingId?: string): FindingValidation[] {
+    if (this.archiveTables && !this.archiveTables.has("finding_validations")) return [];
+    const rows = findingId
+      ? this.db
+          .prepare(
+            "SELECT * FROM finding_validations WHERE task_id = ? AND finding_id = ? ORDER BY created_at, rowid",
+          )
+          .all(taskId, findingId)
+      : this.db
+          .prepare("SELECT * FROM finding_validations WHERE task_id = ? ORDER BY created_at, rowid")
+          .all(taskId);
+    return rows.map((r) => this.rowToFindingValidation(r as Record<string, unknown>));
+  }
+
+  /**
+   * Gate view: the latest independent validation must be `confirmed`.
+   * A later refuted/inconclusive/out-of-scope revokes the confirmation.
+   */
+  hasConfirmedValidation(taskId: string, findingId: string): boolean {
+    const rows = this.listFindingValidations(taskId, findingId).filter((row) => row.independent);
+    const latest = rows.at(-1);
+    return latest?.verdict === "confirmed";
+  }
+
+  private rowToFindingValidation(r: Record<string, unknown>): FindingValidation {
+    return {
+      id: String(r.id),
+      taskId: String(r.task_id),
+      findingId: String(r.finding_id),
+      verdict: r.verdict as FindingValidation["verdict"],
+      method: r.method as FindingValidation["method"],
+      evidence: JSON.parse(String(r.evidence_json ?? "[]")) as FindingValidation["evidence"],
+      note: String(r.note ?? ""),
+      validator: String(r.validator),
+      independent: Number(r.independent) !== 0,
+      createdAt: String(r.created_at),
+    };
+  }
+
   getFinding(taskId: string, findingId: string): Finding | null {
     if (this.archiveTables && !this.archiveTables.has("findings")) return null;
     const r = this.db
@@ -3712,6 +3996,7 @@ export class HistoryStore {
       fix: String(r.fix ?? ""),
       createdAt: String(r.created_at),
       verifiedAt: (r.verified_at as string | null) ?? null,
+      verifiedBy: (r.verified_by as string | null) ?? null,
     };
   }
 
@@ -3738,6 +4023,41 @@ export class HistoryStore {
     input: { from: number; to: number; assetCount: number },
   ): void {
     this.emit(taskId, "explore_scaled", { ...input });
+  }
+
+  /** P15-C2 — how many times this exact normalized command has run in the task. */
+  commandAttemptCount(taskId: string, commandHash: string): number {
+    const row = this.db
+      .prepare(
+        "SELECT count FROM command_attempts WHERE task_id = ? AND command_hash = ?",
+      )
+      .get(taskId, commandHash) as { count?: number } | undefined;
+    return Number(row?.count ?? 0);
+  }
+
+  /** Record one allowed attempt; returns the new count (caller decides the limit). */
+  recordCommandAttempt(taskId: string, commandHash: string): number {
+    const now = this.now();
+    const result = this.db
+      .prepare(
+        `INSERT INTO command_attempts (task_id, command_hash, count, first_at, last_at)
+         VALUES (?, ?, 1, ?, ?)
+         ON CONFLICT(task_id, command_hash)
+         DO UPDATE SET count = command_attempts.count + 1, last_at = excluded.last_at
+         RETURNING count`,
+      )
+      .get(taskId, commandHash, now, now) as { count?: number } | undefined;
+    return Number(result?.count ?? 1);
+  }
+
+  /** Operator reset after an intentional re-run; leaves audit trail in events. */
+  resetCommandAttempts(taskId: string, reason = ""): void {
+    this.db.prepare("DELETE FROM command_attempts WHERE task_id = ?").run(taskId);
+    this.emit(taskId, "tool_gate", {
+      tool: "repeat-guard-reset",
+      ok: true,
+      reason: reason.slice(0, 300),
+    });
   }
 
   /** P5 tool single-gate audit: allow and deny both recorded. */
@@ -3972,7 +4292,140 @@ export class HistoryStore {
       kind: r.kind as HistoryEventKind,
       payload: JSON.parse(String(r.payload_json)) as Record<string, unknown>,
       createdAt: String(r.created_at),
+      prevHash: (r.prev_hash as string | null) ?? null,
+      hash: (r.hash as string | null) ?? null,
     }));
+  }
+
+  /** P17 — recompute the task's event chain from genesis; stored hashes must match. */
+  verifyEventChain(taskId: string): {
+    ok: boolean;
+    length: number;
+    head: string | null;
+    brokenAt: string | null;
+    reason: string | null;
+  } {
+    const rows = this.db
+      .prepare(
+        "SELECT id, task_id, kind, payload_json, created_at, prev_hash, hash FROM events WHERE task_id = ? ORDER BY rowid",
+      )
+      .all(taskId) as Array<Record<string, unknown>>;
+    let prev: string | null = null;
+    for (const row of rows) {
+      const id = String(row.id);
+      if (row.hash == null) {
+        return { ok: false, length: rows.length, head: prev, brokenAt: id, reason: "unsealed event" };
+      }
+      const expected = eventHash(prev, {
+        id,
+        taskId,
+        kind: String(row.kind),
+        payloadJson: String(row.payload_json),
+        createdAt: String(row.created_at),
+      });
+      if (String(row.prev_hash ?? "") !== (prev ?? "") || String(row.hash) !== expected) {
+        return {
+          ok: false,
+          length: rows.length,
+          head: prev,
+          brokenAt: id,
+          reason: "hash mismatch",
+        };
+      }
+      prev = expected;
+    }
+    return { ok: true, length: rows.length, head: prev, brokenAt: null, reason: null };
+  }
+
+  eventChainHead(taskId: string): string | null {
+    const row = this.db
+      .prepare("SELECT hash FROM events WHERE task_id = ? ORDER BY rowid DESC LIMIT 1")
+      .get(taskId) as { hash?: string | null } | undefined;
+    return row?.hash ?? null;
+  }
+
+  /** P17 — record one AD/cloud node as a Fact; graph is derived, not stored. */
+  recordAttackNode(taskId: string, node: AttackNode): Fact {
+    return this.appendFact({
+      taskId,
+      layer: "title",
+      title: `ATTACK node ${node.kind} ${node.name}`.slice(0, 200),
+      summary: JSON.stringify(node),
+      tags: attackNodeTags(node),
+    });
+  }
+
+  /** P17 — record one attack edge as a Fact. */
+  recordAttackEdge(taskId: string, edge: AttackEdge): Fact {
+    return this.appendFact({
+      taskId,
+      layer: "title",
+      title: `ATTACK edge ${edge.kind} ${edge.from} -> ${edge.to}`.slice(0, 200),
+      summary: JSON.stringify(edge),
+      tags: attackEdgeTags(edge),
+    });
+  }
+
+  attackGraph(taskId: string): AttackGraph {
+    return buildAttackGraph(this.listFacts(taskId));
+  }
+
+  attackPaths(
+    taskId: string,
+    opts: { from?: readonly string[]; maxDepth?: number; maxPaths?: number } = {},
+  ): AttackPath[] {
+    return findAttackPaths(this.attackGraph(taskId), opts);
+  }
+
+  /**
+   * P15 观察员：只读、确定性、可复算。
+   *
+   * 规则只读现有图（资产 / Intent / Finding / 凭据），不写库、不派单、不改授权。
+   * 返回 observations 供 Observe 与 `engagement_audit` 工具注入，scorecard 供
+   * Reason 判断「继续磨 vs 换面 vs 收口」。空台账会被明确标成缺口，而不是干净。
+   */
+  engagementAudit(taskId: string): EngagementAudit {
+    return deriveEngagementAudit({
+      now: this.now(),
+      assets: this.listAssets(taskId).map((asset) => ({
+        address: asset.address,
+        kind: asset.kind,
+        weight: asset.weight,
+        assetType: asset.assetType,
+      })),
+      intents: this.listIntents(taskId).map((intent) => ({
+        id: intent.id,
+        title: intent.title,
+        technique: intent.technique,
+        assetRoot: intent.assetRoot,
+        status: intent.status,
+        createdAt: intent.createdAt,
+        updatedAt: intent.updatedAt,
+        concludedAt: intent.concludedAt,
+      })),
+      findings: this.listFindings(taskId).map((finding) => ({
+        id: finding.id,
+        asset: finding.asset,
+        endpoint: finding.endpoint,
+        vulnClass: finding.vulnClass,
+        status: finding.status,
+        severity: finding.severity,
+        createdAt: finding.createdAt,
+        verifiedAt: finding.verifiedAt,
+        evidence: finding.evidence.map((item) => ({
+          path: item.path,
+          ...(item.role ? { role: item.role } : {}),
+        })),
+        independentConfirmed: this.hasConfirmedValidation(taskId, finding.id),
+      })),
+      credentials: this.listCredentials(taskId).map((credential) => ({
+        id: credential.id,
+        asset: credential.asset,
+        kind: credential.kind,
+        reuseCount: credential.reuseCount,
+        verifiedAt: credential.verifiedAt,
+      })),
+    });
   }
 
   /**
@@ -4100,6 +4553,22 @@ export class HistoryStore {
       }
       lines.push("（ready 才是可派单的下一步；intent_propose 带 planStepId；计划≠授权。）");
     }
+
+    // P15 观察员：只读派生，不写「观察事实」，避免第二真相源。
+    const audit = this.engagementAudit(taskId);
+    lines.push("", "## 观察员（只读自动派生）");
+    if (audit.observations.length === 0) {
+      lines.push("- （无重复失败 / 重复派单 / 停滞 / 未经营高权重资产）");
+    } else {
+      for (const item of audit.observations.slice(0, 4)) {
+        lines.push(`- [${item.severity}] ${item.text}`);
+      }
+    }
+    lines.push("", "## 作业记分卡");
+    lines.push(formatEngagementAuditSummary(audit));
+    lines.push(
+      "（观察员只给建议，不派单、不改授权；完整观察项用 engagement_audit。）",
+    );
     return lines;
   }
 

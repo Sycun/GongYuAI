@@ -6,11 +6,16 @@
   "transport": "builtin",
   "binary": "ffuf",
   "defaultEnabled": false,
-  "defaultFlags": "-mc 200,301,302,403",
+  "defaultFlags": "-mc 200,301,302,403 -of json -o /dev/stdout",
   "toolName": "run",
   "toolDescription": "Run ffuf against an authorized target. Pass target and optional flags.",
   "refs": [
     "https://github.com/KoaBrown/pentest-mcp-toolkit",
     "https://github.com/chfle/Pentest-MCP-Server"
-  ]
+  ],
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "parser": "ffuf",
+  "whenToUse": "Use for content/parameter fuzzing; write JSON output so the parser can record exposed paths.",
+  "targetFlag": "-u"
 }

@@ -1,10 +1,16 @@
 import { z } from "zod";
 import { ChatProfileSchema } from "./chat-models.js";
+import { ModelRefSchema, ModelTiersSchema } from "./model-routing.js";
 import { OastConfigSchema, PivotPolicySchema } from "./scope.js";
 export * from "./chat-models.js";
 export * from "./chat-input.js";
 export { selectableChatModels, chatThinkingEfforts, isDeepSeekThinkingModel } from "./chat-model-options.js";
 export * from "./knowledge.js";
+export * from "./engagement-audit.js";
+export * from "./host-enum.js";
+export * from "./attack-graph.js";
+export * from "./model-routing.js";
+export * from "./capability-eval.js";
 import { KnowledgeEmbeddingSettingsSchema } from "./knowledge.js";
 import { CoverageStatusSchema } from "./coverage-audit.js";
 import {
@@ -451,6 +457,10 @@ export const ExecutionConfigSchema = z.object({
     .int()
     .nonnegative()
     .default(DEFAULT_REASON_LEASE_MS),
+  /** P17 — per-tier model overrides (reason/explore/execute). */
+  models: ModelTiersSchema.optional(),
+  /** P17 — ordered provider fallback pool. */
+  providers: z.array(ModelRefSchema).max(8).optional(),
 });
 export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
 
@@ -705,6 +715,7 @@ export const HistoryEventKindSchema = z.enum([
   "finding_status_changed",
   "finding_retracted",
   "finding_retested",
+  "finding_validated",
   "finding_accepted",
   "scope_updated",
   "task_pause_requested",
@@ -786,6 +797,10 @@ export const HistoryEventSchema = z.object({
   kind: HistoryEventKindSchema,
   payload: z.record(z.string(), z.unknown()).default({}),
   createdAt: z.string().datetime(),
+  /** P17 — previous event hash in this task's append-only chain. */
+  prevHash: z.string().nullable().optional(),
+  /** P17 — sha256 over prev + event fields. */
+  hash: z.string().nullable().optional(),
 });
 export type HistoryEvent = z.infer<typeof HistoryEventSchema>;
 
@@ -807,6 +822,17 @@ export const McpServerConfigSchema = z.object({
   args: z.array(z.string()).default([]),
   url: z.string().optional(),
   env: z.record(z.string(), z.string()).default({}),
+  /** P15 — executable name for health probe (builtin only). */
+  binary: z.string().optional(),
+  defaultFlags: z.string().optional(),
+  /** Flag that introduces the target (e.g. -u, -d, -H); empty = bare positional. */
+  targetFlag: z.string().optional(),
+  /** Minimum capability required to enable/invoke this server. */
+  capability: z.enum(["observe", "scan", "active-lab", "full"]).optional(),
+  /** Machine-readable parser lane key; omitted for free-text tools. */
+  parser: z.enum(["nmap", "httpx", "nuclei", "ffuf"]).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  whenToUse: z.string().optional(),
 });
 export type McpServerConfig = z.infer<typeof McpServerConfigSchema>;
 
@@ -830,6 +856,13 @@ export const WorkerMcpServerSchema = z.object({
   args: z.array(z.string()).default([]),
   url: z.string().optional(),
   env: z.record(z.string(), z.string()).default({}),
+  binary: z.string().optional(),
+  defaultFlags: z.string().optional(),
+  targetFlag: z.string().optional(),
+  capability: z.enum(["observe", "scan", "active-lab", "full"]).optional(),
+  parser: z.enum(["nmap", "httpx", "nuclei", "ffuf"]).optional(),
+  timeoutMs: z.number().int().positive().optional(),
+  whenToUse: z.string().optional(),
 });
 export type WorkerMcpServer = z.infer<typeof WorkerMcpServerSchema>;
 
