@@ -1,7 +1,7 @@
 import { chatThinkingEfforts, selectableChatModels } from "@gongyuai/contracts/chat-model-options";
 import type { ChatCatalog, ChatSelection, TaskArchiveState } from "@gongyuai/contracts";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Button, SideSheet, Toast } from "@douyinfe/semi-ui";
+import { Button, Input, Modal, SideSheet, Toast } from "@douyinfe/semi-ui";
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { api, type Overview, type TaskRecord } from "./api";
 import { DETAIL_TABS, ROUTE_META, SETTINGS_SECTIONS, isSettingsRoute, settingsSectionOf, type DetailTab, type SettingsRoute } from "./labels";
@@ -70,6 +70,8 @@ export function App() {
   const taskArchives = useTaskArchives(Boolean(conversations.length || workspace.linkedChats.length || taskIdForChat(page.id ?? "")));
   const [showArchived, setShowArchived] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [projectName, setProjectName] = useState("");
   const changingArchive = useRef(false);
   const [homeId, setHomeId] = useState(newId);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -192,6 +194,24 @@ export function App() {
     setShowArchived(false);
     navigate("chat", next);
   }
+  function openProjectCreator() {
+    setProjectName("");
+    setPanel(null);
+    setCreatingProject(true);
+  }
+  function showProjectArchives() {
+    setShowArchived(true);
+    setCollapsed(false);
+    if (narrow) setPanel("history");
+  }
+  const trimmedProjectName = projectName.trim();
+  const duplicateProject = workspace.projects.includes(trimmedProjectName);
+  function createProject() {
+    if (changingArchive.current || !trimmedProjectName || duplicateProject) return;
+    workspace.addProject(trimmedProjectName);
+    setCreatingProject(false);
+    newChat(trimmedProjectName);
+  }
   function addressChat() {
     if (!id) { navigate("chat", chatId); setHomeId(newId()); }
   }
@@ -251,7 +271,7 @@ export function App() {
     projects: workspace.projects, currentProject: project, projectOf: workspace.projectOf,
     archivedChats, archivedProjects, showArchived, onShowArchived: setShowArchived, archiveBusy, onArchive: changeArchive,
     folded: workspace.folded, onFold: workspace.setFolded,
-    onCreate: (name: string) => { if (!changingArchive.current) { workspace.addProject(name); newChat(name); } },
+    onCreateProject: openProjectCreator,
     onSelect: (next: string) => navigate("chat", next),
     onFeatures: () => setPanel("features"),
     attention,
@@ -323,11 +343,29 @@ export function App() {
           </section>)}
         </nav>}
     </SideSheet>
+    <Modal title="新建项目" visible={creatingProject} width="min(400px, calc(100vw - 32px))"
+      centered closeOnEsc footer={null} onCancel={() => setCreatingProject(false)}>
+      {creatingProject && <form className="gy-create-project" onSubmit={event => {
+        event.preventDefault();
+        createProject();
+      }}>
+        <Input autoFocus maxLength={80} aria-label="项目名称" placeholder="项目名称"
+          value={projectName} onChange={setProjectName} />
+        {duplicateProject && <small role="status">已有同名项目</small>}
+        <div className="gy-create-project-actions">
+          <Button onClick={() => setCreatingProject(false)}>取消</Button>
+          <Button htmlType="submit" theme="solid" disabled={archiveBusy || !trimmedProjectName || duplicateProject}>
+            创建并开始会话
+          </Button>
+        </div>
+      </form>}
+    </Modal>
     <main className="gy-main">
       {chat ? <ChatPage key={chatId} conversation={conversation} pending={pendingTurn(chatId)} draft={draft}
         onDraft={value => setDrafts(old => ({ ...old, [chatId]: value }))} onSend={submit}
         catalog={catalog} selected={selected} modelError={modelError}
         projects={activeProjects} project={project} taskLink={taskLink} archived={chatArchived} archiveBusy={archiveBusy}
+        onCreateProject={openProjectCreator} onShowProjectArchives={showProjectArchives}
         taskArchives={archiveRecords}
         onArchive={archived => void changeArchive({ kind: "chat", id: chatId }, archived)}
         onTaskArchive={(id, archived) => void changeArchive({ kind: "task", id }, archived)}

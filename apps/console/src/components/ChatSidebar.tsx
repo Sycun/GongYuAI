@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Dropdown, Input } from "@douyinfe/semi-ui";
 import { IconArchive, IconChevronDown, IconChevronRight, IconChevronUp, IconFolder, IconCommentStroked, IconPlus, IconSearchStroked, IconSettingStroked, IconSidebar, IconUndo } from "@douyinfe/semi-icons";
 import type { ArchiveScope } from "../chat/archives";
@@ -15,20 +15,18 @@ type Props = {
   archiveBusy: boolean; onArchive: (scope: ArchiveScope, archived: boolean) => void;
   onShowArchived: (show: boolean) => void;
   folded: (name: string) => boolean; onFold: (name: string, folded: boolean) => void;
-  onCreate: (name: string) => void; onNew: (project: string) => void;
+  onCreateProject: () => void; onNew: (project: string) => void;
   onToggle: () => void; onSelect: (id: string) => void; onFeatures: () => void;
   attention?: Record<string, boolean>;
 };
 
 export function ChatSidebar({ conversations, selected, collapsed, blank, projects, currentProject, projectOf,
   archivedChats, archivedProjects, showArchived, archiveBusy, onArchive, onShowArchived,
-  folded, onFold, onCreate, onNew, onToggle, onSelect, onFeatures, attention }: Props) {
+  folded, onFold, onCreateProject, onNew, onToggle, onSelect, onFeatures, attention }: Props) {
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
   const filter = query.trim().toLocaleLowerCase();
-  const existingName = projects.includes(name.trim());
+  useEffect(() => setQuery(""), [showArchived]);
   const grouped = new Map<string, Conversation[]>();
   for (const chat of conversations) {
     if (archivedChats.has(chat.id) !== showArchived) continue;
@@ -51,10 +49,15 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
 
   const activeProjects = projects.filter(project => !archivedProjects.has(project));
   const canChooseProject = activeProjects.length > 1;
+  function handleNewChat() {
+    const [activeProject] = activeProjects;
+    if (activeProject) startChat(activeProject);
+    else onCreateProject();
+  }
   const newChatButton = <Button className="gy-new-chat" icon={<IconPlus />} aria-label="新建会话"
-    disabled={archiveBusy || !activeProjects.length}
-    title={!activeProjects.length ? "请先新建项目或取消项目归档" : canChooseProject ? "选择项目后新建会话" : "新建会话"}
-    onClick={canChooseProject ? undefined : () => startChat(activeProjects[0] ?? currentProject)}>
+    disabled={archiveBusy} aria-haspopup={!activeProjects.length ? "dialog" : undefined}
+    title={!activeProjects.length ? "新建项目并开始会话" : canChooseProject ? "选择项目后新建会话" : "新建会话"}
+    onClick={canChooseProject ? undefined : handleNewChat}>
     {!collapsed && <>
       新建会话{canChooseProject && <IconChevronDown className="gy-new-chat-caret" size="small" aria-hidden="true" />}
     </>}
@@ -76,25 +79,15 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
     {!collapsed && <section className="gy-history" aria-label="工作区会话">
       <div className="gy-history-heading"><span>{showArchived ? "已归档" : "项目"}</span><div>
         <Button theme="borderless" type="tertiary" size="small" icon={<IconPlus />}
-          disabled={archiveBusy} aria-label="新建项目" title="新建项目" aria-expanded={creating}
-          onClick={() => { setCreating(!creating); setName(""); }} />
+          disabled={archiveBusy} aria-label="新建项目" title="新建项目" aria-haspopup="dialog"
+          onClick={() => { setQuery(""); onCreateProject(); }} />
         <Button theme="borderless" type="tertiary" size="small" icon={<IconSearchStroked />}
           aria-label="搜索会话" title="搜索项目或会话" aria-expanded={search} onClick={() => { setSearch(!search); setQuery(""); }} />
         <Button theme={showArchived ? "light" : "borderless"} type={showArchived ? "primary" : "tertiary"}
           size="small" icon={<IconArchive />} aria-label="查看已归档" aria-pressed={showArchived}
           title={showArchived ? "返回项目" : "查看已归档"}
-          onClick={() => { onShowArchived(!showArchived); setQuery(""); setCreating(false); }} />
+          onClick={() => onShowArchived(!showArchived)} />
       </div></div>
-      {creating && <form className="gy-create-project" onSubmit={event => {
-        event.preventDefault();
-        if (!name.trim() || existingName || archiveBusy) return;
-        onCreate(name.trim()); setCreating(false); setQuery(""); setName("");
-      }}>
-        <Input autoFocus maxLength={80} aria-label="项目名称" placeholder="项目名称" value={name} onChange={setName}
-          onKeyDown={event => { if (event.key === "Escape") setCreating(false); }} />
-        <Button htmlType="submit" size="small" disabled={!name.trim() || existingName || archiveBusy}>创建</Button>
-        {existingName && <small role="status">已有同名项目</small>}
-      </form>}
       {search && <Input className="gy-history-search" autoFocus showClear aria-label="搜索项目或会话"
         placeholder="搜索项目或会话" value={query} onChange={setQuery} />}
       <div className="gy-history-list">

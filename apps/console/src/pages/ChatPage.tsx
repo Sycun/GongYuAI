@@ -25,6 +25,7 @@ type Props = {
   conversation?: Conversation; pending?: string; draft: string; onDraft: (text: string) => void;
   projects: string[]; project: string; onMove: (name: string) => void;
   archived: boolean; archiveBusy: boolean; onArchive: (archived: boolean) => void;
+  onCreateProject: () => void; onShowProjectArchives: () => void;
   taskArchives: Map<string, TaskArchiveState>; onTaskArchive: (id: string, archived: boolean) => void;
   taskLink?: TaskLink; onLink: (id: string) => void;
   onSend: () => void; onTask: (t: Turn, view: AssignmentView) => void; onRetry: (turn: Turn) => void;
@@ -50,7 +51,7 @@ function stateOf(turn: Turn, pending?: string) {
 
 export function ChatPage({ catalog, selected, modelError, onSelectModel, onApprovalSettings, files, storing, onFiles, onRemoveFile, conversation, pending, draft, onDraft, onSend, onTask, onRetry, onCancel,
   projects, project, onMove, taskLink, onLink, narrow, viewedTaskId, viewMode, taskChoices, onPin, onFollow,
-  archived, archiveBusy, onArchive, taskArchives, onTaskArchive }: Props) {
+  archived, archiveBusy, onArchive, onCreateProject, onShowProjectArchives, taskArchives, onTaskArchive }: Props) {
   const [modelOpen, setModelOpen] = useState(false);
   const [reading, setReading] = useState(false);
   const [details, setDetails] = useState(false);
@@ -199,7 +200,13 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
         </> : <div className="gy-session-start"><div className="gy-welcome-inner">
           <div className="gy-workspace-context"><IconFolder size="small" />{project} 工作区</div>
           <h2>今天要处理什么任务？</h2>
-          {archived ? <p role="status">请新建活跃项目或取消项目归档后再开始会话。</p> : composer}
+          {archived ? <>
+            <p role="status">{projects.length ? "此项目已归档。" : "暂无活跃项目。"}在活跃项目中可以开始新会话。</p>
+            <div className="gy-project-recovery">
+              <Button theme="solid" disabled={archiveBusy} aria-haspopup="dialog" onClick={onCreateProject}>新建项目</Button>
+              <Button onClick={onShowProjectArchives}>查看已归档项目</Button>
+            </div>
+          </> : composer}
         </div></div>}
       </div>
       {!narrow && rail}

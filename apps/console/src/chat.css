@@ -277,9 +277,9 @@ body {
 .gy-project-row:disabled { color: inherit; opacity: 1; cursor: default; }
 .gy-work-path > .gy-path-project { flex: 0 1 auto; max-width: 40%; }
 .gy-project-group + .gy-project-group { margin-top: 3px; }
-.gy-create-project { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 6px 0; }
-.gy-create-project .semi-input-wrapper { flex: 1; min-width: 60px; }
-.gy-create-project small { width: 100%; }
+.gy-project-recovery, .gy-create-project-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.gy-create-project { display: grid; gap: 12px; }
+.gy-create-project-actions { justify-content: flex-end; }
 .gy-session-meta select {
   width: 100%; box-sizing: border-box; padding: 5px; border: 1px solid var(--gy-rule);
   border-radius: 6px; background: white; font: inherit; color: var(--gy-ink);
