@@ -23,6 +23,7 @@ export function maybeForceExploreTimeout(opts: {
   state: CheckpointState;
   exploreTimeoutMs: number;
   save: () => void;
+  leader?: boolean;
   nowMs?: number;
 }): ExploreTimeoutResult {
   const timeoutMs = opts.exploreTimeoutMs;
@@ -54,7 +55,7 @@ export function maybeForceExploreTimeout(opts: {
   opts.state.toolsAtIntentClaim = null;
   opts.state.lastSoftSurfaceMilestone = 0;
   const open = opts.history.openIntents(opts.taskId);
-  opts.state.phase = open.length > 0 ? "explore" : "reason";
+  opts.state.phase = open.length > 0 || opts.leader === false ? "explore" : "reason";
   opts.save();
   const msg = done
     ? `explore_timeout force-conclude ${intentId} → failed+partial; phase=${opts.state.phase}`

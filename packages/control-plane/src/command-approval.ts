@@ -1,6 +1,6 @@
 import { authorizeCommand } from "@gongyuai/exec";
 import { localProbes, type CommandTicket } from "@gongyuai/history";
-import { selectableChatModels, type ApprovalReceipt } from "@gongyuai/contracts";
+import { selectableChatModels, targetAllows, type ApprovalReceipt } from "@gongyuai/contracts";
 import { needsKey, requestCompletion, responseText } from "./chat-provider.js";
 import type { SettingsStore } from "./settings.js";
 
@@ -26,15 +26,18 @@ export type CommandAuth = {
 /**
  * 能否执行：
  * - 有坐标且提案带真实 command 时，由坐标判定（与 worker 同一个闸）决定，不再按 localProbe 白名单；
+ * - MCP 提案带声明主机时按坐标核对主机，纯本地 MCP 动作（无主机）交给审批模型评估副作用；
  * - 没有坐标的老调用保持原语义（只放行固定本地探针）。
  */
 export function executorBound(action: CommandTicket["action"], auth?: CommandAuth): boolean {
-  if (auth && action.tool === "shell" && action.command) return authorizeCommand(auth, action.command).allowed;
+  if (auth && (action.tool === "shell" || action.tool === "cli") && action.command) return authorizeCommand(auth, action.command).allowed;
+  if (auth && action.hosts?.length) return action.hosts.every(host => targetAllows(auth.targets, host, auth.outOfScope ?? []));
+  if (auth && action.tool === "mcp") return true;
   return action.tool === "shell" && localProbes.some(probe => probe === action.localProbe && probe === action.summary);
 }
 
-/** 老的常量原因保留给没有 command 的旧提案。 */
-export const outOfScopeReason = `超出任务目标坐标或执行器支持范围：当前仅支持本地只读检查（${localProbes.join("、")}），该操作已直接拦截。`;
+/** 老的常量原因保留给没有 command 的旧提案：说清是提案缺内容，不误导成"只支持本地检查"。 */
+export const outOfScopeReason = `该调用未携带可裁决的命令内容（旧版提案），无法按任务坐标放行，已直接拦截；请让任务重新发起带完整命令的调用。`;
 
 /** 动态原因：把裁决理由、目标主机、所需/当前能力档位一起给用户，便于直接补坐标。 */
 export function outOfScopeFor(auth: CommandAuth, command: string): string {
@@ -46,9 +49,10 @@ export function outOfScopeFor(auth: CommandAuth, command: string): string {
 
 /**
  * P14-B7 — approval decision table (pure, unit-tested):
- * - in-scope low-risk read-only → allow
- * - boundary unconfirmed / judge unsure → ask (operator decides, worker waits)
- * - everything else → block (fail-closed)
+ * - in-scope read-only / local validation / active external probing → allow
+ *   (授权范围内且边界已确认：主动探测是授权渗透的正当动作，medium 不等于越界);
+ * - boundary unconfirmed / judge unsure → ask (operator decides, worker waits);
+ * - destructive / unknown → block / ask (fail-closed); bounded non-destructive → allow.
  */
 export function decideApproval(input: {
   bounded: boolean;
@@ -56,24 +60,29 @@ export function decideApproval(input: {
   activity: "read_only" | "local_validation" | "external_action" | "destructive" | "unknown";
   scope: "read-only" | "local-validation";
 }): { decision: "allow" | "block" | "ask"; reason?: string } {
-  const lowRiskLocal =
-    input.risk === "low" &&
-    (input.activity === "read_only" ||
-      (input.scope === "local-validation" && input.activity === "local_validation"));
-  if (input.bounded && lowRiskLocal) return { decision: "allow" };
   if (!input.bounded) {
     return {
       decision: "ask",
       reason: "执行边界无法确认该操作的副作用，需人工确认。",
     };
   }
+  if (input.activity === "destructive") return { decision: "block" };
   if (input.risk === "unknown" || input.activity === "unknown") {
     return {
       decision: "ask",
       reason: "审批模型无法判断该操作的副作用，需人工确认。",
     };
   }
-  return { decision: "block" };
+  // bounded=目标已在坐标内且能力满足（授权前置）。授权内非破坏性利用（路径穿越/
+  // 读文件/注入等 external_action）是渗透正当动作，不因模型误判"未授权风险"拦截；
+  // high 但非破坏亦放行，只有 destructive/unknown 才 block/ask。
+  if (input.activity === "local_validation" && input.scope !== "local-validation") {
+    return {
+      decision: "block",
+      reason: "当前自动审批范围设为只读，未开启本地验证自动放行。",
+    };
+  }
+  return { decision: "allow" };
 }
 
 export async function reviewCommand(

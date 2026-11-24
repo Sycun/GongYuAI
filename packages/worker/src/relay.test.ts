@@ -122,6 +122,22 @@ test("writeRelayProtocol appends πn.json and injection lists foothold", () => {
     const text = formatRelayInjection(listed);
     assert.match(text, /foothold: ssh user@10\.0\.0\.5/);
     assert.match(text, /unexplored_surface: 10\.0\.0\.6:445/);
+
+    for (let g = 1; g <= 5; g++) {
+      writeRelayProtocol(m, history, {
+        trigger: "auto",
+        reason: `gen-${g}`,
+        foothold: `host-${g}`,
+        unexplored_surface: `port-${g}`,
+        tokens: g * 100,
+        toolCalls: g * 3,
+        generation: g,
+      });
+    }
+    const bounded = formatRelayInjection(listRelayProtocols(root));
+    assert.match(bounded, /早期交接摘要（π0\.\.π2，共 3 代已折叠）/);
+    assert.match(bounded, /### π5 · auto · gen-5/);
+    assert.doesNotMatch(bounded, /### π0 · agent/);
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

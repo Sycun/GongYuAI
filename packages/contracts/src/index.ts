@@ -241,6 +241,7 @@ export const AuthScopeSchema = z.object({
 export type AuthScope = z.infer<typeof AuthScopeSchema>;
 
 export * from "./scope.js";
+export * from "./dsml.js";
 export * from "./credentials.js";
 export * from "./fanout.js";
 export * from "./family-key.js";

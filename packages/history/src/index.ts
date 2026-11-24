@@ -379,6 +379,7 @@ export class HistoryStore {
         claimed_by TEXT,
         technique TEXT,
         asset_root TEXT,
+        requeue_count INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         concluded_at TEXT,
@@ -816,6 +817,9 @@ export class HistoryStore {
     const have = new Set(cols.map((column) => column.name));
     if (!have.has("technique")) this.db.exec(`ALTER TABLE intents ADD COLUMN technique TEXT`);
     if (!have.has("asset_root")) this.db.exec(`ALTER TABLE intents ADD COLUMN asset_root TEXT`);
+    if (!have.has("requeue_count")) {
+      this.db.exec(`ALTER TABLE intents ADD COLUMN requeue_count INTEGER NOT NULL DEFAULT 0`);
+    }
   }
 
   /** Migrate pre-P0 DBs that lack source_fact_ids_json. */
@@ -2367,33 +2371,81 @@ export class HistoryStore {
     return rows.map((r) => this.rowToIntent(r));
   }
 
+  /** Refresh `updated_at` on an active claimed/running Intent so live workers are not swept as stale. */
+  heartbeatIntent(taskId: string, intentId: string, workerId: string): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE intents
+         SET updated_at = ?
+         WHERE id = ? AND task_id = ? AND claimed_by = ? AND status IN ('claimed', 'running')`,
+      )
+      .run(this.now(), intentId, taskId, workerId);
+    return (result.changes ?? 0) > 0;
+  }
+
   /**
-   * Heartbeat / lease timeout: claimed|running older than maxAgeMs → expired
-   * (re-claimable after re-propose, or caller may re-propose). Zero tactical policy.
+   * Heartbeat / lease timeout: claimed|running older than maxAgeMs → expired,
+   * or back to `proposed` when `opts.requeue` is enabled (bounded by `maxRequeues`
+   * so poison-pill Intents still terminate as `expired`). Zero tactical policy.
    */
-  expireStaleIntents(taskId: string, maxAgeMs: number): Intent[] {
+  expireStaleIntents(
+    taskId: string,
+    maxAgeMs: number,
+    opts?: { requeue?: boolean; maxRequeues?: number },
+  ): Intent[] {
     const now = Date.now();
-    const open = this.listIntents(taskId).filter((i) =>
-      ["claimed", "running"].includes(i.status),
-    );
-    const expired: Intent[] = [];
-    for (const intent of open) {
+    const maxRequeues = Math.max(0, opts?.maxRequeues ?? 2);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM intents
+         WHERE task_id = ? AND status IN ('claimed', 'running')
+         ORDER BY created_at`,
+      )
+      .all(taskId) as Array<Record<string, unknown>>;
+    const swept: Intent[] = [];
+    for (const raw of rows) {
+      const intent = this.rowToIntent(raw);
       const updated = Date.parse(intent.updatedAt);
       if (!Number.isFinite(updated) || now - updated < maxAgeMs) continue;
-      const result = this.db
-        .prepare(
-          `UPDATE intents
-           SET status = 'expired', updated_at = ?
-           WHERE id = ? AND task_id = ? AND status IN ('claimed', 'running')`,
-        )
-        .run(this.now(), intent.id, taskId);
-      if ((result.changes ?? 0) > 0) {
-        this.emit(taskId, "intent_expired", { intentId: intent.id });
-        const row = this.getIntent(taskId, intent.id);
-        if (row) expired.push(row);
+      const requeueCount = Number(raw.requeue_count ?? 0);
+      const canRequeue = Boolean(opts?.requeue) && requeueCount < maxRequeues;
+      if (canRequeue) {
+        const result = this.db
+          .prepare(
+            `UPDATE intents
+             SET status = 'proposed', claimed_by = NULL, requeue_count = requeue_count + 1, updated_at = ?
+             WHERE id = ? AND task_id = ? AND status IN ('claimed', 'running')`,
+          )
+          .run(this.now(), intent.id, taskId);
+        if ((result.changes ?? 0) > 0) {
+          this.emit(taskId, "intent_expired", {
+            intentId: intent.id,
+            requeued: true,
+            requeueCount: requeueCount + 1,
+          });
+          const row = this.getIntent(taskId, intent.id);
+          if (row) swept.push(row);
+        }
+      } else {
+        const result = this.db
+          .prepare(
+            `UPDATE intents
+             SET status = 'expired', updated_at = ?
+             WHERE id = ? AND task_id = ? AND status IN ('claimed', 'running')`,
+          )
+          .run(this.now(), intent.id, taskId);
+        if ((result.changes ?? 0) > 0) {
+          this.emit(taskId, "intent_expired", {
+            intentId: intent.id,
+            requeued: false,
+            requeueCount,
+          });
+          const row = this.getIntent(taskId, intent.id);
+          if (row) swept.push(row);
+        }
       }
     }
-    return expired;
+    return swept;
   }
 
   /** Open Explore intents (proposed|claimed|running). */
@@ -4470,14 +4522,91 @@ export class HistoryStore {
   }
 
   private observeCore(taskId: string): string[] {
+    const MAX_OBSERVE_ASSETS = 40;
+    const MAX_HOT_FACTS = 25;
+    const MAX_RECENT_TITLES = 40;
+    const MAX_OPEN_INTENTS = 30;
+
     const goals = this.listGoals(taskId);
     const assets = this.listAssets(taskId);
-    const titles = this.listFacts(taskId, "title").slice(-50);
-    const open = this.listIntents(taskId).filter((i) =>
+    const allFacts = this.listFacts(taskId);
+    const allTitleFacts = allFacts.filter((f) => f.layer === "title");
+    const allIntents = this.listIntents(taskId);
+    const open = allIntents.filter((i) =>
       ["proposed", "claimed", "running"].includes(i.status),
     );
     const hints = this.listHints(taskId, 20);
     const transferable = this.listTransferableFacts(taskId).slice(-20);
+    const findings = this.listFindings(taskId).filter((f) => f.status !== "retracted");
+
+    // P13-A1 热祖先保活：从进行中 Intent、未撤回 Finding、可迁移打法与凭据/立足点标签向上闭包求热 Fact，
+    // 防止超过滑动窗口后丢失第 1 小时的关键网段/立足点/凭据观察。
+    const factById = new Map(allFacts.map((f) => [f.id, f]));
+    const intentById = new Map(allIntents.map((i) => [i.id, i]));
+    const hotFactIds = new Set<string>();
+    const factQueue: string[] = [];
+    const enqueueFact = (id: string) => {
+      if (!id || id === ORIGIN_FACT_ID || hotFactIds.has(id)) return;
+      hotFactIds.add(id);
+      factQueue.push(id);
+    };
+    for (const intent of open) {
+      for (const id of intent.sourceFactIds) enqueueFact(id);
+    }
+    for (const finding of findings) {
+      for (const id of finding.factIds ?? []) enqueueFact(id);
+    }
+    for (const f of transferable) enqueueFact(f.id);
+    for (const f of allTitleFacts) {
+      if (f.tags.some((t) => t === "foothold" || t === "credential" || t === "transferable")) {
+        enqueueFact(f.id);
+      }
+    }
+    // 沿 Fact → 产出它的 Intent → 前驱 sourceFactIds 向上追溯最多 64 步，保留完整因果链根。
+    let steps = 0;
+    while (factQueue.length > 0 && steps < 64) {
+      steps += 1;
+      const fid = factQueue.shift()!;
+      const f = factById.get(fid);
+      if (!f?.intentId) continue;
+      const parentIntent = intentById.get(f.intentId);
+      if (!parentIntent) continue;
+      for (const srcId of parentIntent.sourceFactIds) enqueueFact(srcId);
+    }
+
+    const recentTitles = allTitleFacts.slice(-MAX_RECENT_TITLES);
+    const recentTitleSet = new Set(recentTitles.map((f) => f.id));
+    const hotOlderTitles = allTitleFacts
+      .filter((f) => hotFactIds.has(f.id) && !recentTitleSet.has(f.id))
+      .slice(-MAX_HOT_FACTS);
+    const titles = [...hotOlderTitles, ...recentTitles];
+    const foldedTitleCount = Math.max(0, allTitleFacts.length - titles.length);
+
+    // 资产优先级截断：live > admitted > seed > oos，高权重优先，防止大网段/FOFA 扫描百条资产撑爆上下文。
+    const hotAssetSet = new Set<string>([
+      ...open.map((i) => i.assetRoot).filter((x): x is string => Boolean(x)),
+      ...findings.map((f) => f.asset),
+    ]);
+    const sortedAssets = [...assets].sort((a, b) => {
+      const aHot = hotAssetSet.has(a.address) ? 1 : 0;
+      const bHot = hotAssetSet.has(b.address) ? 1 : 0;
+      if (aHot !== bHot) return bHot - aHot;
+      const kindOrder: Record<AssetKind, number> = {
+        live: 5,
+        admitted: 4,
+        seed: 3,
+        candidate: 2,
+        oos: 1,
+      };
+      if (kindOrder[a.kind] !== kindOrder[b.kind]) return kindOrder[b.kind] - kindOrder[a.kind];
+      const aw = a.weight ?? 0;
+      const bw = b.weight ?? 0;
+      if (aw !== bw) return bw - aw;
+      return a.address.localeCompare(b.address);
+    });
+    const shownAssets = sortedAssets.slice(0, MAX_OBSERVE_ASSETS);
+    const omittedAssets = Math.max(0, sortedAssets.length - shownAssets.length);
+    const omittedOos = sortedAssets.slice(MAX_OBSERVE_ASSETS).filter((a) => a.kind === "oos").length;
 
     const lines: string[] = [];
     lines.push("## 目标");
@@ -4488,9 +4617,14 @@ export class HistoryStore {
     if (assets.length === 0) {
       lines.push("- （无；Bootstrap / seedAssetsFromAuth 应写入 auth.targets）");
     } else {
-      for (const a of assets) {
+      for (const a of shownAssets) {
         lines.push(
           `- [${a.kind}] ${a.address} ←fact ${a.factId} · ${a.source}${a.intentId ? ` ←intent ${a.intentId}` : ""}`,
+        );
+      }
+      if (omittedAssets > 0) {
+        lines.push(
+          `- … 另有 ${omittedAssets} 个资产已折叠（其中 oos=${omittedOos}）；需全量清单请调用 asset_list。`,
         );
       }
       lines.push(
@@ -4514,7 +4648,6 @@ export class HistoryStore {
         lines.push(`- [${f.id}] ${f.title}${f.summary ? `: ${f.summary.slice(0, 160)}` : ""}`);
       }
     }
-    const findings = this.listFindings(taskId).filter((f) => f.status !== "retracted");
     lines.push("", `## Findings 台账（${findings.length}）`);
     if (findings.length === 0) {
       lines.push("- （无；发现线索即 finding_record，复现后 finding_verify 才可进交付）");
@@ -4526,18 +4659,27 @@ export class HistoryStore {
       }
       lines.push("（tentative 不得写进交付叙述；verified 须附证据与 repro；同 dedupKey 幂等。）");
     }
-    lines.push("", "## 事实标题（title 层）");
+    lines.push(
+      "",
+      foldedTitleCount > 0
+        ? `## 事实标题（title 层 · 显示 ${titles.length}/${allTitleFacts.length}，已折叠冷历史 ${foldedTitleCount} 条）`
+        : "## 事实标题（title 层）",
+    );
     for (const f of titles) {
       const intent = f.intentId ? ` ←intent ${f.intentId}` : "";
-      lines.push(`- [${f.id}] ${f.title}${intent}`);
+      const hotPin = !recentTitleSet.has(f.id) ? " [热祖先]" : "";
+      lines.push(`- [${f.id}]${hotPin} ${f.title}${intent}`);
     }
-    lines.push("", "## 进行中意图");
+    lines.push("", `## 进行中意图（${open.length}）`);
     if (open.length === 0) {
       lines.push("- （无）");
     } else {
-      for (const i of open) {
+      for (const i of open.slice(0, MAX_OPEN_INTENTS)) {
         const src = i.sourceFactIds.join(",");
         lines.push(`- [${i.id}] (${i.status}) ${i.title} ←facts ${src}`);
+      }
+      if (open.length > MAX_OPEN_INTENTS) {
+        lines.push(`- … 另有 ${open.length - MAX_OPEN_INTENTS} 条进行中意图未展开。`);
       }
     }
     // P14-B4: foothold profiles (structured, bounded).

@@ -135,3 +135,27 @@ test("reconcileWorkers skips when slot identity is unknown (no live child map)",
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("reconcileWorkers respawns only dead follower slot without colliding live slots", { timeout: 10_000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-scale-heal-"));
+  const { store, runner, spawned } = makeRunner(root);
+  try {
+    const task = createTask(store, 4);
+    await runner.start(task.id);
+    addAssets(store.get(task.id)!, 4);
+    await runner.reconcileWorkers(task.id);
+    assert.deepEqual(spawned, [0, 1, 2, 3]);
+
+    // Simulate follower slot 1 crashing while slots 0, 2, 3 remain alive.
+    const slots = (runner as unknown as { children: Map<string, Map<number, { exitCode?: number | null }>> })
+      .children.get(task.id)!;
+    slots.get(1)!.exitCode = 1;
+    (runner as unknown as { lastScaleCheck: Map<string, number> }).lastScaleCheck.delete(task.id);
+
+    await runner.reconcileWorkers(task.id);
+    assert.deepEqual(spawned, [0, 1, 2, 3, 1], "only dead slot 1 is respawned; live slots untouched");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

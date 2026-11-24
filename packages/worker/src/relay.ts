@@ -53,12 +53,28 @@ export function listRelayProtocols(workspaceDir: string): RelayProtocol[] {
   return out;
 }
 
+const MAX_FULL_RELAYS = 3;
+
 export function formatRelayInjection(protocols: RelayProtocol[]): string {
   if (!protocols.length) {
     return "## Session Relay\n（尚无 π；本会话为冷启动。）\n";
   }
   const lines: string[] = ["## Session Relay（累积 π；冲突以 History 为准）"];
-  for (const p of protocols) {
+  const splitIdx = Math.max(0, protocols.length - MAX_FULL_RELAYS);
+  const older = protocols.slice(0, splitIdx);
+  const recent = protocols.slice(splitIdx);
+  if (older.length > 0) {
+    lines.push(`### 早期交接摘要（π0..π${older[older.length - 1]!.generation}，共 ${older.length} 代已折叠）`);
+    for (const p of older.slice(-10)) {
+      const fh = p.foothold ? ` · foothold=${p.foothold.slice(0, 120)}` : "";
+      const pos = p.current_position ? ` · pos=${p.current_position.slice(0, 80)}` : "";
+      lines.push(`- π${p.generation} (${p.trigger}${p.reason ? `: ${p.reason.slice(0, 60)}` : ""})${pos}${fh}`);
+    }
+    if (older.length > 10) {
+      lines.push(`- … 更早 ${older.length - 10} 代 π 已归档于 workspace/relay/，权威状态以 History 图为准。`);
+    }
+  }
+  for (const p of recent) {
     lines.push(`### π${p.generation} · ${p.trigger}${p.reason ? ` · ${p.reason}` : ""}`);
     lines.push(`- current_position: ${p.current_position || "—"}`);
     lines.push(`- network_map: ${p.network_map || "—"}`);

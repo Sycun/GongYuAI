@@ -879,3 +879,106 @@ test("核算条件：重复主键歧义与未知项都不得判通过；非核�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("observe preserves hot ancestor facts across >50 cold facts and bounds large asset inventories", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-hot-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "88888888-8888-4888-8888-888888888888";
+  try {
+    const auth = { targets: ["10.0.0.0/16"], outOfScope: [] as string[] };
+    // Record 50 assets (45 admitted + 5 oos) to trigger bounded asset observe (>40).
+    for (let i = 1; i <= 45; i++) {
+      store.recordAsset({ taskId, address: `10.0.1.${i}`, auth, live: i <= 2 });
+    }
+    for (let i = 1; i <= 5; i++) {
+      store.recordAsset({ taskId, address: `192.168.9.${i}`, auth });
+    }
+
+    // Early root fact (hour 1) that anchors a downstream chain, followed by 55 cold title facts.
+    const earlyRoot = store.appendFact({
+      taskId,
+      layer: "title",
+      title: "EARLY_PIVOT_SUBNET_172_16",
+    });
+    const bridgeIntent = store.proposeIntent({
+      taskId,
+      title: "pivot scan",
+      sourceFactIds: [earlyRoot.id],
+    });
+    store.claimIntent(taskId, bridgeIntent.id, "w0");
+    store.concludeIntent(taskId, bridgeIntent.id, "succeeded", "pivoted", {
+      workerId: "w0",
+      facts: [{ layer: "title", title: "MID_FOOTHOLD_FACT" }],
+    });
+    const midFact = store.listFacts(taskId, "title").find((f) => f.title === "MID_FOOTHOLD_FACT")!;
+
+    for (let i = 0; i < 55; i++) {
+      store.appendFact({
+        taskId,
+        layer: "title",
+        title: `cold-noise-${i}`,
+      });
+    }
+    // Open intent depends on midFact, whose parent intent depended on earlyRoot!
+    store.proposeIntent({
+      taskId,
+      title: "deep internal check",
+      sourceFactIds: [midFact.id],
+    });
+
+    const obs = store.observe(taskId);
+    assert.match(obs, /EARLY_PIVOT_SUBNET_172_16/, "2-hop hot ancestor must survive sliding window");
+    assert.match(obs, /\[热祖先\]/, "pinned older ancestor is marked as hot");
+    assert.match(obs, /已折叠冷历史/, "cold noise facts are folded");
+    assert.match(obs, /另有 10 个资产已折叠/, "assets beyond 40 are bounded with summary");
+    assert.match(obs, /\[live\] 10\.0\.1\.1/, "live assets prioritized to top of bounded list");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("heartbeatIntent and expireStaleIntents requeue with poison-pill cap", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-requeue-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "99999999-9999-4999-8999-999999999999";
+  try {
+    const intent = store.proposeIntent({
+      taskId,
+      title: "flaky target",
+      sourceFactIds: [ORIGIN_FACT_ID],
+    });
+    store.claimIntent(taskId, intent.id, "w1");
+    assert.equal(store.heartbeatIntent(taskId, intent.id, "w2"), false, "wrong worker cannot heartbeat");
+    assert.equal(store.heartbeatIntent(taskId, intent.id, "w1"), true);
+
+    // 1st stale sweep with requeue=true (maxRequeues=2) → back to proposed
+    const r1 = store.expireStaleIntents(taskId, 0, { requeue: true, maxRequeues: 2 });
+    assert.equal(r1.length, 1);
+    assert.equal(r1[0]!.status, "proposed");
+    assert.equal(r1[0]!.claimedBy, null);
+
+    // Re-claim and 2nd stale sweep → back to proposed
+    assert.ok(store.claimIntent(taskId, intent.id, "w2"));
+    const r2 = store.expireStaleIntents(taskId, 0, { requeue: true, maxRequeues: 2 });
+    assert.equal(r2[0]!.status, "proposed");
+
+    // Re-claim and 3rd stale sweep → hits maxRequeues=2, transitions to expired (poison-pill guard)
+    assert.ok(store.claimIntent(taskId, intent.id, "w3"));
+    const r3 = store.expireStaleIntents(taskId, 0, { requeue: true, maxRequeues: 2 });
+    assert.equal(r3[0]!.status, "expired");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

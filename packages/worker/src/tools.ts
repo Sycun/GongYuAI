@@ -257,7 +257,7 @@ export function writeEvidence(
 
 export async function installTool(
   ctx: ToolContext,
-  spec: { name: string; method?: "apt" | "which"; package?: string },
+  spec: { name: string; method?: "apt" | "npm" | "which"; package?: string },
 ): Promise<{ ok: boolean; detail: string }> {
   const name = spec.name;
   const pkg = spec.package ?? name;
@@ -265,7 +265,11 @@ export async function installTool(
   try {
     gateTool(ctx, "install", () => {
       assertCapabilityAllows(ctx.manifest, "install");
-      if (!/^[\w][\w.+-]*$/.test(name) || !/^[\w][\w.+:~=-]*$/.test(pkg)) {
+      const nameOk = /^[\w][\w.+-]*$/.test(name);
+      const pkgOk = method === "npm"
+        ? /^(@[\w.-]+\/)?[\w][\w.+-]*$/.test(pkg)
+        : /^[\w][\w.+:~=-]*$/.test(pkg);
+      if (!nameOk || !pkgOk) {
         throw new Error("invalid tool or package name");
       }
       if (isBudgetHit(ctx.usage.installs + 1, ctx.manifest.budget.maxInstalls)) {
@@ -296,6 +300,8 @@ export async function installTool(
   let cmd: string;
   if (method === "apt") {
     cmd = `sudo DEBIAN_FRONTEND=noninteractive apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ${pkg}`;
+  } else if (method === "npm") {
+    cmd = `npm install -g ${pkg}`;
   } else {
     return { ok: false, detail: `unknown install method ${method}` };
   }

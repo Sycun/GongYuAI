@@ -40,6 +40,25 @@ async function main(): Promise<void> {
   console.log(
     `[gy-worker] task=${manifest.taskId} slot=${manifest.workerSlot}/${manifest.workerCount} mock=${manifest.mock} harness=${harness}`,
   );
+  let shuttingDown = false;
+  const gracefulShutdown = (sig: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[gy-worker] received ${sig}, preserving detached sessions and closing listeners`);
+    try {
+      closeExecRuntime({ keepSessions: true });
+    } catch {
+      /* best-effort */
+    }
+    void closeOastListeners()
+      .catch(() => {})
+      .finally(() => {
+        process.exit(0);
+      });
+  };
+  process.once("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.once("SIGINT", () => gracefulShutdown("SIGINT"));
+
   try {
     if (harness === "bare") {
       await runBareLoop(manifest);

@@ -493,6 +493,28 @@ test("multi-worker leader delegates execution; follower cannot enter Reason", ()
       handleGraphTool("phase_set", { phase: "reason" }, followerCtx) ?? "",
       /follower only Explore/,
     );
+
+    // Follower claims and concludes the last open Intent: must remain in explore and NOT grab Reason lease.
+    const followerState = tmpState("explore");
+    const activeFollowerCtx = {
+      ...followerCtx,
+      state: followerState,
+      execution: { reasonLeaseMs: 60_000 },
+    };
+    const claimed = handleGraphTool("intent_claim", { intentId: intent.id }, activeFollowerCtx);
+    assert.ok(claimed && !claimed.startsWith("denied"));
+    const concluded = handleGraphTool(
+      "intent_conclude",
+      { intentId: intent.id, status: "failed", conclusion: "checked" },
+      activeFollowerCtx,
+    );
+    assert.ok(concluded && !concluded.startsWith("denied"));
+    assert.equal(followerState.phase, "explore", "follower must stay in explore after concluding last intent");
+    assert.equal(history.getReasonLease(taskId), null, "follower must not acquire Reason lease");
+
+    // Once open Intents drain, multi-worker leader wakes from explore into reason; follower stays explore.
+    assert.equal(syncGraphPhase(history, taskId, "explore", { leader: true, workerCount: 2 }), "reason");
+    assert.equal(syncGraphPhase(history, taskId, "reason", { leader: false, workerCount: 2 }), "explore");
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

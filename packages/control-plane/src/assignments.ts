@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { authorizeCommand, runCommand } from "@gongyuai/exec";
-import { authorizationStatus, chatThinkingEfforts, CreateTaskRequestSchema, selectableChatModels, taskScopePromptBlock,
+import { authorizationStatus, chatThinkingEfforts, CreateTaskRequestSchema, hasDsmlMarkup, parseDsmlCalls, selectableChatModels, taskScopePromptBlock,
   type AssignmentView, type ChatSelection, type ChatMessage, type TaskRecord } from "@gongyuai/contracts";
 import { localProbes, openHistory, writeEvidenceFile, type CommandProposal, type CommandTicket } from "@gongyuai/history";
 import type { ControlStore } from "./store.js";
@@ -133,10 +133,20 @@ function interpretStructured(value: unknown): AssignmentReply {
   return { kind: "error", message: "任务模型未返回有效的结构化结果。" };
 }
 
-// 完整的结构化对象仍按原语义处理。普通正文只作为文字结果，不能从中提取命令。
+// 完整的结构化对象仍按原语义处理。普通正文只作为文字结果，不能从中提取命令；
+// 唯一例外是 DeepSeek 原生 DSML 工具调用标记：解析成调用意图，解析失败按错误处理，
+// 绝不把标记正文当结果写进证据（会把任务假完成）。
 function interpretAssignmentReply(text: string): AssignmentReply {
   const trimmed = text.trim().replace(/^\uFEFF/, "");
   if (!trimmed) return { kind: "error", message: "任务模型未返回结果。" };
+  if (hasDsmlMarkup(trimmed)) {
+    const calls = parseDsmlCalls(trimmed);
+    if (!calls.length) return { kind: "error", message: "任务模型返回了无法解析的工具调用（DSML）：请按输出格式重发。" };
+    if (calls.length > 1) return { kind: "error", message: "任务模型一次返回了多个工具调用：请一次只发一个。" };
+    const call = calls[0]!;
+    const kind = call.name === "shell" || call.name === "command" ? "command" : call.name;
+    return interpretStructured({ kind, ...call.args });
+  }
   const fence = /^```([a-z0-9_-]*)[^\S\r\n]*([\s\S]*?)[^\S\r\n]*```$/i.exec(trimmed);
   if (!fence && !trimmed.startsWith("{") && !trimmed.startsWith("[") && !trimmed.startsWith("```")) {
     return { kind: "result", text: trimmed };

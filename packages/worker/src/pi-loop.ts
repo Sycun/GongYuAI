@@ -2,9 +2,11 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_EXPLORE_TIMEOUT_MS,
+  hasDsmlMarkup,
   isBudgetHit,
   isExploreLeader,
   isWallHit,
+  parseDsmlCalls,
   type ShellTraceCall,
   type WorkerManifest,
   type ModelRef,
@@ -52,6 +54,7 @@ import { formatShellResult, recordExecutionStep } from "./execution-trace.js";
 import { c2Tool, shellJob, shellSession } from "./exec-tools.js";
 import { isUntrustedTool, markUntrusted } from "./untrusted.js";
 import { httpRequestTool } from "./http-tools.js";
+import { tsecbenchTool } from "./tsecbench-tools.js";
 import { oastHitsTool, oastIssueTool } from "./oast-tools.js";
 import { tunnelCloseTool, tunnelListTool, tunnelOpenTool } from "./tunnel-tools.js";
 import { parseAndRecord, parseSummaryLine, toolForServer } from "./tool-output.js";
@@ -71,6 +74,17 @@ import {
   bloodhoundImportTool,
   cloudRecordTool,
 } from "./ops-tools.js";
+import {
+  buildModelCandidateChain,
+  buildWorkerRefusalPrompt,
+  createPoolSizeReader,
+  isLeaderStatusTerminal,
+  isModelRefusalText,
+  isRetryableHttpStatus,
+  shouldFailoverHttpStatus,
+  synthesizeGroundedRelayFields,
+  type ResolvedCandidateModel,
+} from "./model-resilience.js";
 
 function phaseToolDenial(
   ctx: ToolContext,
@@ -80,7 +94,12 @@ function phaseToolDenial(
   args?: Record<string, unknown>,
 ): string | undefined {
   const taskId = ctx.manifest.taskId;
-  state.phase = syncGraphPhase(ctx.history, taskId, state.phase);
+  const leader = isExploreLeader(ctx.manifest);
+  const workerCount = ctx.manifest.workerCount ?? 1;
+  state.phase = syncGraphPhase(ctx.history, taskId, state.phase, {
+    leader,
+    workerCount,
+  });
   const phase = asGraphPhase(state.phase);
   const mcpNames = mcpHub.openaiTools.map((tool) => tool.function.name);
   const workerId = ctx.manifest.workerId || `worker-${taskId.slice(0, 8)}`;
@@ -95,12 +114,12 @@ function phaseToolDenial(
   }
   if (
     executionRequiresActiveIntent(name, args) &&
-    isExploreLeader(ctx.manifest) &&
-    (ctx.manifest.workerCount ?? 1) > 1
+    leader &&
+    workerCount > 1
   ) {
     return deny(`denied: leader does not execute ${name}; follower Explore owns tools`);
   }
-  if (name === "assert_goal" && !isExploreLeader(ctx.manifest)) {
+  if (name === "assert_goal" && !leader) {
     return deny("denied: assert_goal is leader-only; follower reports findings via Fact");
   }
   const intentDenial = executionIntentDenial({
@@ -112,7 +131,74 @@ function phaseToolDenial(
     args,
   });
   if (intentDenial) return deny(intentDenial);
+  if (state.activeIntentId) {
+    ctx.history.heartbeatIntent(taskId, state.activeIntentId, workerId);
+  }
   return undefined;
+}
+
+const STALE_INTENT_MAX_AGE_MS = 20 * 60_000;
+
+/**
+ * Multi-worker coordination gate (zero LLM token cost):
+ * - Periodically sweeps stale claimed Intents back to `proposed` (up to maxRequeues=2) on leader;
+ * - Keeps multi-worker Leader parked while Followers own open Intents (prevents LLM spin-lock);
+ * - Keeps multi-worker Follower parked when no `proposed` Intent exists yet (prevents premature exit).
+ */
+async function waitForPoolTurn(opts: {
+  manifest: WorkerManifest;
+  ctx: ToolContext;
+  state: CheckpointState;
+  ckpt: CheckpointStore;
+  workerStartedAt: number;
+  readPoolSize: () => number;
+  lastStaleSweep: { at: number };
+}): Promise<"ready" | "exit"> {
+  const { manifest, ctx, state, ckpt, workerStartedAt, readPoolSize, lastStaleSweep } = opts;
+  const taskId = manifest.taskId;
+  for (;;) {
+    const workerCount = readPoolSize();
+    const leader = isExploreLeader(manifest);
+    const now = Date.now();
+    if (leader && now - lastStaleSweep.at >= 30_000) {
+      lastStaleSweep.at = now;
+      ctx.history.expireStaleIntents(taskId, STALE_INTENT_MAX_AGE_MS, {
+        requeue: true,
+        maxRequeues: 2,
+      });
+    }
+
+    if (ctx.history.allGoalsPass(taskId)) return "exit";
+    if (
+      isBudgetHit(ctx.usage.toolCalls, manifest.budget.maxToolCalls) ||
+      isBudgetHit(state.tokens, manifest.budget.maxTokens) ||
+      isWallHit(workerStartedAt, manifest.budget.maxWallMs)
+    ) {
+      return "ready";
+    }
+    if (workerCount <= 1) return "ready";
+
+    const open = ctx.history.openIntents(taskId);
+    if (leader) {
+      // Leader runs Bootstrap when graph has no Intents/Facts yet, and Reason once open Intents drain.
+      if (open.length === 0) {
+        state.phase = syncGraphPhase(ctx.history, taskId, state.phase, { leader: true, workerCount });
+        return "ready";
+      }
+      flushUsage(manifest, ctx, state);
+      await new Promise((r) => setTimeout(r, 1_000));
+      continue;
+    }
+
+    // Follower: exit cleanly if Leader has already published a terminal task status.
+    if (isLeaderStatusTerminal(manifest.dataDir)) return "exit";
+    if (state.activeIntentId || open.some((i) => i.status === "proposed")) {
+      state.phase = "explore";
+      return "ready";
+    }
+    flushUsage(manifest, ctx, state);
+    await new Promise((r) => setTimeout(r, 1_000));
+  }
 }
 
 /**
@@ -203,10 +289,13 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
       ckpt.save(state);
     }
 
-    // Crash recovery: expire stale claims; never auto-write π (P1.5).
-    // Only leader expires — avoids N workers racing the same sweep.
+    // Crash recovery: requeue stale claims (bounded by maxRequeues=2); never auto-write π (P1.5).
+    // Only leader sweeps — avoids N workers racing the same sweep.
     if (leader) {
-      history.expireStaleIntents(manifest.taskId, 30 * 60_000);
+      history.expireStaleIntents(manifest.taskId, STALE_INTENT_MAX_AGE_MS, {
+        requeue: true,
+        maxRequeues: 2,
+      });
     }
     if (listRelayProtocols(manifest.workspaceDir).length) {
       appendProgress(
@@ -390,49 +479,73 @@ async function buildConfiguredModels(manifest: WorkerManifest) {
     "@earendil-works/pi-ai/api/openai-completions.lazy"
   );
   const ref = resolvePiModelRef(manifest);
-  const chatModel = {
-    id: ref.modelId,
-    name: ref.modelId,
-    api: "openai-completions" as const,
-    provider: ref.provider,
-    baseUrl: ref.baseUrl,
-    reasoning: false,
-    input: (ref.visionEnabled ? ["text", "image"] : ["text"]) as ("text" | "image")[],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128_000,
-    maxTokens: 16_384,
-  };
-  const modelsList = [chatModel];
-  if (ref.visionModelId !== ref.modelId) {
-    modelsList.push({
-      ...chatModel,
-      id: ref.visionModelId,
-      name: ref.visionModelId,
-      input: ["text", "image"],
-    });
+  const candidates = buildModelCandidateChain(
+    {
+      provider: ref.provider,
+      modelId: ref.modelId,
+      baseUrl: ref.baseUrl,
+      apiKeyEnv: ref.apiKeyEnv,
+    },
+    ref.fallbacks,
+    manifest,
+  );
+
+  const byProvider = new Map<
+    string,
+    {
+      baseUrl: string;
+      apiKeyEnv: string;
+      modelIds: Set<string>;
+    }
+  >();
+  for (const cand of candidates) {
+    let group = byProvider.get(cand.provider);
+    if (!group) {
+      group = { baseUrl: cand.baseUrl, apiKeyEnv: cand.apiKeyEnv, modelIds: new Set() };
+      byProvider.set(cand.provider, group);
+    }
+    group.modelIds.add(cand.modelId);
+  }
+  const primaryGroup = byProvider.get(ref.provider);
+  if (primaryGroup && ref.visionModelId !== ref.modelId) {
+    primaryGroup.modelIds.add(ref.visionModelId);
   }
 
   const models = createModels();
-  models.setProvider(
-    createProvider({
-      id: ref.provider,
-      name: ref.provider,
-      baseUrl: ref.baseUrl,
-      auth: {
-        apiKey: {
-          name: "API key",
-          resolve: async () => {
-            const key = process.env[ref.apiKeyEnv];
-            if (!key) return undefined;
-            return { auth: { apiKey: key }, source: ref.apiKeyEnv };
+  for (const [providerId, group] of byProvider.entries()) {
+    const modelsList = Array.from(group.modelIds).map((id) => ({
+      id,
+      name: id,
+      api: "openai-completions" as const,
+      provider: providerId,
+      baseUrl: group.baseUrl,
+      reasoning: false,
+      input: (ref.visionEnabled ? ["text", "image"] : ["text"]) as ("text" | "image")[],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128_000,
+      maxTokens: 16_384,
+    }));
+    models.setProvider(
+      createProvider({
+        id: providerId,
+        name: providerId,
+        baseUrl: group.baseUrl,
+        auth: {
+          apiKey: {
+            name: "API key",
+            resolve: async () => {
+              const key = process.env[group.apiKeyEnv];
+              if (!key) return undefined;
+              return { auth: { apiKey: key }, source: group.apiKeyEnv };
+            },
           },
         },
-      },
-      models: modelsList,
-      api: openAICompletionsApi(),
-    }),
-  );
-  return { models, ref };
+        models: modelsList,
+        api: openAICompletionsApi(),
+      }),
+    );
+  }
+  return { models, ref, candidates };
 }
 
 async function tryPiDurable(
@@ -452,7 +565,7 @@ async function tryPiDurable(
     );
     const schema = await import("@earendil-works/pi-schema");
 
-    const { models, ref } = await buildConfiguredModels(manifest);
+    const { models, ref, candidates } = await buildConfiguredModels(manifest);
     const apiKey = process.env[ref.apiKeyEnv];
     if (!apiKey) return false;
     if (!models.getModel(ref.provider, ref.modelId)) {
@@ -464,6 +577,9 @@ async function tryPiDurable(
     }
 
     const context = BACKGROUND_CONTEXT;
+    const readPoolSize = createPoolSizeReader(manifest);
+    const lastStaleSweep = { at: Date.now() };
+    let candidateIdx = 0;
 
     const {
       defineTool,
@@ -492,7 +608,7 @@ async function tryPiDurable(
       workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
       execution: manifest.execution,
       leader: isExploreLeader(manifest),
-      workerCount: manifest.workerCount ?? 1,
+      workerCount: readPoolSize(),
       save: () => {
         state.toolCalls = ctx.usage.toolCalls;
         state.installs = ctx.usage.installs;
@@ -500,13 +616,20 @@ async function tryPiDurable(
       },
     });
 
+    let lastObservedPiTokens = state.tokens;
     /** Pull Pi usage into checkpoint + worker-status so console Live stays fresh. */
     const syncLiveUsage = (piUsage?: {
       models?: Record<string, { totalTokens?: number }>;
       tools?: Record<string, { totalTokens?: number }>;
     }) => {
       if (piUsage) {
-        state.tokens = Math.max(state.tokens, sumPiTokens(piUsage));
+        const nextTokens = Math.max(state.tokens, sumPiTokens(piUsage));
+        const delta = Math.max(0, nextTokens - lastObservedPiTokens);
+        if (delta > 0) {
+          state.tokensSinceRelay += delta;
+          lastObservedPiTokens = nextTokens;
+        }
+        state.tokens = nextTokens;
       }
       state.toolCalls = Math.max(state.toolCalls, ctx.usage.toolCalls);
       state.installs = Math.max(state.installs, ctx.usage.installs);
@@ -817,16 +940,32 @@ async function tryPiDurable(
     const install_tool = defineTool({
       name: "install_tool",
       description: "Install a missing pentest tool",
-      parameters: obj({ name: str(), package: str() }),
+      parameters: obj({ name: str(), package: str(), method: str() }),
       replay: "none",
-      execute: async (args: { name: string; package: string }) => {
+      execute: async (args: { name: string; package: string; method?: string }) => {
+        const method = args.method === "npm" ? "npm" : "apt";
         const r = await installTool(ctx, {
           name: args.name,
           package: args.package || args.name,
+          method,
         });
         state.installs = ctx.usage.installs;
         ckpt.save(state);
         return { output: [{ type: "text", text: JSON.stringify(r) }] };
+      },
+    } as never);
+
+    const tsecbench = defineTool({
+      name: "tsecbench",
+      description:
+        "TSecBench 平台入口（清板任务必用）：action=list 拿题单与 container_addr；start 开容器(≤3)；submit 交 flag；close 释放；status 查单题。真实目标只来自 start 的 addr，预检地址勿攻击。",
+      parameters: obj({ action: str(), code: str(), flag: str() }),
+      replay: "none",
+      execute: async (args: { action: string; code?: string; flag?: string }) => {
+        const text = await tsecbenchTool(ctx, args);
+        state.toolCalls = ctx.usage.toolCalls;
+        ckpt.save(state);
+        return { output: [{ type: "text", text: markUntrusted(text, { tool: "tsecbench", target: args.code ?? "" }) }] };
       },
     } as never);
 
@@ -957,7 +1096,15 @@ async function tryPiDurable(
         state.phase = prev === "relay" || prev === "init" ? "explore" : prev;
         ckpt.save(state);
         appendProgress(manifest.workspaceDir, `relay π${protocol.generation} (${check.trigger})`);
-        return { output: [{ type: "text" as const, text: JSON.stringify(protocol) }] };
+        const handoff = [
+          `会话已 Relay（π${protocol.generation} · ${check.trigger}）。请基于以下最新图状态与交接继续推进未完成 Goals / open Intents：`,
+          "",
+          buildTurnObserveBlock(manifest, ctx.history, state),
+        ].join("\n");
+        return {
+          output: [{ type: "text" as const, text: JSON.stringify(protocol) }],
+          control: { handoff },
+        };
       },
     } as never);
     const operator_consult = defineTool({
@@ -1250,6 +1397,7 @@ async function tryPiDurable(
           asset_search,
           write_evidence,
           install_tool,
+          tsecbench,
           assert_goal,
           enable_mcp,
           disable_mcp,
@@ -1264,6 +1412,10 @@ async function tryPiDurable(
           disable_skill,
           http_request,
           host_profile_record,
+          host_profile_parse,
+          attack_graph_record,
+          bloodhound_import,
+          cloud_record,
           host_profile_list,
           tunnel_open,
           tunnel_list,
@@ -1309,6 +1461,9 @@ async function tryPiDurable(
               const calls = message?.role === "assistant"
                 ? message.content.filter((part) => part.type === "toolCall")
                 : [];
+              if (calls.length > 0) {
+                state.toolCallsSinceRelay += calls.length;
+              }
               const shellCalls = calls.filter((call) => call.name === "shell");
               const resultsByCall = new Map<string, string>();
               if (shellCalls.length) {
@@ -1356,25 +1511,10 @@ async function tryPiDurable(
           }),
         ],
         sections: [
+          // Static prefix: never embed dynamic Observe/Relays here so provider KV/Prompt Cache hits across turns!
           section(
             "gongyuai-system",
-            () => {
-              state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase);
-              const open = ctx.history.openIntents(manifest.taskId);
-              const phaseBlock = phaseDirective(state.phase, {
-                openIntentCount: open.length,
-                activeIntentId: state.activeIntentId,
-              });
-              return systemPrompt(
-                manifest,
-                `${phaseBlock}\n\n${sessionBootstrapText(
-                  manifest,
-                  ctx.history.observe(manifest.taskId),
-                )}`,
-                mcpHub,
-                skillHub,
-              );
-            },
+            () => systemPrompt(manifest, undefined, mcpHub, skillHub),
             { tag: false },
           ),
         ],
@@ -1399,19 +1539,6 @@ async function tryPiDurable(
     );
     flushUsage(manifest, ctx, state);
 
-    const kickoff = [
-      "你是 GongYuAI 红队作业执行节点。对操作者可见的说明尽量用中文。",
-      "这是长程任务（可连续跑数日）。请用工具完成所有未通过目标；未经 assert_goal 成功不得宣称通过。",
-      "禁止因预算/剩余时间估计提前收口或写最终汇报；目标未全过就继续。",
-      "目标进入任务即视为授权；严格留在任务目标坐标 auth.targets 内，优先小步意图。",
-      "图调度：Bootstrap → Explore → Reason（phase_set / intent_*）；工具面按相位过滤。",
-      "全部目标通过后回复 DONE。",
-      "",
-      kickoffUserMessage(state.phase),
-      "",
-      sessionBootstrapText(manifest, ctx.history.observe(manifest.taskId)),
-    ].join("\n");
-
     // Heartbeat: Pi wait can run for days; keep Live token/toolCounters moving.
     const heartbeat = setInterval(() => {
       void (async () => {
@@ -1429,7 +1556,57 @@ async function tryPiDurable(
 
     try {
       let round = 0;
+      let refusalStreak = 0;
+      let pendingRefusalPrompt: string | null = null;
       for (;;) {
+        const poolDecision = await waitForPoolTurn({
+          manifest,
+          ctx,
+          state,
+          ckpt,
+          workerStartedAt,
+          readPoolSize,
+          lastStaleSweep,
+        });
+        if (poolDecision === "exit") {
+          appendProgress(manifest.workspaceDir, "任务目标已清或主节点已收卷，结束 Pi 循环");
+          break;
+        }
+
+        // Auto Session Relay on Pi Durable: write grounded π and issue durable reset(handoff).
+        const autoRelay = canRelay({
+          manifest,
+          tokensSinceRelay: state.tokensSinceRelay,
+          toolCallsSinceRelay: state.toolCallsSinceRelay,
+          forceAgent: false,
+        });
+        if (autoRelay.ok) {
+          const grounded = synthesizeGroundedRelayFields(
+            ctx.history,
+            manifest.taskId,
+            state.activeIntentId,
+          );
+          const protocol = writeRelayProtocol(manifest, ctx.history, {
+            trigger: "auto",
+            reason: "auto token threshold",
+            ...grounded,
+            tokens: state.tokens,
+            toolCalls: ctx.usage.toolCalls,
+            wallMs: Date.now() - workerStartedAt,
+            generation: state.relayGeneration,
+          });
+          ctx.history.recordRelay(manifest.taskId, protocol.generation, "auto");
+          state.relayGeneration += 1;
+          state.tokensSinceRelay = 0;
+          state.toolCallsSinceRelay = 0;
+          ckpt.save(state);
+          appendProgress(manifest.workspaceDir, `relay π${protocol.generation} (auto reset)`);
+          await root.reset(
+            `会话已自动 Relay（π${protocol.generation}）。请依据以下 History 图与交接继续推进：\n\n${buildTurnObserveBlock(manifest, ctx.history, state)}`,
+            context,
+          );
+        }
+
         round += 1;
         const timeoutNote = runExploreTimeoutGate(
           manifest,
@@ -1441,23 +1618,40 @@ async function tryPiDurable(
         const softPace =
           pending ?? maybeSoftPaceMessage(state, ctx, workerStartedAt);
         if (softPace || timeoutNote || pending) ckpt.save(state);
-        const content =
-          round === 1
-            ? [kickoff, timeoutNote, softPace].filter(Boolean).join("\n\n")
+
+        const observeBlock = buildTurnObserveBlock(manifest, ctx.history, state);
+        const content = pendingRefusalPrompt
+          ? `${pendingRefusalPrompt}\n\n${observeBlock}`
+          : round === 1
+            ? [
+                "你是 GongYuAI 红队作业执行节点。对操作者可见的说明尽量用中文。",
+                "这是长程任务（可连续跑数日）。请用工具完成所有未通过目标；未经 assert_goal 成功不得宣称通过。",
+                "禁止因预算/剩余时间估计提前收口或写最终汇报；目标未全过就继续。",
+                "目标进入任务即视为授权；严格留在任务目标坐标 auth.targets 内，优先小步意图。",
+                "图调度：Bootstrap → Explore → Reason（phase_set / intent_*）；工具面按相位过滤。",
+                "全部目标通过后回复 DONE。",
+                "",
+                kickoffUserMessage(state.phase),
+                timeoutNote ?? "",
+                softPace ?? "",
+                "",
+                observeBlock,
+              ]
+                .filter(Boolean)
+                .join("\n\n")
             : [
                 `长程续跑 #${round}：目标仍未全部通过。禁止收口/最终汇报。`,
                 "按渗透测试节奏继续：建图/验证影响/写 finding/换面；完成语义以 assert_goal / evidence gate 为准。",
                 timeoutNote ?? "",
                 softPace ?? "",
                 "",
-                sessionBootstrapText(
-                  manifest,
-                  ctx.history.observe(manifest.taskId),
-                ),
+                observeBlock,
               ]
                 .filter((line) => line !== "")
                 .join("\n");
+        pendingRefusalPrompt = null;
 
+        const toolsBeforeRound = ctx.usage.toolCalls;
         const submission = await root.submit(
           {
             type: "input",
@@ -1476,18 +1670,40 @@ async function tryPiDurable(
             settledAny.status !== "done" &&
             settledAny.status !== "answered")
         ) {
+          if (candidateIdx + 1 < candidates.length) {
+            candidateIdx += 1;
+            const nextCand = candidates[candidateIdx]!;
+            await root.configure(
+              { model: { provider: nextCand.provider, modelId: nextCand.modelId } },
+              context,
+            );
+            appendProgress(
+              manifest.workspaceDir,
+              `Pi Durable 模型故障切换 → ${nextCand.provider}/${nextCand.modelId}（reason=${settledAny?.reason ?? settledAny?.status}）`,
+            );
+            continue;
+          }
           appendProgress(
             manifest.workspaceDir,
             `Pi Durable 无可用模型（${settledAny?.reason ?? settledAny?.status}），改用 OpenAI 工具循环`,
           );
           return false;
         }
+        let assistantText = "";
         if (settled.status === "done" && settled.type === "input") {
           await root.commit(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (tx: any) => tx.entry(AssistantEntry, settled.answer),
             context,
           );
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const answerParts = (settled.answer as any)?.content;
+          if (Array.isArray(answerParts)) {
+            assistantText = answerParts
+              .filter((p: { type?: string; text?: string }) => p?.type === "text" && typeof p.text === "string")
+              .map((p: { text: string }) => p.text)
+              .join("\n");
+          }
         }
 
         state.toolCalls = ctx.usage.toolCalls;
@@ -1498,6 +1714,32 @@ async function tryPiDurable(
         } catch {
           /* best-effort */
         }
+
+        // P16 零目标拒绝处理链：解释性拒绝永不写 Fact、永不作终态；纠偏重问 → 换模型。
+        if (ctx.usage.toolCalls === toolsBeforeRound && isModelRefusalText(assistantText)) {
+          refusalStreak += 1;
+          ctx.history.recordEvent(manifest.taskId, "tool_gate", {
+            tool: "model_refusal",
+            ok: false,
+            reason: `model explanatory refusal #${refusalStreak}`,
+            snippet: assistantText.slice(0, 240),
+          });
+          if (refusalStreak >= 2 && candidateIdx + 1 < candidates.length) {
+            candidateIdx += 1;
+            const nextCand = candidates[candidateIdx]!;
+            await root.configure(
+              { model: { provider: nextCand.provider, modelId: nextCand.modelId } },
+              context,
+            );
+            appendProgress(
+              manifest.workspaceDir,
+              `P16 拒绝纠偏切换模型 → ${nextCand.provider}/${nextCand.modelId}`,
+            );
+          }
+          pendingRefusalPrompt = buildWorkerRefusalPrompt(refusalStreak, manifest.auth.targets);
+          continue;
+        }
+        refusalStreak = 0;
 
         if (round === 1 && ctx.usage.toolCalls === 0 && !ctx.history.allGoalsPass(manifest.taskId)) {
           appendProgress(
@@ -1679,14 +1921,35 @@ function runExploreTimeoutGate(
     workspaceDir: manifest.workspaceDir,
     state,
     exploreTimeoutMs: timeoutMs,
+    leader: isExploreLeader(manifest),
     save: () => ckpt.save(state),
   });
   return result.message;
 }
 
+function buildTurnObserveBlock(
+  manifest: WorkerManifest,
+  history: ReturnType<typeof openHistory>,
+  state: CheckpointState,
+): string {
+  state.phase = syncGraphPhase(history, manifest.taskId, state.phase, {
+    leader: isExploreLeader(manifest),
+    workerCount: manifest.workerCount ?? 1,
+  });
+  const open = history.openIntents(manifest.taskId);
+  const phaseBlock = phaseDirective(state.phase, {
+    openIntentCount: open.length,
+    activeIntentId: state.activeIntentId,
+  });
+  return `${phaseBlock}\n\n${sessionBootstrapText(
+    manifest,
+    history.observe(manifest.taskId),
+  )}`;
+}
+
 function systemPrompt(
   manifest: WorkerManifest,
-  observeText: string,
+  observeText?: string,
   mcpHub?: McpHub,
   skillHub?: SkillHub,
 ): string {
@@ -1746,15 +2009,13 @@ ${poolLine}
 - 凭据：用 credential_record 登记**指针**（secretRef=证据路径/环境变量名），绝不在 Fact/聊天里写明文；横向复用前先 credential_list 查已有对象。
 - 变更：动手前 change_record（含 rollbackCmd）；回滚只生成不执行。
 - 求助：影响/坐标事实判断不了时 operator_consult（24h 无回复自动转非阻塞），不要猜。
-- 缺少二进制时用 install_tool（需 ≥scan）。
+- 缺少二进制时用 install_tool（需 ≥scan；method=apt 装系统包，method=npm 装全局 node 工具如 pnpm）。
+- 管理自己启动的后台作业用 shell_job(action=kill, jobId)；禁止 pkill/killall（可能误杀无关进程，会被工程自保拒绝）。
 - MCP：常开核以外用 enable_mcp 再调用；未 enable 的 MCP 不可调用。
 - Skill：系统只给路由表。需要方法论时 load_skill(id)；按阶段加载，不要一次灌入全部正文。
 - TSecBench：默认禁止批量 hint；平台 409 already finished 视为终态，停止重试并写 blocked 证据。
 ${visionLine}
-${boardClearPolicyBlock(manifest)}${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}
-当前 Observe（History）：
-${observeText}
-`;
+${boardClearPolicyBlock(manifest)}${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}${observeText ? `\n当前 Observe（History）：\n${observeText}\n` : ""}`;
 }
 
 function sessionBootstrapText(manifest: WorkerManifest, historyObserve: string): string {
@@ -1775,9 +2036,23 @@ function trimMessages(messages: ChatMessage[], maxMessages = 48): void {
   const system = messages[0]?.role === "system" ? [messages[0]!] : [];
   const rest = messages.slice(system.length);
   const kept = rest.slice(-(maxMessages - system.length));
-  // Drop orphan tool results without a preceding assistant tool_calls turn.
-  while (kept.length && kept[0]!.role === "tool") kept.shift();
-  messages.splice(0, messages.length, ...system, ...kept);
+  // Drop orphan tool results: a tool message is only valid if its id was issued by
+  // the most recent assistant tool_calls turn still present in the window. Relay /
+  // checkpoint rebuilds can otherwise leave [system,user,tool] which the API rejects.
+  let pending = new Set<string>();
+  const cleaned: ChatMessage[] = [];
+  for (const m of kept) {
+    if (m.role === "assistant") {
+      pending = new Set(((m.tool_calls ?? []) as Array<{ id?: string }>).map((tc) => tc.id ?? ""));
+      cleaned.push(m);
+    } else if (m.role === "tool") {
+      if (m.tool_call_id && pending.has(m.tool_call_id)) cleaned.push(m);
+    } else {
+      pending = new Set();
+      cleaned.push(m);
+    }
+  }
+  messages.splice(0, messages.length, ...system, ...cleaned);
 }
 
 async function runOpenAiToolLoop(
@@ -1789,16 +2064,24 @@ async function runOpenAiToolLoop(
   skillHub: SkillHub,
   workerStartedAt: number,
 ): Promise<void> {
-  const apiKey = process.env[manifest.model?.apiKeyEnv ?? "OPENAI_API_KEY"];
-  if (!apiKey) {
-    throw new Error("OPENAI_API_KEY missing and pi-durable did not start");
+  const ref = resolvePiModelRef(manifest);
+  const candidates: ResolvedCandidateModel[] = buildModelCandidateChain(
+    {
+      provider: ref.provider,
+      modelId: ref.modelId,
+      baseUrl: ref.baseUrl,
+      apiKeyEnv: ref.apiKeyEnv,
+    },
+    ref.fallbacks,
+    manifest,
+  );
+  let candidateIdx = 0;
+  const activeCandidate = (): ResolvedCandidateModel => candidates[candidateIdx] ?? candidates[0]!;
+  if (!process.env[activeCandidate().apiKeyEnv]) {
+    throw new Error(`${activeCandidate().apiKeyEnv} missing and pi-durable did not start`);
   }
-  const baseUrl = (
-    manifest.model?.baseUrl ??
-    process.env.OPENAI_BASE_URL ??
-    "https://api.openai.com/v1"
-  ).replace(/\/$/, "");
-  const model = manifest.model?.modelId ?? process.env.GY_MODEL ?? "gpt-4.1-mini";
+  const readPoolSize = createPoolSizeReader(manifest);
+  const lastStaleSweep = { at: Date.now() };
 
   const baseTools = [
     ...GRAPH_PHASE_TOOLS,
@@ -2028,8 +2311,26 @@ async function runOpenAiToolLoop(
           properties: {
             name: { type: "string" },
             package: { type: "string" },
+            method: { type: "string", enum: ["apt", "npm"], description: "apt (system package) or npm (global node tool)" },
           },
           required: ["name"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "tsecbench",
+        description:
+          "TSecBench board entry (use for clear-board missions): list challenges+addr, start container (<=3), submit flag, close, status. Real targets only from start addr; never attack the VPN healthcheck IP.",
+        parameters: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["list", "start", "submit", "close", "status"] },
+            code: { type: "string", description: "challenge unique_code" },
+            flag: { type: "string", description: "flag value for submit" },
+          },
+          required: ["action"],
         },
       },
     },
@@ -2108,26 +2409,6 @@ async function runOpenAiToolLoop(
             argsJson: { type: "string" },
           },
           required: ["serverId", "toolName"],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "relay",
-        description: "写 Session Relay π（交班快照）。",
-        parameters: {
-          type: "object",
-          properties: {
-            reason: { type: "string" },
-            current_position: { type: "string" },
-            network_map: { type: "string" },
-            tried: { type: "string" },
-            active_sessions: { type: "string" },
-            foothold: { type: "string" },
-            unexplored_surface: { type: "string" },
-          },
-          required: ["reason"],
         },
       },
     },
@@ -2410,25 +2691,18 @@ async function runOpenAiToolLoop(
   });
 
   const liveTools = () => {
-    state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase);
+    const workerCount = readPoolSize();
+    state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase, {
+      leader: isExploreLeader(manifest),
+      workerCount,
+    });
     const mcpNames = mcpHub.openaiTools.map((t) => t.function.name);
     const allowed = allowedToolNames(state.phase, mcpNames);
     return filterOpenAiTools([...baseTools, ...mcpHub.openaiTools], allowed);
   };
 
-  const refreshSystem = () => {
-    state.phase = syncGraphPhase(ctx.history, manifest.taskId, state.phase);
-    const open = ctx.history.openIntents(manifest.taskId);
-    const observe = sessionBootstrapText(
-      manifest,
-      ctx.history.observe(manifest.taskId),
-    );
-    const phaseBlock = phaseDirective(state.phase, {
-      openIntentCount: open.length,
-      activeIntentId: state.activeIntentId,
-    });
-    return systemPrompt(manifest, `${phaseBlock}\n\n${observe}`, mcpHub, skillHub);
-  };
+  /** Static system prompt (no dynamic Observe/Relays) so provider KV/Prompt Cache stays intact across turns. */
+  const refreshSystem = () => systemPrompt(manifest, undefined, mcpHub, skillHub);
 
   const graphCtx = () => ({
     history: ctx.history,
@@ -2438,7 +2712,7 @@ async function runOpenAiToolLoop(
     workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
     execution: manifest.execution,
     leader: isExploreLeader(manifest),
-    workerCount: manifest.workerCount ?? 1,
+    workerCount: readPoolSize(),
     save: () => {
       state.toolCalls = ctx.usage.toolCalls;
       state.installs = ctx.usage.installs;
@@ -2446,16 +2720,27 @@ async function runOpenAiToolLoop(
     },
   });
 
-  /** Clear chat buffer after Session Relay; re-inject Observe + all π. */
+  let lastInjectedPhase = asGraphPhase(state.phase);
+  let pendingAutoRelayAsk = false;
+  let refusalStreak = 0;
+
+  /** Clear chat buffer after Session Relay; keep static system prefix and inject fresh Observe + bounded π in user message. */
   const resetMessagesAfterRelay = () => {
-    messages.splice(0, messages.length, {
-      role: "system",
-      content: refreshSystem(),
-    }, {
-      role: "user",
-      content:
-        "会话已 Relay。请根据注入的 π 与 History Observe 继续未完成 Goals / open Intents；禁止改动主机网络/VPN/代理。",
-    });
+    const observeBlock = buildTurnObserveBlock(manifest, ctx.history, state);
+    lastInjectedPhase = asGraphPhase(state.phase);
+    pendingAutoRelayAsk = false;
+    messages.splice(
+      0,
+      messages.length,
+      {
+        role: "system",
+        content: refreshSystem(),
+      },
+      {
+        role: "user",
+        content: `会话已 Relay。请根据以下注入的 π 与 History Observe 继续未完成 Goals / open Intents；禁止改动主机网络/VPN/代理。\n\n${observeBlock}`,
+      },
+    );
   };
 
   const performRelay = (opts: {
@@ -2489,6 +2774,7 @@ async function runOpenAiToolLoop(
       unexplored_surface: opts.unexplored_surface,
       tokens: state.tokens,
       toolCalls: ctx.usage.toolCalls,
+      wallMs: Date.now() - workerStartedAt,
       generation: state.relayGeneration,
     });
     ctx.history.recordRelay(manifest.taskId, protocol.generation, check.trigger);
@@ -2512,13 +2798,14 @@ async function runOpenAiToolLoop(
     },
     {
       role: "user",
-      content: kickoffUserMessage(state.phase),
+      content: `${kickoffUserMessage(state.phase)}\n\n${buildTurnObserveBlock(manifest, ctx.history, state)}`,
     },
   ];
+  lastInjectedPhase = asGraphPhase(state.phase);
 
   appendProgress(
     manifest.workspaceDir,
-    `进入模型工具循环 phase=${asGraphPhase(state.phase)}`,
+    `进入模型工具循环 phase=${asGraphPhase(state.phase)} model=${activeCandidate().provider}/${activeCandidate().modelId}`,
   );
   flushUsage(manifest, ctx, state);
 
@@ -2527,6 +2814,17 @@ async function runOpenAiToolLoop(
       ? Math.max(manifest.budget.maxToolCalls, 40)
       : Number.MAX_SAFE_INTEGER;
   for (let i = 0; i < maxRounds; i++) {
+    const poolDecision = await waitForPoolTurn({
+      manifest,
+      ctx,
+      state,
+      ckpt,
+      workerStartedAt,
+      readPoolSize,
+      lastStaleSweep,
+    });
+    if (poolDecision === "exit") break;
+
     const timeoutNote = runExploreTimeoutGate(
       manifest,
       ctx.history,
@@ -2561,7 +2859,8 @@ async function runOpenAiToolLoop(
       ckpt.save(state);
     }
 
-    // Auto Session Relay when token threshold crossed (never on Watchdog crash).
+    // Two-step Auto Session Relay: ask model once to summarize via `relay` tool;
+    // if still above threshold next turn, synthesize grounded π from History and reset.
     const autoCheck = canRelay({
       manifest,
       tokensSinceRelay: state.tokensSinceRelay,
@@ -2569,42 +2868,126 @@ async function runOpenAiToolLoop(
       forceAgent: false,
     });
     if (autoCheck.ok) {
-      performRelay({
-        triggerForceAgent: false,
-        reason: "auto token threshold",
-        foothold: "see prior π + History observe",
-        unexplored_surface: "open intents / unfinished goals",
+      if (!pendingAutoRelayAsk) {
+        pendingAutoRelayAsk = true;
+        messages.push({
+          role: "user",
+          content:
+            "上下文已达 Relay 阈值：请先调用一次 `relay` 工具写下当前立足点（foothold）、已验证约束（tried）与待测面（unexplored_surface），完成本轮交班压缩。",
+        });
+      } else {
+        const grounded = synthesizeGroundedRelayFields(
+          ctx.history,
+          manifest.taskId,
+          state.activeIntentId,
+        );
+        performRelay({
+          triggerForceAgent: false,
+          reason: "auto token threshold (grounded fallback)",
+          ...grounded,
+        });
+      }
+    }
+
+    // Inject phase directive + Observe delta only when phase transitions (preserves prefix cache!).
+    const syncedPhase = syncGraphPhase(ctx.history, manifest.taskId, state.phase, {
+      leader: isExploreLeader(manifest),
+      workerCount: readPoolSize(),
+    });
+    state.phase = syncedPhase;
+    if (asGraphPhase(syncedPhase) !== lastInjectedPhase) {
+      lastInjectedPhase = asGraphPhase(syncedPhase);
+      messages.push({
+        role: "user",
+        content: buildTurnObserveBlock(manifest, ctx.history, state),
       });
     }
 
     trimMessages(messages);
-    // Keep system prompt phase-aware each round.
-    if (messages[0]?.role === "system") {
-      messages[0] = { role: "system", content: refreshSystem() };
-    }
 
     let res: Response | undefined;
     let lastFetchErr: unknown;
+    let switchedModel = false;
     for (let attempt = 0; attempt < 4; attempt++) {
+      const cand = activeCandidate();
+      const candKey = process.env[cand.apiKeyEnv];
+      if (!candKey) {
+        if (candidateIdx + 1 < candidates.length) {
+          candidateIdx += 1;
+          continue;
+        }
+        throw new Error(`API key missing for ${cand.apiKeyEnv}`);
+      }
       try {
-        res = await fetch(`${baseUrl}/chat/completions`, {
+        const candidateRes = await fetch(`${cand.baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
-            authorization: `Bearer ${apiKey}`,
+            authorization: `Bearer ${candKey}`,
             "content-type": "application/json",
             "user-agent": "GongYuAI/0.1",
           },
           body: JSON.stringify({
-            model,
+            model: cand.modelId,
             messages,
             tools: liveTools(),
             tool_choice: "auto",
           }),
         });
+        if (!candidateRes.ok) {
+          const errBody = await candidateRes.text();
+          if (shouldFailoverHttpStatus(candidateRes.status, errBody) && candidateIdx + 1 < candidates.length && attempt >= 1) {
+            candidateIdx += 1;
+            switchedModel = true;
+            const next = activeCandidate();
+            appendProgress(
+              manifest.workspaceDir,
+              `模型接口 ${candidateRes.status} 故障切换 → ${next.provider}/${next.modelId}`,
+            );
+            continue;
+          }
+          if (isRetryableHttpStatus(candidateRes.status) && attempt < 3) {
+            const retryAfter = Number(candidateRes.headers.get("retry-after") ?? "");
+            const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+              ? Math.min(15_000, retryAfter * 1000)
+              : 1000 * Math.pow(2, attempt);
+            lastFetchErr = new Error(`HTTP ${candidateRes.status}: ${errBody.slice(0, 200)}`);
+            appendProgress(
+              manifest.workspaceDir,
+              `模型接口 ${candidateRes.status} 退避重试 ${attempt + 1}/4（等待 ${waitMs}ms）`,
+            );
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue;
+          }
+          if (shouldFailoverHttpStatus(candidateRes.status, errBody) && candidateIdx + 1 < candidates.length) {
+            candidateIdx += 1;
+            switchedModel = true;
+            const next = activeCandidate();
+            appendProgress(
+              manifest.workspaceDir,
+              `模型接口 ${candidateRes.status} 故障切换 → ${next.provider}/${next.modelId}`,
+            );
+            continue;
+          }
+          throw new Error(`模型接口错误 ${candidateRes.status}: ${errBody}`);
+        }
+        res = candidateRes;
         lastFetchErr = undefined;
         break;
       } catch (err) {
         lastFetchErr = err;
+        if (err instanceof Error && err.message.startsWith("模型接口错误 ") && candidateIdx + 1 >= candidates.length) {
+          throw err;
+        }
+        if (attempt >= 2 && candidateIdx + 1 < candidates.length && !switchedModel) {
+          candidateIdx += 1;
+          switchedModel = true;
+          const next = activeCandidate();
+          appendProgress(
+            manifest.workspaceDir,
+            `模型请求异常切换备用 → ${next.provider}/${next.modelId}`,
+          );
+          continue;
+        }
         const waitMs = 1000 * (attempt + 1);
         appendProgress(
           manifest.workspaceDir,
@@ -2617,9 +3000,6 @@ async function runOpenAiToolLoop(
       throw new Error(
         `模型请求失败（已重试）：${lastFetchErr instanceof Error ? lastFetchErr.message : String(lastFetchErr)}`,
       );
-    }
-    if (!res.ok) {
-      throw new Error(`模型接口错误 ${res.status}: ${await res.text()}`);
     }
     const data = (await res.json()) as {
       usage?: {
@@ -2644,14 +3024,54 @@ async function runOpenAiToolLoop(
     const msg = data.choices[0]?.message;
     if (!msg) throw new Error("模型返回为空");
 
+    // DeepSeek DSML：部分端点把工具调用写进正文；还原成调用执行，绝不落入"正文即收工"分支。
+    let toolCalls = msg.tool_calls ?? [];
+    let content = msg.content ?? "";
+    if (!toolCalls.length && content && hasDsmlMarkup(content)) {
+      const parsed = parseDsmlCalls(content);
+      if (parsed.length) {
+        toolCalls = parsed.map((c, i) => ({
+          id: `dsml-${i}-${Date.now()}`,
+          function: { name: c.name === "command" ? "shell" : c.name, arguments: JSON.stringify(c.args) },
+        }));
+        content = "";
+      }
+    }
+
     messages.push({
       role: "assistant",
-      content: msg.content ?? "",
-      tool_calls: msg.tool_calls,
+      content,
+      tool_calls: toolCalls,
     });
 
-    if (!msg.tool_calls?.length) {
-      if ((msg.content ?? "").includes("DONE")) {
+    if (!toolCalls.length) {
+      // P16 零目标拒绝处理链：解释性安全拒绝永不写 Fact、永不作终态；上下文重问 → 单步重问 → 换备用模型。
+      if (isModelRefusalText(content)) {
+        refusalStreak += 1;
+        ctx.history.recordEvent(manifest.taskId, "tool_gate", {
+          tool: "model_refusal",
+          ok: false,
+          reason: `model explanatory refusal #${refusalStreak}`,
+          snippet: content.slice(0, 240),
+        });
+        if (refusalStreak >= 2 && candidateIdx + 1 < candidates.length) {
+          candidateIdx += 1;
+          const next = activeCandidate();
+          appendProgress(
+            manifest.workspaceDir,
+            `P16 拒绝纠偏切换模型 → ${next.provider}/${next.modelId}`,
+          );
+        }
+        messages.push({
+          role: "user",
+          content: buildWorkerRefusalPrompt(refusalStreak, manifest.auth.targets),
+        });
+        flushUsage(manifest, ctx, state);
+        continue;
+      }
+      refusalStreak = 0;
+
+      if (content.includes("DONE")) {
         if (ctx.history.allGoalsPass(manifest.taskId)) break;
         messages.push({
           role: "user",
@@ -2669,10 +3089,11 @@ async function runOpenAiToolLoop(
       flushUsage(manifest, ctx, state);
       continue;
     }
+    refusalStreak = 0;
 
     const toolNames: string[] = [];
     const shellCalls: ShellTraceCall[] = [];
-    for (const call of msg.tool_calls) {
+    for (const call of toolCalls) {
       const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
       let result = "";
       let shellResult: string | undefined;
@@ -2866,6 +3287,13 @@ async function runOpenAiToolLoop(
               layer: "summary",
               title: "安装工具",
               summary: args.name ?? "",
+            });
+            break;
+          case "tsecbench":
+            result = await tsecbenchTool(ctx, {
+              action: args.action ?? "list",
+              ...(args.code ? { code: args.code } : {}),
+              ...(args.flag ? { flag: args.flag } : {}),
             });
             break;
           case "assert_goal":

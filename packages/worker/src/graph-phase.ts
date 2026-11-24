@@ -126,9 +126,14 @@ export function syncGraphPhase(
   history: HistoryStore,
   taskId: string,
   phase: WorkerPhase,
+  opts?: { leader?: boolean; workerCount?: number },
 ): WorkerPhase {
   const p = asGraphPhase(phase);
   if (p === "relay" || p === "report" || p === "done") return p;
+
+  if (opts?.leader === false) {
+    return "explore";
+  }
 
   const open = history.openIntents(taskId);
   const hasActive = open.some((i) =>
@@ -137,6 +142,10 @@ export function syncGraphPhase(
 
   if (hasActive && p === "reason") return "explore";
   if (hasActive && p === "bootstrap") return "explore";
+  // Multi-worker leader delegates Explore: once all open Intents conclude, wake directly into Reason.
+  if (!hasActive && p === "explore" && opts?.leader === true && (opts.workerCount ?? 1) > 1) {
+    return "reason";
+  }
   return p;
 }
 
@@ -754,7 +763,9 @@ export function handleGraphTool(
         ctx.state.lastSoftSurfaceMilestone = 0;
       }
       const open = ctx.history.openIntents(ctx.taskId);
-      ctx.state.phase = open.length > 0 ? "explore" : "reason";
+      // Followers never enter Reason or acquire the project-level Reason lease.
+      const canReason = ctx.leader !== false;
+      ctx.state.phase = open.length > 0 || !canReason ? "explore" : "reason";
       if (ctx.state.phase === "reason" && reasonLeaseMs > 0) {
         ctx.history.tryAcquireReasonLease(ctx.taskId, workerId, reasonLeaseMs);
       }

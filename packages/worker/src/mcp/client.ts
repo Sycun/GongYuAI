@@ -200,7 +200,11 @@ export async function openMcpHub(
         return active;
       }, { serverId, toolName });
       if (pool.get(serverId)?.transport !== "builtin") {
-        await reviewBeforeDispatch(manifest, commandProposal("mcp", serverId + "/" + toolName, args));
+        const declaredTarget = typeof args.target === "string" ? args.target.trim() : "";
+        await reviewBeforeDispatch(manifest, {
+          ...commandProposal("mcp", serverId + "/" + toolName, args),
+          ...(declaredTarget ? { hosts: [declaredTarget] } : {}),
+        });
       }
       const result = await session.callTool(toolName, args);
       success = result.ok;

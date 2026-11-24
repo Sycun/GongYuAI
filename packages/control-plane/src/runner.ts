@@ -134,6 +134,10 @@ const PAUSE_DRAIN_MS = 15_000;
 export class WorkerRunner {
   /** taskId → slot → child */
   private readonly children = new Map<string, Map<number, ChildProcess>>();
+  /** taskId → slot → containerId */
+  private readonly dockerSlots = new Map<string, Map<number, string>>();
+  /** taskId → high-water worker pool size for current run (scale-up only) */
+  private readonly maxPoolSize = new Map<string, number>();
   /** taskId → last reconcile timestamp (throttle; in-memory only) */
   private readonly lastScaleCheck = new Map<string, number>();
   /** Set by boot shutdown: detached workers may outlive this control plane. */
@@ -227,7 +231,7 @@ export class WorkerRunner {
         // 1) 先判断「能否执行」：按任务授权裁决真实命令，越界直接拦截，不调模型、不等待。
         //    有 command 的提案用 task.auth 判定（与 worker 同一个闸），没有命令的旧提案仍按探针白名单。
         if (!executorBound(pending.action, task.auth)) {
-          const reason = pending.action.tool === "shell" && pending.action.command
+          const reason = (pending.action.tool === "shell" || pending.action.tool === "cli") && pending.action.command
             ? outOfScopeFor(task.auth, pending.action.command)
             : outOfScopeReason;
           ledger.settle(pending, policyReceipt(this.settings, pending, reason));
@@ -268,6 +272,13 @@ export class WorkerRunner {
                   } else {
                     target.settle(pending, { ...receipt, decision: "block" });
                   }
+                  return;
+                }
+                // 审批模型抖动/超时不应杀死授权内的长程运行：边界已确认（坐标+能力）
+                // 且非破坏时放行；破坏性/越界仍由 worker 侧与 executorBound 拦截。
+                if (receipt.decision === "unavailable" && executorBound(pending.action, task.auth)) {
+                  target.settle(pending, { ...receipt, decision: "allow",
+                    reason: "审批模型不可用，但命令在授权坐标内，放行以保障长程运行。" });
                   return;
                 }
                 target.settle(pending, receipt);
@@ -393,6 +404,7 @@ export class WorkerRunner {
     const ledger = new CommandLedger(lease.task.dataDir);
     try { ledger.activate(taskId, lease.task.fence); } finally { ledger.close(); }
     const workerCount = taskWorkerCount(lease.task, countScalableAssets(lease.task));
+    this.maxPoolSize.set(taskId, workerCount);
     for (let slot = 0; slot < workerCount; slot++) {
       writeManifestForSlot(lease.task, this.settings, slot, workerCount);
     }
@@ -613,48 +625,120 @@ export class WorkerRunner {
     const task = this.store.get(taskId);
     if (!task || !isActiveTaskStatus(task.status)) return;
 
-    let current: number;
-    if (this.cfg.mode === "docker" && !this.imageForRun.has(taskId)) return;
+    const assetCount = countScalableAssets(task);
+    const computed = taskWorkerCount(task, assetCount);
+
     if (this.cfg.mode === "local") {
       const slots = this.children.get(taskId);
       // Without a live child map (e.g. control-plane restarted) slot identity is
       // unknown; skip rather than risk duplicating a surviving slot.
       if (!slots || slots.size === 0) return;
-      current = slots.size;
-    } else {
-      current = task.containerIds?.length ?? 0;
-      if (current === 0) return;
-    }
+      const highestSlot = Math.max(...slots.keys()) + 1;
+      const prevPool = Math.max(this.maxPoolSize.get(taskId) ?? 0, highestSlot);
+      const targetPool = Math.max(prevPool, computed);
+      const missingSlots: number[] = [];
+      for (let slot = 0; slot < targetPool; slot++) {
+        const child = slots.get(slot);
+        const slotAlive = Boolean(
+          child &&
+          child.exitCode == null &&
+          child.signalCode == null &&
+          !child.killed,
+        );
+        if (!slotAlive) {
+          slots.delete(slot);
+          missingSlots.push(slot);
+        }
+      }
+      if (missingSlots.length === 0) return;
 
-    const assetCount = countScalableAssets(task);
-    const desired = taskWorkerCount(task, assetCount);
-    if (desired <= current) return;
+      // Avoid respawning followers if leader already wrote a terminal status sidecar
+      // or all goals have already passed.
+      if (targetPool === prevPool) {
+        const paths = taskPaths(task.dataDir);
+        if (existsSync(paths.historyDb)) {
+          const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+          try {
+            if (history.allGoalsPass(task.id)) return;
+          } finally {
+            history.close();
+          }
+        }
+      }
 
-    for (let slot = 0; slot < desired; slot++) {
-      writeManifestForSlot(task, this.settings, slot, desired);
-    }
-
-    if (this.cfg.mode === "local") {
-      for (let slot = current; slot < desired; slot++) {
-        const child = this.spawnLocalSlot(task, slot, desired);
-        if (child.pid) task.workerPids = [...(task.workerPids ?? []), child.pid];
+      this.maxPoolSize.set(taskId, targetPool);
+      for (let slot = 0; slot < targetPool; slot++) {
+        writeManifestForSlot(task, this.settings, slot, targetPool);
+      }
+      for (const slot of missingSlots) {
+        const child = this.spawnLocalSlot(task, slot, targetPool);
+        if (child.pid && !(task.workerPids ?? []).includes(child.pid)) {
+          task.workerPids = [...(task.workerPids ?? []), child.pid];
+        }
       }
       task.workerPid = task.workerPids?.[0] ?? task.workerPid;
-    } else {
-      for (let slot = current; slot < desired; slot++) {
-        const containerId = this.spawnDockerSlot(task, slot, desired);
-        task.containerIds = [...(task.containerIds ?? []), containerId];
+      this.store.save(task);
+
+      if (targetPool > prevPool) {
+        const paths = taskPaths(task.dataDir);
+        const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+        try {
+          history.recordExploreScaled(task.id, { from: prevPool, to: targetPool, assetCount });
+        } finally {
+          history.close();
+        }
       }
-      task.containerId = task.containerIds?.[0] ?? task.containerId;
+      return;
     }
+
+    if (!this.imageForRun.has(taskId)) return;
+    const dSlots = this.dockerSlots.get(taskId);
+    const current = dSlots ? Math.max(...dSlots.keys(), -1) + 1 : (task.containerIds?.length ?? 0);
+    if (current === 0) return;
+    const prevPool = Math.max(this.maxPoolSize.get(taskId) ?? 0, current);
+    const targetPool = Math.max(prevPool, computed);
+    const missingSlots: number[] = [];
+    for (let slot = 0; slot < targetPool; slot++) {
+      const cid = dSlots?.get(slot);
+      if (!cid) {
+        missingSlots.push(slot);
+        continue;
+      }
+      const r = spawnSync("docker", ["inspect", "-f", "{{.State.Running}}", cid], { encoding: "utf8" });
+      if (r.status !== 0 || String(r.stdout).trim() !== "true") {
+        dSlots?.delete(slot);
+        missingSlots.push(slot);
+      }
+    }
+    if (missingSlots.length === 0) return;
+
+    this.maxPoolSize.set(taskId, targetPool);
+    for (let slot = 0; slot < targetPool; slot++) {
+      writeManifestForSlot(task, this.settings, slot, targetPool);
+    }
+    let slotMap = this.dockerSlots.get(taskId);
+    if (!slotMap) {
+      slotMap = new Map();
+      this.dockerSlots.set(taskId, slotMap);
+    }
+    for (const slot of missingSlots) {
+      const containerId = this.spawnDockerSlot(task, slot, targetPool);
+      slotMap.set(slot, containerId);
+    }
+    task.containerIds = Array.from(slotMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([, id]) => id);
+    task.containerId = task.containerIds[0] ?? task.containerId;
     this.store.save(task);
 
-    const paths = taskPaths(task.dataDir);
-    const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
-    try {
-      history.recordExploreScaled(task.id, { from: current, to: desired, assetCount });
-    } finally {
-      history.close();
+    if (targetPool > prevPool) {
+      const paths = taskPaths(task.dataDir);
+      const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+      try {
+        history.recordExploreScaled(task.id, { from: prevPool, to: targetPool, assetCount });
+      } finally {
+        history.close();
+      }
     }
   }
 
@@ -704,9 +788,12 @@ export class WorkerRunner {
 
   private startDocker(task: TaskRecord, workerCount: number): TaskRecord {
     const containerIds: string[] = [];
+    const slotMap = new Map<number, string>();
     for (let slot = 0; slot < workerCount; slot++) {
       try {
-        containerIds.push(this.spawnDockerSlot(task, slot, workerCount));
+        const cid = this.spawnDockerSlot(task, slot, workerCount);
+        containerIds.push(cid);
+        slotMap.set(slot, cid);
       } catch (err) {
         // Best-effort cleanup of already-started siblings.
         for (const id of containerIds) {
@@ -715,6 +802,7 @@ export class WorkerRunner {
         throw err;
       }
     }
+    this.dockerSlots.set(task.id, slotMap);
 
     task.status = task.status === "queued" ? "initializing" : "running";
     task.startedAt = task.startedAt ?? new Date().toISOString();
@@ -726,8 +814,9 @@ export class WorkerRunner {
     return task;
   }
 
-  private stopWorkers(task: TaskRecord): void {
+  private stopWorkers(task: TaskRecord, opts?: { preserveDetachedSessions?: boolean }): void {
     const taskId = task.id;
+    const preserveSessions = Boolean(opts?.preserveDetachedSessions);
     const locals = this.children.get(taskId);
     const localPids = new Set(Array.from(locals?.values() ?? [], (child) => child.pid));
     const pids = new Set(task.workerPids?.length
@@ -735,8 +824,9 @@ export class WorkerRunner {
       : task.workerPid ? [task.workerPid] : []);
     for (const pid of localPids) if (pid) pids.add(pid);
     for (const pid of pids) {
-      // A tracked detached child owns its own process group.
-      if (localPids.has(pid)) {
+      // On terminal stop, kill the process group so no stray tool subprocesses survive;
+      // on pause, signal the worker PID directly so detached PTY sessions survive (P11/P14-B4).
+      if (!preserveSessions && localPids.has(pid)) {
         try {
           process.kill(-pid, "SIGTERM");
           continue;
@@ -754,12 +844,21 @@ export class WorkerRunner {
     const containers =
       task.containerIds?.length ? task.containerIds : task.containerId ? [task.containerId] : [];
     for (const id of containers) {
+      if (preserveSessions) {
+        const paused = spawnSync("docker", ["stop", "-t", "5", id], { encoding: "utf8" });
+        if (paused.status !== 0 && !/no such container/i.test(paused.stderr ?? "")) {
+          spawnSync("docker", ["rm", "-f", id], { encoding: "utf8" });
+        }
+        continue;
+      }
       const result = spawnSync("docker", ["rm", "-f", id], { encoding: "utf8" });
       if (result.status !== 0 && !/no such container/i.test(result.stderr ?? "")) {
         throw new Error(`failed to stop worker container ${id}: ${result.error?.message ?? result.stderr}`);
       }
     }
     this.children.delete(taskId);
+    this.dockerSlots.delete(taskId);
+    this.maxPoolSize.delete(taskId);
     this.imageForRun.delete(taskId);
   }
 
@@ -822,7 +921,7 @@ export class WorkerRunner {
     task.error = null;
     this.store.save(task);
 
-    if (this.isAlive(task)) this.stopWorkers(task);
+    if (this.isAlive(task)) this.stopWorkers(task, { preserveDetachedSessions: true });
     const deadline = Date.now() + PAUSE_DRAIN_MS;
     while (this.isAlive(task) && Date.now() < deadline) {
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 200));

@@ -100,13 +100,27 @@ test("P14-B7 approval decision table: allow / ask / block", () => {
     decideApproval({ bounded: true, risk: "low", activity: "unknown", scope: "read-only" }).decision,
     "ask",
   );
-  // Real risk stays blocked (fail-closed).
+  // Authorized in-scope exploitation (path traversal / file read) must not be
+  // blocked by the judge misreading it as "unauthorized": bounded non-destructive allows.
   assert.equal(
     decideApproval({ bounded: true, risk: "high", activity: "external_action", scope: "read-only" }).decision,
-    "block",
+    "allow",
   );
   assert.equal(
     decideApproval({ bounded: true, risk: "medium", activity: "destructive", scope: "local-validation" }).decision,
     "block",
+  );
+  // Authorized in-scope active probing is the engagement's job: medium risk must not stall the run.
+  assert.equal(
+    decideApproval({ bounded: true, risk: "medium", activity: "external_action", scope: "read-only" }).decision,
+    "allow",
+  );
+  assert.equal(
+    decideApproval({ bounded: true, risk: "medium", activity: "read_only", scope: "read-only" }).decision,
+    "allow",
+  );
+  assert.equal(
+    decideApproval({ bounded: true, risk: "low", activity: "external_action", scope: "read-only" }).decision,
+    "allow",
   );
 });

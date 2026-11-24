@@ -44,9 +44,9 @@ export function capabilityAtLeast(have: AuthCapability | undefined, need: AuthCa
 const HOST_NETWORK_DENY =
   /\b(route\s+(add|delete|change|flush)|ip\s+route\s+(add|del|change|replace)|networksetup\s+-(?!get|list)\w|scutil\s+--nc\s+(?!list\b|status\b|probe\b)\w|pfctl\b|iptables\b|ip6tables\b|nft\s+|sysctl\s+.*\bnet\.|launchctl\s+(load|unload).*vpn|osascript[^\n]*Viscosity|viscosity\s+(connect|disconnect)|set\s+system\s+proxy|mitmproxy\s+--mode\s+local|proxychains|tsocks\b)/i;
 
-/** 不可回滚的本机破坏动作。 */
+/** 不可回滚的本机破坏动作。pkill/killall 可能误杀无关进程，属工程自保拒绝；后台作业用 shell_job kill。 */
 const DESTRUCTIVE_DENY =
-  /\b(rm\s+-rf?\s+\/(?!\/)|mkfs\.|dd\s+if=.*of=\/dev\/|diskutil\s+erase|shutdown\b|reboot\b|halt\b|chmod\s+-R\s+777\s+\/|:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:|\.\s+\/dev\/sd[a-z])/i;
+  /\b(rm\s+-rf?\s+\/(?!\/)|mkfs\.|dd\s+if=.*of=\/dev\/|diskutil\s+erase|shutdown\b|reboot\b|halt\b|pkill\b|killall\b|chmod\s+-R\s+777\s+\/|:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:|\.\s+\/dev\/sd[a-z])/i;
 
 const RECON_VERBS = new Set([
   "nmap", "masscan", "naabu", "httpx", "httprobe", "whatweb", "wafw00f", "whatweb",
