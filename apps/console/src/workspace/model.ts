@@ -469,7 +469,7 @@ export function nodeNavigation(node: GNode, taskId: string):
   }
   if (node.kind === "intent") {
     const id = typeof data.intentId === "string" ? data.intentId : node.id.replace(/^intent:/, "");
-    return { kind: "link", href: `#/goals/${enc}?intent=${encodeURIComponent(id)}`, label: "打开目标记录" };
+    return { kind: "link", href: `#/history/${enc}?intent=${encodeURIComponent(id)}`, label: "打开意图记录" };
   }
   if (node.kind === "job") {
     const id = typeof data.jobId === "string" ? data.jobId : node.id.replace(/^job:/, "");

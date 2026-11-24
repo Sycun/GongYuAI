@@ -52,6 +52,8 @@ function parseHash(): Location {
   const located = (route: Route, nextId: string | null = null): Location => ({ route, id: nextId, query });
   if (part === "settings" || part === "settings-tools") return located("settings-model");
   if (part === "dive") return located("live", id || null);
+  // Previously generated intent links pointed to the goals tab.
+  if (part === "goals" && id && query.intent) return located("history", id);
   if (part === "graphs" || part === "demo" || part === "knowledge") return located(part, id || null);
   if (part === "tasks" || part === "overview" || part === "chat" || isDetail(part)) {
     return located(part, id || null);
@@ -401,7 +403,7 @@ export function App() {
           {isSettingsRoute(route) && <SettingsPage section={settingsSectionOf(route)} catalog={catalog} onCatalog={setCatalog} profileId={id} />}
           {isDetail(route) && <TaskDetailPage key={detailId} task={tasks.find(t => t.id === detailId) ?? null}
             tab={route} focus={page.query} refreshNonce={detailNonce}
-            onTabChange={next => navigate(next, detailId ?? null, page.query)} onRefresh={() => { setDetailNonce(value => value + 1); return refreshAfterTaskAction(); }} />}
+            onTabChange={next => navigate(next, detailId ?? null)} onRefresh={() => { setDetailNonce(value => value + 1); return refreshAfterTaskAction(); }} />}
         </Suspense></div>
       </>}
     </main>

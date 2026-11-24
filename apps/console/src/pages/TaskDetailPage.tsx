@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import {
   Button,
   Card,
@@ -59,6 +59,27 @@ import { P15Panel } from "../components/P15Panel";
 import { formatDateTime } from "../time";
 
 const FactIntentDag = lazy(() => import("../components/dag/FactIntentDag"));
+
+class DagErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+
+    return (
+      <Card title="事实与意图">
+        <Space>
+          <Typography.Text role="alert">关系图加载失败</Typography.Text>
+          <Button size="small" onClick={() => window.location.reload()}>重新加载页面</Button>
+        </Space>
+      </Card>
+    );
+  }
+}
 
 type Props = {
   task: TaskRecord | null;
@@ -389,16 +410,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
     }
   }
 
-  const dagPanel = (
-    <Suspense fallback={<div className="gy-dag-empty" role="status">正在加载关系图…</div>}>
-      <FactIntentDag
-        facts={history?.facts ?? []}
-        intents={history?.intents ?? []}
-        height={tab === "goals" ? 380 : 420}
-        loading={loading}
-      />
-    </Suspense>
-  );
+  const historyFocus = focus?.intent || focus?.fact;
 
   return (
     <div>
@@ -412,7 +424,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
             {archived ? <Tag color="grey">已归档</Tag> : null}
           </Space>
           <Typography.Text type="tertiary" style={{ display: "block", marginTop: 6 }}>
-            编号 {shortId(task.id)} · 目标 {(task.auth.targets || []).join(", ") || "—"} · 授权版本 v
+            编号 {shortId(task.id)} · 授权范围 {(task.auth.targets || []).join(", ") || "—"} · 授权版本 v
             {runtime?.scopeVersion ?? task.scopeVersion ?? 1}
             {runtime?.externalState ? ` · 外部状态 ${runtime.externalState}` : ""}
             {runtime?.lastConfirmedAt ? ` · 最后确认 ${formatDateTime(runtime.lastConfirmedAt)}` : ""}
@@ -787,162 +799,83 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
         )}
 
         {tab === "goals" && (
-          <Row gutter={16}>
-            <Col span={24}>{dagPanel}</Col>
-            <Col xs={24} sm={14} style={{ marginTop: 16 }}>
-              <Card
-                title="目标契约"
-                style={{ background: "var(--semi-color-bg-1)" }}
-                bodyStyle={{ paddingTop: 8 }}
-              >
-                <List
-                  dataSource={goals}
-                  emptyContent="无目标"
-                  renderItem={(g) => {
-                    const adopted = adoptedByGoal.get(g.id) ?? null;
-                    const businessGoal = g.kind === "business-reconcile" || Boolean(g.business);
-                    return (
-                      <List.Item
-                        main={
-                          <div>
-                            <Space>
-                              <Typography.Text strong>{g.title}</Typography.Text>
-                              <Tag>{g.assessment ?? (g.passes ? "控制面记录已通过，待核对" : "未验证")}</Tag>
-                              {businessGoal ? (
-                                <Tag color="violet" size="small">
-                                  业务核算
-                                </Tag>
-                              ) : null}
-                            </Space>
-                            <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0" }}>
-                              {g.description}
-                            </Typography.Paragraph>
-                            <Typography.Text type="quaternary" size="small">
-                              证据：
-                              {(g.evidencePaths?.length
-                                ? g.evidencePaths
-                                : g.evidencePatterns
-                              ).join(", ") || "—"}
-                            </Typography.Text>
-                            {g.reconcileGate && (
-                              <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                                核算条件：{g.reconcileGate.pattern}
-                                （未知项≤{g.reconcileGate.maxUnknown}、重复主键歧义≤{g.reconcileGate.maxAmbiguous}；
-                                只挂差异文件不算完成比对）
-                                {!g.passes && rejectionByGoal.get(g.id)
-                                  ? ` · 未通过原因：${rejectionByGoal.get(g.id)}`
-                                  : ""}
-                              </Typography.Paragraph>
-                            )}
-                            {businessGoal && (
-                              <GoalReconcileCard
-                                taskId={task.id}
-                                goal={g}
-                                adopted={adopted}
-                                onChanged={reloadAfterGoalAction}
-                              />
-                            )}
-                            {g.passes && adopted && !businessGoal && (
-                              <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                                首次通过采用的核算文件：{adopted.path}
-                                {" · SHA-256 "}
-                                {adopted.sha256}
-                              </Typography.Paragraph>
-                            )}
-                            {history && <GoalCoverage
-                              key={task.id + "/" + g.id}
-                              taskId={task.id}
-                              goalId={g.id}
-                              record={history.coverage?.filter((row) => row.goalId === g.id).at(-1)}
-                              onSaved={(row) => setHistory((prev) => prev && ({
-                                ...prev, coverage: [...(prev.coverage ?? []).filter((r) => r.id !== row.id), row],
-                              }))}
-                            />}
-                          </div>
-                        }
-                      />
-                    );
-                  }}
-                />
-              </Card>
-            </Col>
-            <Col xs={24} sm={10} style={{ marginTop: 16 }}>
-              <Card
-                title={`图前沿 · 开放意图 (${
-                  (history?.intents ?? []).filter((i) =>
-                    ["proposed", "claimed", "running"].includes(i.status),
-                  ).length
-                })`}
-                style={{ background: "var(--semi-color-bg-1)" }}
-                headerExtraContent={
-                  <Typography.Text type="tertiary" size="small">
-                    相位 {runtime?.phase || "—"}
-                  </Typography.Text>
-                }
-              >
-                <List
-                  dataSource={(history?.intents ?? []).filter((i) =>
-                    ["proposed", "claimed", "running"].includes(i.status),
-                  )}
-                  emptyContent="无开放 Intent — Reason 可扇出"
-                  size="small"
-                  renderItem={(i) => (
-                    <List.Item
-                      main={
-                        <div>
-                          <Space>
-                            <StatusTag status={i.status} />
-                            <Typography.Text
-                              strong={
-                                Boolean(
-                                  runtime?.activeIntentId &&
-                                    i.id === runtime.activeIntentId,
-                                )
-                              }
-                            >
-                              {i.title}
-                            </Typography.Text>
-                          </Space>
-                          {i.sourceFactIds?.length ? (
-                            <Typography.Text type="quaternary" size="small">
-                              ← {i.sourceFactIds.map(shortId).join(", ")}
-                              {i.claimedBy ? ` · ${i.claimedBy}` : ""}
-                            </Typography.Text>
+          <Card
+            title="目标契约"
+            style={{ background: "var(--semi-color-bg-1)" }}
+            bodyStyle={{ paddingTop: 8 }}
+          >
+            <List
+              dataSource={goals}
+              emptyContent={loading ? "正在读取目标…" : "暂无目标"}
+              renderItem={(g) => {
+                const adopted = adoptedByGoal.get(g.id) ?? null;
+                const businessGoal = g.kind === "business-reconcile" || Boolean(g.business);
+                return (
+                  <List.Item
+                    main={
+                      <div>
+                        <Space wrap>
+                          <Typography.Text strong>{g.title}</Typography.Text>
+                          <Tag>{g.assessment ?? (g.passes ? "控制面记录已通过，待核对" : "未验证")}</Tag>
+                          {businessGoal ? (
+                            <Tag color="violet" size="small">
+                              业务核算
+                            </Tag>
                           ) : null}
-                        </div>
-                      }
-                    />
-                  )}
-                />
-              </Card>
-              <Card
-                title="图前沿 · 最近 Fact 标题"
-                style={{ background: "var(--semi-color-bg-1)", marginTop: 16 }}
-              >
-                <List
-                  dataSource={[...(history?.facts ?? [])]
-                    .filter((f) => f.layer === "title")
-                    .reverse()
-                    .slice(0, 12)}
-                  emptyContent="—"
-                  size="small"
-                  renderItem={(f) => (
-                    <List.Item
-                      main={
-                        <div>
-                          <Typography.Text>{f.title}</Typography.Text>
-                          <Typography.Text type="quaternary" size="small">
-                            {shortId(f.id)}
-                            {f.intentId ? ` ← ${shortId(f.intentId)}` : ""}
-                          </Typography.Text>
-                        </div>
-                      }
-                    />
-                  )}
-                />
-              </Card>
-            </Col>
-          </Row>
+                        </Space>
+                        <Typography.Paragraph type="tertiary" style={{ margin: "4px 0 0", maxWidth: "85ch", overflowWrap: "anywhere" }}>
+                          {g.description}
+                        </Typography.Paragraph>
+                        <Descriptions
+                          align="left"
+                          size="small"
+                          style={{ marginTop: 8, overflowWrap: "anywhere" }}
+                          data={[
+                            { key: "所需证据", value: g.evidencePatterns?.join("、") || "—" },
+                            { key: "已记录证据", value: g.evidencePaths?.join("、") || "暂无" },
+                          ]}
+                        />
+                        {g.reconcileGate && (
+                          <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                            核算条件：{g.reconcileGate.pattern}
+                            （未知项≤{g.reconcileGate.maxUnknown}、重复主键歧义≤{g.reconcileGate.maxAmbiguous}；
+                            只挂差异文件不算完成比对）
+                            {!g.passes && rejectionByGoal.get(g.id)
+                              ? ` · 未通过原因：${rejectionByGoal.get(g.id)}`
+                              : ""}
+                          </Typography.Paragraph>
+                        )}
+                        {businessGoal && (
+                          <GoalReconcileCard
+                            taskId={task.id}
+                            goal={g}
+                            adopted={adopted}
+                            onChanged={reloadAfterGoalAction}
+                          />
+                        )}
+                        {g.passes && adopted && !businessGoal && (
+                          <Typography.Paragraph type="secondary" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                            首次通过采用的核算文件：{adopted.path}
+                            {" · SHA-256 "}
+                            {adopted.sha256}
+                          </Typography.Paragraph>
+                        )}
+                        {history && <GoalCoverage
+                          key={task.id + "/" + g.id}
+                          taskId={task.id}
+                          goalId={g.id}
+                          record={history.coverage?.filter((row) => row.goalId === g.id).at(-1)}
+                          onSaved={(row) => setHistory((prev) => prev && ({
+                            ...prev, coverage: [...(prev.coverage ?? []).filter((r) => r.id !== row.id), row],
+                          }))}
+                        />}
+                      </div>
+                    }
+                  />
+                );
+              }}
+            />
+          </Card>
         )}
 
         {tab === "findings" && (
@@ -1117,40 +1050,53 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
 
         {tab === "history" && (
           <Row gutter={16}>
-            <Col span={24}>{dagPanel}</Col>
-            <Col xs={24} sm={12} style={{ marginTop: 16 }}>
-              <Card title="总览" style={{ background: "var(--semi-color-bg-1)" }}>
-                <pre className="gy-mono">{history?.overview || "—"}</pre>
-              </Card>
+            <Col span={24}>
+              <DagErrorBoundary>
+                <Suspense fallback={<div className="gy-dag-empty" role="status">正在加载关系图…</div>}>
+                  <FactIntentDag
+                    key={historyFocus}
+                    facts={history?.facts ?? []}
+                    intents={history?.intents ?? []}
+                    height={420}
+                    loading={loading}
+                    focusId={historyFocus}
+                  />
+                </Suspense>
+              </DagErrorBoundary>
             </Col>
             <Col xs={24} sm={12} style={{ marginTop: 16 }}>
-              <Card title="意图" style={{ background: "var(--semi-color-bg-1)" }}>
+              <Card title="近期意图" style={{ background: "var(--semi-color-bg-1)" }}>
                 <List
-                  dataSource={
-                    runtime?.recentIntents?.length
-                      ? runtime.recentIntents
-                      : [...(history?.intents ?? [])].reverse().slice(0, 20)
-                  }
-                  emptyContent="—"
+                  dataSource={(history?.intents ?? []).slice(-20).reverse()}
+                  emptyContent={loading ? "正在读取意图…" : "暂无意图记录"}
                   size="small"
-                  renderItem={(i) => (
+                  renderItem={(intent) => (
                     <List.Item
                       main={
-                        <Space>
-                          <StatusTag status={i.status} />
-                          <span>{i.title}</span>
-                        </Space>
+                        <div>
+                          <Space wrap>
+                            <StatusTag status={intent.status} />
+                            <Typography.Text strong={intent.id === runtime?.activeIntentId}>
+                              {intent.title}
+                            </Typography.Text>
+                          </Space>
+                          {intent.sourceFactIds?.length ? (
+                            <Typography.Paragraph type="tertiary" size="small" style={{ margin: "4px 0 0" }}>
+                              来源事实 {intent.sourceFactIds.map(shortId).join("、")}
+                            </Typography.Paragraph>
+                          ) : null}
+                        </div>
                       }
                     />
                   )}
                 />
               </Card>
             </Col>
-            <Col span={24} style={{ marginTop: 16 }}>
-              <Card title="事实" style={{ background: "var(--semi-color-bg-1)" }}>
+            <Col xs={24} sm={12} style={{ marginTop: 16 }}>
+              <Card title="近期事实" style={{ background: "var(--semi-color-bg-1)" }}>
                 <List
-                  dataSource={[...(history?.facts ?? [])].reverse().slice(0, 40)}
-                  emptyContent="—"
+                  dataSource={(history?.facts ?? []).slice(-40).reverse()}
+                  emptyContent={loading ? "正在读取事实…" : "暂无事实记录"}
                   size="small"
                   renderItem={(f) => (
                     <List.Item
@@ -1173,6 +1119,16 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
                 />
               </Card>
             </Col>
+            {history?.overview && (
+              <Col span={24} style={{ marginTop: 16 }}>
+                <Card>
+                  <details>
+                    <summary>完整历史摘要</summary>
+                    <pre className="gy-mono" style={{ marginTop: 12 }}>{history.overview}</pre>
+                  </details>
+                </Card>
+              </Col>
+            )}
           </Row>
         )}
 

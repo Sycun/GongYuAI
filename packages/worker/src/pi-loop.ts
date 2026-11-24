@@ -1,7 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  DEFAULT_EXPLORE_TIMEOUT_MS,
   hasDsmlMarkup,
   isBudgetHit,
   isExploreLeader,
@@ -51,7 +50,7 @@ import {
   phaseDirective,
   syncGraphPhase,
 } from "./graph-phase.js";
-import { maybeForceExploreTimeout } from "./explore-timeout.js";
+import { maybeForceEvidenceStall } from "./evidence-rotation.js";
 import { formatShellResult, recordExecutionStep } from "./execution-trace.js";
 import { c2Tool, shellJob, shellSession } from "./exec-tools.js";
 import { isUntrustedTool, markUntrusted } from "./untrusted.js";
@@ -1959,19 +1958,14 @@ function runExploreTimeoutGate(
   state: CheckpointState,
   ckpt: CheckpointStore,
 ): string | null {
-  const timeoutMs =
-    manifest.execution?.exploreTimeoutMs ?? DEFAULT_EXPLORE_TIMEOUT_MS;
-  const result = maybeForceExploreTimeout({
+  const result = maybeForceEvidenceStall({
     history,
     taskId: manifest.taskId,
     workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
     workspaceDir: manifest.workspaceDir,
     state,
-    exploreTimeoutMs: timeoutMs,
     leader: isExploreLeader(manifest),
     save: () => ckpt.save(state),
-    toolCalls: state.toolCalls,
-    hardToolLimit: 20,
   });
   return result.message;
 }

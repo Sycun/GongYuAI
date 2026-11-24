@@ -9,6 +9,7 @@ import {
   jobOutcomeLabel,
   lateResultLabel,
   memoryDisplay,
+  nodeNavigation,
   projectAssetGraph,
   providerDisposition,
   railRequests,
@@ -109,6 +110,13 @@ test("rail requests never include the independent surface graph or memory", () =
   ]);
   assert.equal(paths.some((path) => path.includes("/graphs/surface") || path.endsWith("/memory")), false);
   assert.equal(surfacePath("task-1"), "/tasks/task-1/coverage-matrix");
+});
+
+test("intent links open the corresponding record in task history", () => {
+  const node = { id: "intent:review A", kind: "intent", label: "核对材料", badge: null, data: {} };
+  assert.deepEqual(nodeNavigation(node, "task-1"), {
+    kind: "link", href: "#/history/task-1?intent=review%20A", label: "打开意图记录",
+  });
 });
 
 test("surface thumbnail and table share the matrix cells, including a retraction", () => {

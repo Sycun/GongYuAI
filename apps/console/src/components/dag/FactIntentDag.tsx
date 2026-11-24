@@ -10,7 +10,7 @@ import "@xyflow/react/dist/style.css";
 import { STATUS_LABEL } from "../../labels";
 import { buildDagLayout, CARD_SIZE, collectDag, type DagFact, type DagIntent, type DagRecord } from "./buildDagLayout";
 
-type Props = { facts: DagFact[]; intents: DagIntent[]; height: number; loading?: boolean };
+type Props = { facts: DagFact[]; intents: DagIntent[]; height: number; loading?: boolean; focusId?: string };
 type RecordNode = Node<DagRecord, "record">;
 type RoutedEdge = Edge<{ path: string }, "routed">;
 const KIND = { origin: "起点", fact: "事实", intent: "意图" };
@@ -56,12 +56,12 @@ function ZoomControls() {
   );
 }
 
-export default function FactIntentDag({ facts, intents, height, loading }: Props) {
+export default function FactIntentDag({ facts, intents, height, loading, focusId }: Props) {
   const section = useRef<HTMLElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const flowId = useId().replace(/:/g, "");
   const [vertical, setVertical] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(focusId ?? null);
   const { records, topologyKey } = useMemo(() => collectDag(facts, intents), [facts, intents]);
   const geometry = useMemo(() => buildDagLayout(topologyKey, vertical), [topologyKey, vertical]);
   const selected = selectedId ? records.get(selectedId) : undefined;
@@ -107,6 +107,15 @@ export default function FactIntentDag({ facts, intents, height, loading }: Props
   };
 
   const openCanvas = (flow: ReactFlowInstance<RecordNode, RoutedEdge>) => {
+    const focused = focusId && nodes.find((node) => node.id === focusId);
+    if (focused) {
+      void flow.setCenter(
+        focused.position.x + CARD_SIZE.width / 2,
+        focused.position.y + CARD_SIZE.height / 2,
+        { zoom: 1 },
+      );
+      return;
+    }
     const { clientWidth: width, clientHeight: height } = viewport.current!;
     const bounds = flow.getNodesBounds(nodes);
     const overview = getViewportForBounds(bounds, width, height, MIN_ZOOM, 1, FIT.padding);

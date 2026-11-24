@@ -7,6 +7,7 @@ out/
 .env
 .env.*
 packages/control-plane/web/assets/
+packages/control-plane/web/index.html
 packages/*/dist/
 apps/console/dist/
 *.sqlite

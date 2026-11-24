@@ -44,10 +44,10 @@ export function P15Panel({ taskId }: { taskId: string }) {
   }, [taskId]);
 
   if (error) {
-    return <Card title="P15 观察与复核">读取失败：{error}</Card>;
+    return <Card title="观察与复核">读取失败：{error}</Card>;
   }
   if (!audit) {
-    return <Card title="P15 观察与复核">正在读取…</Card>;
+    return <Card title="观察与复核">正在读取…</Card>;
   }
 
   const { scorecard } = audit;

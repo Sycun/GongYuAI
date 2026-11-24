@@ -560,7 +560,7 @@ function TunnelsSection({ rows }: { rows: TunnelMeta[] }) {
 function P14Sections({ payload }: { payload: TaskP14Payload }) {
   return (
     <Card
-      title="P14 能力投影"
+      title="执行记录"
       style={{ background: "var(--semi-color-bg-1)" }}
       headerExtraContent={
         <Typography.Text type="tertiary" size="small">
@@ -740,7 +740,7 @@ export function P14Panel({ taskId }: { taskId: string }) {
             {error ? (
               <Card style={{ background: "var(--semi-color-bg-1)", marginBottom: 12 }}>
                 <Typography.Paragraph type="danger" style={{ margin: "0 0 8px" }}>
-                  P14 投影读取失败：{error}
+                  执行记录读取失败：{error}
                 </Typography.Paragraph>
                 <Button loading={loading} onClick={() => setAttempt((value) => value + 1)}>
                   重试
@@ -754,14 +754,14 @@ export function P14Panel({ taskId }: { taskId: string }) {
             {error ? (
               <>
                 <Typography.Paragraph type="danger" style={{ margin: "0 0 8px" }}>
-                  P14 投影读取失败：{error}
+                  执行记录读取失败：{error}
                 </Typography.Paragraph>
                 <Button loading={loading} onClick={() => setAttempt((value) => value + 1)}>
                   重试
                 </Button>
               </>
             ) : (
-              <Typography.Text type="tertiary">正在读取 P14 投影…</Typography.Text>
+              <Typography.Text type="tertiary">正在读取执行记录…</Typography.Text>
             )}
           </Card>
         )}
