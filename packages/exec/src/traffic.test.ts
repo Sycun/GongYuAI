@@ -523,3 +523,34 @@ test("GY_TRAFFIC_MODE defaults to finding-window and lag defaults are 200/500/20
     if (prev.vac !== undefined) process.env.GY_TRAFFIC_VACUUM_PAGES = prev.vac;
   }
 });
+
+test("upstream abort mid-body does not crash the proxy (unhandled stream 'error' regression)", async () => {
+  for (const mode of ["finding-window", "all"] as const) {
+    const taskDir = tempTask();
+    const aborting = createHttpServer((req, res) => {
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": "100000" });
+      res.write("partial");
+      setTimeout(() => res.socket?.destroy(), 5);
+    });
+    const abortPort = await listen(aborting);
+    const healthy = createHttpServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+    });
+    const healthyPort = await listen(healthy);
+    const proxy = await startTrafficProxy({ taskId: TASK, taskDir, mode });
+    try {
+      // Aborted upstream destroys the forward PassThrough with an error; without a
+      // listener that 'error' is unhandled and kills the process. Must survive.
+      await proxyRequest(proxy.port, `http://127.0.0.1:${abortPort}/abort`, undefined, "GET").catch(() => {});
+      const ok = await proxyRequest(proxy.port, `http://127.0.0.1:${healthyPort}/ok`, undefined, "GET");
+      assert.equal(ok.status, 200);
+      assert.equal(ok.body.toString("utf8"), "ok");
+    } finally {
+      await proxy.close();
+      aborting.close();
+      healthy.close();
+      rmSync(taskDir, { recursive: true, force: true });
+    }
+  }
+});

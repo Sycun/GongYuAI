@@ -98,6 +98,8 @@ type Spool = {
 
 function spool(source: Readable, taskDir: string, type: string | undefined, maxPreviewBytes: number): Spool {
   const forward = new PassThrough();
+  // Source abort destroys forward with an error; no listener would crash the worker (done already rejects → 502).
+  forward.on("error", () => {});
   const tmpDir = join(taskDir, "traffic", "_tmp");
   mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
   const tmp = join(tmpDir, randomUUID());
@@ -160,6 +162,7 @@ type Capture = {
  */
 function capture(source: Readable, cap: number, type: string | undefined): Capture {
   const forward = new PassThrough();
+  forward.on("error", () => {});
   const hash = createHash("sha256");
   const parts: Buffer[] = [];
   let kept = 0;
@@ -394,6 +397,7 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
       || isNoiseExchange(write, noteNoise404(opts.taskDir, write), retention);
     res.writeHead(upstreamRes.statusCode ?? 502, outHeaders);
     if (skip) {
+      upstreamRes.on("error", () => {});
       upstreamRes.pipe(res);
       return;
     }
