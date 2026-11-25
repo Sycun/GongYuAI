@@ -2,6 +2,9 @@ import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:chil
 import { accessSync, constants } from "node:fs";
 import { commandProposal, reviewBeforeDispatch } from "../command-guard.js";
 import {
+  cidrContains,
+  cidrContainsCidr,
+  cidrOverlaps,
   isIpv4Cidr,
   targetAllows,
   type ToolCatalogEntry,
@@ -359,11 +362,26 @@ export async function openMcpHub(
         }
         const builtin = pool.get(serverId)?.transport === "builtin";
         if (builtin || typeof args.target === "string") {
-          const target = typeof args.target === "string" ? args.target.trim() : "";
+          const rawTarget = typeof args.target === "string" ? args.target.trim() : "";
+          if (!rawTarget) {
+            throw new Error("invalid args: MCP call requires a non-empty string 'target' parameter");
+          }
           const { targets, outOfScope } = manifest.auth;
-          const allowed = isIpv4Cidr(target)
-            ? targets.includes(target) && !outOfScope?.length && targetAllows(targets, target)
-            : target && !/\s|\*/.test(target) && targetAllows(targets, target, outOfScope);
+          const parts = rawTarget.split(",").map((p) => p.trim()).filter(Boolean);
+          const allowed = parts.length > 0 && parts.every((part) => {
+            if (/\s|\*/.test(part)) return false;
+            if (isIpv4Cidr(part)) {
+              const blockedByOos = (outOfScope ?? []).some((o) =>
+                isIpv4Cidr(o) ? cidrOverlaps(o, part) : cidrContains(part, o),
+              );
+              if (blockedByOos) return false;
+              return targets.some((t) => {
+                const trimmed = t.trim();
+                return trimmed === "*" || (isIpv4Cidr(trimmed) && cidrContainsCidr(trimmed, part));
+              });
+            }
+            return targetAllows(targets, part, outOfScope);
+          });
           if (!allowed) throw new Error("denied: MCP target is outside the authorized scope");
         }
         chargeToolCall(ctx);

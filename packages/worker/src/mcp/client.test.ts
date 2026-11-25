@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -138,4 +138,92 @@ test("a stdio MCP that never answers is killed and later calls fail fast", async
   assert.equal(again.ok, false);
   assert.equal(again.code, "timeout");
   assert.ok(Date.now() - started < 200);
+});
+
+test("builtin MCP allows authorized CIDR subnets, comma-separated targets, array flags, and wordlist; rejects OOS overlap or missing target", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-mcp-scope-"));
+  const builtinDir = join(root, "mcp-echo");
+  mkdirSync(builtinDir, { recursive: true });
+  mkdirSync(join(root, "workspace"), { recursive: true });
+  mkdirSync(join(root, "evidence"), { recursive: true });
+  writeFileSync(
+    join(builtinDir, "mcp.json"),
+    JSON.stringify({
+      id: "echoer",
+      name: "Echoer",
+      binary: "/bin/echo",
+      toolName: "run",
+      targetFlag: "-u",
+    }),
+  );
+  const history = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir: join(root, "evidence") });
+  const m = manifest(root);
+  m.auth = {
+    authorizationNote: "lab subnet auth",
+    targets: ["10.0.0.0/8"],
+    outOfScope: ["10.0.200.0/24"],
+    capability: "full",
+  };
+  m.mcpServers = [{
+    id: "echoer",
+    name: "Echoer",
+    transport: "builtin",
+    binary: "/bin/echo",
+    rootDir: builtinDir,
+    args: [],
+    env: {},
+  }];
+  m.mcpPool = [...m.mcpServers];
+  const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+  const hub = await openMcpHub(m, ctx);
+  t.after(async () => {
+    await hub.close();
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  // 1) Subnet CIDR inside authorized supernet + array flags + top-level wordlist
+  const subnetRes = JSON.parse(
+    await hub.invoke("echoer", "run", {
+      target: "10.0.186.0/24",
+      flags: ["-sV", "-T4"],
+      wordlist: "/tmp/common.txt",
+    }),
+  ) as { exitCode: number; stdout: string };
+  assert.equal(subnetRes.exitCode, 0);
+  assert.equal(subnetRes.stdout.trim(), "-sV -T4 -u 10.0.186.0/24 -w /tmp/common.txt");
+
+  // 2) Comma-separated targets all within scope
+  const multiRes = JSON.parse(
+    await hub.invoke("echoer", "run", {
+      target: "10.0.186.0:80,10.0.186.1:3000",
+      flags: "-json",
+    }),
+  ) as { exitCode: number; stdout: string };
+  assert.equal(multiRes.exitCode, 0);
+  assert.equal(multiRes.stdout.trim(), "-json -u 10.0.186.0:80,10.0.186.1:3000");
+
+  // 3) CIDR overlapping outOfScope is denied
+  await assert.rejects(
+    hub.invoke("echoer", "run", { target: "10.0.200.0/25" }),
+    /outside the authorized scope/,
+  );
+
+  // 4) Supernet broader than authorized CIDR is denied
+  await assert.rejects(
+    hub.invoke("echoer", "run", { target: "10.0.0.0/4" }),
+    /outside the authorized scope/,
+  );
+
+  // 5) Comma-separated targets with any OOS entry are denied
+  await assert.rejects(
+    hub.invoke("echoer", "run", { target: "10.0.186.0:80,192.168.1.1:80" }),
+    /outside the authorized scope/,
+  );
+
+  // 6) Missing target gives a clear invalid args error
+  await assert.rejects(
+    hub.invoke("echoer", "run", { targets: "10.0.186.0:80" }),
+    /requires a non-empty string 'target'/,
+  );
 });

@@ -184,11 +184,32 @@ export type BinaryProbeResult =
   | { found: false };
 
 /**
+ * Binaries where a Kali-packaged alias must be preferred over the bare name
+ * because the bare name collides with an unrelated system CLI (e.g. Debian/Kali
+ * `/usr/bin/httpx` is Python's `httpx` CLI while ProjectDiscovery's scanner is
+ * `/usr/bin/httpx-toolkit`).
+ */
+export const PREFERRED_BINARY_ALIASES: Record<string, string[]> = {
+  httpx: ["httpx-toolkit"],
+};
+
+/**
+ * Ordered candidate executable names for `name`: preferred aliases first, then
+ * `name`, then remaining Kali-integrated aliases.
+ */
+export function binarySearchCandidates(name: string): string[] {
+  const lower = name.toLowerCase();
+  const preferred = PREFERRED_BINARY_ALIASES[lower] ?? [];
+  const fallback = (KALI_BINARY_ALIASES[lower] ?? []).filter((a) => !preferred.includes(a));
+  return [...preferred, name, ...fallback];
+}
+
+/**
  * Probe PATH and standard Kali/Go/pipx/Homebrew directories for `name` or its
  * Kali-integrated alias. Adds the discovered directory to PATH when needed.
  */
 export function findInstalledBinary(name: string): BinaryProbeResult {
-  const candidates = [name, ...(KALI_BINARY_ALIASES[name.toLowerCase()] ?? [])];
+  const candidates = binarySearchCandidates(name);
   for (const candidate of candidates) {
     const which = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(candidate)}`], {
       encoding: "utf8",

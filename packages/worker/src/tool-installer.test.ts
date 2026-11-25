@@ -8,6 +8,7 @@ import { openHistory } from "@gongyuai/history";
 import { openMcpHub } from "./mcp/client.js";
 import { openSkillHub } from "./skills/runtime.js";
 import {
+  binarySearchCandidates,
   builtinBinaryAvailable,
   invalidateBinaryHealth,
   resolveInstallPlan,
@@ -292,4 +293,10 @@ test("installSkill verifies official/high-star GitHub, hot-registers, and SkillH
   const rejected = await verifyGithubRepo("randomuser", "tiny-skill", lowStarFetch);
   assert.equal(rejected.ok, false);
   assert.match(rejected.reason, /500/);
+});
+
+test("binarySearchCandidates prefers httpx-toolkit before bare httpx to avoid Python httpx collision on Kali", () => {
+  assert.deepEqual(binarySearchCandidates("httpx"), ["httpx-toolkit", "httpx"]);
+  assert.deepEqual(binarySearchCandidates("nmap"), ["nmap"]);
+  assert.deepEqual(binarySearchCandidates("netexec"), ["netexec", "nxc", "crackmapexec"]);
 });

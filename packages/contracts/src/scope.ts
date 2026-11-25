@@ -158,19 +158,45 @@ function parseIpv4(host: string): number | null {
   return ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0;
 }
 
-/** True if IPv4 `host` is inside `cidr` (e.g. 10.0.0.0/8). */
-export function cidrContains(cidr: string, host: string): boolean {
+function parseIpv4Cidr(cidr: string): { net: number; bits: number; mask: number } | null {
   const [base, bitsRaw] = cidr.trim().split("/");
-  if (!base || bitsRaw == null) return false;
-  const ip = parseIpv4(normalizeHost(host));
+  if (!base || bitsRaw == null) return null;
   const net = parseIpv4(base);
   const bits = Number(bitsRaw);
-  if (ip == null || net == null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
-    return false;
+  if (net == null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
+    return null;
   }
-  if (bits === 0) return true;
-  const mask = bits === 32 ? 0xffffffff : (~((1 << (32 - bits)) - 1)) >>> 0;
-  return (ip & mask) === (net & mask);
+  const mask = bits === 0 ? 0 : bits === 32 ? 0xffffffff : (~((1 << (32 - bits)) - 1)) >>> 0;
+  return { net: (net & mask) >>> 0, bits, mask };
+}
+
+/** True if IPv4 `host` is inside `cidr` (e.g. 10.0.0.0/8). */
+export function cidrContains(cidr: string, host: string): boolean {
+  const parsed = parseIpv4Cidr(cidr);
+  const ip = parseIpv4(normalizeHost(host));
+  if (!parsed || ip == null) return false;
+  if (parsed.bits === 0) return true;
+  return ((ip & parsed.mask) >>> 0) === parsed.net;
+}
+
+/** True if IPv4 CIDR `innerCidr` is equal to or a subnet of `outerCidr`. */
+export function cidrContainsCidr(outerCidr: string, innerCidr: string): boolean {
+  const outer = parseIpv4Cidr(outerCidr);
+  const inner = parseIpv4Cidr(innerCidr);
+  if (!outer || !inner || inner.bits < outer.bits) return false;
+  if (outer.bits === 0) return true;
+  return ((inner.net & outer.mask) >>> 0) === outer.net;
+}
+
+/** True if two IPv4 CIDRs share at least one IP address. */
+export function cidrOverlaps(aCidr: string, bCidr: string): boolean {
+  const a = parseIpv4Cidr(aCidr);
+  const b = parseIpv4Cidr(bCidr);
+  if (!a || !b) return false;
+  const minBits = Math.min(a.bits, b.bits);
+  if (minBits === 0) return true;
+  const mask = minBits === 32 ? 0xffffffff : (~((1 << (32 - minBits)) - 1)) >>> 0;
+  return ((a.net & mask) >>> 0) === ((b.net & mask) >>> 0);
 }
 
 export type ScopeMatch =
@@ -179,11 +205,13 @@ export type ScopeMatch =
 
 /**
  * Formal auth.targets match: `*`, IPv4 CIDR, `*.domain`, exact host, subdomain suffix.
- * Candidate may be host, URL, or IPv4.
+ * Candidate may be host, URL, IPv4, or IPv4 CIDR.
  */
 export function matchTarget(targets: string[], candidate: string): ScopeMatch {
+  const trimmedCandidate = candidate.trim();
+  const candidateIsCidr = isIpv4Cidr(trimmedCandidate);
   const host = normalizeHost(candidate);
-  if (!host && !isIpv4Cidr(candidate.trim())) return { ok: false };
+  if (!host && !candidateIsCidr) return { ok: false };
 
   for (const raw of targets) {
     const t = raw.trim();
@@ -191,7 +219,9 @@ export function matchTarget(targets: string[], candidate: string): ScopeMatch {
     if (t === "*") return { ok: true, by: "*", via: "star" };
 
     if (isIpv4Cidr(t)) {
-      if (host && cidrContains(t, host)) return { ok: true, by: t, via: "cidr" };
+      if (candidateIsCidr ? cidrContainsCidr(t, trimmedCandidate) : Boolean(host && cidrContains(t, host))) {
+        return { ok: true, by: t, via: "cidr" };
+      }
       continue;
     }
 

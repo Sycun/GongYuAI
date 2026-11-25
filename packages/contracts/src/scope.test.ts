@@ -3,6 +3,8 @@ import { test } from "node:test";
 import {
   admitAddress,
   cidrContains,
+  cidrContainsCidr,
+  cidrOverlaps,
   matchTarget,
   normalizeHost,
   normalizeTargetPattern,
@@ -48,4 +50,16 @@ test("admitAddress auto-admits under CIDR", () => {
   const r = admitAddress({ targets: ["10.0.0.0/8"] }, "10.9.9.9");
   assert.equal(r.kind, "admitted");
   assert.equal(admitAddress({ targets: ["10.0.0.0/8"] }, "8.8.8.8").kind, "oos");
+});
+
+test("cidrContainsCidr and cidrOverlaps handle subnets, supernets, and overlaps", () => {
+  assert.equal(cidrContainsCidr("10.0.0.0/8", "10.0.186.0/24"), true);
+  assert.equal(cidrContainsCidr("10.0.0.0/8", "10.0.0.0/8"), true);
+  assert.equal(cidrContainsCidr("10.0.0.0/8", "10.0.0.0/4"), false);
+  assert.equal(cidrContainsCidr("10.0.186.0/24", "10.0.187.0/24"), false);
+  assert.equal(cidrOverlaps("10.0.0.0/8", "10.0.186.0/24"), true);
+  assert.equal(cidrOverlaps("10.0.186.0/24", "10.0.186.128/25"), true);
+  assert.equal(cidrOverlaps("10.0.186.0/24", "10.0.187.0/24"), false);
+  assert.equal(matchTarget(["10.0.0.0/8"], "10.0.186.0/24").ok, true);
+  assert.equal(matchTarget(["10.0.0.0/8"], "10.0.0.0/4").ok, false);
 });
