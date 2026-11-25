@@ -42,7 +42,6 @@ import {
   type MemoryNode,
   type ProviderFault,
   type TaskRecord,
-  redactSecretRef,
 } from "@gongyuai/contracts";
 import {
   listExecutionSteps,
@@ -659,10 +658,7 @@ export async function handleOpsRoute(
         return send(res, 200, {
           transactions: history.listHttpTransactions(taskId, 50),
           plan: history.listPlan(taskId),
-          credentials: history.listCredentials(taskId).map((credential) => ({
-            ...credential,
-            secretRef: redactSecretRef(credential.secretRef),
-          })),
+          credentials: history.listCredentials(taskId),
           retests: history.listFindingRetests(taskId),
           validations: history.listFindingValidations(taskId),
           oastTokens: history.listOastTokens(taskId),

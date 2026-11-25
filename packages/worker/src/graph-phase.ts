@@ -875,7 +875,7 @@ export function handleGraphTool(
         cvss: args.cvss?.trim() || null,
         dedupKey: args.dedupKey?.trim() || undefined,
         factIds: parseFactIds(args.factIds ?? ""),
-        intentId: ctx.state.activeIntentId,
+        intentId: ctx.state.activeIntentId ?? undefined,
         impact: args.impact ?? "",
         fix: args.fix ?? "",
       });
@@ -901,6 +901,7 @@ export function handleGraphTool(
           fix: args.fix,
           cvss: args.cvss?.trim() || undefined,
           verifiedBy: workerId,
+          intentId: ctx.state.activeIntentId ?? undefined,
         },
       );
       appendProgress(

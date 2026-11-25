@@ -352,7 +352,7 @@ export type TunnelMeta = {
   error?: string;
 };
 
-/** P14 只读投影：事务、计划、凭据（secretRef 已脱敏）、复测、带外回调与隧道。 */
+/** P14 只读投影：事务、计划、凭据、复测、带外回调与隧道。 */
 export type TaskP14Payload = {
   transactions: HttpTransaction[];
   plan: PlanStep[];
@@ -720,7 +720,7 @@ export const api = {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskIds, archived }),
     }),
   history: (id: string, signal?: AbortSignal) => request<HistoryPayload>(`/tasks/${encodeURIComponent(id)}/history`, { signal }),
-  /** P14 只读能力投影；凭据只返回脱敏后的 secretRef。 */
+  /** P14 只读能力投影；凭据返回完整 secretRef 以便复现。 */
   getTaskP14: (id: string, signal?: AbortSignal) =>
     request<TaskP14Payload>(`/tasks/${encodeURIComponent(id)}/p14`, { signal }),
   /** 跨任务历史接触（只读线索）；address 可为 host 或 URL。 */

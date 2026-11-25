@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Card, Empty, Input, Space, Table, Tabs, Tag, Typography } from "@douyinfe/semi-ui";
+import { Button, Card, Empty, Input, Space, Table, Tabs, Tag, Toast, Typography } from "@douyinfe/semi-ui";
 import type { Credential, HostProfile, OastHit, OastToken } from "@gongyuai/contracts";
 import { api, type AssetRecord, type AssetHistoryPayload, type TaskP14Payload, type TunnelMeta } from "../api";
 import { ASSET_KIND_LABEL, shortId, statusColor } from "../labels";
@@ -87,7 +87,7 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
         style={{ background: "var(--semi-color-bg-1)", marginTop: 16 }}
         headerExtraContent={
           error ? <Button size="small" onClick={() => setAttempt((v) => v + 1)}>重试</Button>
-            : <Typography.Text type="tertiary" size="small">只读 · 凭据仅脱敏指针</Typography.Text>
+            : <Typography.Text type="tertiary" size="small">只读</Typography.Text>
         }
       >
         {error && <Typography.Paragraph type="danger" style={{ margin: "0 0 8px" }}>战场对象读取失败：{error}</Typography.Paragraph>}
@@ -97,10 +97,10 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
               <HostProfileSection rows={hostProfiles} />
             </Tabs.TabPane>
             <Tabs.TabPane itemKey="credentials" tab={`已获凭据 ${credentials.length}`}>
-              <CredentialsSection rows={credentials} />
+              <CredentialsSection taskId={taskId} rows={credentials} />
             </Tabs.TabPane>
             <Tabs.TabPane itemKey="sessions" tab={`驻留会话 ${sessions.length}`}>
-              <SessionsSection rows={sessions} />
+              <SessionsSection taskId={taskId} rows={sessions} />
             </Tabs.TabPane>
             <Tabs.TabPane itemKey="tunnels" tab={`隧道 ${payload?.tunnels?.length ?? 0}`}>
               <TunnelsSection rows={payload?.tunnels ?? []} />
@@ -156,11 +156,111 @@ function ProfileList({ label, items }: { label: string; items: string[] }) {
   );
 }
 
-function CredentialsSection({ rows }: { rows: Credential[] }) {
+async function readSecretRefEvidence(taskId: string, secretRef: string): Promise<{ path: string; body: string }> {
+  const trimmed = secretRef.trim();
+  const candidates = trimmed.startsWith("evidence/")
+    ? [trimmed.slice("evidence/".length), trimmed]
+    : [trimmed];
+  let lastError: unknown;
+  for (const path of candidates) {
+    if (!path) continue;
+    try {
+      const res = await api.evidenceFile(taskId, path);
+      return { path, body: res.text };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? "无法读取证据文件"));
+}
+
+function isEnvVarRef(ref: string): boolean {
+  return /^[A-Z][A-Z0-9_]{2,}$/.test(ref.trim());
+}
+
+function SecretRefCell({
+  taskId,
+  secretRef,
+  onPreview,
+}: {
+  taskId: string;
+  secretRef: string;
+  onPreview: (preview: { path: string; body: string }) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const canPreview = Boolean(secretRef.trim()) && !isEnvVarRef(secretRef);
+  return (
+    <Space spacing={6} wrap>
+      <Typography.Text code copyable size="small" style={{ wordBreak: "break-all" }}>
+        {secretRef}
+      </Typography.Text>
+      {canPreview && (
+        <Button
+          size="small"
+          theme="borderless"
+          loading={loading}
+          onClick={async () => {
+            setLoading(true);
+            try {
+              onPreview(await readSecretRefEvidence(taskId, secretRef));
+            } catch (e) {
+              Toast.error(e instanceof Error ? e.message : String(e));
+            } finally {
+              setLoading(false);
+            }
+          }}
+        >
+          查看
+        </Button>
+      )}
+    </Space>
+  );
+}
+
+function SecretPreviewCard({
+  preview,
+  onClose,
+}: {
+  preview: { path: string; body: string } | null;
+  onClose: () => void;
+}) {
+  if (!preview) return null;
+  return (
+    <Card
+      title={preview.path}
+      style={{ marginTop: 12 }}
+      headerExtraContent={
+        <Space spacing={6}>
+          <Button
+            size="small"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(preview.body);
+                Toast.success("已复制凭据内容");
+              } catch (e) {
+                Toast.error(e instanceof Error ? e.message : "复制失败");
+              }
+            }}
+          >
+            复制
+          </Button>
+          <Button size="small" onClick={onClose}>关闭</Button>
+        </Space>
+      }
+    >
+      <pre className="gy-mono gy-finding-block" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
+        {preview.body}
+      </pre>
+    </Card>
+  );
+}
+
+function CredentialsSection({ taskId, rows }: { taskId: string; rows: Credential[] }) {
+  const [preview, setPreview] = useState<{ path: string; body: string } | null>(null);
   return (
     <>
       <Typography.Paragraph type="tertiary" size="small" style={{ margin: "0 0 8px" }}>
-        仅展示脱敏后的 secretRef 指针，不展示任何明文密钥。
+        展示完整凭据引用（secretRef），可点击“查看”直接预览对应证据文件以复现。
       </Typography.Paragraph>
       {rows.length ? (
         <Table
@@ -170,30 +270,35 @@ function CredentialsSection({ rows }: { rows: Credential[] }) {
             { title: "类型", dataIndex: "kind", width: 120, render: (k: string) => <Tag color={CREDENTIAL_KIND_COLOR[k] ?? "grey"} size="small">{CREDENTIAL_KIND_LABEL[k] ?? k}</Tag> },
             { title: "资产", dataIndex: "asset", render: (v: string) => <Typography.Text style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
             { title: "用户名", dataIndex: "username", width: 140, render: (v: string | null) => v || "—" },
-            { title: "secretRef（已脱敏）", dataIndex: "secretRef", render: (v: string) => <Typography.Text code size="small" style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
+            { title: "secretRef", dataIndex: "secretRef", render: (v: string) => <SecretRefCell taskId={taskId} secretRef={v} onPreview={setPreview} /> },
             { title: "复用次数", dataIndex: "reuseCount", width: 100 },
           ]}
         />
       ) : <Empty description="暂无凭据记录" style={{ padding: "24px 0" }} />}
+      <SecretPreviewCard preview={preview} onClose={() => setPreview(null)} />
     </>
   );
 }
 
-function SessionsSection({ rows }: { rows: Credential[] }) {
+function SessionsSection({ taskId, rows }: { taskId: string; rows: Credential[] }) {
+  const [preview, setPreview] = useState<{ path: string; body: string } | null>(null);
   if (!rows.length) return <Empty description="暂无驻留会话；获取会话或立足点 Shell 后记录在这里。" style={{ padding: "24px 0" }} />;
   return (
-    <Table
-      size="small" rowKey="id" dataSource={rows}
-      pagination={rows.length > 20 ? { pageSize: 20 } : false}
-      columns={[
-        { title: "类型", dataIndex: "kind", width: 130, render: (k: string) => <Tag color={CREDENTIAL_KIND_COLOR[k] ?? "grey"} size="small">{CREDENTIAL_KIND_LABEL[k] ?? k}</Tag> },
-        { title: "资产", dataIndex: "asset", render: (v: string) => <Typography.Text style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
-        { title: "用户名", dataIndex: "username", width: 140, render: (v: string | null) => v || "—" },
-        { title: "会话指针", dataIndex: "secretRef", render: (v: string) => <Typography.Text code size="small" style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
-        { title: "最近使用", dataIndex: "lastUsedAt", width: 170, render: (t: string | null) => t ? formatDateTime(t, true) : "—" },
-        { title: "复用", dataIndex: "reuseCount", width: 70 },
-      ]}
-    />
+    <>
+      <Table
+        size="small" rowKey="id" dataSource={rows}
+        pagination={rows.length > 20 ? { pageSize: 20 } : false}
+        columns={[
+          { title: "类型", dataIndex: "kind", width: 130, render: (k: string) => <Tag color={CREDENTIAL_KIND_COLOR[k] ?? "grey"} size="small">{CREDENTIAL_KIND_LABEL[k] ?? k}</Tag> },
+          { title: "资产", dataIndex: "asset", render: (v: string) => <Typography.Text style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
+          { title: "用户名", dataIndex: "username", width: 140, render: (v: string | null) => v || "—" },
+          { title: "会话指针", dataIndex: "secretRef", render: (v: string) => <SecretRefCell taskId={taskId} secretRef={v} onPreview={setPreview} /> },
+          { title: "最近使用", dataIndex: "lastUsedAt", width: 170, render: (t: string | null) => t ? formatDateTime(t, true) : "—" },
+          { title: "复用", dataIndex: "reuseCount", width: 70 },
+        ]}
+      />
+      <SecretPreviewCard preview={preview} onClose={() => setPreview(null)} />
+    </>
   );
 }
 

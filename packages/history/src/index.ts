@@ -3758,6 +3758,21 @@ export class HistoryStore {
     if (intentId && !this.getIntent(input.taskId, intentId)) {
       throw new Error(`unknown finding intent: ${intentId}`);
     }
+    if (existing) {
+      const mergedFactIds = [...new Set([...existing.factIds, ...factIds])];
+      const nextIntentId = existing.intentId ?? intentId;
+      const changed =
+        nextIntentId !== existing.intentId || mergedFactIds.length !== existing.factIds.length;
+      if (changed) {
+        this.db
+          .prepare(
+            `UPDATE findings SET intent_id = ?, fact_ids_json = ? WHERE task_id = ? AND id = ?`,
+          )
+          .run(nextIntentId, JSON.stringify(mergedFactIds), input.taskId, existing.id);
+        return { finding: this.getFinding(input.taskId, existing.id)!, created: false };
+      }
+      return { finding: existing, created: false };
+    }
 
     const finding: Finding = {
       id: randomUUID(),
@@ -3821,6 +3836,8 @@ export class HistoryStore {
       cvss?: string | null;
       /** P15-C1 — identity that performed the verification (worker id / operator). */
       verifiedBy?: string;
+      /** Backfill intent link if the finding was originally recorded outside an active Intent. */
+      intentId?: string | null;
     },
   ): Finding {
     const finding = this.getFinding(taskId, findingId);
@@ -3848,6 +3865,19 @@ export class HistoryStore {
       }
     });
 
+    const resolvedIntentId = finding.intentId ?? this.resolveIntentIdForWrite(taskId, input.intentId);
+    const nextIntentId = resolvedIntentId && this.getIntent(taskId, resolvedIntentId) ? resolvedIntentId : finding.intentId;
+    const normEvPath = (p: string) => p.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^evidence\//, "");
+    const evidenceSet = new Set(files.map((f) => normEvPath(f.path)).filter(Boolean));
+    const matchedFactIds = evidenceSet.size
+      ? (this.db
+          .prepare("SELECT id, evidence_path FROM facts WHERE task_id = ? AND evidence_path IS NOT NULL")
+          .all(taskId) as Array<{ id: string; evidence_path: string }>)
+          .filter((row) => evidenceSet.has(normEvPath(row.evidence_path)))
+          .map((row) => row.id)
+      : [];
+    const nextFactIds = [...new Set([...finding.factIds, ...matchedFactIds])];
+
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const evidence = [...finding.evidence];
@@ -3865,11 +3895,14 @@ export class HistoryStore {
         .prepare(
           `UPDATE findings
            SET status = 'verified', confidence = 'firm', evidence_json = ?,
+               intent_id = ?, fact_ids_json = ?,
                repro = ?, impact = ?, fix = ?, cvss = ?, verified_at = ?, verified_by = ?
            WHERE task_id = ? AND id = ? AND status = 'tentative'`,
         )
         .run(
           JSON.stringify(evidence),
+          nextIntentId,
+          JSON.stringify(nextFactIds),
           repro,
           input.impact?.trim() || finding.impact,
           input.fix?.trim() || finding.fix,

@@ -78,3 +78,20 @@ test("布局产出可渲染的路径与稳定边 ID", () => {
   assert.ok(geometry.edges.every((e) => e.path.startsWith("M")));
   assert.ok(geometry.edges.every((e) => typeof e.id === "string" && e.id.length > 0));
 });
+
+test("无显式 intentId/factIds 的漏洞兜底连到所属资产，不沦为孤立节点", () => {
+  const looseFinding: DagFinding = {
+    id: "v-loose",
+    title: "Gradio 文件读取",
+    asset: "app.example",
+    vulnClass: "CWE-22",
+    severity: "critical",
+    status: "verified",
+    intentId: null,
+    factIds: [],
+    createdAt: "2026-11-24T02:30:00Z",
+  };
+  const dag = collectDag(facts, intents, [looseFinding], assets);
+  assert.equal(dag.orphanIds.has("v-loose"), false);
+  assert.equal(link(dag, assetNodeId("app.example"), "v-loose", "affects")?.structural, true);
+});

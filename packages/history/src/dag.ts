@@ -441,6 +441,63 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
     });
   }
 
+  // 兜底链路（兼容历史/未显式传 intentId 与 factIds 的漏洞）：
+  // 1) 若共享同一证据文件路径，连到对应 Fact（走确定性因果校验）；
+  // 2) 若仍无任何入边，挂一条结构边到对应资产节点，避免漏洞悬浮成孤立节点。
+  const normEv = (p: string) => p.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^evidence\//, "");
+  const factsByEvidence = new Map<string, Fact[]>();
+  for (const fact of facts) {
+    if (!fact.evidencePath) continue;
+    const key = normEv(fact.evidencePath);
+    if (!key) continue;
+    const list = factsByEvidence.get(key) ?? [];
+    list.push(fact);
+    factsByEvidence.set(key, list);
+  }
+  const assetsByExact = new Map<string, AssetRecord>();
+  const assetsByHost = new Map<string, AssetRecord>();
+  for (const asset of input.assets) {
+    const exact = artifact("asset", asset.address)?.value;
+    if (exact && !assetsByExact.has(exact)) assetsByExact.set(exact, asset);
+    const host = exact?.replace(/:\d+$/, "");
+    if (host && !assetsByHost.has(host)) assetsByHost.set(host, asset);
+  }
+  for (const finding of findings) {
+    if (finding.intentId || finding.factIds.length > 0) continue;
+    let linked = false;
+    for (const ev of finding.evidence) {
+      const key = normEv(ev.path);
+      for (const fact of factsByEvidence.get(key) ?? []) {
+        pushCausal({
+          causal: "fact->finding",
+          fromRef: factRefs.get(fact.id) ?? null,
+          toRef: findingRefs.get(finding.id) ?? null,
+          from: factNodeId(fact.id),
+          to: findingNodeId(finding.id),
+          kind: "evidences",
+          label: "同证据支撑",
+        });
+        linked = true;
+      }
+    }
+    if (!linked) {
+      const targetAsset = artifact("asset", finding.asset)?.value;
+      const matchedAsset = targetAsset
+        ? (assetsByExact.get(targetAsset) ?? assetsByHost.get(targetAsset.replace(/:\d+$/, "")))
+        : undefined;
+      if (matchedAsset) {
+        pushEdge({
+          id: `${assetNodeId(matchedAsset.address)}->${findingNodeId(finding.id)}:affects`,
+          from: assetNodeId(matchedAsset.address),
+          to: findingNodeId(finding.id),
+          kind: "affects",
+          label: "所属资产",
+          broken: false,
+        });
+      }
+    }
+  }
+
   // 发现 → 发现：同资产且共享端点 / 证据 SHA-256 / 事务 id，按时间推进。
   const maxFindingEdges = Math.max(0, input.maxFindingEdges ?? MAX_FINDING_EDGES_DEFAULT);
   const findingPairs: Array<{ from: Finding; to: Finding }> = [];

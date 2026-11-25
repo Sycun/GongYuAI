@@ -366,3 +366,45 @@ test("HistoryStore.dagExport：时间倒挂的边诚实标 proposed + timestamp_
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("无显式 intentId/factIds 的漏洞：按共享证据连 Fact，否则兜底连所属资产", () => {
+  const seed = fact({ id: "f-seed", tags: ["asset.addr:10.0.186.1"] });
+  const evFact = fact({ id: "f-ev", evidencePath: "findings/gradio.txt", createdAt: T0 });
+  const withSharedEv = finding({
+    id: "finding-ev",
+    asset: "10.0.186.1",
+    intentId: null,
+    factIds: [],
+    evidence: [{ path: "findings/gradio.txt", sha256: SHA, role: "proof" }],
+    createdAt: T1,
+  });
+  const assetOnly = finding({
+    id: "finding-asset",
+    asset: "10.0.186.1",
+    intentId: null,
+    factIds: [],
+    evidence: [],
+    createdAt: T1,
+  });
+
+  const dag = buildDagExport({
+    taskId: TASK,
+    generatedAt: T2,
+    facts: [seed, evFact],
+    intents: [],
+    findings: [withSharedEv, assetOnly],
+    assets: [{ ...ASSET, address: "10.0.186.1", factId: seed.id }],
+  });
+
+  const evEdge = dag.edges.find(
+    (e) => e.from === "fact:f-ev" && e.to === "finding:finding-ev" && e.kind === "evidences",
+  );
+  assert.ok(evEdge, "共享证据文件的漏洞应连到对应 Fact");
+  assert.equal(evEdge.verification, "proven");
+
+  const assetEdge = dag.edges.find(
+    (e) => e.from === "asset:10.0.186.1" && e.to === "finding:finding-asset" && e.kind === "affects",
+  );
+  assert.ok(assetEdge, "无证据匹配的漏洞应兜底连到所属资产");
+  assert.equal(assetEdge.broken, false);
+});

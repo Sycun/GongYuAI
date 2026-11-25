@@ -34,7 +34,7 @@ async function getJson(url: string): Promise<{ status: number; body: any }> {
   return { status: res.status, body: await res.json() };
 }
 
-test("GET /tasks/:id/p14 exposes transactions/plan/credentials/retests with redacted pointers", async (t) => {
+test("GET /tasks/:id/p14 exposes transactions/plan/credentials/retests with full secretRef", async (t) => {
   const { task, paths, history, base } = await fixture(t, "P14 投影");
   // transaction
   mkdirSync(join(paths.evidenceDir, "http"), { recursive: true });
@@ -82,7 +82,7 @@ test("GET /tasks/:id/p14 exposes transactions/plan/credentials/retests with reda
   assert.equal(body.transactions.length, 1);
   assert.equal(body.plan.length, 1);
   assert.equal(body.credentials.length, 1);
-  assert.equal(body.credentials[0].secretRef, "credentials/***");
+  assert.equal(body.credentials[0].secretRef, "credentials/admin.txt");
   assert.equal(body.retests.length, 1);
   assert.equal(body.retests[0].verdict, "fixed");
   assert.equal(body.oastTokens.length, 1);

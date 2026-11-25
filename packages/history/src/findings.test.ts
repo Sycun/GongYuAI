@@ -277,3 +277,51 @@ test("report renders Findings chapter without tentative leads", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("recordFinding dedup and verifyFinding backfill missing intentId and evidence-matched factIds", () => {
+  const { root, evidenceDir, store } = setup("gy-find-backfill-");
+  try {
+    const seedFact = store.appendFact({
+      taskId: TASK_ID,
+      layer: "summary",
+      title: "发现 Gradio 服务",
+      summary: "Gradio 4.12.0",
+    });
+    const intent = store.proposeIntent({
+      taskId: TASK_ID,
+      title: "验证 Gradio 任意文件读取",
+      sourceFactIds: [seedFact.id],
+    });
+    // First recorded outside any active intent and without factIds.
+    const first = recordLead(store, { intentId: null });
+    assert.equal(first.finding.intentId, null);
+    assert.deepEqual(first.finding.factIds, []);
+
+    // Dedup call with factIds backfills them without creating a duplicate.
+    const deduped = recordLead(store, { intentId: null, factIds: [seedFact.id] });
+    assert.equal(deduped.created, false);
+    assert.equal(deduped.finding.id, first.finding.id);
+    assert.deepEqual(deduped.finding.factIds, [seedFact.id]);
+
+    // verifyFinding backfills intentId and any Fact sharing the same evidencePath.
+    writeEvidenceFile(evidenceDir, "findings/gradio-poc.txt", "root:x:0:0\n");
+    const evFact = store.appendFact({
+      taskId: TASK_ID,
+      layer: "summary",
+      title: "读取 /etc/passwd 证据",
+      summary: "proof",
+      evidencePath: "findings/gradio-poc.txt",
+    });
+    const verified = store.verifyFinding(TASK_ID, first.finding.id, {
+      evidencePaths: ["findings/gradio-poc.txt"],
+      repro: "curl http://lab.example.com/file=/etc/passwd",
+      intentId: intent.id,
+    });
+    assert.equal(verified.intentId, intent.id);
+    assert.ok(verified.factIds.includes(seedFact.id));
+    assert.ok(verified.factIds.includes(evFact.id));
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

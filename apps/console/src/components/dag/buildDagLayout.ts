@@ -363,6 +363,48 @@ export function collectDag(
       links.push({ source: assetNodeId(asset.address), target: asset.factId, kind: "asserted-by", structural: true });
     }
 
+    // 兜底链路：缺少 intentId 与 factIds 的漏洞按共享证据文件连 Fact，否则挂所属资产节点。
+    const normEv = (p: string) => p.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^evidence\//, "");
+    const factsByEvidence = new Map<string, DagFact[]>();
+    for (const fact of facts) {
+      if (!fact.evidencePath) continue;
+      const key = normEv(fact.evidencePath);
+      if (!key) continue;
+      const list = factsByEvidence.get(key) ?? [];
+      list.push(fact);
+      factsByEvidence.set(key, list);
+    }
+    const assetsByExact = new Map<string, DagAsset>();
+    const assetsByHost = new Map<string, DagAsset>();
+    for (const asset of assets) {
+      const exact = normAsset(asset.address);
+      if (exact && !assetsByExact.has(exact)) assetsByExact.set(exact, asset);
+      const host = exact.replace(/:\d+$/, "");
+      if (host && !assetsByHost.has(host)) assetsByHost.set(host, asset);
+    }
+    for (const finding of findings) {
+      const hasExplicit = Boolean(finding.intentId && intentIds.has(finding.intentId)) || (finding.factIds?.length ?? 0) > 0;
+      if (hasExplicit) continue;
+      let linked = false;
+      for (const ev of finding.evidence ?? []) {
+        const key = normEv(ev.path ?? "");
+        for (const fact of factsByEvidence.get(key) ?? []) {
+          const verdict = verifyEdge(factRefs.get(fact.id) ?? null, findingRefs.get(finding.id) ?? null);
+          links.push({ source: fact.id, target: finding.id, kind: "evidences", ...verdict });
+          linked = true;
+        }
+      }
+      if (!linked) {
+        const targetAsset = normAsset(finding.asset);
+        const matched = targetAsset
+          ? (assetsByExact.get(targetAsset) ?? assetsByHost.get(targetAsset.replace(/:\d+$/, "")))
+          : undefined;
+        if (matched) {
+          links.push({ source: assetNodeId(matched.address), target: finding.id, kind: "affects", structural: true });
+        }
+      }
+    }
+
     // 漏洞 → 漏洞（同资产 + 共享端点/证据/事务，按时间推进）
     const pairs: Array<{ from: DagFinding; to: DagFinding }> = [];
     for (const earlier of findings) {
