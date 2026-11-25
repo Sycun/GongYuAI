@@ -316,7 +316,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
           taskId: manifest.taskId,
           taskDir: manifest.dataDir,
           workerId: manifest.workerId,
-          intentId: state.activeIntentId ?? undefined,
+          getIntentId: () => state.activeIntentId,
           insecureUpstream: true,
         });
         ctx.proxyEnv = trafficProxy.getProxyEnv();
@@ -2883,6 +2883,52 @@ async function runOpenAiToolLoop(
     {
       type: "function" as const,
       function: {
+        name: "traffic_search",
+        description: "检索本任务 MITM 代理与 http_request 录制的 HTTP 流量索引（只返回摘要与 http:<id> 证据引用）。",
+        parameters: {
+          type: "object",
+          properties: {
+            host: { type: "string" }, method: { type: "string" },
+            status: { type: "number" }, statusMin: { type: "number" }, statusMax: { type: "number" },
+            keyword: { type: "string" }, findingId: { type: "string" },
+            offset: { type: "number" }, limit: { type: "number" },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "traffic_get",
+        description: "读取单条录制流量的完整请求/响应头与主体大小元数据。",
+        parameters: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "traffic_blob",
+        description: "按 offset/maxBytes 分页读取录制流量的请求体或响应体。",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            side: { type: "string", enum: ["req", "res"] },
+            offset: { type: "number" },
+            maxBytes: { type: "number" },
+          },
+          required: ["id", "side"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
         name: "oast_issue",
         description: "P14 签发带外回调令牌（未配置 auth.oast 时 unavailable）。",
         parameters: {
@@ -3662,6 +3708,11 @@ async function runOpenAiToolLoop(
           }
           case "http_request":
             result = await httpRequestTool(ctx, args, { intentId: state.activeIntentId });
+            break;
+          case "traffic_search":
+          case "traffic_get":
+          case "traffic_blob":
+            result = runTrafficTool(manifest.dataDir, manifest.taskId, call.function.name, args);
             break;
           case "oast_issue":
             result = await oastIssueTool(ctx, args);

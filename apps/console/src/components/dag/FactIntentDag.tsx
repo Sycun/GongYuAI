@@ -10,7 +10,7 @@ import "@xyflow/react/dist/style.css";
 import { FINDING_SEVERITY_LABEL, STATUS_LABEL } from "../../labels";
 import {
   buildDagLayout, CARD_SIZE, collectDag,
-  type DagAsset, type DagFact, type DagFinding, type DagIntent, type DagRecord,
+  type DagAsset, type DagFact, type DagFinding, type DagIntent, type DagRecord, type ServerDagExport,
 } from "./buildDagLayout";
 
 type Props = {
@@ -18,6 +18,7 @@ type Props = {
   intents: DagIntent[];
   findings?: DagFinding[];
   assets?: DagAsset[];
+  serverDag?: ServerDagExport | null;
   height: number;
   loading?: boolean;
   focusId?: string;
@@ -93,14 +94,14 @@ function edgeClass(link: { structural?: boolean; verification?: string; broken?:
   return `${base}${active ? " gy-dag-edge-active" : ""}`;
 }
 
-export default function FactIntentDag({ facts, intents, findings = [], assets = [], height, loading, focusId }: Props) {
+export default function FactIntentDag({ facts, intents, findings = [], assets = [], serverDag, height, loading, focusId }: Props) {
   const section = useRef<HTMLElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const flowId = useId().replace(/:/g, "");
   const [vertical, setVertical] = useState(false);
   const [showOrphans, setShowOrphans] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(focusId ?? null);
-  const dag = useMemo(() => collectDag(facts, intents, findings, assets), [facts, intents, findings, assets]);
+  const dag = useMemo(() => collectDag(facts, intents, findings, assets, serverDag), [facts, intents, findings, assets, serverDag]);
   const geometry = useMemo(
     () => buildDagLayout(dag, vertical, showOrphans),
     [dag.topologyKey, vertical, showOrphans],

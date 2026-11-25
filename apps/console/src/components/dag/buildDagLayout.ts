@@ -61,6 +61,30 @@ export type DagAsset = {
   intentId?: string | null;
 };
 
+export type ServerDagEdge = {
+  id: string;
+  from: string;
+  to: string;
+  kind: string;
+  label?: string;
+  broken?: boolean;
+  verification?: DagVerification;
+  abstentionReason?: string;
+};
+
+export type ServerDagExport = {
+  edges: ServerDagEdge[];
+  notes?: string[];
+};
+
+function unwrapServerNodeId(id: string): string {
+  if (id.startsWith("asset:")) return id;
+  if (id.startsWith("fact:")) return id.slice("fact:".length);
+  if (id.startsWith("intent:")) return id.slice("intent:".length);
+  if (id.startsWith("finding:")) return id.slice("finding:".length);
+  return id;
+}
+
 export type DagNodeKind = "asset" | "fact" | "intent" | "finding";
 
 export type DagRecord = {
@@ -213,6 +237,7 @@ export function collectDag(
   intents: DagIntent[],
   findings: DagFinding[] = [],
   assets: DagAsset[] = [],
+  serverDag?: ServerDagExport | null,
 ): DagCollection {
   const records = new Map<string, DagRecord>();
   const links: DagLink[] = [];
@@ -238,7 +263,8 @@ export function collectDag(
     });
   }
 
-  const usesOrigin = intents.some((intent) => (intent.sourceFactIds ?? []).includes(ORIGIN_ID));
+  const usesOrigin = intents.some((intent) => (intent.sourceFactIds ?? []).includes(ORIGIN_ID))
+    || (serverDag?.edges ?? []).some((e) => unwrapServerNodeId(e.from) === ORIGIN_ID);
   if (usesOrigin) {
     records.set(ORIGIN_ID, { kind: "fact", title: "任务起点", meta: "origin", data: { synthetic: true } });
   }
@@ -255,22 +281,6 @@ export function collectDag(
       id: intent.id, createdAt: intent.createdAt, references: sources,
       artifacts: intentArtifacts,
     });
-    for (const source of sources) {
-      if (source === ORIGIN_ID) {
-        links.push({ source: ORIGIN_ID, target: intent.id, kind: "anchors", structural: true });
-        continue;
-      }
-      if (!records.has(source)) records.set(source, { kind: "fact", title: source, meta: "记录缺失" });
-      const verdict = verifyEdge(factRefs.get(source) ?? null, intentRefs.get(intent.id) ?? null);
-      links.push({ source, target: intent.id, kind: "anchors", ...verdict });
-    }
-  }
-
-  // 意图 → 事实（Explore 回写）
-  for (const fact of facts) {
-    if (!fact.intentId || !intentIds.has(fact.intentId)) continue;
-    const verdict = verifyEdge(intentRefs.get(fact.intentId) ?? null, factRefs.get(fact.id) ?? null);
-    links.push({ source: fact.intentId, target: fact.id, kind: "produces", ...verdict });
   }
 
   for (const finding of findings) {
@@ -284,41 +294,94 @@ export function collectDag(
       references: [...(finding.intentId ? [finding.intentId] : []), ...(finding.factIds ?? [])],
       artifacts: findingArtifacts(finding),
     });
-    for (const factId of finding.factIds ?? []) {
-      if (!records.has(factId)) records.set(factId, { kind: "fact", title: factId, meta: "记录缺失" });
-      const verdict = verifyEdge(factRefs.get(factId) ?? null, findingRefs.get(finding.id) ?? null);
-      links.push({ source: factId, target: finding.id, kind: "evidences", ...verdict });
-    }
-    if (finding.intentId && intentIds.has(finding.intentId)) {
-      const verdict = verifyEdge(intentRefs.get(finding.intentId) ?? null, findingRefs.get(finding.id) ?? null);
-      links.push({ source: finding.intentId, target: finding.id, kind: "yields", ...verdict });
-    }
   }
 
-  // 资产 → 事实（结构凭据边）
-  for (const asset of assets) {
-    if (!records.has(asset.factId)) continue;
-    links.push({ source: assetNodeId(asset.address), target: asset.factId, kind: "asserted-by", structural: true });
-  }
-
-  // 漏洞 → 漏洞（同资产 + 共享端点/证据/事务，按时间推进）
-  const pairs: Array<{ from: DagFinding; to: DagFinding }> = [];
-  for (const earlier of findings) {
-    for (const later of findings) {
-      if (earlier.id === later.id || earlier.asset !== later.asset) continue;
-      const a = parseMs(earlier.createdAt);
-      const b = parseMs(later.createdAt);
-      if (a === null || b === null || a >= b) continue;
-      const endpointMatch = earlier.endpoint != null && earlier.endpoint === later.endpoint;
-      const earlierKeys = new Set(findingArtifacts(earlier).map(artifactKey));
-      const shared = findingArtifacts(later).some((entry) => earlierKeys.has(artifactKey(entry)));
-      if (endpointMatch || shared) pairs.push({ from: earlier, to: later });
+  if (serverDag?.edges) {
+    // 优先消费后端 edge-verifier 产出的权威边，避免前后端校验口径漂移。
+    for (const edge of serverDag.edges) {
+      const source = unwrapServerNodeId(edge.from);
+      const target = unwrapServerNodeId(edge.to);
+      if (!records.has(source)) {
+        const kind: DagNodeKind = edge.from.startsWith("asset:") ? "asset"
+          : edge.from.startsWith("intent:") ? "intent"
+          : edge.from.startsWith("finding:") ? "finding"
+          : "fact";
+        records.set(source, { kind, title: source, meta: "记录缺失" });
+      }
+      if (!records.has(target)) {
+        const kind: DagNodeKind = edge.to.startsWith("asset:") ? "asset"
+          : edge.to.startsWith("intent:") ? "intent"
+          : edge.to.startsWith("finding:") ? "finding"
+          : "fact";
+        records.set(target, { kind, title: target, meta: "记录缺失" });
+      }
+      links.push({
+        source,
+        target,
+        kind: edge.kind,
+        ...(edge.verification ? { verification: edge.verification } : { structural: true }),
+        ...(edge.abstentionReason ? { abstentionReason: edge.abstentionReason } : {}),
+        ...(edge.broken ? { broken: true } : {}),
+      });
     }
-  }
-  pairs.sort((x, y) => x.from.id.localeCompare(y.from.id) || x.to.id.localeCompare(y.to.id));
-  for (const pair of pairs.slice(0, MAX_FINDING_EDGES)) {
-    const verdict = verifyEdge(findingRefs.get(pair.from.id) ?? null, findingRefs.get(pair.to.id) ?? null);
-    links.push({ source: pair.from.id, target: pair.to.id, kind: "escalates", ...verdict });
+  } else {
+    for (const intent of intents) {
+      const sources = [...new Set(intent.sourceFactIds?.length ? intent.sourceFactIds : [ORIGIN_ID])];
+      for (const source of sources) {
+        if (source === ORIGIN_ID) {
+          links.push({ source: ORIGIN_ID, target: intent.id, kind: "anchors", structural: true });
+          continue;
+        }
+        if (!records.has(source)) records.set(source, { kind: "fact", title: source, meta: "记录缺失" });
+        const verdict = verifyEdge(factRefs.get(source) ?? null, intentRefs.get(intent.id) ?? null);
+        links.push({ source, target: intent.id, kind: "anchors", ...verdict });
+      }
+    }
+
+    // 意图 → 事实（Explore 回写）
+    for (const fact of facts) {
+      if (!fact.intentId || !intentIds.has(fact.intentId)) continue;
+      const verdict = verifyEdge(intentRefs.get(fact.intentId) ?? null, factRefs.get(fact.id) ?? null);
+      links.push({ source: fact.intentId, target: fact.id, kind: "produces", ...verdict });
+    }
+
+    for (const finding of findings) {
+      for (const factId of finding.factIds ?? []) {
+        if (!records.has(factId)) records.set(factId, { kind: "fact", title: factId, meta: "记录缺失" });
+        const verdict = verifyEdge(factRefs.get(factId) ?? null, findingRefs.get(finding.id) ?? null);
+        links.push({ source: factId, target: finding.id, kind: "evidences", ...verdict });
+      }
+      if (finding.intentId && intentIds.has(finding.intentId)) {
+        const verdict = verifyEdge(intentRefs.get(finding.intentId) ?? null, findingRefs.get(finding.id) ?? null);
+        links.push({ source: finding.intentId, target: finding.id, kind: "yields", ...verdict });
+      }
+    }
+
+    // 资产 → 事实（结构凭据边）
+    for (const asset of assets) {
+      if (!records.has(asset.factId)) continue;
+      links.push({ source: assetNodeId(asset.address), target: asset.factId, kind: "asserted-by", structural: true });
+    }
+
+    // 漏洞 → 漏洞（同资产 + 共享端点/证据/事务，按时间推进）
+    const pairs: Array<{ from: DagFinding; to: DagFinding }> = [];
+    for (const earlier of findings) {
+      for (const later of findings) {
+        if (earlier.id === later.id || earlier.asset !== later.asset) continue;
+        const a = parseMs(earlier.createdAt);
+        const b = parseMs(later.createdAt);
+        if (a === null || b === null || a >= b) continue;
+        const endpointMatch = earlier.endpoint != null && earlier.endpoint === later.endpoint;
+        const earlierKeys = new Set(findingArtifacts(earlier).map(artifactKey));
+        const shared = findingArtifacts(later).some((entry) => earlierKeys.has(artifactKey(entry)));
+        if (endpointMatch || shared) pairs.push({ from: earlier, to: later });
+      }
+    }
+    pairs.sort((x, y) => x.from.id.localeCompare(y.from.id) || x.to.id.localeCompare(y.to.id));
+    for (const pair of pairs.slice(0, MAX_FINDING_EDGES)) {
+      const verdict = verifyEdge(findingRefs.get(pair.from.id) ?? null, findingRefs.get(pair.to.id) ?? null);
+      links.push({ source: pair.from.id, target: pair.to.id, kind: "escalates", ...verdict });
+    }
   }
 
   // 只保留两端都存在的边，避免悬空连线。

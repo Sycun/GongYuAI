@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { performHttpRequest } from "@gongyuai/exec";
+import { insertTraffic, performHttpRequest, putBlob } from "@gongyuai/exec";
 import { capabilityAtLeast } from "./tools.js";
 import { scopeAllows } from "@gongyuai/contracts";
 import { readEvidenceBytes } from "@gongyuai/history";
@@ -250,6 +250,45 @@ export async function httpRequestTool(
     durationMs: artifact.durationMs,
     note: args.note ?? (sessionName ? `session=${sessionName}` : ""),
   });
+
+  // Mirror built-in http_request exchanges into the task traffic index so Traffic tab and traffic_* tools see them.
+  if (ctx.manifest.dataDir) {
+    try {
+      const reqBuf = args.body ? Buffer.from(args.body, "utf8") : Buffer.alloc(0);
+      const reqContentType = Object.entries(headers).find(([k]) => k.toLowerCase() === "content-type")?.[1]?.split(";")[0]?.trim();
+      const resContentType = Object.entries(result.headers).find(([k]) => k.toLowerCase() === "content-type")?.[1]?.split(";")[0]?.trim();
+      let resBuf: Buffer = Buffer.from(result.bodyHead ?? "", "utf8");
+      try {
+        const rawRes = readEvidenceBytes(ctx.manifest.evidenceDir, artifact.responsePath);
+        const sepIdx = rawRes.indexOf(Buffer.from("\r\n\r\n"));
+        if (sepIdx >= 0) resBuf = rawRes.subarray(sepIdx + 4);
+      } catch {
+        /* fall back to bodyHead */
+      }
+      const reqBody = reqBuf.length > 0 ? putBlob(ctx.manifest.dataDir, reqBuf, reqContentType) : undefined;
+      const resBody = resBuf.length > 0 ? putBlob(ctx.manifest.dataDir, resBuf, resContentType) : undefined;
+      insertTraffic(ctx.manifest.dataDir, {
+        taskId: ctx.manifest.taskId,
+        ...(opts.intentId ? { intentId: opts.intentId } : {}),
+        workerId: ctx.manifest.workerId,
+        method: artifact.method,
+        url: artifact.url,
+        host: artifact.host,
+        path: artifact.path || "/",
+        status: artifact.status,
+        durationMs: artifact.durationMs,
+        startedAt: artifact.startedAt,
+        reqHeaders: headers,
+        resHeaders: result.headers,
+        ...(reqBody ? { reqBody } : {}),
+        ...(resBody ? { resBody } : {}),
+        reqPreview: args.body ? args.body.slice(0, 8192) : "",
+        resPreview: (result.bodyHead ?? "").slice(0, 8192),
+      });
+    } catch {
+      /* non-fatal traffic mirror */
+    }
+  }
 
   // Zero-tax endpoint discovery: record live non-404 endpoints into asset inventory automatically.
   if (artifact.status > 0 && artifact.status !== 404 && artifact.path && artifact.path !== "/") {

@@ -167,6 +167,20 @@ export type HistoryPayload = {
   }>;
   assets?: AssetRecord[];
   findings?: FindingRecord[];
+  /** 服务端权威 DAG 导出（含确定性符号边校验 proven/proposed 与 abstentionReason）。 */
+  dag?: {
+    edges: Array<{
+      id: string;
+      from: string;
+      to: string;
+      kind: string;
+      label?: string;
+      broken?: boolean;
+      verification?: "proven" | "proposed";
+      abstentionReason?: string;
+    }>;
+    notes?: string[];
+  };
   retestRequests?: RetestRequestRecord[];
   peerReviews?: PeerReviewRecord[];
   hints?: Array<{

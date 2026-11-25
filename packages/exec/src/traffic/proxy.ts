@@ -29,6 +29,8 @@ export type TrafficProxyOptions = {
   taskDir: string;
   workerId?: string;
   intentId?: string;
+  /** Dynamic active-intent getter (overrides static intentId per request). */
+  getIntentId?: () => string | null | undefined;
   /** `http://host:port` upstream. Changed later with `setUpstream`. */
   upstream?: string | null;
   /** Accept upstream TLS certificates that this process does not trust. */
@@ -259,10 +261,11 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
     const reqHeaders = headerMap(req.headers);
     const resHeaders = headerMap(upstreamRes.headers);
     const [reqBody, resBody] = await Promise.all([reqSpool.done, resSpool.done]);
+    const currentIntentId = opts.getIntentId?.() ?? opts.intentId;
     try {
       insertTraffic(opts.taskDir, {
         taskId: opts.taskId,
-        ...(opts.intentId ? { intentId: opts.intentId } : {}),
+        ...(currentIntentId ? { intentId: currentIntentId } : {}),
         ...(opts.workerId ? { workerId: opts.workerId } : {}),
         method: (req.method ?? "GET").toUpperCase(),
         url: target.href,

@@ -11,6 +11,7 @@ import type {
   FactLayer,
   Finding,
   FindingConfidence,
+  FindingQualification,
   FindingSeverity,
   FindingValidation,
   FindingValidationDraft,
@@ -306,6 +307,18 @@ export class HistoryStore {
     );
     if (!findingCols.has("verified_by")) {
       this.db.exec("ALTER TABLE findings ADD COLUMN verified_by TEXT");
+    }
+    if (!findingCols.has("qualification")) {
+      this.db.exec("ALTER TABLE findings ADD COLUMN qualification TEXT");
+    }
+    if (!findingCols.has("traffic_ids_json")) {
+      this.db.exec("ALTER TABLE findings ADD COLUMN traffic_ids_json TEXT");
+    }
+    if (!findingCols.has("root_cause")) {
+      this.db.exec("ALTER TABLE findings ADD COLUMN root_cause TEXT");
+    }
+    if (!findingCols.has("poc_curl")) {
+      this.db.exec("ALTER TABLE findings ADD COLUMN poc_curl TEXT");
     }
     this.ensureEventHashChain();
   }
@@ -649,6 +662,10 @@ export class HistoryStore {
         created_at TEXT NOT NULL,
         verified_at TEXT,
         verified_by TEXT,
+        qualification TEXT,
+        traffic_ids_json TEXT,
+        root_cause TEXT,
+        poc_curl TEXT,
         UNIQUE(task_id, dedup_key)
       );
       CREATE INDEX IF NOT EXISTS idx_findings_task ON findings(task_id, status);
@@ -4175,6 +4192,24 @@ export class HistoryStore {
   }
 
   private rowToFinding(r: Record<string, unknown>): Finding {
+    const rawQual = typeof r.qualification === "string" ? r.qualification : undefined;
+    const qualification =
+      rawQual === "exploited" || rawQual === "confirmed" || rawQual === "unconfirmed"
+        ? (rawQual as FindingQualification)
+        : undefined;
+    let trafficIds: string[] | undefined;
+    if (typeof r.traffic_ids_json === "string" && r.traffic_ids_json.trim()) {
+      try {
+        const parsed = JSON.parse(r.traffic_ids_json) as unknown;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          trafficIds = parsed.map((id) => String(id));
+        }
+      } catch {
+        /* ignore malformed legacy json */
+      }
+    }
+    const rootCause = typeof r.root_cause === "string" && r.root_cause.length > 0 ? r.root_cause : undefined;
+    const pocCurl = typeof r.poc_curl === "string" && r.poc_curl.length > 0 ? r.poc_curl : undefined;
     return {
       id: String(r.id),
       taskId: String(r.task_id),
@@ -4196,6 +4231,10 @@ export class HistoryStore {
       createdAt: String(r.created_at),
       verifiedAt: (r.verified_at as string | null) ?? null,
       verifiedBy: (r.verified_by as string | null) ?? null,
+      ...(qualification ? { qualification } : {}),
+      ...(trafficIds ? { trafficIds } : {}),
+      ...(rootCause ? { rootCause } : {}),
+      ...(pocCurl ? { pocCurl } : {}),
     };
   }
 

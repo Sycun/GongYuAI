@@ -316,6 +316,23 @@
         "工具调不动",
         "资产图"
       ]
+    },
+    {
+      "id": "aimy-skill",
+      "triggers": [
+        "aimy",
+        "sqlcheck",
+        "xsscheck",
+        "bizlogic",
+        "waf",
+        "param-mine",
+        "auth-bypass",
+        "jwt-exploit",
+        "ssrf",
+        "ssti",
+        "graphql",
+        "proto-pollution"
+      ]
     }
   ]
 }

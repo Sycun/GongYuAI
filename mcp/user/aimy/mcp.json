@@ -1,0 +1,14 @@
+{
+  "id": "aimy",
+  "name": "aimy-mcp",
+  "description": "Prohao42/aimy-skill 官方 MCP 服务（暴露 90+ 渗透测试命令，需先安装 aimy-skill[mcp]）",
+  "category": "web",
+  "transport": "stdio",
+  "command": "aimy-mcp",
+  "args": [],
+  "binary": "aimy-mcp",
+  "defaultEnabled": false,
+  "capability": "scan",
+  "timeoutMs": 600000,
+  "whenToUse": "Use for structured JSON web/API vulnerability discovery, injection checks (sqlcheck/xsscheck/ssrf/ssti), auth/JWT testing, WAF bypass, and business-logic/race checks via aimy-skill."
+}

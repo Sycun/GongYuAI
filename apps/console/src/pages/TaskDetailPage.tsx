@@ -436,6 +436,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
                   intents={history?.intents ?? []}
                   findings={history?.findings ?? []}
                   assets={history?.assets ?? []}
+                  serverDag={history?.dag}
                   height={560}
                   loading={loading}
                   focusId={graphFocus}
