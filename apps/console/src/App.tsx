@@ -8,7 +8,7 @@ import { DETAIL_TABS, ROUTE_META, SETTINGS_SECTIONS, isSettingsRoute, resolveDet
 import { newId } from "./chat/id";
 import { storeFiles, type DraftFile } from "./chat/attachments";
 import { useConversations } from "./chat/useConversations";
-import { defaultProject, defaultProjectLabel } from "./chat/projects";
+import { defaultProject, isDuplicateProjectName } from "./chat/projects";
 import { useChatProjects } from "./chat/useChatProjects";
 import { archiveKey, conversationTaskIds, submissionTasks, taskIdForChat, workspaceArchives, type ArchiveScope } from "./chat/archives";
 import { useTaskArchives } from "./chat/useTaskArchives";
@@ -202,12 +202,12 @@ export function App() {
     setCreatingProject(true);
   }
   const trimmedProjectName = projectName.trim();
-  const duplicateProject = trimmedProjectName === defaultProjectLabel || workspace.projects.includes(trimmedProjectName);
+  const duplicateProject = isDuplicateProjectName(trimmedProjectName, activeProjects, workspace.projectName);
   function createProject() {
     if (changingArchive.current || !trimmedProjectName || duplicateProject) return;
-    workspace.addProject(trimmedProjectName);
+    const projectId = workspace.addProject(trimmedProjectName);
     setCreatingProject(false);
-    newChat(trimmedProjectName);
+    newChat(projectId);
   }
   function addressChat() {
     if (!id) { navigate("chat", chatId); setHomeId(newId()); }
@@ -264,7 +264,7 @@ export function App() {
   }
   const sidebarProps = {
     conversations: workspaceChats, selected: chat ? id : null, blank: chat && !conversation, onNew: newChat,
-    projects: workspace.projects, currentProject: project, projectOf: workspace.projectOf,
+    projects: workspace.projects, currentProject: project, projectOf: workspace.projectOf, projectLabel: workspace.projectLabel,
     archivedChats, archivedProjects, showArchived, onShowArchived: setShowArchived, archiveBusy, onArchive: changeArchive,
     folded: workspace.folded, onFold: workspace.setFolded,
     onCreateProject: openProjectCreator,
@@ -360,7 +360,7 @@ export function App() {
       {chat ? <ChatPage key={chatId} conversation={conversation} pending={pendingTurn(chatId)} draft={draft}
         onDraft={value => setDrafts(old => ({ ...old, [chatId]: value }))} onSend={submit}
         catalog={catalog} selected={selected} modelError={modelError}
-        projects={activeProjects} project={project} taskLink={taskLink} archived={chatArchived} archiveBusy={archiveBusy}
+        projects={activeProjects} project={project} projectLabel={workspace.projectLabel} taskLink={taskLink} archived={chatArchived} archiveBusy={archiveBusy}
         taskArchives={archiveRecords}
         onArchive={archived => void changeArchive({ kind: "chat", id: chatId }, archived)}
         onTaskArchive={(id, archived) => void changeArchive({ kind: "task", id }, archived)}

@@ -21,7 +21,7 @@ import {
 import type { Probe } from "../api";
 import type { TaskArchiveState } from "@gongyuai/contracts";
 import { archiveKey, workspaceArchives } from "../chat/archives";
-import { defaultProject } from "../chat/projects";
+import { defaultProject, defaultProjectLabel, isDuplicateProjectName, projectLabel, projectName } from "../chat/projects";
 import type { Conversation } from "../chat/useConversations";
 import { loadAssetGraph, loadMemoryGraph, loadSurface, type Getter } from "./loadGraphs.js";
 
@@ -71,6 +71,38 @@ test("the default conversation area stays active with a legacy archive flag or a
   const populated = state([{ id: "old-chat", title: "旧会话", updated: 0, turns: [] }]);
   assert.deepEqual([...populated.archivedChats], ["old-chat"]);
   assert.deepEqual([...populated.archivedProjects], ["另一个项目"]);
+});
+
+test("archiving a project releases its name while keeping legacy and new project IDs isolated", () => {
+  const names = new Map<string, string>([
+    ["测试", "测试"],
+    ["proj-2", "测试"],
+    ["proj-3", "活跃项目"],
+  ]);
+  const nameOf = (id: string) => projectName(id, names.get(id));
+  const projects = [defaultProject, "测试", "proj-2", "proj-3"];
+  const state = workspaceArchives({
+    projects,
+    conversations: [{ id: "c1", title: "旧测试会话", updated: 0, turns: [] }],
+    tasks: new Map(),
+    projectOf: () => "测试",
+    linkedTaskOf: () => undefined,
+    isSubmitting: () => false,
+    localArchives: new Set([archiveKey("chat", "c1")]),
+  });
+  assert.deepEqual([...state.archivedProjects], ["测试"]);
+  const activeBefore = projects.filter(id => id !== "proj-2" && !state.archivedProjects.has(id));
+  assert.equal(isDuplicateProjectName("测试", activeBefore, nameOf), false);
+  assert.equal(isDuplicateProjectName("活跃项目", activeBefore, nameOf), true);
+  assert.equal(isDuplicateProjectName(defaultProjectLabel, activeBefore, nameOf), true);
+  assert.equal(isDuplicateProjectName(defaultProject, activeBefore, nameOf), true);
+
+  const activeAfter = projects.filter(id => !state.archivedProjects.has(id));
+  assert.equal(isDuplicateProjectName("测试", activeAfter, nameOf), true);
+  assert.equal(projectLabel("测试", names.get("测试")), "测试");
+  assert.equal(projectLabel("proj-2", names.get("proj-2")), "测试");
+  assert.equal(projectLabel("legacy-only"), "legacy-only");
+  assert.equal(projectLabel(defaultProject), defaultProjectLabel);
 });
 
 function ok(json: unknown): Promise<Probe<unknown>> {

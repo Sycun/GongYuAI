@@ -9,7 +9,6 @@ import { ChatMarkdown } from "../components/ChatMarkdown";
 import { STATUS_LABEL } from "../labels";
 import { ChatTaskSelect } from "../components/ChatTaskProgress";
 import type { TaskLink } from "../chat/useChatProjects";
-import { projectLabel } from "../chat/projects";
 import { ComposerSafety, ReviewRecord, decisions } from "../components/ComposerSafety";
 import type { DraftFile } from "../chat/attachments";
 import { BrandMark } from "../components/ChatSidebar";
@@ -24,7 +23,7 @@ type Props = {
   onSelectModel: (s: ChatSelection) => void; onApprovalSettings: () => void;
   files: DraftFile[]; storing: boolean; onFiles: (files: DraftFile[]) => void; onRemoveFile: (id: string) => void;
   conversation?: Conversation; pending?: string; draft: string; onDraft: (text: string) => void;
-  projects: string[]; project: string; onMove: (name: string) => void;
+  projects: string[]; project: string; projectLabel: (id: string) => string; onMove: (name: string) => void;
   archived: boolean; archiveBusy: boolean; onArchive: (archived: boolean) => void;
   taskArchives: Map<string, TaskArchiveState>; onTaskArchive: (id: string, archived: boolean) => void;
   taskLink?: TaskLink; onLink: (id: string) => void;
@@ -50,7 +49,7 @@ function stateOf(turn: Turn, pending?: string) {
 }
 
 export function ChatPage({ catalog, selected, modelError, onSelectModel, onApprovalSettings, files, storing, onFiles, onRemoveFile, conversation, pending, draft, onDraft, onSend, onTask, onRetry, onCancel,
-  projects, project, onMove, taskLink, onLink, narrow, viewedTaskId, viewMode, taskChoices, onPin, onFollow,
+  projects, project, projectLabel, onMove, taskLink, onLink, narrow, viewedTaskId, viewMode, taskChoices, onPin, onFollow,
   archived, archiveBusy, onArchive, taskArchives, onTaskArchive }: Props) {
   const [modelOpen, setModelOpen] = useState(false);
   const [reading, setReading] = useState(false);

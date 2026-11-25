@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Input } from "@douyinfe/semi-ui";
 import { IconArchive, IconChevronDown, IconChevronRight, IconChevronUp, IconFolder, IconCommentStroked, IconPlus, IconSearchStroked, IconSettingStroked, IconSidebar, IconUndo } from "@douyinfe/semi-icons";
 import type { ArchiveScope } from "../chat/archives";
-import { defaultProject, projectLabel } from "../chat/projects";
+import { defaultProject } from "../chat/projects";
 import type { Conversation } from "../chat/useConversations";
 
 export function BrandMark() {
@@ -11,7 +11,7 @@ export function BrandMark() {
 
 type Props = {
   conversations: Conversation[]; selected: string | null; collapsed?: boolean; blank: boolean;
-  projects: string[]; currentProject: string; projectOf: (id: string) => string;
+  projects: string[]; currentProject: string; projectOf: (id: string) => string; projectLabel: (id: string) => string;
   archivedChats: Set<string>; archivedProjects: Set<string>; showArchived: boolean;
   archiveBusy: boolean; onArchive: (scope: ArchiveScope, archived: boolean) => void;
   onShowArchived: (show: boolean) => void;
@@ -21,7 +21,7 @@ type Props = {
   attention?: Record<string, boolean>;
 };
 
-export function ChatSidebar({ conversations, selected, collapsed, blank, projects, currentProject, projectOf,
+export function ChatSidebar({ conversations, selected, collapsed, blank, projects, currentProject, projectOf, projectLabel,
   archivedChats, archivedProjects, showArchived, archiveBusy, onArchive, onShowArchived,
   folded, onFold, onCreateProject, onNew, onToggle, onSelect, onFeatures, attention }: Props) {
   const [search, setSearch] = useState(false);
@@ -39,7 +39,8 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
   const visible = projects.map(project => {
     const items = grouped.get(project) ?? [];
     const label = projectLabel(project);
-    const matches = label.toLocaleLowerCase().includes(filter) || project.toLocaleLowerCase().includes(filter);
+    const matches = label.toLocaleLowerCase().includes(filter)
+      || (project === defaultProject && project.toLocaleLowerCase().includes(filter));
     return { project, label, items: matches ? items : items.filter(c => c.title.toLocaleLowerCase().includes(filter)), matches,
       archived: archivedProjects.has(project) };
   }).filter(group => (group.matches && group.archived === showArchived) || group.items.length);

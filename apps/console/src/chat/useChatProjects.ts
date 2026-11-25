@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Toast } from "@douyinfe/semi-ui";
-import { defaultProject } from "./projects";
+import { newId } from "./id";
+import { defaultProject, projectLabel as formatProjectLabel, projectName as formatProjectName } from "./projects";
 
 const prefix = "gongyuai.chat.workspace.v1.";
 export type TaskLink = { id: string; turnId?: string };
@@ -33,9 +34,11 @@ export function useChatProjects() {
     catch { Toast.warning("浏览器无法保存本次设置，刷新后可能丢失。"); }
   }
 
+  const projectName = (id: string) => formatProjectName(id, values.get("project/" + id));
+  const projectLabel = (id: string) => formatProjectLabel(id, values.get("project/" + id));
   const projects = [defaultProject, ...[...values.keys()].filter(k => k.startsWith("project/"))
-    .map(k => k.slice("project/".length)).filter(name => name && name !== defaultProject)
-    .sort((a, b) => a.localeCompare(b, "zh-CN"))];
+    .map(k => k.slice("project/".length)).filter(id => id && id !== defaultProject)
+    .sort((a, b) => projectName(a).localeCompare(projectName(b), "zh-CN") || a.localeCompare(b))];
   function taskOf(chatId: string): TaskLink | undefined {
     try {
       const link = JSON.parse(values.get("task/" + chatId) || "null");
@@ -65,10 +68,17 @@ export function useChatProjects() {
       save("archives", JSON.stringify([...entries]));
     },
     projectOf: (chatId: string) => values.get("belongs/" + chatId) || defaultProject,
-    folded: (name: string) => values.get("fold/" + name) === "1",
-    setFolded: (name: string, folded: boolean) => save("fold/" + name, folded ? "1" : "0"),
-    addProject: (name: string) => save("project/" + name, name),
-    moveChat: (chatId: string, name: string) => save("belongs/" + chatId, name),
+    projectName,
+    projectLabel,
+    folded: (id: string) => values.get("fold/" + id) === "1",
+    setFolded: (id: string, folded: boolean) => save("fold/" + id, folded ? "1" : "0"),
+    addProject: (name: string) => {
+      let id = newId();
+      while (id === defaultProject || values.has("project/" + id)) id = newId();
+      save("project/" + id, name);
+      return id;
+    },
+    moveChat: (chatId: string, projectId: string) => save("belongs/" + chatId, projectId),
     linkTask: (chatId: string, link?: TaskLink) => save("task/" + chatId, JSON.stringify(link ?? null)),
   };
 }
