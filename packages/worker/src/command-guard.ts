@@ -25,12 +25,13 @@ export function checkCommandRun(m: WorkerManifest) {
   const ledger = new CommandLedger(m.dataDir);
   try { check(ledger, m, m.commandFence); } finally { ledger.close(); }
 }
-export function recordHardDenial(m: WorkerManifest, tool: string, reason: string) {
+export function recordHardDenial(m: WorkerManifest, tool: string, reason: string, command?: string) {
   if (!m.commandFence) return;
   const ledger = new CommandLedger(m.dataDir);
   try {
     check(ledger, m, m.commandFence);
-    const ticket = ledger.request(m.taskId, m.commandFence, commandProposal(tool, tool, []));
+    const { digest } = commandProposal(tool, command?.trim() || tool, []);
+    const ticket = ledger.request(m.taskId, m.commandFence, { tool, summary: tool, digest });
     ledger.settle(ticket, { ...unavailable(reason, ticket.id), decision: "block", risk: "high" });
   } finally { ledger.close(); }
 }

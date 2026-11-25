@@ -164,6 +164,7 @@ export function gateTool<T>(
   tool: string,
   check: () => T,
   detail?: Record<string, unknown>,
+  deniedCommand?: string,
 ): T {
   let authorized: T;
   try {
@@ -181,7 +182,7 @@ export function gateTool<T>(
       (isCriticalHostViolation ||
         (isStandaloneCaller && (/^denied:/.test(reason) || reason.includes("not in task targets"))))
     ) {
-      recordHardDenial(ctx.manifest, tool, reason);
+      recordHardDenial(ctx.manifest, tool, reason, deniedCommand);
     }
     ctx.history.recordToolGate(ctx.manifest.taskId, {
       tool,
@@ -294,7 +295,7 @@ export async function runShell(
     const verdict = authorizeCommand(ctx.manifest.auth, command);
     assertRepeatAllowed(ctx, command);
     return verdict;
-  });
+  }, undefined, command);
   checkCommandRun(ctx.manifest);
   const proposal = {
     ...commandProposal("shell", command, [], true),
