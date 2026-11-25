@@ -40,26 +40,77 @@ function formatNum(n: number): string {
   return n.toLocaleString("zh-CN");
 }
 
-export function SettingsPage({ section, catalog, onCatalog, profileId }: { profileId?: string | null; section: SettingsSection; catalog: ChatCatalog | null; onCatalog: (value: ChatCatalog) => void }) {
+const SETTINGS_DATA_SECTIONS = new Set<SettingsSection>(["assets", "mcp", "skills", "update"]);
+
+export function SettingsPage({
+  section,
+  catalog,
+  onCatalog,
+  profileId,
+  online,
+  modelError,
+}: {
+  profileId?: string | null;
+  section: SettingsSection;
+  catalog: ChatCatalog | null;
+  onCatalog: (value: ChatCatalog) => void;
+  online?: boolean | null;
+  modelError?: boolean;
+}) {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [usage, setUsage] = useState<UsageStats | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadingModels, setReloadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateJobStatus | null>(null);
   const updateFormApi = useRef<FormApi | null>(null);
   const updateStartedAt = useRef<number>(0);
   const lastCommitBeforeUpdate = useRef<string | null>(null);
+  const loadSeq = useRef(0);
+
+  const needsSettings = SETTINGS_DATA_SECTIONS.has(section);
+  const needsUsage = section === "usage";
 
   const reload = useCallback(async () => {
-    const [s, u] = await Promise.all([api.settings(), section === "usage" ? api.usage(true) : null]);
-    setSettings(s.json);
-    if (u) setUsage(u.json);
-    return s.json;
-  }, [section]);
+    if (!needsSettings && !needsUsage) return null;
+    const seq = ++loadSeq.current;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [s, u] = await Promise.all([
+        needsSettings ? api.settings() : null,
+        needsUsage ? api.usage(true) : null,
+      ]);
+      if (loadSeq.current !== seq) return null;
+      if (s) setSettings(s.json);
+      if (u) setUsage(u.json);
+      return s?.json ?? null;
+    } catch (e) {
+      if (loadSeq.current === seq) {
+        setLoadError(e instanceof Error ? e.message : String(e));
+      }
+      throw e;
+    } finally {
+      if (loadSeq.current === seq) setLoading(false);
+    }
+  }, [needsSettings, needsUsage]);
 
   useEffect(() => {
+    if (!needsSettings && !needsUsage) {
+      setLoadError(null);
+      return;
+    }
     void reload().catch((e) => Toast.error(e instanceof Error ? e.message : String(e)));
-  }, [reload]);
+  }, [reload, needsSettings, needsUsage]);
+
+  useEffect(() => {
+    if (online !== true) return;
+    if ((needsSettings && !settings) || (needsUsage && !usage) || loadError) {
+      void reload().catch(() => {});
+    }
+  }, [online, needsSettings, needsUsage, settings, usage, loadError, reload]);
 
   useEffect(() => {
     if (!updating) return;
@@ -120,8 +171,140 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
     return () => window.clearInterval(timer);
   }, [updating, reload]);
 
+  const totals = usage?.totals ?? { tokens: 0, toolCalls: 0, installs: 0, tasks: 0 };
+  const phase = updateStatus?.phase;
+  const cardStyle = { background: "var(--semi-color-bg-1)", maxWidth: 720 } as const;
+
+  if (section === "approval") {
+    return <ChatApprovalSettings catalog={catalog} onCatalog={onCatalog} online={online} />;
+  }
+
+  if (section === "model") {
+    const retryModels = () => {
+      setReloadingModels(true);
+      void api
+        .chatModels()
+        .then((r) => onCatalog(r.json))
+        .catch(() => Toast.error("无法读取模型配置"))
+        .finally(() => setReloadingModels(false));
+    };
+    return (
+      <div className="gy-settings-stack">
+        {catalog ? (
+          <ChatModelSettings key={profileId} catalog={catalog} initialId={profileId} onSaved={onCatalog} />
+        ) : (
+          <div role="status">
+            <Space vertical align="start">
+              <Typography.Text type={modelError || online === false ? "danger" : "tertiary"}>
+                {online === false
+                  ? "无法连接后端服务，暂时无法读取模型配置。服务恢复后会自动重试。"
+                  : modelError
+                    ? "读取模型配置失败，请重试。"
+                    : "正在读取模型配置…"}
+              </Typography.Text>
+              {(modelError || online === false) && (
+                <Button icon={<IconRefresh />} loading={reloadingModels} onClick={retryModels}>
+                  重新读取对话模型
+                </Button>
+              )}
+            </Space>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (section === "runtime") {
+    return (
+      <Card title="运行时" style={cardStyle}>
+        <Space vertical align="start">
+          <Typography.Text>监听 {window.location.host || "0.0.0.0:8877"}</Typography.Text>
+          <Typography.Text type="tertiary">
+            长程任务控制台 · 检查点 + 租约/栅栏 · 证据闸门 · Semi Design
+          </Typography.Text>
+        </Space>
+      </Card>
+    );
+  }
+
+  const renderLoadFallback = (loadingLabel: string) => {
+    if (loadError) {
+      return (
+        <div role="alert">
+          <Space vertical align="start">
+            <Typography.Text type="danger">
+              {online === false
+                ? "后端服务当前离线，无法加载数据。服务恢复后会自动重试。"
+                : `加载失败：${loadError}`}
+            </Typography.Text>
+            <Button
+              icon={<IconRefresh />}
+              loading={loading}
+              onClick={() => void reload().catch((e) => Toast.error(e instanceof Error ? e.message : String(e)))}
+            >
+              重试
+            </Button>
+          </Space>
+        </div>
+      );
+    }
+    return <Typography.Text type="tertiary">{loadingLabel}</Typography.Text>;
+  };
+
+  if (section === "usage") {
+    if (!usage) return renderLoadFallback("加载用量…");
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <IntegrationUsage usage={usage.integrations} />
+        <Card title="Token 统计" style={cardStyle}>
+          <Row gutter={12} style={{ marginBottom: 12 }}>
+            <Col span={12}>
+              <Typography.Text type="tertiary" size="small">
+                累计 Token
+              </Typography.Text>
+              <div style={{ fontSize: 26, fontWeight: 650 }}>{formatNum(totals.tokens)}</div>
+            </Col>
+            <Col span={12}>
+              <Typography.Text type="tertiary" size="small">
+                工具调用 / 安装
+              </Typography.Text>
+              <div style={{ fontSize: 18, fontWeight: 600, marginTop: 6 }}>
+                {formatNum(totals.toolCalls)} / {formatNum(totals.installs)}
+              </div>
+            </Col>
+          </Row>
+          <Typography.Text type="tertiary" size="small">
+            任务数 {totals.tasks}
+          </Typography.Text>
+          <Table
+            style={{ marginTop: 12 }}
+            size="small"
+            pagination={false}
+            rowKey="id"
+            dataSource={usage.byTask ?? []}
+            empty="暂无用量"
+            columns={[
+              { title: "任务", dataIndex: "name", ellipsis: true },
+              { title: "Token", dataIndex: "tokens", width: 90, render: (v: number) => formatNum(v) },
+              { title: "工具", dataIndex: "toolCalls", width: 70 },
+            ]}
+          />
+          <Button
+            icon={<IconRefresh />}
+            theme="borderless"
+            style={{ marginTop: 8 }}
+            loading={loading}
+            onClick={() => void reload().catch((e) => Toast.error(e instanceof Error ? e.message : String(e)))}
+          >
+            刷新用量
+          </Button>
+        </Card>
+      </div>
+    );
+  }
+
   if (!settings) {
-    return <Typography.Text type="tertiary">加载设置…</Typography.Text>;
+    return renderLoadFallback("加载设置…");
   }
 
   const saveUpdateCfg = async (
@@ -143,6 +326,7 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
   };
 
   const runSilentUpdate = async () => {
+    if (!settings) return;
     const values =
       updateFormApi.current?.getValues?.() ??
       ({
@@ -175,21 +359,6 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
       Toast.error(e instanceof Error ? e.message : String(e));
     }
   };
-
-  const totals = usage?.totals ?? { tokens: 0, toolCalls: 0, installs: 0, tasks: 0 };
-  const phase = updateStatus?.phase;
-  const cardStyle = { background: "var(--semi-color-bg-1)", maxWidth: 720 } as const;
-
-  if (section === "approval") return <ChatApprovalSettings catalog={catalog} onCatalog={onCatalog} />;
-
-  if (section === "model") {
-    return (
-      <div className="gy-settings-stack">
-        {catalog ? <ChatModelSettings key={profileId} catalog={catalog} initialId={profileId} onSaved={onCatalog} /> :
-          <Button onClick={() => void api.chatModels().then(r => onCatalog(r.json)).catch(() => Toast.error("无法读取模型配置"))}>重新读取对话模型</Button>}
-      </div>
-    );
-  }
 
   if (section === "assets") {
     const collectors = settings.assetCollectors ?? [];
@@ -738,56 +907,6 @@ export function SettingsPage({ section, catalog, onCatalog, profileId }: { profi
           </Form>
         </Card>
       </Space>
-    );
-  }
-
-  if (section === "usage") {
-    return (
-      <div style={{ display: "grid", gap: 16 }}>
-      <IntegrationUsage usage={usage?.integrations} />
-      <Card title="Token 统计" style={cardStyle}>
-        <Row gutter={12} style={{ marginBottom: 12 }}>
-          <Col span={12}>
-            <Typography.Text type="tertiary" size="small">
-              累计 Token
-            </Typography.Text>
-            <div style={{ fontSize: 26, fontWeight: 650 }}>{formatNum(totals.tokens)}</div>
-          </Col>
-          <Col span={12}>
-            <Typography.Text type="tertiary" size="small">
-              工具调用 / 安装
-            </Typography.Text>
-            <div style={{ fontSize: 18, fontWeight: 600, marginTop: 6 }}>
-              {formatNum(totals.toolCalls)} / {formatNum(totals.installs)}
-            </div>
-          </Col>
-        </Row>
-        <Typography.Text type="tertiary" size="small">
-          任务数 {totals.tasks}
-        </Typography.Text>
-        <Table
-          style={{ marginTop: 12 }}
-          size="small"
-          pagination={false}
-          rowKey="id"
-          dataSource={usage?.byTask ?? []}
-          empty="暂无用量"
-          columns={[
-            { title: "任务", dataIndex: "name", ellipsis: true },
-            { title: "Token", dataIndex: "tokens", width: 90, render: (v: number) => formatNum(v) },
-            { title: "工具", dataIndex: "toolCalls", width: 70 },
-          ]}
-        />
-        <Button
-          icon={<IconRefresh />}
-          theme="borderless"
-          style={{ marginTop: 8 }}
-          onClick={() => void reload()}
-        >
-          刷新用量
-        </Button>
-      </Card>
-      </div>
     );
   }
 

@@ -136,6 +136,14 @@ export function App() {
   }, [route]);
 
   useEffect(() => {
+    if (online !== true || catalog) return;
+    let active = true;
+    api.chatModels().then(r => { if (active) { setCatalog(r.json); setModelError(false); } })
+      .catch(() => { if (active) setModelError(true); });
+    return () => { active = false; };
+  }, [online, catalog]);
+
+  useEffect(() => {
     function hashChange() { setPage(parseHash()); setPanel(null); }
     const media = matchMedia("(max-width: 760px)");
     function resize() { setNarrow(media.matches); setPanel(p => p === "history" ? null : p); }
@@ -402,7 +410,7 @@ export function App() {
           {route === "graphs" && <GraphCenterPage onOpen={openHref} />}
           {route === "demo" && <DemoPage />}
           {route === "knowledge" && <KnowledgePage query={page.query} tasks={tasks} />}
-          {isSettingsRoute(route) && <SettingsPage section={settingsSectionOf(route)} catalog={catalog} onCatalog={setCatalog} profileId={id} />}
+          {isSettingsRoute(route) && <SettingsPage section={settingsSectionOf(route)} catalog={catalog} onCatalog={setCatalog} profileId={id} online={online} modelError={modelError} />}
           {isDetail(route) && <TaskDetailPage key={detailId} task={tasks.find(t => t.id === detailId) ?? null}
             tab={route} focus={page.query} refreshNonce={detailNonce}
             onTabChange={next => navigate(next, detailId ?? null)} onRefresh={() => { setDetailNonce(value => value + 1); return refreshAfterTaskAction(); }} />}

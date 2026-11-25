@@ -11,9 +11,9 @@ import { api } from "../api";
 import { newId } from "../chat/id";
 
 type Mode = "reuse" | "independent";
-type Props = { catalog: ChatCatalog | null; onCatalog: (value: ChatCatalog) => void };
+type Props = { catalog: ChatCatalog | null; onCatalog: (value: ChatCatalog) => void; online?: boolean | null };
 
-export function ChatApprovalSettings({ catalog, onCatalog }: Props) {
+export function ChatApprovalSettings({ catalog, onCatalog, online }: Props) {
   const [draft, setDraft] = useState<ChatApproval | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -23,9 +23,13 @@ export function ChatApprovalSettings({ catalog, onCatalog }: Props) {
   const { found, busy: querying, query, reset } = useChatModelQuery();
   useEffect(() => {
     let active = true;
+    setMessage("");
     api.approval().then(r => { if (active) setDraft(r.json); }).catch(() => { if (active) setMessage("读取审批策略失败。"); });
     return () => { active = false; };
   }, [attempt]);
+  useEffect(() => {
+    if (online === true && !draft && message) setAttempt(n => n + 1);
+  }, [online, draft, message]);
   if (!draft) return <div role="status">{message || "读取审批策略…"} {message && <Button onClick={() => setAttempt(n => n+1)}>重试</Button>}</div>;
 
   const effective: Mode = mode ?? (draft.reviewer ? "independent" : "reuse");
