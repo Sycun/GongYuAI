@@ -157,7 +157,15 @@ function withLiveGoals(task: TaskRecord): TaskRecord {
 }
 
 function taskArchiveState(task: TaskRecord): TaskArchiveState {
-  return { id: task.id, name: task.name, status: task.status, archivedAt: task.archivedAt, submissionKey: task.assignment?.requestId };
+  return {
+    id: task.id,
+    name: task.name,
+    status: task.status,
+    archivedAt: task.archivedAt,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    submissionKey: task.assignment?.requestId,
+  };
 }
 
 function sendFile(res: ServerResponse, abs: string, cache = false): boolean {

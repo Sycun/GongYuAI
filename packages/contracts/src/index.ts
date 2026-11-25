@@ -157,6 +157,8 @@ export function isArchivableTaskStatus(status: unknown): boolean {
 }
 
 export type TaskArchiveState = Pick<TaskRecord, "id" | "name" | "status" | "archivedAt"> & {
+  createdAt?: string;
+  updatedAt?: string;
   submissionKey?: string;
 };
 

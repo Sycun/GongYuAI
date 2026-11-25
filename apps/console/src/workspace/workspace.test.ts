@@ -20,7 +20,7 @@ import {
 } from "./model.js";
 import type { Probe } from "../api";
 import type { TaskArchiveState } from "@gongyuai/contracts";
-import { archiveKey, workspaceArchives } from "../chat/archives";
+import { archiveKey, mergeWorkspaceConversations, submissionTasks, taskChatId, taskIdForChat, workspaceArchives } from "../chat/archives";
 import { defaultProject, defaultProjectLabel, isDuplicateProjectName, projectLabel, projectName } from "../chat/projects";
 import type { Conversation } from "../chat/useConversations";
 import { loadAssetGraph, loadMemoryGraph, loadSurface, type Getter } from "./loadGraphs.js";
@@ -103,6 +103,68 @@ test("archiving a project releases its name while keeping legacy and new project
   assert.equal(projectLabel("proj-2", names.get("proj-2")), "测试");
   assert.equal(projectLabel("legacy-only"), "legacy-only");
   assert.equal(projectLabel(defaultProject), defaultProjectLabel);
+});
+
+test("server tasks created outside chat automatically appear in sidebar without duplicating local or linked chats", () => {
+  const localTaskId = "11111111-1111-4111-8111-111111111111";
+  const pendingTaskId = "22222222-2222-4222-8222-222222222222";
+  const linkedTaskId = "33333333-3333-4333-8333-333333333333";
+  const cliRunningId = "44444444-4444-4444-8444-444444444444";
+  const cliArchivedId = "55555555-5555-4555-8555-555555555555";
+
+  const conversations: Conversation[] = [
+    {
+      id: "chat-local",
+      title: "本地对话",
+      updated: Date.parse("2026-11-25T09:00:00Z"),
+      turns: [
+        { id: "turn-1", conversationId: "chat-local", created: Date.parse("2026-11-25T09:00:00Z"), question: "本地对话", answer: "", taskId: localTaskId },
+        { id: "turn-2", conversationId: "chat-local", created: Date.parse("2026-11-25T09:01:00Z"), question: "提交中", answer: "", submissionKey: "turn-2" },
+      ],
+    },
+  ];
+  const tasks = new Map<string, TaskArchiveState>([
+    [localTaskId, { id: localTaskId, name: "本地任务", status: "completed", archivedAt: null, createdAt: "2026-11-25T09:00:00Z" }],
+    [pendingTaskId, { id: pendingTaskId, name: "提交中任务", status: "running", archivedAt: null, createdAt: "2026-11-25T09:01:00Z", submissionKey: "turn-2" }],
+    [linkedTaskId, { id: linkedTaskId, name: "手动关联任务", status: "running", archivedAt: null, createdAt: "2026-11-25T09:05:00Z" }],
+    [cliRunningId, { id: cliRunningId, name: "tsecbench-auto", status: "running", archivedAt: null, createdAt: "2026-11-25T10:00:00Z" }],
+    [cliArchivedId, { id: cliArchivedId, name: "tsecbench-old", status: "stopped", archivedAt: "2026-11-24T12:00:00Z", createdAt: "2026-11-24T10:00:00Z" }],
+  ]);
+
+  const manualLinks = new Map<string, string>([["chat-linked", linkedTaskId]]);
+  const linkedTaskOf = (id: string) => manualLinks.get(id) ?? taskIdForChat(id);
+  const submissions = submissionTasks(tasks.values());
+  const merged = mergeWorkspaceConversations({
+    conversations,
+    linkedChats: manualLinks.keys(),
+    linkedTaskOf,
+    tasks,
+    submissions,
+  });
+
+  // Newest first; local/pending/linked tasks are NOT duplicated as task-<id>
+  assert.deepEqual(
+    merged.map(c => ({ id: c.id, title: c.title })),
+    [
+      { id: taskChatId(cliRunningId), title: "tsecbench-auto" },
+      { id: "chat-linked", title: "手动关联任务" },
+      { id: "chat-local", title: "本地对话" },
+      { id: taskChatId(cliArchivedId), title: "tsecbench-old" },
+    ],
+  );
+
+  // Archived server tasks are automatically classified into archivedChats
+  const archiveState = workspaceArchives({
+    projects: [defaultProject],
+    conversations: merged,
+    projectOf: () => defaultProject,
+    linkedTaskOf,
+    tasks,
+    localArchives: new Set(),
+    isSubmitting: () => false,
+  });
+  assert.equal(archiveState.archivedChats.has(taskChatId(cliRunningId)), false);
+  assert.equal(archiveState.archivedChats.has(taskChatId(cliArchivedId)), true);
 });
 
 function ok(json: unknown): Promise<Probe<unknown>> {

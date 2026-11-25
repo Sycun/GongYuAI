@@ -229,7 +229,7 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
           details && <ChatTaskSelect value={taskLink?.id ?? ""} onChange={onLink} disabled={archiveBusy} />}</dd>
         <dt>当前模型</dt><dd>{selected?.modelId ?? "未选择"}</dd>
         <dt>思考强度</dt><dd>{effortLabels[selected?.effort ?? "default"]}</dd>
-        <dt>会话状态</dt><dd>{archived ? "已归档" : last ? stateOf(last, pending) : "尚未开始"}</dd>
+        <dt>会话状态</dt><dd>{archived ? "已归档" : last ? stateOf(last, pending) : taskLink?.id && taskArchives.get(taskLink.id)?.status ? (STATUS_LABEL[taskArchives.get(taskLink.id)!.status] ?? taskArchives.get(taskLink.id)!.status) : "尚未开始"}</dd>
         {conversation?.turns[0] && <><dt>开始时间</dt><dd>{stamp.format(conversation.turns[0].created)}</dd></>}
       </dl>
       {conversation && <Button className="gy-session-archive" size="small" disabled={archiveBusy} onClick={() => onArchive(!archived)}>

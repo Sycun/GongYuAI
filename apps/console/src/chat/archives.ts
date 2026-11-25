@@ -12,6 +12,74 @@ export function taskIdForChat(id: string) {
   return /^task-([a-f0-9-]{36})$/.exec(id)?.[1];
 }
 
+export function taskChatId(taskId: string) {
+  return `task-${taskId}`;
+}
+
+function taskTimestamp(task?: TaskArchiveState): number {
+  const ts = Date.parse(task?.createdAt ?? task?.updatedAt ?? "");
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+export function mergeWorkspaceConversations({
+  conversations,
+  linkedChats,
+  linkedTaskOf,
+  tasks,
+  submissions,
+  activeChatId,
+}: {
+  conversations: Conversation[];
+  linkedChats: Iterable<string>;
+  linkedTaskOf: (id: string) => string | undefined;
+  tasks: Map<string, TaskArchiveState>;
+  submissions: Map<string, string>;
+  activeChatId?: string | null;
+}): Conversation[] {
+  const knownChats = new Set(conversations.map(c => c.id));
+  const coveredTasks = new Set<string>();
+  const merged: Conversation[] = [...conversations];
+
+  for (const chat of conversations) {
+    for (const taskId of conversationTaskIds(chat, linkedTaskOf(chat.id), submissions)) {
+      coveredTasks.add(taskId);
+    }
+  }
+
+  const extraChatIds = new Set<string>(linkedChats);
+  if (activeChatId && taskIdForChat(activeChatId)) extraChatIds.add(activeChatId);
+
+  for (const id of extraChatIds) {
+    if (knownChats.has(id)) continue;
+    knownChats.add(id);
+    const taskId = linkedTaskOf(id);
+    if (taskId) coveredTasks.add(taskId);
+    const task = taskId ? tasks.get(taskId) : undefined;
+    merged.push({
+      id,
+      title: task?.name?.trim() || "关联任务",
+      updated: taskTimestamp(task),
+      turns: [],
+    });
+  }
+
+  for (const task of [...tasks.values()].reverse()) {
+    if (coveredTasks.has(task.id)) continue;
+    const id = taskChatId(task.id);
+    if (knownChats.has(id)) continue;
+    knownChats.add(id);
+    coveredTasks.add(task.id);
+    merged.push({
+      id,
+      title: task.name.trim() || `任务 ${task.id.slice(0, 8)}`,
+      updated: taskTimestamp(task),
+      turns: [],
+    });
+  }
+
+  return merged.sort((a, b) => b.updated - a.updated);
+}
+
 export function submissionTasks(tasks: Iterable<TaskArchiveState>) {
   const result = new Map<string, string>();
   for (const task of tasks) {

@@ -10,7 +10,7 @@ import { storeFiles, type DraftFile } from "./chat/attachments";
 import { useConversations } from "./chat/useConversations";
 import { defaultProject, isDuplicateProjectName } from "./chat/projects";
 import { useChatProjects } from "./chat/useChatProjects";
-import { archiveKey, conversationTaskIds, submissionTasks, taskIdForChat, workspaceArchives, type ArchiveScope } from "./chat/archives";
+import { archiveKey, conversationTaskIds, mergeWorkspaceConversations, submissionTasks, taskIdForChat, workspaceArchives, type ArchiveScope } from "./chat/archives";
 import { useTaskArchives } from "./chat/useTaskArchives";
 import { ChatSidebar } from "./components/ChatSidebar";
 import { ChatPage } from "./pages/ChatPage";
@@ -69,7 +69,7 @@ export function App() {
   const [narrow, setNarrow] = useState(() => matchMedia("(max-width: 760px)").matches);
   const { conversations, send, pendingTurn, applyTask, cancel } = useConversations();
   const workspace = useChatProjects();
-  const taskArchives = useTaskArchives(Boolean(conversations.length || workspace.linkedChats.length || taskIdForChat(page.id ?? "")));
+  const taskArchives = useTaskArchives(true);
   const [showArchived, setShowArchived] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -100,12 +100,15 @@ export function App() {
   const taskSessionId = taskIdForChat(chatId);
   const taskLink = workspace.taskOf(chatId) ?? (taskSessionId ? { id: taskSessionId, turnId: undefined } : undefined);
   const linkedTaskOf = (id: string) => workspace.taskOf(id)?.id ?? taskIdForChat(id);
-  const knownChats = new Set(conversations.map(c => c.id));
-  const linkedChats = new Set(workspace.linkedChats);
-  if (taskSessionId) linkedChats.add(chatId);
-  const workspaceChats = [...conversations, ...[...linkedChats].filter(id => !knownChats.has(id)).map(id => ({
-    id, title: archiveRecords.get(linkedTaskOf(id) ?? "")?.name ?? "关联任务", updated: 0, turns: [],
-  }))];
+  const taskSubmissions = submissionTasks(archiveRecords.values());
+  const workspaceChats = mergeWorkspaceConversations({
+    conversations,
+    linkedChats: workspace.linkedChats,
+    linkedTaskOf,
+    tasks: archiveRecords,
+    submissions: taskSubmissions,
+    activeChatId: chatId,
+  });
   const isSubmitting = (id: string) => Boolean(pendingTurn(id) || preparing.current.has(id));
   const { archivedChats, archivedProjects, chatsByProject, submissions } = workspaceArchives({
     projects: workspace.projects, conversations: workspaceChats, projectOf: workspace.projectOf,
@@ -395,7 +398,7 @@ export function App() {
         <div className="gy-shell-content"><Suspense fallback={<span role="status">正在打开…</span>}>
           {route === "overview" && <OverviewPage overview={overview} onSelect={openTask} onOpen={openHref} />}
           {route === "tasks" && <TasksPage tasks={tasks} onSelect={openTask} onRefresh={refreshAfterTaskAction}
-            onCreated={task => { openTask(task); void refresh(); }} />}
+            onCreated={task => { openTask(task); void refreshAfterTaskAction(); }} />}
           {route === "graphs" && <GraphCenterPage onOpen={openHref} />}
           {route === "demo" && <DemoPage />}
           {route === "knowledge" && <KnowledgePage query={page.query} tasks={tasks} />}
