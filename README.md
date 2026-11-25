@@ -44,10 +44,10 @@ GY_REVIEW_OUTPUT="$PWD/out/readme-review" pnpm review:offline
 完成构建后，从仓库根目录启动本机控制面。以下命令使用独立的数据目录，适合初次体验。`--isolated` 会跳过旧任务导入、Watchdog 和后台作业队列。
 
 ```sh
-pnpm gy serve --isolated --data-dir "$PWD/out/readme-demo" --host 127.0.0.1 --port 8787
+pnpm gy serve --isolated --data-dir "$PWD/out/readme-demo" --host 127.0.0.1 --port 8877
 ```
 
-保持这个终端运行，在浏览器打开 [本机工作台](http://127.0.0.1:8787/)。想先看界面，可进入「设置与功能 → 演示场景」，逐条查看两份会议纪要怎样形成一致结论和待确认项。这个内置演示使用固定数据，无需模型。也可以从另一终端执行 `curl -fsS http://127.0.0.1:8787/health`，确认服务返回 `"ok": true`。结束体验时，在服务终端按 Ctrl+C。
+保持这个终端运行，在浏览器打开 [本机工作台](http://127.0.0.1:8877/)。想先看界面，可进入「设置与功能 → 演示场景」，逐条查看两份会议纪要怎样形成一致结论和待确认项。这个内置演示使用固定数据，无需模型。也可以从另一终端执行 `curl -fsS http://127.0.0.1:8877/health`，确认服务返回 `"ok": true`。结束体验时，在服务终端按 Ctrl+C。
 
 ### 提交一项材料核对任务
 
@@ -73,7 +73,7 @@ pnpm gy scorecard --recompute out/scorecard.json
 
 第一条查询当前状态。第二条导出计算记分卡所用的快照。最后一条只读快照文件，复算目标计数并校验摘要，输出中的 `sealValid` 表示快照校验是否通过。
 
-开发控制台时，可在另一终端运行 `GY_CONSOLE_API=http://127.0.0.1:8787 pnpm dev:console`，从 Vite 打印的地址打开页面。这里显式指定了后端端口，因为 Vite 的默认代理指向 8877，而上述 CLI 服务监听 8787。
+开发控制台时，可在另一终端运行 `pnpm dev:console`，从 Vite 打印的地址打开页面。Vite 的默认代理与 CLI / 控制面默认端口都是 8877。若用 `--port` 改了端口，再设 `GY_CONSOLE_API=http://127.0.0.1:<port>`。
 
 ## 已有实验能说明什么
 

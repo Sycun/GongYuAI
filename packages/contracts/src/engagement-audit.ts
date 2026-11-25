@@ -53,6 +53,8 @@ export type EngagementAuditCredential = {
   kind: string;
   reuseCount: number;
   verifiedAt: string | null;
+  /** Absent on older projections; only an explicit L1 triggers the hint. */
+  tier?: "L1" | "L2" | "L3";
 };
 
 export type EngagementAuditInput = {
@@ -69,7 +71,8 @@ export type EngagementAuditObservationCode =
   | "stalled-intent"
   | "tentative-backlog"
   | "unexplored-asset"
-  | "idle-credential";
+  | "idle-credential"
+  | "l1-unverified";
 
 export type EngagementAuditObservation = {
   code: EngagementAuditObservationCode;
@@ -145,6 +148,7 @@ const CODE_RANK: Record<EngagementAuditObservationCode, number> = {
   "tentative-backlog": 3,
   "unexplored-asset": 4,
   "idle-credential": 5,
+  "l1-unverified": 6,
 };
 
 const norm = (value: string | null | undefined): string =>
@@ -328,6 +332,22 @@ export function deriveEngagementAudit(
         `${idleCredentials.length} 条已验证凭据尚未复用；` +
         `横向前先 credential_list 核对适用范围，复用要留 attempt 证据。`,
       refs: idleCredentials.map((credential) => credential.id).slice(0, 8),
+    });
+  }
+
+  // L1 and still unverified: a light hint. Does not replace idle-credential.
+  const unverifiedL1 = credentials.filter(
+    (credential) => credential.tier === "L1" && !credential.verifiedAt,
+  );
+  if (unverifiedL1.length > 0) {
+    observations.push({
+      code: "l1-unverified",
+      key: "l1",
+      severity: "info",
+      text:
+        `${unverifiedL1.length} 条凭据仍是 L1 且未验证；` +
+        `由凭据所有者或其明确授权的人员提供认证证据后记为 L2，影响范围确认后记为 L3。`,
+      refs: unverifiedL1.map((credential) => credential.id).slice(0, 8),
     });
   }
 

@@ -57,6 +57,7 @@ import { formatShellResult, recordExecutionStep } from "./execution-trace.js";
 import { c2Tool, shellJob, shellSession } from "./exec-tools.js";
 import { isUntrustedTool, markUntrusted } from "./untrusted.js";
 import { httpRequestTool } from "./http-tools.js";
+import { redactModelToolResult, redactOutboundChatMessages } from "./outbound-redact.js";
 import { tsecbenchTool } from "./tsecbench-tools.js";
 import { oastHitsTool, oastIssueTool } from "./oast-tools.js";
 import { tunnelCloseTool, tunnelListTool, tunnelOpenTool } from "./tunnel-tools.js";
@@ -602,7 +603,7 @@ async function tryPiDurable(
     let candidateIdx = 0;
 
     const {
-      defineTool,
+      defineTool: definePiTool,
       defineExtension,
       createRegistry,
       Harness,
@@ -617,6 +618,14 @@ async function tryPiDurable(
       hook: (...args: unknown[]) => unknown;
       ToolTask: unknown;
       GenerationTask: unknown;
+    };
+    const defineTool = (spec: { execute?: (...args: never[]) => unknown }) => {
+      const execute = spec?.execute;
+      if (typeof execute !== "function") return definePiTool(spec as never);
+      return definePiTool({
+        ...spec,
+        execute: async (...args: never[]) => redactModelToolResult(await execute(...args)),
+      } as never);
     };
     const { obj, str } = schema as { obj: (x: unknown) => unknown; str: () => unknown };
 
@@ -3197,7 +3206,7 @@ async function runOpenAiToolLoop(
           },
           body: JSON.stringify({
             model: cand.modelId,
-            messages,
+            messages: redactOutboundChatMessages(messages),
             tools: liveTools(),
             tool_choice: "auto",
           }),

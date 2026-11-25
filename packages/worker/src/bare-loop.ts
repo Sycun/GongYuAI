@@ -20,6 +20,7 @@ import { assertMockGoals, collectMockBanner, dispatchMockTool } from "./mock-fix
 import { appendProgress, assertCommandAllowed, chargeToolCall, gateTool, writeEvidence, type ToolContext } from "./tools.js";
 import { writeWorkerStatus } from "./status.js";
 import { recordExecutionStep } from "./execution-trace.js";
+import { redactOutboundChatMessages } from "./outbound-redact.js";
 
 function matchingPaths(evidenceDir: string, goal: GoalSpec): string[] {
   const patterns = [...goal.evidencePatterns, ...(goal.evidenceChecks ?? []).map((rule) => rule.pattern)];
@@ -228,7 +229,12 @@ Rules: use tools only; write real evidence files; never claim DONE until check_g
           authorization: `Bearer ${apiKey}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ model, messages, tools, tool_choice: "auto" }),
+        body: JSON.stringify({
+          model,
+          messages: redactOutboundChatMessages(messages),
+          tools,
+          tool_choice: "auto",
+        }),
       });
       if (!res.ok) throw new Error(`model ${res.status}: ${await res.text()}`);
       const data = (await res.json()) as {

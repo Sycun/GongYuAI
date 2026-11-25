@@ -34,6 +34,7 @@ import type {
   BusinessReconcileConfig,
   Credential,
   CredentialKind,
+  CredentialTier,
   HttpTransaction,
   OastHit,
   OastToken,
@@ -47,6 +48,8 @@ import type {
 import {
   ASSET_KIND_RANK,
   ASSET_TAG,
+  credentialTierUpgrades,
+  defaultCredentialTier,
   FINDING_SEVERITY_RANK,
   ORIGIN_FACT_ID,
   TRANSFERABLE_TAG,
@@ -298,6 +301,20 @@ export class HistoryStore {
     );
     if (!columns.has("fact_id")) {
       this.db.exec("ALTER TABLE credentials ADD COLUMN fact_id TEXT");
+    }
+    if (!columns.has("tier")) {
+      this.db.exec("ALTER TABLE credentials ADD COLUMN tier TEXT");
+      this.db.exec(`
+        UPDATE credentials
+        SET tier = CASE
+          WHEN verified_at IS NOT NULL AND length(trim(verified_at)) > 0 THEN 'L2'
+          ELSE 'L1'
+        END
+        WHERE tier IS NULL OR length(trim(tier)) = 0
+      `);
+    }
+    if (!columns.has("impact_summary")) {
+      this.db.exec("ALTER TABLE credentials ADD COLUMN impact_summary TEXT");
     }
     // P15-C1: legacy findings have no verifier identity. NULL means "unknown",
     // so a later independent validation can still be recorded.
@@ -629,7 +646,9 @@ export class HistoryStore {
         last_used_at TEXT,
         reuse_count INTEGER NOT NULL DEFAULT 0,
         expires_at TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        tier TEXT,
+        impact_summary TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_credentials_task ON credentials(task_id, asset);
 
@@ -1696,6 +1715,8 @@ export class HistoryStore {
     sourceFindingId?: string | null;
     verified?: boolean;
     expiresAt?: string | null;
+    tier?: CredentialTier;
+    impactSummary?: string | null;
     /** 未传（undefined）→ 继承当前活跃 Intent；显式 null = 不挂父节点。 */
     intentId?: string | null;
   }): { credential: Credential; created: boolean } {
@@ -1714,7 +1735,18 @@ export class HistoryStore {
         (row.username ?? null) === username &&
         row.secretRef === secretRef,
     );
-    if (existing) return { credential: existing, created: false };
+    if (existing) {
+      const patch: { tier?: CredentialTier; impactSummary?: string | null } = {};
+      if (input.tier && credentialTierUpgrades(existing.tier, input.tier)) patch.tier = input.tier;
+      if (input.impactSummary !== undefined) {
+        const next = input.impactSummary?.trim() || null;
+        if (next !== existing.impactSummary) patch.impactSummary = next;
+      }
+      if (patch.tier || patch.impactSummary !== undefined) {
+        return { credential: this.updateCredential(input.taskId, existing.id, patch), created: false };
+      }
+      return { credential: existing, created: false };
+    }
 
     const now = this.now();
     const credentialId = randomUUID();
@@ -1744,16 +1776,20 @@ export class HistoryStore {
       reuseCount: 0,
       expiresAt: input.expiresAt ?? null,
       createdAt: now,
+      tier: defaultCredentialTier({ tier: input.tier, verified: input.verified === true }),
+      impactSummary: input.impactSummary?.trim() || null,
     };
     this.db.prepare(
       `INSERT INTO credentials
         (id, task_id, kind, asset, username, secret_ref, secret_hmac, source_finding_id,
-         fact_id, verified_at, last_used_at, reuse_count, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         fact_id, verified_at, last_used_at, reuse_count, expires_at, created_at,
+         tier, impact_summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       credential.id, credential.taskId, credential.kind, credential.asset, credential.username,
       credential.secretRef, credential.secretHmac, credential.sourceFindingId, credential.factId,
       credential.verifiedAt, null, 0, credential.expiresAt, credential.createdAt,
+      credential.tier, credential.impactSummary,
     );
     this.emit(input.taskId, "credential_recorded", {
       credentialId: credential.id,
@@ -1791,6 +1827,27 @@ export class HistoryStore {
     return this.getCredential(taskId, credentialId)!;
   }
 
+  /** Raise tier and/or replace the L3 impact summary. Omitted fields stay as stored. */
+  updateCredential(
+    taskId: string,
+    credentialId: string,
+    patch: { tier?: CredentialTier; impactSummary?: string | null },
+  ): Credential {
+    const current = this.getCredential(taskId, credentialId);
+    if (!current) throw new Error(`unknown credential: ${credentialId}`);
+    if (patch.tier && patch.tier !== "L1" && patch.tier !== "L2" && patch.tier !== "L3") {
+      throw new Error(`invalid credential tier: ${patch.tier}`);
+    }
+    const tier = patch.tier ?? current.tier;
+    const impactSummary = patch.impactSummary === undefined
+      ? current.impactSummary
+      : (patch.impactSummary?.trim() || null);
+    this.db.prepare(
+      "UPDATE credentials SET tier = ?, impact_summary = ? WHERE task_id = ? AND id = ?",
+    ).run(tier, impactSummary, taskId, credentialId);
+    return this.getCredential(taskId, credentialId)!;
+  }
+
   private rowToCredential(row: Row): Credential {
     return {
       id: String(row.id),
@@ -1809,6 +1866,13 @@ export class HistoryStore {
       reuseCount: Number(row.reuse_count ?? 0),
       expiresAt: row.expires_at === null || row.expires_at === undefined ? null : String(row.expires_at),
       createdAt: String(row.created_at),
+      tier: defaultCredentialTier({
+        tier: row.tier === "L1" || row.tier === "L2" || row.tier === "L3" ? row.tier : undefined,
+        verifiedAt: row.verified_at === null || row.verified_at === undefined ? null : String(row.verified_at),
+      }),
+      impactSummary: row.impact_summary === null || row.impact_summary === undefined || row.impact_summary === ""
+        ? null
+        : String(row.impact_summary),
     };
   }
 
@@ -3744,8 +3808,6 @@ export class HistoryStore {
       findingDedupKey({ asset, vulnClass, endpoint });
 
     const existing = this.findFindingByDedupKey(input.taskId, dedupKey);
-    if (existing) return { finding: existing, created: false };
-
     const factIds = [...new Set((input.factIds ?? []).map((s) => s.trim()).filter(Boolean))];
     for (const id of factIds) {
       if (!this.getFact(input.taskId, id)) {
@@ -4714,6 +4776,7 @@ export class HistoryStore {
         kind: credential.kind,
         reuseCount: credential.reuseCount,
         verifiedAt: credential.verifiedAt,
+        tier: credential.tier,
       })),
     });
   }

@@ -125,7 +125,7 @@ function parseGlobal(argv: string[]): { cmd: string; rest: string[]; opts: Globa
     // Empty → control-plane resolves to <installRoot>/.gongyuai (never cwd-relative).
     dataDir: process.env.GY_DATA_DIR ?? "",
     host: process.env.GY_HOST ?? "127.0.0.1",
-    port: Number(process.env.GY_PORT ?? 8787),
+    port: Number(process.env.GY_PORT ?? 8877),
   };
   const out: string[] = [];
   for (let i = 0; i < argv.length; i++) {

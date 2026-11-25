@@ -224,6 +224,44 @@ test("idle verified credential is a suggestion, not a warning", () => {
   assert.equal(idle.severity, "info");
 });
 
+test("L1 unverified credentials are an info hint and do not replace idle-credential", () => {
+  const credentials: EngagementAuditCredential[] = [
+    {
+      id: "c1",
+      asset: "lab.example.com",
+      kind: "password",
+      reuseCount: 0,
+      verifiedAt: ago(20),
+      tier: "L2",
+    },
+    {
+      id: "c2",
+      asset: "api.example.com",
+      kind: "token",
+      reuseCount: 0,
+      verifiedAt: null,
+      tier: "L1",
+    },
+  ];
+  const audit = deriveEngagementAudit({
+    now: NOW,
+    assets: [asset("lab.example.com"), asset("api.example.com")],
+    intents: [
+      intent("i1", "CWE-89", "lab.example.com", "succeeded"),
+      intent("i2", "AUTHZ-BOLA", "api.example.com", "succeeded"),
+    ],
+    findings: [finding("f1", "verified")],
+    credentials,
+  });
+  const idle = audit.observations.find((item) => item.code === "idle-credential");
+  const unverified = audit.observations.find((item) => item.code === "l1-unverified");
+  assert.ok(idle);
+  assert.equal(idle.severity, "info");
+  assert.ok(unverified);
+  assert.equal(unverified.severity, "info");
+  assert.deepEqual(unverified.refs, ["c2"]);
+});
+
 test("empty ledger is a gap, not a clean target", () => {
   const audit = deriveEngagementAudit({
     now: NOW,

@@ -76,7 +76,7 @@ export async function bootControlPlane(opts: BootOptions = {}) {
     }
   }
   const host = opts.host ?? process.env.GY_HOST ?? "127.0.0.1";
-  const port = opts.port ?? Number(process.env.GY_PORT ?? 8787);
+  const port = opts.port ?? Number(process.env.GY_PORT ?? 8877);
   const runtime = (opts.runtime ?? process.env.GY_RUNTIME ?? "local") as "local" | "docker";
   const leaseMs = opts.leaseMs ?? Number(process.env.GY_LEASE_MS ?? 15_000);
   const watchdogMs = opts.watchdogMs ?? Number(process.env.GY_WATCHDOG_MS ?? 5_000);

@@ -20,8 +20,17 @@ function openssl(args: string[], cwd: string): void {
   }
 }
 
+export const DEFAULT_TASK_CA_SUBJECT = "/CN=Local Proxy Root CA";
+
+export type TaskCaOptions = {
+  /** OpenSSL `-subj` value. Defaults to {@link DEFAULT_TASK_CA_SUBJECT}. */
+  subject?: string;
+};
+
 /** Per-task CA. The key stays in the task directory at mode 0600 and is never installed system-wide. */
-export function ensureTaskCa(taskDir: string): TaskCa {
+export function ensureTaskCa(taskDir: string, options: TaskCaOptions = {}): TaskCa {
+  const subject = (options.subject ?? DEFAULT_TASK_CA_SUBJECT).trim() || DEFAULT_TASK_CA_SUBJECT;
+  if (/[\r\n\u0000]/.test(subject)) throw new Error("invalid CA subject");
   const dir = join(taskDir, "traffic");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
@@ -32,7 +41,7 @@ export function ensureTaskCa(taskDir: string): TaskCa {
     chmodSync(keyPath, 0o600);
     openssl([
       "req", "-x509", "-new", "-key", "ca.key", "-days", "30",
-      "-out", "ca.crt", "-subj", "/CN=GongYuAI Task CA",
+      "-out", "ca.crt", "-subj", subject,
       "-addext", "basicConstraints=critical,CA:TRUE",
       "-addext", "keyUsage=critical,keyCertSign,cRLSign",
     ], dir);
