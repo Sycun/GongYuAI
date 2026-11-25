@@ -3,7 +3,7 @@
   "name": "aimy-skill",
   "description": "Prohao42/aimy-skill (v3.7.5) 渗透测试工具链：89 个结构化 JSON CLI 命令与 aimy-mcp，覆盖侦察、注入、鉴权绕过、业务逻辑、WAF 绕过与漏洞验证。",
   "defaultEnabled": true,
-  "source": "user",
+  "source": "builtin",
   "triggers": [
     "aimy",
     "sqlcheck",

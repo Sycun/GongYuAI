@@ -14,6 +14,7 @@
     },
     {
       "id": "evidence-first",
+      "phase": "verify",
       "triggers": [
         "evidence",
         "证据",
@@ -240,6 +241,7 @@
     },
     {
       "id": "pentest-verification",
+      "phase": "verify",
       "triggers": [
         "验证",
         "复现",
@@ -270,6 +272,7 @@
     },
     {
       "id": "independent-validation",
+      "phase": "verify",
       "triggers": [
         "独立确认",
         "复核",
@@ -319,6 +322,7 @@
     },
     {
       "id": "aimy-skill",
+      "phase": "discover",
       "triggers": [
         "aimy",
         "sqlcheck",

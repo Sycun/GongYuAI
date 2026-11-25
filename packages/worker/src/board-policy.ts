@@ -39,6 +39,20 @@ export function isBoardClearMission(manifest: WorkerManifest): boolean {
   );
 }
 
+export function systematicDiscoveryPolicyBlock(): string {
+  return `
+## 体系化漏洞搜索与反证纪律（防碰运气 / 防锚定 / 防误报）
+1. **双轨并行搜索（防扫描器锚定）**：
+   - **轨道 A（正向业务语义推演）**：从入口、身份、资源所有权、状态流转与业务动作出发，独立提出越权（IDOR/BOLA/BFLA）、认证绕过、状态跳过、竞态等假设；**扫描器零命中绝不阻断语义探索**，不要只盯着扫描器告警跑。
+   - **轨道 B（确定性扫描兜底）**：用 \`nmap/httpx/nuclei/ffuf/aimy\` 等确定性工具覆盖已知特征、隐藏参数、指纹组件与危险点，作为下限兜底与轨道 A 汇合。
+2. **漏洞大类缺口复查**：
+   - 推进与收口前检查 Observe 中的「漏洞大类覆盖矩阵」；对标为\`未测\`且适用于当前目标的大类补跑定向探索，明确区分“测过无发现”与“未检查”。
+3. **发现与验证解耦（主动反证优先）**：
+   - **发现阶段求全**：接受弱线索并先 \`finding_record\`（tentative），不因暂缺完整利用链而过早放弃。
+   - **验证阶段求真**：验证时优先寻找**反证**（普通反射而非执行、前置鉴权兜底、不可达或仅状态码波动）；必须用 \`http_request(compareWith="http:<baselineId>")\` 做正常基线 vs 攻击态差分对照，排除误报后才允许 \`finding_verify\`。
+`;
+}
+
 export function boardClearPolicyBlock(manifest: WorkerManifest): string {
   if (!isBoardClearMission(manifest)) return "";
 

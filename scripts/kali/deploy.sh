@@ -10,7 +10,7 @@
 set -uo pipefail
 
 # 非交互 shell 里 pnpm/node 不在 PATH：显式补上，与 systemd 单元里的 PATH 保持一致。
-export PATH="/home/parallels/.npm-global/bin:/home/parallels/.n/bin:${PATH}"
+export PATH="/home/parallels/.npm-global/bin:/home/parallels/.n/bin:/home/parallels/.local/bin:${PATH}"
 
 ACTION=${1:?用法: deploy.sh prepare|switch <commit>}
 COMMIT=${2:?用法: deploy.sh prepare|switch <commit>}
@@ -88,6 +88,13 @@ prepare() {
   ( cd "${NEW_DIR}" && /home/parallels/.npm-global/bin/pnpm run build >/tmp/gy-deploy-build.log 2>&1 ) \
     || { log "!! 构建失败，见 /tmp/gy-deploy-build.log"; exit 1; }
   log "构建产物 packages/control-plane/dist/server.js 时间=$(stat -c %y "${NEW_DIR}/packages/control-plane/dist/server.js" | cut -d. -f1)"
+
+  if ! command -v aimy-mcp >/dev/null 2>&1; then
+    log "== prepare: 安装 aimy-skill[mcp]（Kali 执行机）=="
+    python3 -m pip install --user --break-system-packages "git+https://github.com/Prohao42/aimy-skill.git[mcp]" >/tmp/gy-deploy-aimy.log 2>&1 \
+      && log "aimy-mcp 安装完成: $(command -v aimy-mcp || echo ~/.local/bin/aimy-mcp)" \
+      || log "!! aimy-skill 安装失败（非致命，见 /tmp/gy-deploy-aimy.log）"
+  fi
 
   log "== prepare: 迁移正式配置与数据根 =="
   cp -a "${OLD_DIR}/${DATA_DIR_NAME}" "${NEW_DIR}/${DATA_DIR_NAME}" || { log "!! 数据复制失败"; exit 1; }

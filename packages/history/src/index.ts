@@ -4901,6 +4901,50 @@ export class HistoryStore {
       lines.push("（ready 才是可派单的下一步；intent_propose 带 planStepId；计划≠授权。）");
     }
 
+    // 体系化漏洞大类覆盖账本（只读派生）：区分「已证实 / 线索 / 已测无发现 / 未测」，防止只盯熟悉类型而漏测。
+    const vulnClasses: Array<{ id: string; label: string; pattern: RegExp }> = [
+      { id: "injection", label: "注入(SQLi/CMDi/SSTI/XXE)", pattern: /\b(sqli|sql|cmdi|rce|ssti|xxe|nosql|ldap|cwe-89|cwe-78|cwe-94|cwe-611)\b|注入|命令执行|模板注入/i },
+      { id: "authz", label: "越权(IDOR/BOLA/BFLA)", pattern: /\b(idor|bola|bfla|authz|rbac|acl|privilege|cwe-639|cwe-862|cwe-863)\b|越权|水平|垂直|权限绕过/i },
+      { id: "authn", label: "认证会话(AuthN/JWT/OAuth)", pattern: /\b(authn|jwt|oauth|oidc|session|cookie|login|reset|mfa|cwe-287|cwe-384)\b|认证|登录|令牌|会话|密码重置/i },
+      { id: "bizlogic", label: "业务逻辑(状态机/竞态/支付)", pattern: /\b(bizlogic|business|workflow|race|toctou|state|price|coupon|replay|cwe-362|cwe-840)\b|业务逻辑|状态机|竞态|重放|越步|金额/i },
+      { id: "ssrf-file", label: "SSRF/文件(穿越/LFI/上传)", pattern: /\b(ssrf|lfi|rfi|traversal|upload|file|path|cwe-918|cwe-22|cwe-434)\b|路径穿越|任意文件|文件读取|文件上传/i },
+      { id: "client-api", label: "前端与API(XSS/CORS/GraphQL)", pattern: /\b(xss|csrf|cors|graphql|proto|prototype|dom|cwe-79|cwe-352|cwe-942)\b|跨站|原型链/i },
+      { id: "deser-config", label: "反序列化/组件CVE/配置", pattern: /\b(deser|deserialize|cve-|config|misconfig|actuator|swagger|debug|cwe-502|cwe-200)\b|反序列化|信息泄露|弱配置|默认口令/i },
+    ];
+    const verifiedVulnText = findings
+      .filter((f) => f.status === "verified" || f.status === "retested" || f.status === "accepted")
+      .map((f) => `${f.vulnClass} ${f.title}`)
+      .join(" ");
+    const tentativeVulnText = findings
+      .filter((f) => f.status === "tentative")
+      .map((f) => `${f.vulnClass} ${f.title}`)
+      .join(" ");
+    const testedText = [
+      ...allIntents.map((i) => `${i.title} ${i.technique ?? ""} ${i.conclusion ?? ""}`),
+      ...allTitleFacts.map((f) => `${f.title} ${f.tags.join(" ")}`),
+    ].join(" ");
+    const covParts: string[] = [];
+    const untestedLabels: string[] = [];
+    for (const vc of vulnClasses) {
+      if (vc.pattern.test(verifiedVulnText)) {
+        covParts.push(`${vc.label}=已证实`);
+      } else if (vc.pattern.test(tentativeVulnText)) {
+        covParts.push(`${vc.label}=待验证`);
+      } else if (vc.pattern.test(testedText)) {
+        covParts.push(`${vc.label}=已测无洞`);
+      } else {
+        covParts.push(`${vc.label}=未测`);
+        untestedLabels.push(vc.label);
+      }
+    }
+    lines.push("", "## 漏洞大类覆盖矩阵（防漏测 · 区分已测与未测）");
+    lines.push(`- ${covParts.join(" · ")}`);
+    if (untestedLabels.length > 0) {
+      lines.push(
+        `（尚有 ${untestedLabels.length} 类未测：${untestedLabels.join("、")}；收口前须核查是否适用于当前目标，避免把“未测”误当作“安全”。）`,
+      );
+    }
+
     // P15 观察员：只读派生，不写「观察事实」，避免第二真相源。
     const audit = this.engagementAudit(taskId);
     lines.push("", "## 观察员（只读自动派生）");

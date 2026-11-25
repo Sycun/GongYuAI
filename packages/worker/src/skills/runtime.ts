@@ -4,6 +4,8 @@ import type { ToolCatalogEntry, WorkerManifest, WorkerSkillPack } from "@gongyua
 import type { HistoryStore } from "@gongyuai/history";
 import { appendProgress } from "../tools.js";
 
+export type SkillPhase = "discover" | "verify" | "both";
+
 export type SkillHub = {
   /** Compact routing table lines for system prompt (no full bodies). */
   routingTable(): string[];
@@ -18,16 +20,17 @@ export type SkillHub = {
   /**
    * Dark-Moon reactive triggering: match recent asset/fingerprint facts against routing.json
    * triggers and return compact Skill excerpts (deduped per session, hard token/char cap).
+   * Respects optional `phase` ("discover" | "verify") so discovery and verification skills do not conflict.
    */
   autoInjectForFacts(
     facts: ReadonlyArray<{ title: string; summary?: string; tags?: readonly string[] }>,
-    opts?: { maxChars?: number; maxSkills?: number },
+    opts?: { maxChars?: number; maxSkills?: number; phase?: "discover" | "verify" },
   ): string;
   /** Which skills have been loaded this run (for progress). */
   loadedIds(): string[];
 };
 
-type RouteExtra = { triggers?: string[] };
+type RouteExtra = { triggers?: string[]; phase?: SkillPhase };
 
 function stripFrontmatter(raw: string): string {
   if (!raw.startsWith("---")) return raw;
@@ -49,23 +52,30 @@ function readTriggers(rootDir: string): string[] {
   }
 }
 
-function loadRoutingFile(installHintDirs: string[]): Map<string, string[]> {
-  const map = new Map<string, string[]>();
+function loadRoutingFile(installHintDirs: string[]): {
+  triggers: Map<string, string[]>;
+  phases: Map<string, SkillPhase>;
+} {
+  const triggers = new Map<string, string[]>();
+  const phases = new Map<string, SkillPhase>();
   for (const dir of installHintDirs) {
     const p = join(dir, "routing.json");
     if (!existsSync(p)) continue;
     try {
       const raw = JSON.parse(readFileSync(p, "utf8")) as {
-        routes?: Array<{ id: string; triggers?: string[] }>;
+        routes?: Array<{ id: string; triggers?: string[]; phase?: SkillPhase }>;
       };
       for (const r of raw.routes ?? []) {
-        if (r.id && r.triggers?.length) map.set(r.id, r.triggers);
+        if (r.id && r.triggers?.length) triggers.set(r.id, r.triggers);
+        if (r.id && (r.phase === "discover" || r.phase === "verify" || r.phase === "both")) {
+          phases.set(r.id, r.phase);
+        }
       }
     } catch {
       /* ignore */
     }
   }
-  return map;
+  return { triggers, phases };
 }
 
 /**
@@ -109,9 +119,13 @@ export function openSkillHub(
   const autoInjected = new Set<string>();
 
   function triggersFor(id: string, rootDir?: string): string[] {
-    if (routeFile.has(id)) return routeFile.get(id)!;
+    if (routeFile.triggers.has(id)) return routeFile.triggers.get(id)!;
     if (rootDir) return readTriggers(rootDir);
     return [];
+  }
+
+  function phaseFor(id: string): SkillPhase {
+    return routeFile.phases.get(id) ?? "both";
   }
 
   function listReferences(rootDir: string): string[] {
@@ -150,8 +164,10 @@ export function openSkillHub(
         const pack = pool.get(c.id)!;
         const trig = triggersFor(c.id, pack.rootDir);
         const trigPart = trig.length ? ` · 触发:${trig.slice(0, 8).join(",")}` : "";
+        const phase = phaseFor(c.id);
+        const phaseTag = phase === "discover" ? "[发现] " : phase === "verify" ? "[验证] " : "";
         const desc = (c.description || "").slice(0, 80);
-        lines.push(`- \`${c.id}\` ${c.name}${desc ? ` — ${desc}` : ""}${trigPart}`);
+        lines.push(`- ${phaseTag}\`${c.id}\` ${c.name}${desc ? ` — ${desc}` : ""}${trigPart}`);
       }
       return lines;
     },
@@ -258,6 +274,8 @@ export function openSkillHub(
       const scored: Array<{ id: string; score: number; matched: string[] }> = [];
       for (const c of catalog) {
         if (loaded.has(c.id) || autoInjected.has(c.id)) continue;
+        const skillPhase = phaseFor(c.id);
+        if (opts?.phase && skillPhase !== "both" && skillPhase !== opts.phase) continue;
         const pack = pool.get(c.id);
         if (!pack) continue;
         const trig = triggersFor(c.id, pack.rootDir);

@@ -12,7 +12,7 @@ User=parallels
 Group=parallels
 WorkingDirectory=/home/parallels/GongYuAI
 Environment=HOME=/home/parallels
-Environment=PATH=/home/parallels/.n/bin:/home/parallels/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/home/parallels/.n/bin:/home/parallels/.npm-global/bin:/home/parallels/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=GY_HOST=0.0.0.0
 Environment=GY_PORT=8877
 # Optional local secrets (create if needed; never commit):

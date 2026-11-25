@@ -52,6 +52,11 @@ pnpm --filter @gongyuai/control-plane build
 pnpm --filter @gongyuai/worker build
 pnpm --filter @gongyuai/console build
 
+if ! command -v aimy-mcp >/dev/null 2>&1; then
+  echo "install aimy-skill[mcp] for builtin aimy MCP..."
+  python3 -m pip install --user --break-system-packages "git+https://github.com/Prohao42/aimy-skill.git[mcp]" || true
+fi
+
 DATA_DIR="$GY/.gongyuai"
 # Absorb any leftover ~/.gongyuai tasks before first serve (boot also migrates).
 if [[ -d /home/parallels/.gongyuai/tasks && ! -d "$DATA_DIR/tasks" ]]; then

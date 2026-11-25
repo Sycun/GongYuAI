@@ -28,7 +28,7 @@ import {
 import { INSTALL_METHODS, type InstallMethod } from "./tool-installer.js";
 import { installMcp, installSkill, trustedRegistryCatalogHint } from "./trusted-registry.js";
 import { collectorsPromptBlock, runAssetSearch } from "./asset-collectors.js";
-import { boardClearPolicyBlock, hasBenchmarkHarness } from "./board-policy.js";
+import { boardClearPolicyBlock, hasBenchmarkHarness, systematicDiscoveryPolicyBlock } from "./board-policy.js";
 import { takeSoftPaceAdvice } from "./soft-pace.js";
 import { writeWorkerStatus } from "./status.js";
 import { writeTerminalReport } from "./report.js";
@@ -2100,7 +2100,7 @@ function buildTurnObserveBlock(
     activeIntentId: state.activeIntentId,
   });
   const autoSkillBlock = skillHub
-    ? skillHub.autoInjectForFacts(history.listFacts(manifest.taskId))
+    ? skillHub.autoInjectForFacts(history.listFacts(manifest.taskId), { phase: "discover" })
     : "";
   return [
     phaseBlock,
@@ -2180,7 +2180,7 @@ ${poolLine}
 - ${trustedRegistryCatalogHint()}
 - TSecBench：默认禁止批量 hint；平台 409 already finished 视为终态，停止重试并写 blocked 证据。
 ${visionLine}
-${boardClearPolicyBlock(manifest)}${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}${observeText ? `\n当前 Observe（History）：\n${observeText}\n` : ""}`;
+${systematicDiscoveryPolicyBlock()}${boardClearPolicyBlock(manifest)}${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}${observeText ? `\n当前 Observe（History）：\n${observeText}\n` : ""}`;
 }
 
 function sessionBootstrapText(manifest: WorkerManifest, historyObserve: string): string {

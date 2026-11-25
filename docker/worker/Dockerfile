@@ -2,9 +2,10 @@ FROM kalilinux/kali-rolling
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq \
-  && apt-get install -y -qq curl ca-certificates git python3 \
+  && apt-get install -y -qq curl ca-certificates git python3 python3-pip \
   && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
   && apt-get install -y -qq nodejs \
+  && pip3 install --no-cache-dir --break-system-packages "git+https://github.com/Prohao42/aimy-skill.git[mcp]" \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/gongyuai
