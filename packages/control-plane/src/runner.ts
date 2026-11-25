@@ -21,7 +21,7 @@ import {
   type TerminalTaskStatus,
   type WorkerManifest,
 } from "@gongyuai/contracts";
-import { CommandLedger, hasCommandLedger, openHistory, writeTaskReport, type CommandTicket } from "@gongyuai/history";
+import { CommandLedger, hasCommandLedger, materializeTaskDeliverables, openHistory, writeTaskReport, type CommandTicket } from "@gongyuai/history";
 import { executorBound, outOfScopeFor, outOfScopeReason, policyReceipt, userReceipt, reviewCommand } from "./command-approval.js";
 import type { ApprovalReceipt } from "@gongyuai/contracts";
 import { durableDbForSlot, manifestPathForSlot, taskPaths } from "./paths.js";
@@ -930,6 +930,14 @@ export class WorkerRunner {
           writeTaskReport({ taskId: task.id, dataDir: task.dataDir, auth: task.auth }, history, {
             status, reason: error ?? undefined, accounting: task,
           });
+          try {
+            materializeTaskDeliverables(
+              { taskId: task.id, evidenceDir: paths.evidenceDir, auth: task.auth },
+              history,
+            );
+          } catch {
+            /* best-effort deliverable materialization must not fail report finalization */
+          }
         });
       } finally {
         history.close();
@@ -992,6 +1000,22 @@ export class WorkerRunner {
     latest.error = latest.commandReview?.fence === latest.fence ? latest.commandReview.reason : null;
     this.store.save(latest);
     this.children.delete(taskId);
+    // Best-effort snapshot of ledger/report deliverables on pause (never writes terminal report.md).
+    const pausePaths = taskPaths(latest.dataDir);
+    if (existsSync(pausePaths.historyDb)) {
+      let history: ReturnType<typeof openHistory> | null = null;
+      try {
+        history = openHistory({ dbPath: pausePaths.historyDb, evidenceDir: pausePaths.evidenceDir });
+        materializeTaskDeliverables(
+          { taskId: latest.id, evidenceDir: pausePaths.evidenceDir, auth: latest.auth },
+          history,
+        );
+      } catch {
+        /* best-effort */
+      } finally {
+        try { history?.close(); } catch { /* ignore */ }
+      }
+    }
     return latest;
   }
 

@@ -3794,6 +3794,8 @@ export class HistoryStore {
     repro?: string;
     impact?: string;
     fix?: string;
+    pocCurl?: string | null;
+    qualification?: FindingQualification | null;
   }): { finding: Finding; created: boolean } {
     const title = input.title.trim();
     const vulnClass = input.vulnClass.trim();
@@ -3820,17 +3822,24 @@ export class HistoryStore {
     if (intentId && !this.getIntent(input.taskId, intentId)) {
       throw new Error(`unknown finding intent: ${intentId}`);
     }
+    const pocCurl = input.pocCurl?.trim() || null;
+    const qualification = input.qualification ?? null;
     if (existing) {
       const mergedFactIds = [...new Set([...existing.factIds, ...factIds])];
       const nextIntentId = existing.intentId ?? intentId;
+      const nextPocCurl = existing.pocCurl ?? pocCurl;
+      const nextQualification = existing.qualification ?? qualification;
       const changed =
-        nextIntentId !== existing.intentId || mergedFactIds.length !== existing.factIds.length;
+        nextIntentId !== existing.intentId ||
+        mergedFactIds.length !== existing.factIds.length ||
+        nextPocCurl !== (existing.pocCurl ?? null) ||
+        nextQualification !== (existing.qualification ?? null);
       if (changed) {
         this.db
           .prepare(
-            `UPDATE findings SET intent_id = ?, fact_ids_json = ? WHERE task_id = ? AND id = ?`,
+            `UPDATE findings SET intent_id = ?, fact_ids_json = ?, poc_curl = ?, qualification = ? WHERE task_id = ? AND id = ?`,
           )
-          .run(nextIntentId, JSON.stringify(mergedFactIds), input.taskId, existing.id);
+          .run(nextIntentId, JSON.stringify(mergedFactIds), nextPocCurl, nextQualification, input.taskId, existing.id);
         return { finding: this.getFinding(input.taskId, existing.id)!, created: false };
       }
       return { finding: existing, created: false };
@@ -3857,14 +3866,16 @@ export class HistoryStore {
       createdAt: this.now(),
       verifiedAt: null,
       verifiedBy: null,
+      ...(qualification ? { qualification } : {}),
+      ...(pocCurl ? { pocCurl } : {}),
     };
     this.db
       .prepare(
         `INSERT INTO findings
           (id, task_id, title, asset, vuln_class, severity, cvss, confidence, status,
            endpoint, dedup_key, intent_id, fact_ids_json, evidence_json, repro, impact, fix,
-           created_at, verified_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           created_at, verified_at, qualification, poc_curl)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         finding.id, finding.taskId, finding.title, finding.asset, finding.vulnClass,
@@ -3872,6 +3883,7 @@ export class HistoryStore {
         finding.endpoint, finding.dedupKey, finding.intentId,
         JSON.stringify(finding.factIds), JSON.stringify(finding.evidence),
         finding.repro, finding.impact, finding.fix, finding.createdAt, finding.verifiedAt,
+        qualification, pocCurl,
       );
     this.emit(input.taskId, "finding_recorded", {
       findingId: finding.id,
@@ -3900,6 +3912,8 @@ export class HistoryStore {
       verifiedBy?: string;
       /** Backfill intent link if the finding was originally recorded outside an active Intent. */
       intentId?: string | null;
+      pocCurl?: string | null;
+      qualification?: FindingQualification | null;
     },
   ): Finding {
     const finding = this.getFinding(taskId, findingId);
@@ -3953,12 +3967,15 @@ export class HistoryStore {
         }
       }
       const now = this.now();
+      const nextPocCurl = input.pocCurl?.trim() || finding.pocCurl || null;
+      const nextQualification = input.qualification ?? finding.qualification ?? null;
       this.db
         .prepare(
           `UPDATE findings
            SET status = 'verified', confidence = 'firm', evidence_json = ?,
                intent_id = ?, fact_ids_json = ?,
-               repro = ?, impact = ?, fix = ?, cvss = ?, verified_at = ?, verified_by = ?
+               repro = ?, impact = ?, fix = ?, cvss = ?, verified_at = ?, verified_by = ?,
+               poc_curl = ?, qualification = ?
            WHERE task_id = ? AND id = ? AND status = 'tentative'`,
         )
         .run(
@@ -3971,6 +3988,8 @@ export class HistoryStore {
           input.cvss?.trim() || finding.cvss,
           now,
           input.verifiedBy?.trim() || finding.verifiedBy,
+          nextPocCurl,
+          nextQualification,
           taskId,
           findingId,
         );
@@ -3985,6 +4004,18 @@ export class HistoryStore {
       throw err;
     }
     return this.getFinding(taskId, findingId)!;
+  }
+
+  /** Backfill `poc_curl` on an existing finding (e.g. synthesized from captured traffic). */
+  updateFindingPocCurl(taskId: string, findingId: string, pocCurl: string): Finding | null {
+    const clean = pocCurl.trim();
+    if (!clean) return this.getFinding(taskId, findingId);
+    const existing = this.getFinding(taskId, findingId);
+    if (!existing || existing.pocCurl) return existing;
+    this.db
+      .prepare(`UPDATE findings SET poc_curl = ? WHERE task_id = ? AND id = ?`)
+      .run(clean, taskId, findingId);
+    return this.getFinding(taskId, findingId);
   }
 
   /**
@@ -5126,3 +5157,9 @@ export {
   type DagFindingRef,
   type DagIntentRef,
 } from "./dag.js";
+export {
+  LEDGER_REL_PATH,
+  REPORT_REL_PATH,
+  materializeTaskDeliverables,
+  type MaterializedDeliverables,
+} from "./deliverables.js";

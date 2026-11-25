@@ -41,6 +41,7 @@ import { writeWorkerStatus } from "./status.js";
 import { writeTerminalReport } from "./report.js";
 import { isMcpToolName, openMcpHub, type McpHub } from "./mcp/client.js";
 import { openSkillHub, type SkillHub } from "./skills/runtime.js";
+import { openFingerprintKnowledgeRag, type KnowledgeRagHub } from "./knowledge-rag.js";
 import {
   canRelay,
   formatRelayInjection,
@@ -324,6 +325,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
 
     const mcpHub = await openMcpHub(manifest, ctx);
     const skillHub = openSkillHub(manifest, history);
+    const knowledgeRag = openFingerprintKnowledgeRag(manifest, history);
     let trafficProxy: TrafficProxy | null = null;
     if (process.env.GY_DISABLE_TRAFFIC_PROXY !== "1") {
       try {
@@ -350,6 +352,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
         mcpHub,
         skillHub,
         workerStartedAt,
+        knowledgeRag,
       );
       if (!started) {
         await runOpenAiToolLoop(
@@ -360,6 +363,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
           mcpHub,
           skillHub,
           workerStartedAt,
+          knowledgeRag,
         );
       }
     } finally {
@@ -592,6 +596,7 @@ async function tryPiDurable(
   mcpHub: McpHub,
   skillHub: SkillHub,
   workerStartedAt: number,
+  knowledgeRag?: KnowledgeRagHub,
 ): Promise<boolean> {
   try {
     const { BACKGROUND_CONTEXT } = await import("@earendil-works/chord/context");
@@ -725,7 +730,11 @@ async function tryPiDurable(
           /* best-effort; usage already on disk */
         }
         return {
-          details: { shellResult: formatShellResult(r) },
+          details: {
+            shellResult: formatShellResult(r),
+            exitCode: r.exitCode,
+            durationMs: r.durationMs ?? null,
+          },
           output: [
             {
               type: "text",
@@ -1688,19 +1697,28 @@ async function tryPiDurable(
                 state.toolCallsSinceRelay += calls.length;
               }
               const shellCalls = calls.filter((call) => call.name === "shell");
-              const resultsByCall = new Map<string, string>();
+              const resultsByCall = new Map<string, { text: string; exitCode: number | null; durationMs: number | null }>();
               if (shellCalls.length) {
                 for (const id of results) {
                   const result = (await api.entry(ToolResultEntry, id, hookCtx))?.model?.[0];
                   if (result?.role !== "toolResult" || result.toolName !== "shell") continue;
-                  const details = result.details;
-                  const shellResult = details && typeof details === "object" && "shellResult" in details
+                  const details = result.details && typeof result.details === "object"
+                    ? (result.details as Record<string, unknown>)
+                    : undefined;
+                  const shellResult = details && "shellResult" in details
                     ? details.shellResult
                     : undefined;
                   const resultText = typeof shellResult === "string" ? shellResult : result.content
                     .flatMap((part) => part.type === "text" ? [part.text] : [])
                     .join("\n");
-                  resultsByCall.set(result.toolCallId, resultText);
+                  const parsedExit = /^exit=(-?\d+)\b/.exec(resultText);
+                  const exitCode = typeof details?.exitCode === "number"
+                    ? details.exitCode
+                    : parsedExit
+                      ? Number(parsedExit[1])
+                      : null;
+                  const durationMs = typeof details?.durationMs === "number" ? details.durationMs : null;
+                  resultsByCall.set(result.toolCallId, { text: resultText, exitCode, durationMs });
                 }
               }
               try {
@@ -1718,25 +1736,32 @@ async function tryPiDurable(
                 tools: calls.map((call) => call.name),
                 tokens: state.tokens,
                 phase: state.phase,
-                calls: shellCalls.map((call) => ({
-                  id: call.id,
-                  command: typeof call.arguments.command === "string" ? call.arguments.command : null,
-                  result: resultsByCall.get(call.id) ?? null,
-                })),
+                calls: shellCalls.map((call) => {
+                  const meta = resultsByCall.get(call.id);
+                  return {
+                    id: call.id,
+                    command: typeof call.arguments.command === "string" ? call.arguments.command : null,
+                    result: meta?.text ?? null,
+                    exitCode: meta?.exitCode ?? null,
+                    durationMs: meta?.durationMs ?? null,
+                  };
+                }),
               });
               state.step = Math.max(state.step, step);
               // Soft pace during long Pi sessions: queue for next continue/kickoff inject.
               const softDuring = maybeSoftPaceMessage(state, ctx, workerStartedAt);
               if (softDuring) state.pendingSoftPaceMessage = softDuring;
-              // Fingerprint-triggered skill auto-inject inside the long turn (SkillHub dedups per session).
+              // Fingerprint-triggered skill & local knowledge RAG auto-inject inside the long turn.
               try {
                 const facts = ctx.history.listFacts(manifest.taskId);
                 if (shouldCheckAutoSkill(longTurn, facts.length)) {
                   const skillBlock = skillHub.autoInjectForFacts(facts, { phase: "discover" });
                   if (skillBlock) longTurn.notes.push(skillBlock);
+                  const ragBlock = knowledgeRag?.autoInjectForFacts(facts);
+                  if (ragBlock) longTurn.notes.push(ragBlock);
                 }
               } catch {
-                /* skill hub is advisory */
+                /* skill hub & knowledge RAG are advisory */
               }
               // Silent π audit snapshot inside the long turn (never sets relayPending).
               maybeBackgroundSnapshot();
@@ -1855,6 +1880,7 @@ async function tryPiDurable(
 
         const observeBlock = buildTurnObserveBlock(manifest, ctx.history, state, skillHub, {
           incremental: round > 1,
+          knowledgeRag,
         });
         // Persist the fingerprint now so a mid-turn crash does not replay the full Observe.
         ckpt.save(state);
@@ -2257,7 +2283,7 @@ export function buildTurnObserveBlock(
   history: ReturnType<typeof openHistory>,
   state: CheckpointState,
   skillHub?: SkillHub,
-  opts?: { incremental?: boolean },
+  opts?: { incremental?: boolean; knowledgeRag?: KnowledgeRagHub },
 ): string {
   state.phase = syncGraphPhase(history, manifest.taskId, state.phase, {
     leader: isExploreLeader(manifest),
@@ -2268,8 +2294,12 @@ export function buildTurnObserveBlock(
     openIntentCount: open.length,
     activeIntentId: state.activeIntentId,
   });
+  const facts = skillHub || opts?.knowledgeRag ? history.listFacts(manifest.taskId) : [];
   const autoSkillBlock = skillHub
-    ? skillHub.autoInjectForFacts(history.listFacts(manifest.taskId), { phase: "discover" })
+    ? skillHub.autoInjectForFacts(facts, { phase: "discover" })
+    : "";
+  const autoRagBlock = opts?.knowledgeRag
+    ? opts.knowledgeRag.autoInjectForFacts(facts)
     : "";
   const incremental = opts?.incremental ?? false;
   const snapshot = buildObserveSnapshot(history, manifest.taskId);
@@ -2283,7 +2313,7 @@ export function buildTurnObserveBlock(
           includeRelays: !incremental,
         });
   state.observeFingerprint = snapshot;
-  return [phaseBlock, observeBody, autoSkillBlock].filter(Boolean).join("\n\n");
+  return [phaseBlock, observeBody, autoSkillBlock, autoRagBlock].filter(Boolean).join("\n\n");
 }
 
 function systemPrompt(
@@ -2422,6 +2452,7 @@ async function runOpenAiToolLoop(
   mcpHub: McpHub,
   skillHub: SkillHub,
   workerStartedAt: number,
+  knowledgeRag?: KnowledgeRagHub,
 ): Promise<void> {
   const ref = resolvePiModelRef(manifest);
   const candidates: ResolvedCandidateModel[] = buildModelCandidateChain(

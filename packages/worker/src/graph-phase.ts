@@ -2,7 +2,14 @@
  * Graph-driven Bootstrap → Explore → Reason protocol (P2 / handbook polish).
  * History remains authoritative; phase only gates Worker tool surface.
  */
-import type { ExecutionConfig, Finding, FindingConfidence, FindingSeverity, WorkerPhase } from "@gongyuai/contracts";
+import type {
+  ExecutionConfig,
+  Finding,
+  FindingConfidence,
+  FindingQualification,
+  FindingSeverity,
+  WorkerPhase,
+} from "@gongyuai/contracts";
 import {
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
   DEFAULT_MAX_INTENTS_PER_REASON,
@@ -11,7 +18,9 @@ import {
 } from "@gongyuai/contracts";
 import {
   closeFindingWindow,
+  getTrafficLive,
   promoteTrafficForFinding,
+  readTrafficBodyLive,
   targetHostOf,
   type PromoteTrafficResult,
 } from "@gongyuai/exec";
@@ -173,7 +182,7 @@ export function phaseDirective(
     );
   } else if (p === "explore") {
     lines.push(
-      "Explore（验证影响）：拿到 foothold 先 host_profile_record（OS/域/用户/权限/服务/共享），再按 T1046/T1069/T1087/T1135/T1021/T1550 族验证内网推进；一次只 claim 一个 Intent → 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro）才可进交付；high/critical 另找 worker/operator 用 finding_validate 独立确认（同一 worker 自证会被拒）。nmap/httpx/nuclei/ffuf 必须用机读输出（-oX - / -json / -jsonl / -of json），看到 [parser] mandatory 就重跑。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。有 open Explore 时禁止进入 Reason。",
+      "Explore（验证影响）：拿到 foothold 先 host_profile_record（OS/域/用户/权限/服务/共享），再按 T1046/T1069/T1087/T1135/T1021/T1550 族验证内网推进；一次只 claim 一个 Intent → 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro + 可选 pocCurl）才可进交付；独立验证由控制面在 finding_verify 后自动异步执行（不要为此发 operator_consult）。nmap/httpx/nuclei/ffuf 必须用机读输出（-oX - / -json / -jsonl / -of json），看到 [parser] mandatory 就重跑。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。有 open Explore 时禁止进入 Reason。",
     );
   } else if (p === "reason") {
     lines.push(
@@ -387,6 +396,14 @@ export const GRAPH_PHASE_TOOLS = [
           factIds: { type: "string" },
           impact: { type: "string" },
           fix: { type: "string" },
+          pocCurl: {
+            type: "string",
+            description: "Optional reproducible curl command for independent verification.",
+          },
+          qualification: {
+            type: "string",
+            description: "Optional Dark-Moon qualification: unconfirmed | confirmed | exploited.",
+          },
           trafficIds: {
             type: "string",
             description: "Optional comma-separated traffic ids (from traffic_search, http:<id> ok) to persist with this finding. Recent same-intent/same-host traffic is kept automatically.",
@@ -411,6 +428,14 @@ export const GRAPH_PHASE_TOOLS = [
           impact: { type: "string" },
           fix: { type: "string" },
           cvss: { type: "string" },
+          pocCurl: {
+            type: "string",
+            description: "Optional reproducible curl command for independent replay validation.",
+          },
+          qualification: {
+            type: "string",
+            description: "Optional Dark-Moon qualification: unconfirmed | confirmed | exploited.",
+          },
           trafficIds: { type: "string", description: "Optional comma-separated traffic ids of the reproduction." },
         },
         required: ["findingId", "evidencePaths", "repro"],
@@ -587,6 +612,65 @@ type CapturedTraffic = {
  * from the in-memory ring and open (or converge) the post-window. Best-effort:
  * never fails the finding tool.
  */
+const REDACTED_CURL_HEADERS = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "x-api-key",
+  "x-auth-token",
+]);
+
+const SKIP_CURL_HEADERS = new Set([
+  "host",
+  "content-length",
+  "connection",
+  "accept-encoding",
+  "transfer-encoding",
+]);
+
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function parseQualification(raw: string | undefined): FindingQualification | undefined {
+  const v = raw?.trim().toLowerCase();
+  if (v === "unconfirmed" || v === "confirmed" || v === "exploited") return v;
+  return undefined;
+}
+
+/** Synthesize a safe, reproducible curl command from the most relevant captured exchange. */
+export function buildPocCurlFromTraffic(trafficDir: string, trafficIds: readonly string[]): string | null {
+  for (let i = trafficIds.length - 1; i >= 0; i--) {
+    const id = trafficIds[i]!;
+    const ex = getTrafficLive(trafficDir, id);
+    if (!ex || !/^https?:\/\//i.test(ex.url)) continue;
+    const parts = ["curl", "-sS"];
+    const method = (ex.method || "GET").toUpperCase();
+    if (method !== "GET") parts.push("-X", method);
+    for (const [rawKey, rawVal] of Object.entries(ex.reqHeaders ?? {})) {
+      const key = rawKey.toLowerCase();
+      if (SKIP_CURL_HEADERS.has(key)) continue;
+      const val = REDACTED_CURL_HEADERS.has(key)
+        ? "<redacted>"
+        : Array.isArray(rawVal)
+          ? rawVal.join(", ")
+          : String(rawVal);
+      if (!val.trim()) continue;
+      parts.push("-H", shellSingleQuote(`${rawKey}: ${val.slice(0, 240)}`));
+    }
+    if (ex.reqBodyBlob && ex.reqBodyBlob.size > 0 && ex.reqBodyBlob.size <= 4096) {
+      const slice = readTrafficBodyLive(trafficDir, id, "req", 0, 2048);
+      if (slice?.body && !/\u0000/.test(slice.body)) {
+        parts.push("--data-raw", shellSingleQuote(slice.body));
+      }
+    }
+    parts.push(shellSingleQuote(ex.url));
+    return parts.join(" ");
+  }
+  return null;
+}
+
 function captureFindingTraffic(
   ctx: GraphToolCtx,
   finding: Finding,
@@ -604,9 +688,15 @@ function captureFindingTraffic(
       trafficIds: opts.trafficIds ?? [],
       ...(opts.converge ? { converge: true } : {}),
     });
-    const linked = res.trafficIds.length
+    let linked = res.trafficIds.length
       ? ctx.history.linkFindingTraffic(ctx.taskId, finding.id, res.trafficIds)
       : null;
+    if (res.trafficIds.length && !(linked?.pocCurl ?? finding.pocCurl)) {
+      const synthesized = buildPocCurlFromTraffic(ctx.trafficDir, res.trafficIds);
+      if (synthesized) {
+        linked = ctx.history.updateFindingPocCurl(ctx.taskId, finding.id, synthesized) ?? linked;
+      }
+    }
     return {
       trafficIds: res.trafficIds,
       finding: linked,
@@ -932,6 +1022,8 @@ export function handleGraphTool(
         intentId: ctx.state.activeIntentId ?? undefined,
         impact: args.impact ?? "",
         fix: args.fix ?? "",
+        pocCurl: (args.pocCurl ?? args.poc_curl)?.trim() || null,
+        qualification: parseQualification(args.qualification),
       });
       const traffic = captureFindingTraffic(ctx, r.finding, {
         trafficIds: parseFactIds(args.trafficIds ?? ""),
@@ -960,6 +1052,8 @@ export function handleGraphTool(
           cvss: args.cvss?.trim() || undefined,
           verifiedBy: workerId,
           intentId: ctx.state.activeIntentId ?? undefined,
+          pocCurl: (args.pocCurl ?? args.poc_curl)?.trim() || undefined,
+          qualification: parseQualification(args.qualification),
         },
       );
       // Verified: keep the reproduction traffic, then converge the post-window

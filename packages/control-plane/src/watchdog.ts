@@ -1,9 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isActiveTaskStatus, isDrainingTaskStatus, isTerminalTaskStatus, isWallHit } from "@gongyuai/contracts";
+import { materializeTaskDeliverables, openHistory } from "@gongyuai/history";
+import { taskPaths } from "./paths.js";
 import { exhaustedCounter, refreshTaskUsage } from "./usage.js";
 import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
+import { scheduleAutoValidationsForTask } from "./validate-runner.js";
+
+const DELIVERABLE_REFRESH_MS = 300_000;
 
 export type WatchdogConfig = {
   intervalMs: number;
@@ -18,6 +23,7 @@ export type WatchdogConfig = {
 export class Watchdog {
   private timer: NodeJS.Timeout | null = null;
   private pending: Promise<void> | null = null;
+  private readonly lastDeliverableRefresh = new Map<string, number>();
 
   constructor(
     private readonly store: ControlStore,
@@ -142,6 +148,33 @@ export class Watchdog {
         this.store.renewLease(taskId, this.cfg.ownerId, task.fence, this.cfg.leaseMs);
         // Resource provisioning (non-tactical): scale-up only, asset-count driven.
         await this.runner.reconcileWorkers(taskId);
+        // Best-effort independent replay validation for newly verified findings.
+        const paths = taskPaths(task.dataDir);
+        scheduleAutoValidationsForTask({
+          taskId: task.id,
+          taskDir: task.dataDir,
+          historyDb: paths.historyDb,
+          evidenceDir: paths.evidenceDir,
+          targets: task.auth.targets,
+        });
+        // Throttled periodic materialization of ledger & engagement report deliverables.
+        const nowMs = Date.now();
+        const prevRefresh = this.lastDeliverableRefresh.get(task.id) ?? 0;
+        if (nowMs - prevRefresh >= DELIVERABLE_REFRESH_MS && existsSync(paths.historyDb)) {
+          this.lastDeliverableRefresh.set(task.id, nowMs);
+          let history: ReturnType<typeof openHistory> | null = null;
+          try {
+            history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+            materializeTaskDeliverables(
+              { taskId: task.id, evidenceDir: paths.evidenceDir, auth: task.auth },
+              history,
+            );
+          } catch {
+            /* best-effort */
+          } finally {
+            try { history?.close(); } catch { /* ignore */ }
+          }
+        }
       }
       return;
     }

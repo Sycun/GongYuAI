@@ -4,6 +4,8 @@ export type ShellTraceCall = {
   id: string;
   command: string | null;
   result: string | null;
+  exitCode?: number | null;
+  durationMs?: number | null;
 };
 
 export const ExecutionStepSchema = z.object({

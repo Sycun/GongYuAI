@@ -15,6 +15,9 @@ import { appendProgress } from "./tools.js";
 export const EVIDENCE_STALL_MS =
   Number(process.env.GY_EVIDENCE_STALL_MS ?? 900_000) || 900_000;
 
+export const EVIDENCE_PROGRESS_GRACE_MS =
+  Number(process.env.GY_EVIDENCE_PROGRESS_GRACE_MS ?? 300_000) || 300_000;
+
 function ms(iso: string | null | undefined): number {
   if (!iso) return 0;
   const t = Date.parse(iso);
@@ -36,16 +39,43 @@ export function lastVerifiedEvidenceAt(history: HistoryStore, taskId: string): n
   return latest;
 }
 
+/**
+ * Freshest substantive non-verified progress on the active Intent (new Facts or
+ * tentative Findings tied to this Intent). Used to distinguish active deep analysis
+ * from genuine spin-lock before force-concluding an Intent.
+ */
+export function lastActiveProgressAt(
+  history: HistoryStore,
+  taskId: string,
+  intentId: string,
+): number {
+  let latest = 0;
+  for (const f of history.listFacts(taskId)) {
+    if (f.intentId === intentId) latest = Math.max(latest, ms(f.createdAt));
+  }
+  for (const f of history.listFindings(taskId)) {
+    if (f.intentId === intentId && f.status !== "retracted") {
+      latest = Math.max(latest, ms(f.createdAt));
+    }
+  }
+  return latest;
+}
+
 export type EvidenceStallResult = {
   concluded: boolean;
   intentId: string | null;
   message: string | null;
+  extended?: boolean;
 };
 
 /**
  * Force-conclude the active Intent when verified evidence has stalled past stallMs.
  * Relay-safe: the anchor derives from History (verified-evidence recency + intent
  * createdAt), never from the volatile checkpoint claim timestamp that reset() loses.
+ *
+ * Graded stall check: if the active Intent has recent substantive progress (new Fact
+ * or tentative Finding within `progressGraceMs`) and total idle is below `hardStallMs`
+ * (default 2x stallMs), extend the grace window instead of interrupting active work.
  */
 export function maybeForceEvidenceStall(opts: {
   history: HistoryStore;
@@ -55,6 +85,8 @@ export function maybeForceEvidenceStall(opts: {
   state: CheckpointState;
   save: () => void;
   stallMs?: number;
+  progressGraceMs?: number;
+  hardStallMs?: number;
   leader?: boolean;
   nowMs?: number;
 }): EvidenceStallResult {
@@ -71,6 +103,13 @@ export function maybeForceEvidenceStall(opts: {
   );
   const idle = now - anchor;
   if (idle < stallMs) return { concluded: false, intentId: null, message: null };
+
+  const progressGraceMs = opts.progressGraceMs ?? Math.min(EVIDENCE_PROGRESS_GRACE_MS, Math.floor(stallMs / 2));
+  const hardStallMs = opts.hardStallMs ?? stallMs * 2;
+  const activeAt = lastActiveProgressAt(opts.history, opts.taskId, intentId);
+  if (activeAt > anchor && now - activeAt < progressGraceMs && idle < hardStallMs) {
+    return { concluded: false, intentId, message: null, extended: true };
+  }
   const minutes = Math.round(idle / 60_000);
   const reason = `Evidence stall: ${minutes}min since last verified evidence on this surface; force rotate (relay-safe)`;
   const done = opts.history.forceConcludeExploreTimeout({

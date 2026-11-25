@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { WorkerManifest } from "@gongyuai/contracts";
-import { openHistory } from "@gongyuai/history";
+import { CommandLedger, openHistory } from "@gongyuai/history";
 import { openMcpHub, probeMcpHealth } from "./client.js";
 import type { ToolContext } from "../tools.js";
 
@@ -118,8 +118,8 @@ test("a stdio MCP that never answers is killed and later calls fail fast", async
     name: "Sleeper",
     transport: "stdio",
     command: process.execPath,
-    args: ["-e", "require('fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000);", pidFile],
-    env: {},
+    args: ["-e", "require('fs').writeFileSync(process.argv[1], String(process.pid)); process.stderr.write('A'.repeat(3000) + ' waiting for config ' + process.env.FIXTURE_TOKEN); setInterval(() => {}, 1000);", pidFile],
+    env: { FIXTURE_TOKEN: "test-secret" },
     timeoutMs: 300,
   }];
   const ctx: ToolContext = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
@@ -129,7 +129,13 @@ test("a stdio MCP that never answers is killed and later calls fail fast", async
     history.close();
     rmSync(root, { recursive: true, force: true });
   });
-  await assert.rejects(hub.enable("sleeper", "health"), /timeout/);
+  await assert.rejects(hub.enable("sleeper", "health"), (err: Error) => {
+    assert.match(err.message, /timeout/);
+    assert.match(err.message, /stderr tail: .*waiting for config \[redacted\]/);
+    assert.ok(err.message.length < 2300);
+    assert.doesNotMatch(err.message, /test-secret/);
+    return true;
+  });
   const pid = Number(readFileSync(pidFile, "utf8"));
   const stat = spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
   assert.equal(/^[SR]/.test(stat), false, `sleeper still running: ${stat || "none"}`);
@@ -138,6 +144,108 @@ test("a stdio MCP that never answers is killed and later calls fail fast", async
   assert.equal(again.ok, false);
   assert.equal(again.code, "timeout");
   assert.ok(Date.now() - started < 200);
+});
+
+for (const legacyList of [false, true]) {
+  test(`stdio MCP handshake and echo with ${legacyList ? "mixed framing" : "NDJSON"} stdout`, async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "gy-mcp-echo-"));
+    mkdirSync(join(root, "workspace"), { recursive: true });
+    const history = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir: join(root, "evidence") });
+    const m = manifest(root);
+    m.commandFence = 1;
+    const ledger = new CommandLedger(root);
+    ledger.activate(m.taskId, 1);
+    const approver = setInterval(() => {
+      const pending = ledger.next(m.taskId, 1, "pending");
+      if (pending) {
+        ledger.settle(pending, {
+          id: pending.id,
+          at: new Date().toISOString(),
+          model: "",
+          scope: "local-validation",
+          decision: "allow",
+          risk: "low",
+          actor: "policy",
+          reason: "test fixture allow",
+        });
+      }
+    }, 10);
+    const source = String.raw`
+      const rl = require("node:readline").createInterface({ input: process.stdin });
+      const assert = require("node:assert/strict");
+      let n = 0;
+      function send(value, legacy = false) {
+        const body = Buffer.from(JSON.stringify(value, null, legacy ? 2 : undefined));
+        if (legacy) {
+          const notice = '{"jsonrpc":"2.0","method":"notifications/message","params":{}}\n';
+          process.stdout.write(notice + "Content-Len");
+          setTimeout(() => {
+            process.stdout.write("gth: " + body.length + "\r\n");
+            setTimeout(() => {
+              const split = body.indexOf(Buffer.from("你好")) + 1;
+              process.stdout.write(Buffer.concat([Buffer.from("\r\n"), body.subarray(0, split)]));
+              setTimeout(() => process.stdout.write(body.subarray(split)), 5);
+            }, 5);
+          }, 5);
+          return;
+        }
+        process.stdout.write(body.subarray(0, 8));
+        setTimeout(() => process.stdout.write(Buffer.concat([body.subarray(8), Buffer.from("\n")])), 5);
+      }
+      rl.on("line", (line) => {
+        const msg = JSON.parse(line);
+        assert.equal(msg.jsonrpc, "2.0");
+        assert.equal(msg.method, ["initialize", "notifications/initialized", "tools/list", "tools/call"][n++]);
+        if (msg.method === "notifications/initialized") {
+          assert.equal(msg.id, undefined);
+          return;
+        }
+        const result = msg.method === "initialize"
+          ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } }
+          : msg.method === "tools/list"
+            ? { tools: [{ name: "echo", description: "你好", inputSchema: { type: "object" } }] }
+            : { content: [{ type: "text", text: msg.params.arguments.value }] };
+        send({ jsonrpc: "2.0", id: msg.id, result }, msg.method === "tools/list" && process.argv[1] === "true");
+      });
+    `;
+    m.mcpServers = [{ id: "fixture", name: "Fixture", transport: "stdio", command: process.execPath, args: ["-e", source, String(legacyList)], env: {} }];
+    const hub = await openMcpHub(m, { manifest: m, history, usage: { toolCalls: 0, installs: 0 } });
+    t.after(async () => {
+      clearInterval(approver);
+      ledger.close();
+      await hub.close();
+      history.close();
+      rmSync(root, { recursive: true, force: true });
+    });
+    assert.deepEqual(hub.enabledIds(), ["fixture"]);
+    assert.match(hub.openaiTools[0]!.function.description, /你好/);
+    assert.equal(await hub.invoke("fixture", "echo", { value: "ok\n测试" }), "ok\n测试");
+  });
+}
+
+test("stdio MCP discovery failure includes stderr and is not registered", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-mcp-discovery-"));
+  const history = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir: join(root, "evidence") });
+  const m = manifest(root);
+  m.mcpPool = [{
+    id: "fixture", name: "Fixture", transport: "stdio", command: process.execPath, env: {},
+    args: ["-e", String.raw`
+      require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+        const { id, method } = JSON.parse(line);
+        if (method === "initialize") console.log(JSON.stringify({ jsonrpc: "2.0", id, result: {} }));
+        if (method === "tools/list") process.stderr.write("discovery unavailable\n", () => process.exit(2));
+      });
+    `],
+  }];
+  const hub = await openMcpHub(m, { manifest: m, history, usage: { toolCalls: 0, installs: 0 } });
+  t.after(async () => {
+    await hub.close();
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  await assert.rejects(hub.enable("fixture", "test"), /MCP process exited \(2\).*stderr tail: discovery unavailable.*startup-failed/);
+  assert.deepEqual(hub.enabledIds(), []);
+  assert.deepEqual(hub.openaiTools, []);
 });
 
 test("builtin MCP allows authorized CIDR subnets, comma-separated targets, array flags, and wordlist; rejects OOS overlap or missing target", async (t) => {

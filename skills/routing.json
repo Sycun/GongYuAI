@@ -91,7 +91,8 @@
         "oauth",
         "oidc",
         "sso",
-        "token"
+        "jwks",
+        "openid"
       ]
     },
     {
@@ -134,11 +135,12 @@
     {
       "id": "active-directory-attack",
       "triggers": [
-        "ad",
-        "domain",
+        "active directory",
         "kerberos",
         "ldap",
-        "smb"
+        "smb",
+        "bloodhound",
+        "ntlm"
       ]
     },
     {
@@ -147,25 +149,28 @@
         "aws",
         "azure",
         "gcp",
-        "cloud",
-        "s3"
+        "s3 bucket",
+        "minio",
+        "imds",
+        "iam"
       ]
     },
     {
       "id": "ai-llm-app-attack",
       "triggers": [
         "llm",
-        "prompt",
-        "ai",
-        "rag",
-        "agent"
+        "prompt injection",
+        "openai",
+        "langchain",
+        "ollama",
+        "langflow"
       ]
     },
     {
       "id": "source-code-hunting",
       "triggers": [
         "源码",
-        "code",
+        "source code",
         "审计",
         "sast"
       ]
@@ -173,9 +178,9 @@
     {
       "id": "component-vuln-intel",
       "triggers": [
-        "cve",
-        "组件",
-        "依赖",
+        "cve-",
+        "组件漏洞",
+        "依赖漏洞",
         "供应链"
       ]
     },
@@ -183,9 +188,11 @@
       "id": "binary-mobile-reversing",
       "triggers": [
         "apk",
-        "ios",
+        "ipa",
         "逆向",
-        "mobile"
+        "elf",
+        "ghidra",
+        "radare2"
       ]
     },
     {
@@ -193,8 +200,10 @@
       "triggers": [
         "wifi",
         "无线",
-        "rf",
-        "蓝牙"
+        "rfid",
+        "蓝牙",
+        "zigbee",
+        "uart"
       ]
     },
     {

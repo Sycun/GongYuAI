@@ -3,7 +3,7 @@ import { request as httpRequest } from "node:http";
 import { connect as netConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { DatabaseSync } from "node:sqlite";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   type Finding,
   type FindingQualification,
@@ -496,4 +496,100 @@ export async function runIndependentValidation(input: {
     try { history.close(); } catch { /* already closed */ }
     if (proxy) await proxy.close();
   }
+}
+
+type AutoValidateItem = {
+  taskId: string;
+  taskDir: string;
+  historyDb: string;
+  evidenceDir: string;
+  targets: readonly string[];
+  findingId: string;
+};
+
+const autoQueue: AutoValidateItem[] = [];
+const autoAttempted = new Set<string>();
+let autoRunning = false;
+
+/** Clear in-memory auto-validation queue/dedup state (tests). */
+export function resetAutoValidationState(): void {
+  autoQueue.length = 0;
+  autoAttempted.clear();
+  autoRunning = false;
+}
+
+function drainAutoValidationQueue(): void {
+  if (autoRunning) return;
+  const next = autoQueue.shift();
+  if (!next) return;
+  autoRunning = true;
+  void runIndependentValidation(next)
+    .catch(() => {
+      /* independent validation is best-effort and must never crash control-plane */
+    })
+    .finally(() => {
+      autoRunning = false;
+      if (autoQueue.length > 0) drainAutoValidationQueue();
+    });
+}
+
+/**
+ * Scan a task's verified findings and asynchronously enqueue independent replay
+ * validation for any finding that has a replayable URL and has not yet been
+ * validated or attempted in this process. Serialized to max 1 concurrent job.
+ */
+export function scheduleAutoValidationsForTask(input: {
+  taskId: string;
+  taskDir: string;
+  historyDb: string;
+  evidenceDir: string;
+  targets: readonly string[];
+  findingId?: string;
+}): string[] {
+  if (!existsSync(input.historyDb)) return [];
+  const queued: string[] = [];
+  let history: ReturnType<typeof openHistory> | null = null;
+  try {
+    history = openHistory({ dbPath: input.historyDb, evidenceDir: input.evidenceDir });
+    const findings = input.findingId
+      ? [history.getFinding(input.taskId, input.findingId)].filter((f): f is Finding => Boolean(f))
+      : history.listFindings(input.taskId);
+    for (const finding of findings) {
+      if (finding.status !== "verified") continue;
+      const key = flightKey(input.taskId, finding.id);
+      if (autoAttempted.has(key) || inflight.has(key)) continue;
+      const existingValidations = history.listFindingValidations(input.taskId, finding.id);
+      if (existingValidations.some((v) => v.independent)) {
+        autoAttempted.add(key);
+        continue;
+      }
+      if (latestSucceeded(input.taskDir, input.taskId, finding.id)) {
+        autoAttempted.add(key);
+        continue;
+      }
+      const packet = buildValidatorPacket({
+        taskId: input.taskId,
+        targets: input.targets,
+        finding,
+      });
+      const target = replayUrl(packet);
+      if (!target || !hostAllowed(target, packet.task.targets)) continue;
+      autoAttempted.add(key);
+      autoQueue.push({
+        taskId: input.taskId,
+        taskDir: input.taskDir,
+        historyDb: input.historyDb,
+        evidenceDir: input.evidenceDir,
+        targets: [...input.targets],
+        findingId: finding.id,
+      });
+      queued.push(finding.id);
+    }
+  } catch {
+    return queued;
+  } finally {
+    try { history?.close(); } catch { /* ignore */ }
+  }
+  if (queued.length > 0) drainAutoValidationQueue();
+  return queued;
 }

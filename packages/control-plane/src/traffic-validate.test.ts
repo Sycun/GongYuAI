@@ -6,9 +6,14 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { CreateTaskRequestSchema } from "@gongyuai/contracts";
-import { openHistory } from "@gongyuai/history";
+import { openHistory, writeEvidenceFile } from "@gongyuai/history";
 import { bootControlPlane, taskPaths } from "./index.js";
-import { buildValidatorPacket, gradeDarkMoon } from "./validate-runner.js";
+import {
+  buildValidatorPacket,
+  gradeDarkMoon,
+  resetAutoValidationState,
+  scheduleAutoValidationsForTask,
+} from "./validate-runner.js";
 
 const SECRET = "EXPLORER_TRANSCRIPT_9f3a_do_not_leak";
 
@@ -209,6 +214,78 @@ test("validate-run is an isolated replay and does not carry explorer messages", 
   assert.equal(raw.toString("utf8"), blob.json.body);
   const tooBig = await call("GET", `${base}/traffic/${trafficId}/blob?side=res&maxBytes=65537`);
   assert.equal(tooBig.status, 400);
+});
+
+test("scheduleAutoValidationsForTask enqueues verified findings asynchronously and deduplicates", async (t) => {
+  resetAutoValidationState();
+  const root = mkdtempSync(join(tmpdir(), "gy-auto-val-"));
+  const evidenceDir = join(root, "evidence");
+  const historyDb = join(root, "history.sqlite");
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("root:x:0:0:root:/root:/bin/bash\n");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const addr = server.address();
+  if (!addr || typeof addr === "string") throw new Error("no port");
+  const url = `http://127.0.0.1:${addr.port}/exec`;
+
+  t.after(async () => {
+    resetAutoValidationState();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const taskId = "44444444-4444-4444-8444-444444444444";
+  const history = openHistory({ dbPath: historyDb, evidenceDir });
+  const { finding } = history.recordFinding({
+    taskId,
+    title: "Command Execution",
+    asset: `127.0.0.1:${addr.port}`,
+    vulnClass: "CWE-78",
+    severity: "critical",
+    endpoint: url,
+    pocCurl: `curl -sS '${url}'`,
+  });
+  const ev = writeEvidenceFile(evidenceDir, "cmd.txt", "uid=0(root)");
+  history.verifyFinding(taskId, finding.id, {
+    evidencePaths: [ev],
+    repro: `curl -sS '${url}'`,
+    verifiedBy: "w0",
+  });
+  history.close();
+
+  const firstQueued = scheduleAutoValidationsForTask({
+    taskId,
+    taskDir: root,
+    historyDb,
+    evidenceDir,
+    targets: [`127.0.0.1:${addr.port}`],
+  });
+  assert.deepEqual(firstQueued, [finding.id]);
+
+  // Second call immediately deduplicates.
+  const secondQueued = scheduleAutoValidationsForTask({
+    taskId,
+    taskDir: root,
+    historyDb,
+    evidenceDir,
+    targets: [`127.0.0.1:${addr.port}`],
+  });
+  assert.deepEqual(secondQueued, []);
+
+  // Poll until async validation completes.
+  let validations: ReturnType<ReturnType<typeof openHistory>["listFindingValidations"]> = [];
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    const h = openHistory({ dbPath: historyDb, evidenceDir });
+    validations = h.listFindingValidations(taskId, finding.id);
+    h.close();
+    if (validations.length > 0) break;
+  }
+  assert.ok(validations.length >= 1, "expected independent validation to complete asynchronously");
+  assert.equal(validations[0]!.independent, true);
+  assert.equal(validations[0]!.verdict, "confirmed");
 });
 
 async function call(method: string, url: string, body?: unknown): Promise<{ status: number; text: string; json: any }> {

@@ -276,3 +276,55 @@ test("边界：跨面新 verified 证据按任务级牵引（已知边界，待�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("graded stall extends grace window when active intent has recent substantive progress", () => {
+  const { root, dbPath, history } = setup();
+  try {
+    const taskId = "t-graded-stall";
+    const intent = history.proposeIntent({ taskId, title: "deep-analysis", sourceFactIds: [ORIGIN_FACT_ID] });
+    history.claimIntent(taskId, intent.id, "w0");
+    // Backdate intent creation by 20 minutes (past 15min stallMs).
+    const now = Date.now();
+    const db = new DatabaseSync(dbPath);
+    db.prepare("UPDATE intents SET created_at = ? WHERE id = ?").run(
+      new Date(now - 20 * 60_000).toISOString(),
+      intent.id,
+    );
+    db.close();
+
+    // Append a fresh Fact tied to the active Intent 1 minute ago (substantive progress).
+    const fact = history.appendFact({
+      taskId,
+      layer: "summary",
+      title: "Discovered internal admin endpoint",
+      summary: "New lead under investigation",
+      intentId: intent.id,
+    });
+    const db2 = new DatabaseSync(dbPath);
+    db2.prepare("UPDATE facts SET created_at = ? WHERE id = ?").run(
+      new Date(now - 60_000).toISOString(),
+      fact.id,
+    );
+    db2.close();
+
+    const ckpt = state({ activeIntentId: intent.id });
+    const extended = maybeForceEvidenceStall({
+      history, taskId, workerId: "w0", workspaceDir: root, state: ckpt,
+      stallMs: 15 * 60_000, progressGraceMs: 5 * 60_000, save: () => {}, nowMs: now,
+    });
+    assert.equal(extended.concluded, false);
+    assert.equal(extended.extended, true);
+    assert.equal(ckpt.activeIntentId, intent.id);
+
+    // Once past hardStallMs (2x stallMs = 30min), it still force-concludes so nothing hangs forever.
+    const forced = maybeForceEvidenceStall({
+      history, taskId, workerId: "w0", workspaceDir: root, state: ckpt,
+      stallMs: 15 * 60_000, progressGraceMs: 5 * 60_000, save: () => {}, nowMs: now + 15 * 60_000,
+    });
+    assert.equal(forced.concluded, true);
+    assert.equal(ckpt.activeIntentId, null);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

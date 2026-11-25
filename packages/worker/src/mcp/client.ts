@@ -44,7 +44,7 @@ export type McpFailureCode =
 export class McpStartupError extends Error {
   readonly code: McpFailureCode;
   readonly serverId: string;
-  constructor(serverId: string, code: McpFailureCode, reason: string) {
+  constructor(serverId: string, code: McpFailureCode, readonly reason: string) {
     super(`${reason} {"code":"${code}","serverId":"${serverId}"}`);
     this.name = "McpStartupError";
     this.code = code;
@@ -258,22 +258,22 @@ export async function openMcpHub(
       enabled.add(cfg.id);
       return `MCP ${cfg.id} 已启用${autoInstalledNote}`;
     }
-    let session: McpServerSession | null;
+    let session: McpServerSession | null = null;
+    let tools: Awaited<ReturnType<McpServerSession["listTools"]>>;
     try {
       session = await openOne(cfg, ctx);
+      if (!session) return `MCP ${cfg.id} 无法连接（配置不全或 adapter 缺失）`;
+      tools = await session.listTools();
     } catch (err) {
+      await session?.close().catch(() => {});
       const wrapped = err instanceof McpStartupError
         ? err
         : new McpStartupError(cfg.id, "startup-failed", err instanceof Error ? err.message : String(err));
       blocked.set(cfg.id, wrapped);
       throw wrapped;
     }
-    if (!session) {
-      return `MCP ${cfg.id} 无法连接（配置不全或 adapter 缺失）`;
-    }
     sessions.set(cfg.id, session);
     enabled.add(cfg.id);
-    const tools = await session.listTools();
     const names: string[] = [];
     for (const t of tools) {
       const full = mcpToolName(cfg.id, t.name);
@@ -574,56 +574,82 @@ function withTimeout<T>(work: Promise<T>, timeoutMs: number, serverId: string, t
 
 class DeadlineRpc {
   private nextId = 1;
-  private buffer = "";
+  private buffer: Buffer = Buffer.alloc(0);
+  private bodyLength?: number;
+  private stderrTail = "";
+  private ended?: Error;
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (err: Error) => void }>();
 
-  constructor(private readonly child: ChildProcessWithoutNullStreams) {
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => this.onData(chunk));
-    child.on("error", (err) => {
-      for (const pending of this.pending.values()) pending.reject(err);
-      this.pending.clear();
+  constructor(
+    private readonly child: ChildProcessWithoutNullStreams,
+    private readonly serverId: string,
+    private readonly env: Record<string, string>,
+  ) {
+    child.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      this.stderrTail = (this.stderrTail + chunk).slice(-2048);
     });
-    child.on("exit", () => {
-      for (const pending of this.pending.values()) pending.reject(new Error("MCP process exited"));
-      this.pending.clear();
+    child.on("error", (err) => this.end(err));
+    // Keep draining stdout and stderr until close, even after the child exits.
+    child.on("close", (code, signal) => {
+      this.end(new Error(`MCP process exited (${signal ?? code ?? "unknown"})`));
     });
+    child.stdin.on("error", () => {}); // Write callbacks report failures without an unhandled EPIPE.
   }
 
-  private onData(chunk: string): void {
-    this.buffer += chunk;
-    while (true) {
-      const headerEnd = this.buffer.indexOf("\r\n\r\n");
-      if (headerEnd < 0) {
-        const nl = this.buffer.indexOf("\n");
-        if (nl < 0) return;
-        const line = this.buffer.slice(0, nl).trim();
-        this.buffer = this.buffer.slice(nl + 1);
-        if (!line || line.startsWith("Content-Length")) continue;
-        try {
-          this.handleMessage(JSON.parse(line) as Record<string, unknown>);
-        } catch {
-          /* ignore partial noise */
-        }
-        continue;
-      }
-      const header = this.buffer.slice(0, headerEnd);
-      const match = /Content-Length:\s*(\d+)/i.exec(header);
-      if (!match) {
-        this.buffer = this.buffer.slice(headerEnd + 4);
-        continue;
-      }
-      const length = Number(match[1]);
-      const bodyStart = headerEnd + 4;
-      if (this.buffer.length < bodyStart + length) return;
-      const body = this.buffer.slice(bodyStart, bodyStart + length);
-      this.buffer = this.buffer.slice(bodyStart + length);
-      try {
-        this.handleMessage(JSON.parse(body) as Record<string, unknown>);
-      } catch {
-        /* ignore */
+  private end(err: Error): void {
+    this.ended ??= err;
+    for (const pending of this.pending.values()) pending.reject(this.ended);
+    this.pending.clear();
+  }
+
+  diagnostic(reason: string): string {
+    let stderr = this.stderrTail;
+    for (const [key, value] of Object.entries(this.env)) {
+      if (value && /token|password|passwd|secret|key|cookie|authorization/i.test(key)) {
+        stderr = stderr.replaceAll(value, "[redacted]");
       }
     }
+    stderr = stderr.replace(/[\x00-\x1f\x7f]+/g, " ").trim();
+    return stderr ? `${reason} · stderr tail: ${stderr}` : reason;
+  }
+
+  private onData(chunk: Buffer): void {
+    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk;
+    while (true) {
+      if (this.bodyLength !== undefined) {
+        if (this.buffer.length < this.bodyLength) return;
+        const body = this.buffer.subarray(0, this.bodyLength);
+        this.buffer = this.buffer.subarray(this.bodyLength);
+        this.bodyLength = undefined;
+        this.parseMessage(body);
+        continue;
+      }
+      const nl = this.buffer.indexOf(0x0a);
+      if (nl < 0) return;
+      const line = this.buffer.toString("utf8", 0, nl);
+      // Choose the framing at the stream head, not from a delimiter in a later frame.
+      if (/^content-(?:length|type):/i.test(line)) {
+        const headerEnd = this.buffer.indexOf("\r\n\r\n");
+        if (headerEnd < 0) return;
+        const header = this.buffer.toString("ascii", 0, headerEnd);
+        const match = /^content-length:[ \t]*(\d+)[ \t]*\r?$/im.exec(header);
+        const length = match ? Number(match[1]) : NaN;
+        this.buffer = this.buffer.subarray(headerEnd + 4);
+        if (Number.isSafeInteger(length)) this.bodyLength = length;
+        continue;
+      }
+      const body = this.buffer.subarray(0, nl);
+      this.buffer = this.buffer.subarray(nl + 1);
+      this.parseMessage(body);
+    }
+  }
+
+  private parseMessage(body: Buffer): void {
+    let msg: unknown;
+    try { msg = JSON.parse(body.toString("utf8")); } catch { return; }
+    if (msg && typeof msg === "object") this.handleMessage(msg as Record<string, unknown>);
   }
 
   private handleMessage(msg: Record<string, unknown>): void {
@@ -635,14 +661,14 @@ class DeadlineRpc {
   }
 
   request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
+    if (this.ended) return Promise.reject(this.ended);
     const id = this.nextId++;
     const payload = JSON.stringify({ jsonrpc: "2.0", id, method, params });
-    const frame = `Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         if (!this.pending.has(id)) return;
         this.pending.delete(id);
-        reject(new McpStartupError("stdio", "timeout", `${method} exceeded ${timeoutMs}ms`));
+        reject(new McpStartupError(this.serverId, "timeout", `${method} exceeded ${timeoutMs}ms`));
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => {
@@ -654,7 +680,7 @@ class DeadlineRpc {
           reject(err);
         },
       });
-      this.child.stdin.write(frame, (err) => {
+      this.child.stdin.write(payload + "\n", (err) => {
         if (!err) return;
         clearTimeout(timer);
         this.pending.delete(id);
@@ -663,9 +689,12 @@ class DeadlineRpc {
     });
   }
 
-  notify(method: string, params: unknown): void {
+  notify(method: string, params: unknown): Promise<void> {
+    if (this.ended) return Promise.reject(this.ended);
     const payload = JSON.stringify({ jsonrpc: "2.0", method, params });
-    this.child.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+    return new Promise((resolve, reject) => {
+      this.child.stdin.write(payload + "\n", (err) => err ? reject(err) : resolve());
+    });
   }
 
   close(): void {
@@ -688,29 +717,37 @@ async function openStdioDeadline(
     stdio: ["pipe", "pipe", "pipe"],
     env: { ...process.env, ...env },
   });
-  child.stderr.on("data", () => {});
-  const rpc = new DeadlineRpc(child);
+  const rpc = new DeadlineRpc(child, serverId, env);
   const kill = () => {
     try { child.kill("SIGKILL"); } catch { /* already gone */ }
   };
+  const startupError = (err: unknown) => {
+    if (err instanceof McpStartupError) {
+      return new McpStartupError(serverId, err.code, rpc.diagnostic(err.reason));
+    }
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return new McpStartupError(serverId, "missing-binary", `MCP 二进制不存在：${command}`);
+    return new McpStartupError(serverId, "startup-failed", rpc.diagnostic(err instanceof Error ? err.message : String(err)));
+  };
+  const startedAt = Date.now();
+  const remaining = () => Math.max(1, timeoutMs - (Date.now() - startedAt));
   try {
     await rpc.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
       clientInfo: { name: "gongyuai-worker", version: "0.1.0" },
     }, timeoutMs);
-    rpc.notify("notifications/initialized", {});
+    await withTimeout(rpc.notify("notifications/initialized", {}), remaining(), serverId, "notifications/initialized");
   } catch (err) {
     kill();
-    if (err instanceof McpStartupError) throw new McpStartupError(serverId, err.code, err.message);
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") throw new McpStartupError(serverId, "missing-binary", `MCP 二进制不存在：${command}`);
-    throw new McpStartupError(serverId, "startup-failed", err instanceof Error ? err.message : String(err));
+    throw startupError(err);
   }
   return {
     serverId,
     async listTools() {
-      const res = await rpc.request("tools/list", {}, 60_000) as {
+      const res = await rpc.request("tools/list", {}, remaining()).catch((err) => {
+        throw startupError(err);
+      }) as {
         tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
       };
       return (res.tools ?? []).map((tool) => ({
@@ -728,7 +765,7 @@ async function openStdioDeadline(
         const text = (res.content ?? []).map((item) => item.text ?? "").filter(Boolean).join("\n");
         return { ok: !res.isError, text: text || JSON.stringify(res) };
       } catch (err) {
-        return { ok: false, text: err instanceof Error ? err.message : String(err) };
+        return { ok: false, text: err instanceof McpStartupError ? startupError(err).message : err instanceof Error ? err.message : String(err) };
       }
     },
     async close() {

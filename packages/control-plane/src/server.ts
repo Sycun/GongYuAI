@@ -66,7 +66,11 @@ import type { ControlStore } from "./store.js";
 import type { WorkerRunner } from "./runner.js";
 import type { SettingsStore } from "./settings.js";
 import type { SilentUpdater } from "./updater.js";
-import { runIndependentValidation, ValidationBusyError } from "./validate-runner.js";
+import {
+  runIndependentValidation,
+  scheduleAutoValidationsForTask,
+  ValidationBusyError,
+} from "./validate-runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(__dirname, "..", "web");
@@ -703,9 +707,18 @@ export function startControlServer(opts: ServerOptions) {
               repro: typeof body.repro === "string" ? body.repro : "",
               impact: typeof body.impact === "string" ? body.impact : undefined,
               fix: typeof body.fix === "string" ? body.fix : undefined,
+              pocCurl: typeof body.pocCurl === "string" ? body.pocCurl : undefined,
               verifiedBy: typeof body.verifiedBy === "string" ? body.verifiedBy : "operator:api",
             });
             refreshTerminalReport(history);
+            scheduleAutoValidationsForTask({
+              taskId: task.id,
+              taskDir: task.dataDir,
+              historyDb: paths.historyDb,
+              evidenceDir: paths.evidenceDir,
+              targets: task.auth.targets,
+              findingId: finding.id,
+            });
             return send(res, 200, { finding });
           } catch (err) {
             return send(res, 409, { error: err instanceof Error ? err.message : String(err) });

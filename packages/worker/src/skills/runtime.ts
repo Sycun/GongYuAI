@@ -32,6 +32,24 @@ export type SkillHub = {
 
 type RouteExtra = { triggers?: string[]; phase?: SkillPhase };
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Match a routing trigger against lowercased fact text.
+ * Pure ASCII triggers require non-alphanumeric boundaries so short tokens like
+ * "ad", "rf", or "ai" never match inside unrelated English words ("admin", "csrf", "main").
+ */
+export function matchesTrigger(hayLower: string, rawTrigger: string): boolean {
+  const needle = rawTrigger.trim().toLowerCase();
+  if (needle.length < 2) return false;
+  if (/^[a-z0-9][a-z0-9._ -]*[a-z0-9]$/i.test(needle)) {
+    return new RegExp(`(?<![a-z0-9_])${escapeRegex(needle)}(?![a-z0-9_])`, "i").test(hayLower);
+  }
+  return hayLower.includes(needle);
+}
+
 function stripFrontmatter(raw: string): string {
   if (!raw.startsWith("---")) return raw;
   const end = raw.indexOf("\n---", 3);
@@ -281,8 +299,7 @@ export function openSkillHub(
         const trig = triggersFor(c.id, pack.rootDir);
         const matched: string[] = [];
         for (const t of trig) {
-          const needle = t.trim().toLowerCase();
-          if (needle.length >= 2 && hay.includes(needle)) matched.push(t);
+          if (matchesTrigger(hay, t)) matched.push(t);
         }
         if (matched.length > 0) {
           scored.push({ id: c.id, score: matched.length, matched });
