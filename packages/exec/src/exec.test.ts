@@ -368,6 +368,23 @@ test("P14-B7 参数级判类：引号内的危险动词不再被首词掩盖", a
   assert.equal(classifyCommand("echo hi"), "exec");
 });
 
+test("破坏性判定：目标 URL 路径串非本机命令；裸动词与路径二进制仍拒", () => {
+  const probe = [
+    "cd /tmp/evidence && python3 -u - <<'PYEOF' 2>&1 | tail -40",
+    "import http.client",
+    'cands=["/api/manager/reboot","/api/manager/queue/update_all"]',
+    "for p in cands: print(p)",
+    "PYEOF",
+  ].join("\n");
+  assert.notEqual(classifyCommand(probe), "destructive");
+  assert.notEqual(classifyCommand(probe), "host-network");
+  assert.equal(classifyCommand("reboot"), "destructive");
+  assert.equal(classifyCommand("sudo shutdown -h now"), "destructive");
+  assert.equal(classifyCommand("/sbin/reboot"), "destructive");
+  assert.equal(classifyCommand("sudo /usr/sbin/halt"), "destructive");
+  assert.equal(classifyCommand("python3 -c 'import os; os.system(\"killall openvpn\")'"), "destructive");
+});
+
 test("P14-B4 已声明的 pivot CIDR 才放行内网主机", () => {
   const base = { targets: ["127.0.0.1"], outOfScope: [], capability: "active-lab" as const };
   assert.equal(authorizeCommand(base, "curl http://10.20.0.5/").allowed, false);

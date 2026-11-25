@@ -44,9 +44,14 @@ export function capabilityAtLeast(have: AuthCapability | undefined, need: AuthCa
 const HOST_NETWORK_DENY =
   /\b(route\s+(add|delete|change|flush)|ip\s+route\s+(add|del|change|replace)|networksetup\s+-(?!get|list)\w|scutil\s+--nc\s+(?!list\b|status\b|probe\b)\w|pfctl\b|iptables\b|ip6tables\b|nft\s+|sysctl\s+.*\bnet\.|launchctl\s+(load|unload).*vpn|osascript[^\n]*Viscosity|viscosity\s+(connect|disconnect)|set\s+system\s+proxy|mitmproxy\s+--mode\s+local|proxychains|tsocks\b)/i;
 
-/** 不可回滚的本机破坏动作。pkill/killall 可能误杀无关进程，属工程自保拒绝；后台作业用 shell_job kill。 */
+/** 不可回滚的本机破坏动作。pkill/killall 可能误杀无关进程，属工程自保拒绝；后台作业用 shell_job kill。
+ * shutdown/reboot/halt 排除 URL 路径段（如目标 API "/api/manager/reboot"）：那是打向目标的 payload 字符串，
+ * 不是本机命令；路径二进制执行（/sbin/reboot）由 classifyCommand 的 verb 兜底覆盖。 */
 const DESTRUCTIVE_DENY =
-  /\b(rm\s+-rf?\s+\/(?!\/)|mkfs\.|dd\s+if=.*of=\/dev\/|diskutil\s+erase|shutdown\b|reboot\b|halt\b|pkill\b|killall\b|chmod\s+-R\s+777\s+\/|:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:|\.\s+\/dev\/sd[a-z])/i;
+  /\b(rm\s+-rf?\s+\/(?!\/)|mkfs\.|dd\s+if=.*of=\/dev\/|diskutil\s+erase|pkill\b|killall\b|chmod\s+-R\s+777\s+\/|:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:|\.\s+\/dev\/sd[a-z])|(?<![\/\w.-])(shutdown|reboot|halt)\b/i;
+/** 路径二进制执行兜底（lookbehind 会放过 /sbin/reboot）；只查命令起始位置，
+ * 避免把 quoted URL 路径 token（/api/manager/reboot）误判为本机破坏。 */
+const DESTRUCTIVE_PATH_EXEC = /^(?:sudo\s+)?(?:\/[\w.-]+)+\/(reboot|shutdown|halt|pkill|killall)\b/i;
 
 const RECON_VERBS = new Set([
   "nmap", "masscan", "naabu", "httpx", "httprobe", "whatweb", "wafw00f", "whatweb",
@@ -221,7 +226,7 @@ function firstVerb(command: string): string {
 
 export function classifyCommand(command: string): CommandClass {
   if (HOST_NETWORK_DENY.test(command)) return "host-network";
-  if (DESTRUCTIVE_DENY.test(command)) return "destructive";
+  if (DESTRUCTIVE_DENY.test(command) || DESTRUCTIVE_PATH_EXEC.test(command)) return "destructive";
   const tokens = shellTokens(command);
   // Parameter-level check: a destructive payload carried inside quotes or a
   // different token still counts (`bash -c "rm -rf /"`, `sh -c '...'`).

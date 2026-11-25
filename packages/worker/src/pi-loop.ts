@@ -1765,10 +1765,12 @@ async function tryPiDurable(
           state.toolCallsSinceRelay = 0;
           relayPending = false;
           ckpt.save(state);
-          appendProgress(manifest.workspaceDir, `relay π${protocol.generation} (auto reset)`);
-          await root.reset(
-            `会话已自动 Relay（π${protocol.generation}）。请依据以下 History 图与交接继续推进：\n\n${buildTurnObserveBlock(manifest, ctx.history, state, skillHub)}`,
-            context,
+          // 只记录 π 交接协议，不 reset 会话：reset 会清空模型工作上下文，
+          // flash 级模型每次重置后整轮用于重新定位，利用链永远接不起来（2026-11-25 复跑回归）。
+          // 长上下文交给 pi-durable 原生 compaction；续跑 submit 自带完整会话历史。
+          appendProgress(
+            manifest.workspaceDir,
+            `relay π${protocol.generation} (auto recorded, session kept)`,
           );
         }
 
