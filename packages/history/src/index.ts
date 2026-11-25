@@ -4115,6 +4115,26 @@ export class HistoryStore {
   }
 
   /**
+   * Merge traffic ids (UUIDs, optional `http:` prefix) into a finding's
+   * `trafficIds`. Idempotent; unknown finding returns null.
+   */
+  linkFindingTraffic(taskId: string, findingId: string, trafficIds: readonly string[]): Finding | null {
+    const finding = this.getFinding(taskId, findingId);
+    if (!finding) return null;
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const merged = [...(finding.trafficIds ?? [])];
+    for (const raw of trafficIds) {
+      const id = String(raw).trim().replace(/^http:/, "");
+      if (uuid.test(id) && !merged.includes(id)) merged.push(id);
+    }
+    if (merged.length === (finding.trafficIds ?? []).length) return finding;
+    this.db
+      .prepare(`UPDATE findings SET traffic_ids_json = ? WHERE task_id = ? AND id = ?`)
+      .run(JSON.stringify(merged), taskId, findingId);
+    return this.getFinding(taskId, findingId);
+  }
+
+  /**
    * P15-C1 — record one independent opinion about a verified finding.
    *
    * Hard rules:

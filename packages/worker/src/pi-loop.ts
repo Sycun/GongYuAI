@@ -19,6 +19,13 @@ import { startTrafficProxy, type TrafficProxy } from "@gongyuai/exec";
 import { CheckpointStore, type CheckpointState } from "./checkpoint.js";
 import { runTrafficTool } from "./traffic-tools.js";
 import {
+  appendNoteToToolResult,
+  createLongTurnQueue,
+  renderLongTurnNote,
+  shouldCheckAutoSkill,
+  takeLongTurnNotes,
+} from "./long-turn.js";
+import {
   appendProgress,
   installTool,
   runShell,
@@ -38,6 +45,9 @@ import {
   canRelay,
   formatRelayInjection,
   listRelayProtocols,
+  midSubmissionRelayGate,
+  relayHardResetEnabled,
+  shouldSnapshotRelay,
   writeRelayProtocol,
 } from "./relay.js";
 import {
@@ -233,6 +243,10 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
   });
   const ckpt = new CheckpointStore(`${manifest.durableDb}.ckpt.sqlite`);
   let state = ckpt.load();
+  // Monotonic boot epoch: bump once per worker process so Pi requestId (e{epoch}-r{round})
+  // never collides with a round already committed to pi-durable before a pause/resume or restart.
+  state.bootEpoch += 1;
+  ckpt.save(state);
   // Wall clock restarts with this process; soft wall milestones must too.
   if (state.lastSoftWallMilestone !== 0) {
     state.lastSoftWallMilestone = 0;
@@ -321,6 +335,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
           insecureUpstream: true,
         });
         ctx.proxyEnv = trafficProxy.getProxyEnv();
+        ctx.getActiveIntentId = () => state.activeIntentId;
       } catch {
         // Sandboxed or port-restricted environment: degrade gracefully without blocking worker.
         trafficProxy = null;
@@ -619,12 +634,32 @@ async function tryPiDurable(
       ToolTask: unknown;
       GenerationTask: unknown;
     };
-    const defineTool = (spec: { execute?: (...args: never[]) => unknown }) => {
+    // Long-turn delivery: notes queued during a 1,000+ step submission ride on
+    // the next top-level, non-blocked tool result (armed in beforeTool).
+    const longTurn = createLongTurnQueue();
+    const armedTools = new Map<string, number>();
+    const attachLongTurnNotes = <T,>(toolName: string, out: T): T => {
+      const armed = armedTools.get(toolName) ?? 0;
+      if (armed <= 0) return out;
+      if (armed === 1) armedTools.delete(toolName);
+      else armedTools.set(toolName, armed - 1);
+      const { notes, consumedSoftPace } = takeLongTurnNotes(state, longTurn);
+      if (consumedSoftPace) {
+        try {
+          ckpt.save(state);
+        } catch {
+          /* best-effort; note still delivered */
+        }
+      }
+      return notes.length ? appendNoteToToolResult(out, renderLongTurnNote(notes)) : out;
+    };
+    const defineTool = (spec: { name?: string; execute?: (...args: never[]) => unknown }) => {
       const execute = spec?.execute;
       if (typeof execute !== "function") return definePiTool(spec as never);
       return definePiTool({
         ...spec,
-        execute: async (...args: never[]) => redactModelToolResult(await execute(...args)),
+        execute: async (...args: never[]) =>
+          attachLongTurnNotes(spec.name ?? "", redactModelToolResult(await execute(...args))),
       } as never);
     };
     const { obj, str } = schema as { obj: (x: unknown) => unknown; str: () => unknown };
@@ -638,6 +673,7 @@ async function tryPiDurable(
       execution: manifest.execution,
       leader: isExploreLeader(manifest),
       workerCount: readPoolSize(),
+      trafficDir: manifest.dataDir,
       save: () => {
         state.toolCalls = ctx.usage.toolCalls;
         state.installs = ctx.usage.installs;
@@ -1498,6 +1534,45 @@ async function tryPiDurable(
     const pruneLeaderExecTools = isExploreLeader(manifest) && readPoolSize() > 1;
     let relayPending = false;
     let rotatePending: string | null = null;
+    /**
+     * Silent background π audit snapshot (step-paced). NOT a handoff and NEVER a
+     * session reset: never touches relayPending, never interrupts the submission.
+     * Called after each tool step and at the top of the outer loop.
+     */
+    const maybeBackgroundSnapshot = (): boolean => {
+      if (
+        !shouldSnapshotRelay({
+          manifest,
+          step: state.step,
+          lastSnapshotStep: state.lastRelaySnapshotStep,
+          toolCallsSinceRelay: state.toolCallsSinceRelay,
+        })
+      ) {
+        return false;
+      }
+      try {
+        const grounded = synthesizeGroundedRelayFields(ctx.history, manifest.taskId, state.activeIntentId);
+        const protocol = writeRelayProtocol(manifest, ctx.history, {
+          trigger: "auto",
+          reason: "background audit snapshot",
+          ...grounded,
+          tokens: state.tokens,
+          toolCalls: ctx.usage.toolCalls,
+          wallMs: Date.now() - workerStartedAt,
+          generation: state.relayGeneration,
+        });
+        ctx.history.recordRelay(manifest.taskId, protocol.generation, "auto");
+        state.relayGeneration += 1;
+        state.lastRelaySnapshotStep = state.step;
+        state.tokensSinceRelay = 0;
+        state.toolCallsSinceRelay = 0;
+        ckpt.save(state);
+        appendProgress(manifest.workspaceDir, `relay π${protocol.generation} (background snapshot, session kept)`);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     let stepsSinceRotateCheck = 0;
 
     const allPiTools = [
@@ -1565,19 +1640,22 @@ async function tryPiDurable(
           hook(ToolTask, {
             beforeTool: (call: { name: string; parent?: unknown; args?: Record<string, unknown> }) => {
               if (call.parent) return undefined;
-              if (relayPending && call.name !== "relay" && call.name !== "intent_conclude") {
-                return {
-                  block:
-                    "Session Relay 阈值已触发：请立即停止调用新工具并输出简短交接摘要，系统将自动落盘 π 并开启干净新会话。",
-                };
-              }
+              const relayBlock = midSubmissionRelayGate({
+                hardReset: relayHardResetEnabled(),
+                relayPending,
+                toolName: call.name,
+              });
+              if (relayBlock) return relayBlock;
               if (rotatePending && call.name !== "intent_conclude" && call.name !== "relay") {
                 return {
                   block: `当前攻击面已触发证据耗尽轮换（${rotatePending}）：请停止旧面调用并简短总结，系统将立即切回 Reason 换面。`,
                 };
               }
               const block = phaseToolDenial(ctx, state, call.name, mcpHub, call.args);
-              return block ? { block } : undefined;
+              if (block) return { block };
+              // Top-level, allowed call: its result may carry pending long-turn notes.
+              armedTools.set(call.name, (armedTools.get(call.name) ?? 0) + 1);
+              return undefined;
             },
           }),
           hook(GenerationTask, {
@@ -1650,8 +1728,22 @@ async function tryPiDurable(
               // Soft pace during long Pi sessions: queue for next continue/kickoff inject.
               const softDuring = maybeSoftPaceMessage(state, ctx, workerStartedAt);
               if (softDuring) state.pendingSoftPaceMessage = softDuring;
-              // Mid-submission Session Relay trigger: stop Pi internal compaction from masking π handoffs.
+              // Fingerprint-triggered skill auto-inject inside the long turn (SkillHub dedups per session).
+              try {
+                const facts = ctx.history.listFacts(manifest.taskId);
+                if (shouldCheckAutoSkill(longTurn, facts.length)) {
+                  const skillBlock = skillHub.autoInjectForFacts(facts, { phase: "discover" });
+                  if (skillBlock) longTurn.notes.push(skillBlock);
+                }
+              } catch {
+                /* skill hub is advisory */
+              }
+              // Silent π audit snapshot inside the long turn (never sets relayPending).
+              maybeBackgroundSnapshot();
+              // Mid-submission relay interruption is OPT-IN (hard-reset mode); default live session
+              // keeps running long turns — pi-durable native compaction handles the growing context.
               if (
+                relayHardResetEnabled() &&
                 !relayPending &&
                 canRelay({
                   manifest,
@@ -1719,7 +1811,8 @@ async function tryPiDurable(
     }, 5_000);
 
     try {
-      let round = 0;
+      // Restore the persisted round so a restart never replays a requestId already committed to pi-durable.
+      let round = state.round;
       let refusalStreak = 0;
       let pendingRefusalPrompt: string | null = null;
       for (;;) {
@@ -1737,44 +1830,14 @@ async function tryPiDurable(
           break;
         }
 
-        // Auto Session Relay on Pi Durable: write grounded π and issue durable reset(handoff).
-        const autoRelay = canRelay({
-          manifest,
-          tokensSinceRelay: state.tokensSinceRelay,
-          toolCallsSinceRelay: state.toolCallsSinceRelay,
-          forceAgent: false,
-        });
-        if (autoRelay.ok) {
-          const grounded = synthesizeGroundedRelayFields(
-            ctx.history,
-            manifest.taskId,
-            state.activeIntentId,
-          );
-          const protocol = writeRelayProtocol(manifest, ctx.history, {
-            trigger: "auto",
-            reason: "auto token threshold",
-            ...grounded,
-            tokens: state.tokens,
-            toolCalls: ctx.usage.toolCalls,
-            wallMs: Date.now() - workerStartedAt,
-            generation: state.relayGeneration,
-          });
-          ctx.history.recordRelay(manifest.taskId, protocol.generation, "auto");
-          state.relayGeneration += 1;
-          state.tokensSinceRelay = 0;
-          state.toolCallsSinceRelay = 0;
-          relayPending = false;
-          ckpt.save(state);
-          // 只记录 π 交接协议，不 reset 会话：reset 会清空模型工作上下文，
-          // flash 级模型每次重置后整轮用于重新定位，利用链永远接不起来（2026-11-25 复跑回归）。
-          // 长上下文交给 pi-durable 原生 compaction；续跑 submit 自带完整会话历史。
-          appendProgress(
-            manifest.workspaceDir,
-            `relay π${protocol.generation} (auto recorded, session kept)`,
-          );
-        }
+        // Silent background π audit snapshot (also checked after every tool step inside long turns).
+        maybeBackgroundSnapshot();
+        // Hard-reset mode (opt-in) clears the mid-submission flag between rounds; default mode never sets it.
+        relayPending = false;
 
         round += 1;
+        state.round = round;
+        ckpt.save(state);
         const timeoutNote =
           rotatePending ??
           runExploreTimeoutGate(
@@ -1790,7 +1853,11 @@ async function tryPiDurable(
           pending ?? maybeSoftPaceMessage(state, ctx, workerStartedAt);
         if (softPace || timeoutNote || pending) ckpt.save(state);
 
-        const observeBlock = buildTurnObserveBlock(manifest, ctx.history, state, skillHub);
+        const observeBlock = buildTurnObserveBlock(manifest, ctx.history, state, skillHub, {
+          incremental: round > 1,
+        });
+        // Persist the fingerprint now so a mid-turn crash does not replay the full Observe.
+        ckpt.save(state);
         const content = pendingRefusalPrompt
           ? `${pendingRefusalPrompt}\n\n${observeBlock}`
           : round === 1
@@ -1811,7 +1878,8 @@ async function tryPiDurable(
                 .filter(Boolean)
                 .join("\n\n")
             : [
-                `长程续跑 #${round}：目标仍未全部通过。禁止收口/最终汇报。`,
+                `长程续跑 #${round}：当前会话上下文连续（pi-durable 原生 compaction 维护长上下文），目标仍未全部通过。`,
+                "禁止输出交接摘要 / Session Relay 交接块或主动收口；请直接继续调用工具推进未完成目标。",
                 "按渗透测试节奏继续：建图/验证影响/写 finding/换面；完成语义以 assert_goal / evidence gate 为准。",
                 timeoutNote ?? "",
                 softPace ?? "",
@@ -1827,7 +1895,7 @@ async function tryPiDurable(
           {
             type: "input",
             content,
-            requestId: `gy-${manifest.taskId}-r${round}`,
+            requestId: piRequestId(manifest.taskId, state.bootEpoch, round),
           },
           context,
         );
@@ -2095,11 +2163,101 @@ function runExploreTimeoutGate(
   return result.message;
 }
 
-function buildTurnObserveBlock(
+/** Fingerprint of live Observe entities (key `type:id` → display line) for incremental resume deltas. */
+export type ObserveSnapshot = Record<string, string>;
+
+/** Snapshot the mutable Goals / open Intents / Findings / Assets / Hints the model is told about. */
+export function buildObserveSnapshot(
+  history: ReturnType<typeof openHistory>,
+  taskId: string,
+): ObserveSnapshot {
+  const snap: ObserveSnapshot = {};
+  for (const g of history.listGoals(taskId)) {
+    snap[`goal:${g.id}`] = `[${g.passes ? "通过" : "未通过"}] ${g.title}`;
+  }
+  for (const i of history.openIntents(taskId)) {
+    snap[`intent:${i.id}`] = `(${i.status}) ${i.title}`;
+  }
+  for (const f of history.listFindings(taskId)) {
+    if (f.status === "retracted") continue;
+    snap[`finding:${f.id}`] = `(${f.status}/${f.severity}) ${f.title}`;
+  }
+  for (const a of history.listAssets(taskId)) {
+    snap[`asset:${a.address}`] = `[${a.kind}] ${a.address}`;
+  }
+  for (const h of history.listHints(taskId, 20)) {
+    snap[`hint:${h.id}`] = h.text.slice(0, 160);
+  }
+  // Key title-layer and transferable Facts (last 30), so teammates' new Facts in an
+  // Explore pool show up in the resume delta.
+  const keyFacts = new Map<string, { title: string; createdAt: string; transferable: boolean }>();
+  for (const f of history.listFacts(taskId, "title")) {
+    keyFacts.set(f.id, { title: f.title, createdAt: f.createdAt, transferable: f.tags.includes("transferable") });
+  }
+  for (const f of history.listTransferableFacts(taskId)) {
+    keyFacts.set(f.id, { title: f.title, createdAt: f.createdAt, transferable: true });
+  }
+  const recentFacts = [...keyFacts.entries()]
+    .sort((a, b) => a[1].createdAt.localeCompare(b[1].createdAt))
+    .slice(-OBSERVE_FACT_LIMIT);
+  for (const [id, f] of recentFacts) {
+    snap[`fact:${id}`] = `${f.transferable ? "[transferable] " : ""}${f.title.slice(0, 160)}`;
+  }
+  return snap;
+}
+
+const MAX_OBSERVE_DELTA_ENTRIES = 50;
+/** Recent key Facts tracked in the Observe fingerprint. */
+export const OBSERVE_FACT_LIMIT = 30;
+const OBSERVE_DELTA_LABEL: Record<string, string> = {
+  goal: "目标",
+  intent: "进行中意图",
+  finding: "Finding",
+  asset: "资产",
+  hint: "Hint",
+  fact: "关键 Fact",
+};
+
+/**
+ * Render only entities new/changed since the previous injected snapshot. Bounds a single resume
+ * turn's prompt size; unchanged static state is NOT re-injected into the continuous session.
+ */
+export function renderObserveDelta(current: ObserveSnapshot, prev: ObserveSnapshot): string {
+  const changed: Array<{ cat: string; id: string; val: string }> = [];
+  for (const [key, val] of Object.entries(current)) {
+    if (prev[key] === val) continue;
+    const sep = key.indexOf(":");
+    changed.push({ cat: key.slice(0, sep), id: key.slice(sep + 1), val });
+  }
+  if (changed.length === 0) {
+    return "## 本轮图增量\n（图状态自上轮续跑无新增/变更；继续推进未完成目标，需要全量状态用 history_overview。）";
+  }
+  const shown = changed.slice(0, MAX_OBSERVE_DELTA_ENTRIES);
+  const lines: string[] = ["## 本轮图增量（自上次续跑新增/变更）"];
+  for (const cat of ["goal", "intent", "finding", "asset", "hint", "fact"]) {
+    const items = shown.filter((c) => c.cat === cat);
+    if (!items.length) continue;
+    lines.push(`### ${OBSERVE_DELTA_LABEL[cat] ?? cat}`);
+    for (const it of items) lines.push(`- [${it.id}] ${it.val}`);
+  }
+  if (changed.length > shown.length) {
+    lines.push(`- … 另有 ${changed.length - shown.length} 项变更未展开；用 history_overview 看全量。`);
+  }
+  lines.push("（仅增量；完整 Goals/资产/Fact/Intent 用 history_overview，冲突以 History 为准。）");
+  return lines.join("\n");
+}
+
+/** Pi Durable submission requestId; boot epoch + persisted round guarantee uniqueness across restarts. */
+export function piRequestId(taskId: string, epoch: number, round: number): string {
+  return `gy-${taskId}-e${epoch}-r${round}`;
+}
+
+export function buildTurnObserveBlock(
   manifest: WorkerManifest,
   history: ReturnType<typeof openHistory>,
   state: CheckpointState,
   skillHub?: SkillHub,
+  opts?: { incremental?: boolean },
 ): string {
   state.phase = syncGraphPhase(history, manifest.taskId, state.phase, {
     leader: isExploreLeader(manifest),
@@ -2113,13 +2271,19 @@ function buildTurnObserveBlock(
   const autoSkillBlock = skillHub
     ? skillHub.autoInjectForFacts(history.listFacts(manifest.taskId), { phase: "discover" })
     : "";
-  return [
-    phaseBlock,
-    sessionBootstrapText(manifest, history.observe(manifest.taskId)),
-    autoSkillBlock,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const incremental = opts?.incremental ?? false;
+  const snapshot = buildObserveSnapshot(history, manifest.taskId);
+  const hasPrev = Object.keys(state.observeFingerprint ?? {}).length > 0;
+  // Live-session resume (round > 1): inject only the delta, never the π handoff block.
+  // Cold start / explicit reset: full Observe (+ π only when not an active-session resume).
+  const observeBody =
+    incremental && hasPrev
+      ? renderObserveDelta(snapshot, state.observeFingerprint)
+      : sessionBootstrapText(manifest, history.observe(manifest.taskId), {
+          includeRelays: !incremental,
+        });
+  state.observeFingerprint = snapshot;
+  return [phaseBlock, observeBody, autoSkillBlock].filter(Boolean).join("\n\n");
 }
 
 function systemPrompt(
@@ -2194,7 +2358,14 @@ ${visionLine}
 ${systematicDiscoveryPolicyBlock()}${boardClearPolicyBlock(manifest)}${collectorsPromptBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}${observeText ? `\n当前 Observe（History）：\n${observeText}\n` : ""}`;
 }
 
-function sessionBootstrapText(manifest: WorkerManifest, historyObserve: string): string {
+export function sessionBootstrapText(
+  manifest: WorkerManifest,
+  historyObserve: string,
+  opts?: { includeRelays?: boolean },
+): string {
+  // π handoff blocks belong to cold-start recovery / explicit reset only. Active-session resume
+  // (and on-demand overview) keep the continuous context; relays are not re-injected every round.
+  if (opts?.includeRelays === false) return historyObserve;
   const relays = formatRelayInjection(listRelayProtocols(manifest.workspaceDir));
   return `${historyObserve}\n\n${relays}`;
 }
@@ -2993,6 +3164,7 @@ async function runOpenAiToolLoop(
     execution: manifest.execution,
     leader: isExploreLeader(manifest),
     workerCount: readPoolSize(),
+    trafficDir: manifest.dataDir,
     save: () => {
       state.toolCalls = ctx.usage.toolCalls;
       state.installs = ctx.usage.installs;

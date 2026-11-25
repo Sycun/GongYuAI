@@ -9,7 +9,28 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { blobPath, getTraffic, queryTraffic, readBlobSlice, startTrafficProxy } from "./traffic/index.js";
+import {
+  blobPath,
+  closeTrafficDb,
+  countTrafficExchanges,
+  getTraffic,
+  insertTraffic,
+  linkTrafficFinding,
+  pruneTrafficNow,
+  queryTraffic,
+  readBlobSlice,
+  readStoredExchange,
+  resolveTrafficMode,
+  startTrafficProxy,
+  TRAFFIC_MAX_EXCHANGES,
+  TRAFFIC_PREVIEW_CHARS,
+  TRAFFIC_PRUNE_CHECK_EVERY,
+  TRAFFIC_PRUNE_SLACK,
+  TRAFFIC_VACUUM_PAGES,
+  trafficPruneDue,
+  trafficRetentionDefaults,
+  type TrafficWrite,
+} from "./traffic/index.js";
 import { ensureTaskCa, leafFor } from "./traffic/ca.js";
 
 const TASK = "6460e5ec-1a8c-4b95-b4e3-d77a02c79680";
@@ -66,7 +87,7 @@ test("recorded bodies are deduped under sha256/<ab>/<hash>.bin and slice by offs
     });
   });
   const originPort = await listen(origin);
-  const proxy = await startTrafficProxy({ taskId: TASK, taskDir, workerId: "w0" });
+  const proxy = await startTrafficProxy({ taskId: TASK, taskDir, workerId: "w0", mode: "all" });
   try {
     const before = { ...process.env };
     const env = proxy.getProxyEnv();
@@ -158,6 +179,7 @@ test("HTTPS CONNECT is decrypted with the task CA and an upstream proxy is swapp
     taskId: TASK,
     taskDir,
     insecureUpstream: true,
+    mode: "all",
   });
   try {
     const tlsBody = await connectHttps(proxy.port, originPort, proxy.caPath);
@@ -218,3 +240,286 @@ function connectHttps(proxyPort: number, originPort: number, caPath: string): Pr
     });
   });
 }
+
+const RETAIN = {
+  maxPreviewChars: 64,
+  maxHeadersJsonChars: 180,
+  maxExchanges: 5,
+  compactStaticAssets: true,
+  compactNoise: true,
+  noiseRepeatAfter: 1,
+  noiseHostThreshold: 3,
+};
+
+function exchange(over: Partial<TrafficWrite> = {}): TrafficWrite {
+  return {
+    taskId: TASK,
+    method: "GET",
+    url: "http://lab.local/a",
+    host: "lab.local",
+    path: "/a",
+    status: 200,
+    durationMs: 4,
+    startedAt: "2026-11-25T00:00:00.000Z",
+    reqHeaders: { host: "lab.local", cookie: "session=abc" },
+    resHeaders: { "content-type": "text/html; charset=utf-8", "set-cookie": "a=b" },
+    reqPreview: "request-body",
+    resPreview: "response-body",
+    ...over,
+  };
+}
+
+test("traffic index caps previews and headers, and compacts static assets and repeated 404s", () => {
+  const previous = {
+    preview: process.env.GY_TRAFFIC_MAX_PREVIEW_CHARS,
+    headers: process.env.GY_TRAFFIC_MAX_HEADERS_CHARS,
+    cap: process.env.GY_TRAFFIC_MAX_EXCHANGES,
+  };
+  delete process.env.GY_TRAFFIC_MAX_PREVIEW_CHARS;
+  delete process.env.GY_TRAFFIC_MAX_HEADERS_CHARS;
+  delete process.env.GY_TRAFFIC_MAX_EXCHANGES;
+  const taskDir = tempTask();
+  try {
+    const defaults = trafficRetentionDefaults();
+    assert.equal(defaults.maxPreviewChars, TRAFFIC_PREVIEW_CHARS);
+    assert.ok(defaults.maxPreviewChars <= 1024);
+    assert.equal(defaults.maxExchanges, TRAFFIC_MAX_EXCHANGES);
+    assert.ok(defaults.maxExchanges > 0);
+
+    const fat = insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T00:00:01.000Z",
+      path: "/login",
+      url: "http://lab.local/login",
+      reqPreview: "R".repeat(4000),
+      resPreview: "S".repeat(4000),
+      reqHeaders: { cookie: "c".repeat(5000), host: "lab.local" },
+      resHeaders: { "content-type": "text/html", "x-debug": "d".repeat(5000) },
+    }), RETAIN);
+    const stored = readStoredExchange(taskDir, fat.id);
+    assert.ok(stored);
+    assert.equal(stored.reqPreview.length, 64);
+    assert.equal(stored.resPreview.length, 64);
+    assert.ok(stored.reqHeadersJson.length <= 180);
+    assert.ok(stored.resHeadersJson.length <= 180);
+    assert.match(stored.resHeadersJson, /content-type/);
+
+    const asset = insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T00:00:02.000Z",
+      path: "/static/app.js",
+      url: "http://lab.local/static/app.js",
+      resHeaders: { "content-type": "application/javascript", "set-cookie": "" },
+      reqPreview: "should-drop",
+      resPreview: "console.log(1)",
+    }), RETAIN);
+    const assetRow = readStoredExchange(taskDir, asset.id);
+    assert.equal(assetRow?.reqPreview, "");
+    assert.equal(assetRow?.resPreview, "");
+    assert.equal(assetRow?.reqHeadersJson.includes("cookie"), false);
+    assert.equal(getTraffic(taskDir, asset.id)?.path, "/static/app.js");
+
+    const stateful = insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T00:00:03.000Z",
+      path: "/static/app.js",
+      url: "http://lab.local/static/app.js",
+      resHeaders: { "content-type": "application/javascript", "set-cookie": "sid=1" },
+      resPreview: "still-visible",
+    }), RETAIN);
+    assert.equal(readStoredExchange(taskDir, stateful.id)?.resPreview, "still-visible");
+
+    const linkedAsset = insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T00:00:04.000Z",
+      path: "/static/proof.js",
+      url: "http://lab.local/static/proof.js",
+      resHeaders: { "content-type": "text/javascript" },
+      resPreview: "finding-preview",
+      findingIds: ["11111111-1111-4111-8111-111111111111"],
+    }), RETAIN);
+    assert.equal(readStoredExchange(taskDir, linkedAsset.id)?.resPreview, "finding-preview");
+    assert.deepEqual(readStoredExchange(taskDir, linkedAsset.id)?.findingIds, ["11111111-1111-4111-8111-111111111111"]);
+
+    const repeatCfg = { ...RETAIN, noiseHostThreshold: 100 };
+    const first404 = insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T00:00:05.000Z",
+      method: "GET",
+      path: "/missing",
+      url: "http://lab.local/missing",
+      status: 404,
+      resHeaders: { "content-type": "text/html" },
+      resPreview: "first-404",
+    }), repeatCfg);
+    assert.equal(readStoredExchange(taskDir, first404.id)?.resPreview, "first-404");
+    const second404 = insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T00:00:06.000Z",
+      path: "/missing",
+      url: "http://lab.local/missing",
+      status: 404,
+      resHeaders: { "content-type": "text/html" },
+      resPreview: "repeat-404",
+    }), repeatCfg);
+    assert.equal(readStoredExchange(taskDir, second404.id)?.resPreview, "");
+    assert.equal(getTraffic(taskDir, second404.id)?.status, 404);
+
+    const floodCfg = { ...RETAIN, noiseRepeatAfter: 100, noiseHostThreshold: 2 };
+    for (let i = 0; i < 2; i += 1) {
+      const row = insertTraffic(taskDir, exchange({
+        startedAt: `2026-11-25T00:00:1${i}.000Z`,
+        host: "flood.local",
+        path: `/scan-${i}`,
+        url: `http://flood.local/scan-${i}`,
+        status: 404,
+        resHeaders: { "content-type": "text/plain" },
+        resPreview: `unique-${i}`,
+      }), floodCfg);
+      assert.equal(readStoredExchange(taskDir, row.id)?.resPreview, `unique-${i}`);
+    }
+    const flooded = insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T00:00:20.000Z",
+      host: "flood.local",
+      path: "/scan-flood",
+      url: "http://flood.local/scan-flood",
+      status: 404,
+      resHeaders: { "content-type": "text/plain" },
+      resPreview: "flood-preview",
+    }), floodCfg);
+    assert.equal(readStoredExchange(taskDir, flooded.id)?.resPreview, "");
+    assert.equal(getTraffic(taskDir, flooded.id)?.path, "/scan-flood");
+  } finally {
+    if (previous.preview !== undefined) process.env.GY_TRAFFIC_MAX_PREVIEW_CHARS = previous.preview;
+    if (previous.headers !== undefined) process.env.GY_TRAFFIC_MAX_HEADERS_CHARS = previous.headers;
+    if (previous.cap !== undefined) process.env.GY_TRAFFIC_MAX_EXCHANGES = previous.cap;
+    closeTrafficDb(taskDir);
+    rmSync(taskDir, { recursive: true, force: true });
+  }
+});
+
+test("traffic rolling prune drops the oldest unlinked rows and keeps finding_ids", () => {
+  const taskDir = tempTask();
+  try {
+    const cfg = {
+      ...RETAIN,
+      maxExchanges: 4,
+      compactStaticAssets: false,
+      compactNoise: false,
+      pruneCheckEvery: 1,
+      pruneSlack: 0,
+    };
+    const linked = insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T01:00:00.000Z",
+      path: "/kept",
+      url: "http://lab.local/kept",
+      findingIds: ["22222222-2222-4222-8222-222222222222"],
+      resPreview: "linked",
+    }), cfg);
+    const doomed: string[] = [];
+    for (let i = 1; i <= 3; i += 1) {
+      const row = insertTraffic(taskDir, exchange({
+        startedAt: `2026-11-25T01:00:0${i}.000Z`,
+        path: `/old-${i}`,
+        url: `http://lab.local/old-${i}`,
+        resPreview: `old-${i}`,
+      }), cfg);
+      doomed.push(row.id);
+    }
+    linkTrafficFinding(taskDir, doomed[0]!, "33333333-3333-4333-8333-333333333333");
+    insertTraffic(taskDir, exchange({
+      startedAt: "2026-11-25T01:00:05.000Z",
+      path: "/new",
+      url: "http://lab.local/new",
+      resPreview: "new",
+    }), cfg);
+
+    assert.ok(countTrafficExchanges(taskDir) <= 4);
+    assert.equal(readStoredExchange(taskDir, linked.id)?.resPreview, "linked");
+    assert.deepEqual(readStoredExchange(taskDir, doomed[0]!)?.findingIds, ["33333333-3333-4333-8333-333333333333"]);
+    assert.equal(readStoredExchange(taskDir, doomed[1]!), null);
+    assert.equal(readStoredExchange(taskDir, doomed[2]!), null);
+
+    const onlyLinked = tempTask();
+    try {
+      for (let i = 0; i < 4; i += 1) {
+        insertTraffic(onlyLinked, exchange({
+          startedAt: `2026-11-25T02:00:0${i}.000Z`,
+          path: `/proof-${i}`,
+          url: `http://lab.local/proof-${i}`,
+          findingIds: [`44444444-4444-4444-8444-44444444444${i}`],
+        }), { ...cfg, maxExchanges: 2 });
+      }
+      assert.equal(countTrafficExchanges(onlyLinked), 4);
+    } finally {
+      closeTrafficDb(onlyLinked);
+      rmSync(onlyLinked, { recursive: true, force: true });
+    }
+  } finally {
+    closeTrafficDb(taskDir);
+    rmSync(taskDir, { recursive: true, force: true });
+  }
+});
+
+test("traffic prune is lagged: no count/delete until the check interval and slack are exceeded", () => {
+  const taskDir = tempTask();
+  try {
+    const cfg = {
+      ...RETAIN,
+      maxExchanges: 10,
+      compactStaticAssets: false,
+      compactNoise: false,
+      pruneCheckEvery: 5,
+      pruneSlack: 5,
+      vacuumPages: 200,
+    };
+    const ids: string[] = [];
+    const add = (i: number) => {
+      const row = insertTraffic(taskDir, exchange({
+        startedAt: new Date(Date.UTC(2026, 10, 25, 3, 0, i)).toISOString(),
+        path: `/lag-${i}`,
+        url: `http://lab.local/lag-${i}`,
+      }), cfg);
+      ids.push(row.id);
+    };
+    // 15 rows = maxExchanges + slack: never over the threshold, nothing pruned.
+    for (let i = 0; i < 15; i += 1) add(i);
+    assert.equal(countTrafficExchanges(taskDir), 15);
+    // Rows 16..19 are over the threshold but between checks: still kept.
+    for (let i = 15; i < 19; i += 1) add(i);
+    assert.equal(countTrafficExchanges(taskDir), 19);
+    // The 20th insert hits the check interval: batch delete down to 90% of the cap.
+    add(19);
+    assert.equal(countTrafficExchanges(taskDir), 9);
+    assert.equal(readStoredExchange(taskDir, ids[0]!), null);
+    assert.ok(readStoredExchange(taskDir, ids[19]!));
+
+    // pruneTrafficNow honors slack and is a no-op under the threshold.
+    assert.equal(pruneTrafficNow(taskDir, cfg), 0);
+  } finally {
+    closeTrafficDb(taskDir);
+    rmSync(taskDir, { recursive: true, force: true });
+  }
+});
+
+test("GY_TRAFFIC_MODE defaults to finding-window and lag defaults are 200/500/200", () => {
+  assert.equal(resolveTrafficMode(undefined), "finding-window");
+  assert.equal(resolveTrafficMode(""), "finding-window");
+  assert.equal(resolveTrafficMode("bogus"), "finding-window");
+  assert.equal(resolveTrafficMode(" ALL "), "all");
+  const prev = {
+    every: process.env.GY_TRAFFIC_PRUNE_CHECK_EVERY,
+    slack: process.env.GY_TRAFFIC_PRUNE_SLACK,
+    vac: process.env.GY_TRAFFIC_VACUUM_PAGES,
+  };
+  delete process.env.GY_TRAFFIC_PRUNE_CHECK_EVERY;
+  delete process.env.GY_TRAFFIC_PRUNE_SLACK;
+  delete process.env.GY_TRAFFIC_VACUUM_PAGES;
+  try {
+    const d = trafficRetentionDefaults();
+    assert.equal(d.pruneCheckEvery, TRAFFIC_PRUNE_CHECK_EVERY);
+    assert.equal(d.pruneSlack, TRAFFIC_PRUNE_SLACK);
+    assert.equal(d.vacuumPages, TRAFFIC_VACUUM_PAGES);
+    assert.equal(trafficPruneDue(8_500, 8_000, 500), false);
+    assert.equal(trafficPruneDue(8_501, 8_000, 500), true);
+    assert.equal(trafficPruneDue(99_999, 0, 500), false);
+  } finally {
+    if (prev.every !== undefined) process.env.GY_TRAFFIC_PRUNE_CHECK_EVERY = prev.every;
+    if (prev.slack !== undefined) process.env.GY_TRAFFIC_PRUNE_SLACK = prev.slack;
+    if (prev.vac !== undefined) process.env.GY_TRAFFIC_VACUUM_PAGES = prev.vac;
+  }
+});

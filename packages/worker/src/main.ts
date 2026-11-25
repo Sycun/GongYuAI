@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { WorkerManifestSchema } from "@gongyuai/contracts";
+import { bindEvidencePaceManifest } from "./board-policy.js";
 import { runBareLoop } from "./bare-loop.js";
 import { runMockLoop } from "./mock-loop.js";
 import { runPiLoop } from "./pi-loop.js";
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
     manifest.workspaceDir = "/task/workspace";
   }
 
+  bindEvidencePaceManifest(manifest);
   const harness = harnessMode();
   console.log(
     `[gy-worker] task=${manifest.taskId} slot=${manifest.workerSlot}/${manifest.workerCount} mock=${manifest.mock} harness=${harness}`,

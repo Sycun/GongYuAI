@@ -383,6 +383,16 @@ test("破坏性判定：目标 URL 路径串非本机命令；裸动词与路径
   assert.equal(classifyCommand("/sbin/reboot"), "destructive");
   assert.equal(classifyCommand("sudo /usr/sbin/halt"), "destructive");
   assert.equal(classifyCommand("python3 -c 'import os; os.system(\"killall openvpn\")'"), "destructive");
+  // Real HTTP probe to an in-scope target whose URL path contains /reboot is allowed, not a host action.
+  const urlProbe = "curl -s http://10.10.1.5/api/manager/reboot";
+  assert.notEqual(classifyCommand(urlProbe), "destructive");
+  assert.equal(authorizeCommand(AUTH, urlProbe).allowed, true);
+  assert.equal(authorizeCommand(AUTH, "httpx -u http://10.10.1.5/api/manager/reboot").allowed, true);
+  // Bare host verbs / no-sudo shutdown / path binaries remain denied even at full capability.
+  assert.equal(classifyCommand("halt"), "destructive");
+  assert.equal(classifyCommand("shutdown -h now"), "destructive");
+  assert.equal(authorizeCommand({ ...AUTH, capability: "full" }, "reboot").allowed, false);
+  assert.equal(authorizeCommand({ ...AUTH, capability: "full" }, "/sbin/reboot").allowed, false);
 });
 
 test("P14-B4 已声明的 pivot CIDR 才放行内网主机", () => {

@@ -18,6 +18,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "review:offline": "node --import tsx --test packages/history/src/review-acceptance.test.ts",
     "diff-harness": "tsx scripts/diff-harness.ts",
+    "diff-run-metrics": "tsx scripts/diff-run-metrics.ts",
     "diff-harness:offline": "tsx scripts/diff-harness-offline.ts",
     "diff-harness:tsec": "tsx scripts/diff-harness.ts --mock --goals examples/tsecbench/goals-subset-diff.json --target example.invalid --auth \"Local synthetic P3 fixture only\"",
     "tsecbench": "tsx scripts/tsecbench.ts",

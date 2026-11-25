@@ -9,6 +9,10 @@ import {
   canRelay,
   formatRelayInjection,
   listRelayProtocols,
+  midSubmissionRelayGate,
+  relayHardResetEnabled,
+  relaySnapshotStepInterval,
+  shouldSnapshotRelay,
   writeRelayProtocol,
 } from "./relay.js";
 
@@ -141,5 +145,107 @@ test("writeRelayProtocol appends πn.json and injection lists foothold", () => {
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("活会话长 turn：>2 工具调用且 >30k token 不触发 beforeTool 硬拦截（默认硬重置关闭）", () => {
+  const prevHard = process.env.GY_RELAY_HARD_RESET;
+  const prevMin = process.env.GY_RELAY_MIN_TOOL_CALLS;
+  const prevThr = process.env.GY_RELAY_TOKEN_THRESHOLD;
+  delete process.env.GY_RELAY_HARD_RESET;
+  delete process.env.GY_RELAY_MIN_TOOL_CALLS;
+  delete process.env.GY_RELAY_TOKEN_THRESHOLD;
+  try {
+    const m = manifest("/tmp");
+    assert.equal(relayHardResetEnabled(), false);
+    // Long session far exceeds the legacy 2-tool / 30k-token auto threshold.
+    const auto = canRelay({
+      manifest: m,
+      tokensSinceRelay: 100_000,
+      toolCallsSinceRelay: 8,
+      forceAgent: false,
+    });
+    assert.equal(auto.ok, true);
+    // Default live-session mode: the beforeTool gate never blocks, regardless of relayPending.
+    assert.equal(
+      midSubmissionRelayGate({ hardReset: false, relayPending: false, toolName: "shell" }),
+      undefined,
+    );
+    assert.equal(
+      midSubmissionRelayGate({ hardReset: false, relayPending: true, toolName: "shell" }),
+      undefined,
+    );
+    // Explicit hard-reset mode (opt-in) still interrupts non-relay tools once pending.
+    const blocked = midSubmissionRelayGate({ hardReset: true, relayPending: true, toolName: "shell" });
+    assert.ok(blocked && /硬重置模式/.test(blocked.block));
+    assert.equal(
+      midSubmissionRelayGate({ hardReset: true, relayPending: true, toolName: "relay" }),
+      undefined,
+    );
+    assert.equal(
+      midSubmissionRelayGate({ hardReset: true, relayPending: true, toolName: "intent_conclude" }),
+      undefined,
+    );
+    process.env.GY_RELAY_HARD_RESET = "1";
+    assert.equal(relayHardResetEnabled(), true);
+  } finally {
+    if (prevHard === undefined) delete process.env.GY_RELAY_HARD_RESET;
+    else process.env.GY_RELAY_HARD_RESET = prevHard;
+    if (prevMin === undefined) delete process.env.GY_RELAY_MIN_TOOL_CALLS;
+    else process.env.GY_RELAY_MIN_TOOL_CALLS = prevMin;
+    if (prevThr === undefined) delete process.env.GY_RELAY_TOKEN_THRESHOLD;
+    else process.env.GY_RELAY_TOKEN_THRESHOLD = prevThr;
+  }
+});
+
+test("后台 π 快照按步数节奏落盘，而非每 30k token；GY_DIFF_NO_RELAY 关闭", () => {
+  const prevInt = process.env.GY_RELAY_SNAPSHOT_STEP_INTERVAL;
+  const prevDiff = process.env.GY_DIFF_NO_RELAY;
+  const prevMin = process.env.GY_RELAY_MIN_TOOL_CALLS;
+  delete process.env.GY_RELAY_SNAPSHOT_STEP_INTERVAL;
+  delete process.env.GY_DIFF_NO_RELAY;
+  delete process.env.GY_RELAY_MIN_TOOL_CALLS;
+  try {
+    const m = manifest("/tmp");
+    const interval = relaySnapshotStepInterval();
+    assert.ok(interval >= 100); // default is a coarse step interval, not a per-turn token trigger
+    // Below the step interval: no snapshot even with huge token accumulation.
+    assert.equal(
+      shouldSnapshotRelay({ manifest: m, step: interval - 1, lastSnapshotStep: 0, toolCallsSinceRelay: 999 }),
+      false,
+    );
+    // Reached the interval with enough activity: snapshot.
+    assert.equal(
+      shouldSnapshotRelay({ manifest: m, step: interval, lastSnapshotStep: 0, toolCallsSinceRelay: 5 }),
+      true,
+    );
+    // Interval measured from the last snapshot, not absolute step.
+    assert.equal(
+      shouldSnapshotRelay({ manifest: m, step: interval + 10, lastSnapshotStep: interval, toolCallsSinceRelay: 5 }),
+      false,
+    );
+    // Min-tool guard: an idle session does not snapshot.
+    assert.equal(
+      shouldSnapshotRelay({ manifest: m, step: interval * 2, lastSnapshotStep: 0, toolCallsSinceRelay: 0 }),
+      false,
+    );
+    process.env.GY_RELAY_SNAPSHOT_STEP_INTERVAL = "40";
+    assert.equal(relaySnapshotStepInterval(), 40);
+    assert.equal(
+      shouldSnapshotRelay({ manifest: m, step: 40, lastSnapshotStep: 0, toolCallsSinceRelay: 5 }),
+      true,
+    );
+    process.env.GY_DIFF_NO_RELAY = "1";
+    assert.equal(
+      shouldSnapshotRelay({ manifest: m, step: 1000, lastSnapshotStep: 0, toolCallsSinceRelay: 5 }),
+      false,
+    );
+  } finally {
+    if (prevInt === undefined) delete process.env.GY_RELAY_SNAPSHOT_STEP_INTERVAL;
+    else process.env.GY_RELAY_SNAPSHOT_STEP_INTERVAL = prevInt;
+    if (prevDiff === undefined) delete process.env.GY_DIFF_NO_RELAY;
+    else process.env.GY_DIFF_NO_RELAY = prevDiff;
+    if (prevMin === undefined) delete process.env.GY_RELAY_MIN_TOOL_CALLS;
+    else process.env.GY_RELAY_MIN_TOOL_CALLS = prevMin;
   }
 });

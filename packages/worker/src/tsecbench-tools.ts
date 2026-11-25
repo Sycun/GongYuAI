@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { targetAllows } from "@gongyuai/contracts";
 import { writeEvidenceFile } from "@gongyuai/history";
+import { promoteTrafficForFinding, trafficLabelUuid } from "@gongyuai/exec";
 import type { ToolContext } from "./tools.js";
 import { appendProgress, chargeToolCall, gateTool } from "./tools.js";
 
@@ -79,6 +80,55 @@ export function parseContainerAddresses(raw: unknown): Array<{ endpoint: string;
   return out;
 }
 
+/** Container hosts seen per challenge code (start/list/status), for solve-traffic capture. */
+const challengeHosts = new Map<string, string[]>();
+let lastChallengeHost: string | null = null;
+
+/** Platform says the flag was right (`correct: true`, top-level or under `data`). */
+export function submitCorrect(response: unknown): boolean {
+  if (!response || typeof response !== "object") return false;
+  const top = response as Record<string, unknown>;
+  if (top.correct === true) return true;
+  const data = top.data;
+  return !!data && typeof data === "object" && (data as Record<string, unknown>).correct === true;
+}
+
+/**
+ * Correct flag: persist the traffic window around the solve under the stable
+ * label `tsecbench:<code>` (as a UUID so it fits finding_ids). Matches the
+ * active Intent or the challenge container host. Best-effort.
+ */
+export function captureSolveTraffic(
+  ctx: ToolContext,
+  code: string,
+): { label: string; findingId: string; trafficIds: string[]; promoted: number } | null {
+  const intentId = ctx.getActiveIntentId?.() ?? null;
+  const hosts = challengeHosts.get(code) ?? (lastChallengeHost ? [lastChallengeHost] : []);
+  if (!intentId && hosts.length === 0) return null;
+  const label = `tsecbench:${code}`;
+  const findingId = trafficLabelUuid(label);
+  try {
+    const ids = new Set<string>();
+    let promoted = 0;
+    const targets = hosts.length ? hosts : [null];
+    for (const host of targets) {
+      const res = promoteTrafficForFinding(ctx.manifest.dataDir, { findingId, intentId, host });
+      res.trafficIds.forEach((id) => ids.add(id));
+      promoted += res.promoted;
+    }
+    if (ids.size) {
+      try {
+        appendProgress(ctx.manifest.workspaceDir, `tsecbench solve ${code} → traffic kept ×${ids.size} (${label})`);
+      } catch {
+        /* progress log is best-effort */
+      }
+    }
+    return { label, findingId, trafficIds: [...ids], promoted };
+  } catch {
+    return null;
+  }
+}
+
 /** Auto-admit started challenge container hosts into manifest scope & History asset ledger. */
 export function autoAdmitContainerTargets(
   ctx: ToolContext,
@@ -87,6 +137,8 @@ export function autoAdmitContainerTargets(
 ): Array<{ address: string; factId: string }> {
   const parsed = parseContainerAddresses(addrRaw);
   if (!parsed.length) return [];
+  if (code) challengeHosts.set(code, [...new Set(parsed.map((p) => p.host))]);
+  lastChallengeHost = parsed[0]?.host ?? lastChallengeHost;
   let scopeChanged = false;
   for (const { host } of parsed) {
     if (!targetAllows(ctx.manifest.auth.targets, host, ctx.manifest.auth.outOfScope ?? [])) {
@@ -202,7 +254,14 @@ export async function tsecbenchTool(
           relPath,
           JSON.stringify({ code, submittedAt: new Date().toISOString(), status: r.status, response: r.text }, null, 2),
         );
-        return JSON.stringify({ status: r.status, evidencePath: relPath, response: JSON.parse(r.text) });
+        const response = JSON.parse(r.text) as unknown;
+        const traffic = submitCorrect(response) ? captureSolveTraffic(ctx, code) : null;
+        return JSON.stringify({
+          status: r.status,
+          evidencePath: relPath,
+          response,
+          ...(traffic ? { traffic } : {}),
+        });
       } catch {
         /* fall through to raw text */
       }

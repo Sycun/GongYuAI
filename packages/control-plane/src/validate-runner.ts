@@ -416,6 +416,10 @@ export async function runIndependentValidation(input: {
       taskDir: input.taskDir,
       workerId: "independent-validator",
       insecureUpstream: true,
+      // This proxy only carries the validator's own replay. Persist every
+      // exchange (never ring-only) so the replay is on disk and can be bound
+      // to the finding below, whatever GY_TRAFFIC_MODE the worker uses.
+      mode: "all",
     });
     const target = replayUrl(packet);
     if (target && hostAllowed(target, packet.task.targets)) {

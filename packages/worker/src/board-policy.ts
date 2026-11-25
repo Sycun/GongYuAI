@@ -1,6 +1,152 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { WorkerManifest } from "@gongyuai/contracts";
+
+export type EvidenceGoalLike = {
+  id: string;
+  title?: string;
+  description?: string;
+  evidencePatterns?: string[];
+  passes?: boolean;
+};
+
+export type EvidenceDeliverableKind = "ledger" | "report";
+
+export type EvidenceDeliverableSpec = {
+  kind: EvidenceDeliverableKind;
+  goalId: string;
+  label: string;
+  /** Path relative to evidenceDir, without a leading slash. */
+  relativePath: string;
+};
+
+export type EvidenceDeliverableGap = EvidenceDeliverableSpec & {
+  /** Workspace-facing path, always under evidence/. */
+  evidencePath: string;
+  reason: "missing" | "stale";
+  ageMs: number | null;
+};
+
+const LEDGER_FALLBACK = "goals/autonomous-progress.md";
+const REPORT_FALLBACK = "engagement/report.md";
+
+function safeRelative(pattern: string | undefined, fallback: string): string {
+  if (!pattern) return fallback;
+  const norm = pattern.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!norm || norm.startsWith("/") || norm.includes("..") || /[*?\0]/.test(norm)) return fallback;
+  return norm;
+}
+
+function mentionsLedger(goal: EvidenceGoalLike): boolean {
+  const blob = `${goal.id}\n${goal.title ?? ""}\n${goal.description ?? ""}\n${(goal.evidencePatterns ?? []).join("\n")}`;
+  return goal.id === "progress-log"
+    || /autonomous-progress\.md/i.test(blob)
+    || /进度台账|engagement ledger/i.test(blob);
+}
+
+function mentionsReport(goal: EvidenceGoalLike): boolean {
+  const blob = `${goal.id}\n${goal.title ?? ""}\n${goal.description ?? ""}\n${(goal.evidencePatterns ?? []).join("\n")}`;
+  return goal.id === "engagement-report"
+    || /engagement\/report\.md/i.test(blob)
+    || /渗透报告|客户报告|engagement report/i.test(blob);
+}
+
+/** Goals that require a progress ledger or an engagement report, deduped by path. */
+export function evidenceDeliverableSpecs(goals: readonly EvidenceGoalLike[]): EvidenceDeliverableSpec[] {
+  const specs: EvidenceDeliverableSpec[] = [];
+  const seen = new Set<string>();
+  for (const goal of goals) {
+    const patterns = goal.evidencePatterns ?? [];
+    if (mentionsLedger(goal)) {
+      const matched = patterns.find((pattern) => /autonomous-progress\.md|goals\/[^ *]*progress\.md/i.test(pattern));
+      const relativePath = safeRelative(matched, LEDGER_FALLBACK);
+      const key = `ledger:${relativePath}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        specs.push({ kind: "ledger", goalId: goal.id, label: "进度台账", relativePath });
+      }
+    }
+    if (mentionsReport(goal)) {
+      const matched = patterns.find((pattern) => /engagement\/report\.md/i.test(pattern));
+      const relativePath = safeRelative(matched, REPORT_FALLBACK);
+      const key = `report:${relativePath}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        specs.push({ kind: "report", goalId: goal.id, label: "渗透报告", relativePath });
+      }
+    }
+  }
+  return specs;
+}
+
+export function collectEvidenceGaps(opts: {
+  evidenceDir: string;
+  goals: readonly EvidenceGoalLike[];
+  nowMs?: number;
+  staleAfterMs?: number;
+}): EvidenceDeliverableGap[] {
+  const now = opts.nowMs ?? Date.now();
+  const staleAfter = opts.staleAfterMs ?? 30 * 60_000;
+  const gaps: EvidenceDeliverableGap[] = [];
+  for (const spec of evidenceDeliverableSpecs(opts.goals)) {
+    const abs = join(opts.evidenceDir, spec.relativePath);
+    const evidencePath = `evidence/${spec.relativePath}`;
+    if (!existsSync(abs)) {
+      gaps.push({ ...spec, evidencePath, reason: "missing", ageMs: null });
+      continue;
+    }
+    try {
+      const st = statSync(abs);
+      if (!st.isFile() || st.size <= 0) {
+        gaps.push({ ...spec, evidencePath, reason: "missing", ageMs: null });
+        continue;
+      }
+      const ageMs = Math.max(0, now - st.mtimeMs);
+      if (ageMs >= staleAfter) {
+        gaps.push({ ...spec, evidencePath, reason: "stale", ageMs });
+      }
+    } catch {
+      gaps.push({ ...spec, evidencePath, reason: "missing", ageMs: null });
+    }
+  }
+  return gaps;
+}
+
+export type EvidencePaceBinding = {
+  evidenceDir: string;
+  goals: EvidenceGoalLike[];
+  historyDb?: string;
+};
+
+let evidencePaceBinding: EvidencePaceBinding | null = null;
+
+/**
+ * Called once from the worker entry so soft-pace can see evidence paths
+ * without the Pi loop having to thread a new argument through checkpoint state.
+ */
+export function bindEvidencePaceManifest(manifest: {
+  evidenceDir?: string;
+  historyDb?: string;
+  goals?: EvidenceGoalLike[];
+} | null): void {
+  if (!manifest?.evidenceDir) {
+    evidencePaceBinding = null;
+    return;
+  }
+  evidencePaceBinding = {
+    evidenceDir: manifest.evidenceDir,
+    goals: manifest.goals ?? [],
+    ...(manifest.historyDb ? { historyDb: manifest.historyDb } : {}),
+  };
+}
+
+export function currentEvidencePaceBinding(): EvidencePaceBinding | null {
+  return evidencePaceBinding;
+}
+
+export function resetEvidencePaceBinding(): void {
+  evidencePaceBinding = null;
+}
 
 /**
  * Engagement & vulnerability discovery policy.
@@ -71,6 +217,8 @@ export function boardClearPolicyBlock(manifest: WorkerManifest): string {
    - 发现可疑线索先 \`finding_record\`（tentative）；完成复现后必须调用 \`finding_verify\` 绑定封存事务 \`http:<id>\`、带外命中 \`oast:<token>\` 或 \`evidence/\` 原件及精确复现步骤；
    - 确认有效成因、凭据或立足点后，提炼组件/架构特征通过 \`technique_transfer\` 对同族资产扇出验证；
    - 同一攻击面连续约 25 次工具调用无实质证据进展时，须 \`intent_conclude(status="failed", conclusion="已验证排除的假设与边界约束")\` 止损换面；交付报告（如 \`engagement/report.md\`）只纳入 \`verified\` 结论。
+4. **过程材料落盘（不阻断攻击链）**：
+   - 目标若要求进度台账或渗透报告，边打边写 \`evidence/goals/autonomous-progress.md\` 与 \`evidence/engagement/report.md\`；目录空着或长时间不更新时，软节奏会点名路径。缺文件不是收工理由。
 `;
 
   if (!hasBenchmarkHarness(manifest)) {

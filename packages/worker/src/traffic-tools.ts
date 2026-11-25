@@ -1,7 +1,8 @@
 import {
   getTraffic,
-  queryTraffic,
-  readTrafficBody,
+  getTrafficLive,
+  queryTrafficLive,
+  readTrafficBodyLive,
   trafficEvidenceRef,
   type TrafficQuery,
 } from "@gongyuai/exec";
@@ -9,7 +10,7 @@ import {
 export const TRAFFIC_TOOLS = [
   {
     name: "traffic_search",
-    description: "Search recorded HTTP exchanges for this task by host, method, status, keyword, or intentId. Returns evidence refs http:<id>.",
+    description: "Search recorded HTTP exchanges for this task by host, method, status, keyword, or intentId. Includes recent in-memory (hot, not yet persisted) exchanges listed in hotIds; they are saved to disk once finding_record links them. Returns evidence refs http:<id>.",
     parameters: {
       type: "object",
       properties: {
@@ -34,7 +35,7 @@ export const TRAFFIC_TOOLS = [
   },
   {
     name: "traffic_blob",
-    description: "Read one slice of a request or response body. Default 8 KiB, maximum 64 KiB, continue with offset. Evidence ref is http:<id>.",
+    description: "Read one slice of a request or response body. Default 8 KiB, maximum 64 KiB, continue with offset. Hot (in-memory) bodies keep only their first 64 KiB (truncated=true). Evidence ref is http:<id>.",
     parameters: {
       type: "object",
       properties: {
@@ -58,19 +59,27 @@ function num(value: unknown): number | undefined {
   return undefined;
 }
 
+function isHot(taskDir: string, id: string): boolean {
+  return getTraffic(taskDir, id) == null;
+}
+
 function fail(error: unknown): string {
   return JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) });
 }
 
 function head(taskDir: string, id: string, side: "req" | "res"): string {
   try {
-    return readTrafficBody(taskDir, id, side, 0, 512).body;
+    return readTrafficBodyLive(taskDir, id, side, 0, 512).body;
   } catch {
     return "";
   }
 }
 
-/** Agent-facing traffic tools. They only read the task store. */
+/**
+ * Agent-facing traffic tools. Read-only. In finding-window mode they merge
+ * index.sqlite rows with the in-memory ring (hot, not yet persisted), so an
+ * exchange is searchable before finding_record promotes it.
+ */
 export function runTrafficTool(
   taskDir: string,
   taskId: string,
@@ -89,23 +98,25 @@ export function runTrafficTool(
         ...(num(args.offset) !== undefined ? { offset: num(args.offset) } : {}),
         ...(num(args.limit) !== undefined ? { limit: num(args.limit) } : {}),
       };
-      const page = queryTraffic(taskDir, query);
+      const page = queryTrafficLive(taskDir, query);
       return JSON.stringify({
         ok: true,
         traffic: page.traffic,
         total: page.total,
         nextOffset: page.nextOffset,
+        ...(page.hotIds.length ? { hotIds: page.hotIds } : {}),
         evidence: page.traffic.map((row) => trafficEvidenceRef(row.id)),
       });
     }
     if (name === "traffic_get") {
       const id = text(args.id);
       if (!id) return fail("id required");
-      const record = getTraffic(taskDir, id);
+      const record = getTrafficLive(taskDir, id);
       if (!record || record.taskId !== taskId) return fail("traffic not found");
       return JSON.stringify({
         ok: true,
         evidenceRef: trafficEvidenceRef(record.id),
+        persisted: !isHot(taskDir, record.id),
         record,
         summary: {
           method: record.method,
@@ -122,9 +133,9 @@ export function runTrafficTool(
       const id = text(args.id);
       const side = args.side === "req" || args.side === "res" ? args.side : null;
       if (!id || !side) return fail("id and side=req|res required");
-      const record = getTraffic(taskDir, id);
+      const record = getTrafficLive(taskDir, id);
       if (!record || record.taskId !== taskId) return fail("traffic not found");
-      const slice = readTrafficBody(taskDir, id, side, num(args.offset), num(args.maxBytes));
+      const slice = readTrafficBodyLive(taskDir, id, side, num(args.offset), num(args.maxBytes));
       return JSON.stringify({
         ok: true,
         evidenceRef: slice.evidenceRef,
@@ -134,6 +145,7 @@ export function runTrafficTool(
         size: slice.size,
         nextOffset: slice.nextOffset,
         ...(slice.contentType ? { contentType: slice.contentType } : {}),
+        ...(slice.truncated ? { truncated: true, bufferedBytes: slice.bufferedBytes } : {}),
         body: slice.body,
         bytes: slice.bytes.toString("base64"),
       });

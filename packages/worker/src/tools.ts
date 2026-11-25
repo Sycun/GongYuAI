@@ -125,6 +125,8 @@ export type ToolContext = {
   usage: { toolCalls: number; installs: number };
   /** Child-process-only proxy env from task-local MITM traffic proxy (never mutates host). */
   proxyEnv?: Record<string, string>;
+  /** Current Explore Intent (pi-loop state); used to bind traffic windows. */
+  getActiveIntentId?: () => string | null | undefined;
 };
 
 /** Formal scope match (CIDR / wildcard / suffix / *) — see @gongyuai/contracts scope. */

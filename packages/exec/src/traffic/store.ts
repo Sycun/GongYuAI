@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -10,8 +10,19 @@ import {
   type TrafficSearchQuery,
 } from "@gongyuai/contracts";
 import { readBlobSlice, type BlobSlice } from "./blobs.js";
+import {
+  isNoiseExchange,
+  isStaticAssetExchange,
+  resolveTrafficRetention,
+  shapeTrafficWrite,
+  trafficPruneCount,
+  trafficPruneDue,
+  type TrafficRetentionConfig,
+} from "./retention.js";
 
 export type TrafficWrite = {
+  /** Optional fixed id (ring promotion). Default: a fresh UUID. */
+  id?: string;
   taskId: string;
   intentId?: string;
   workerId?: string;
@@ -52,8 +63,13 @@ export function openTrafficDb(taskDir: string): DatabaseSync {
   const key = join(taskDir);
   const cached = dbs.get(key);
   if (cached) return cached;
-  mkdirSync(dirname(dbPath(taskDir)), { recursive: true, mode: 0o700 });
-  const db = new DatabaseSync(dbPath(taskDir));
+  const path = dbPath(taskDir);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const fresh = !existsSync(path);
+  const db = new DatabaseSync(path);
+  // auto_vacuum is only honored before the first table. New task DBs reclaim
+  // pages after rolling deletes so index.sqlite does not keep the high-water mark.
+  if (fresh) db.exec("PRAGMA auto_vacuum = INCREMENTAL");
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA busy_timeout = 3000");
   db.exec(`
@@ -82,6 +98,7 @@ export function openTrafficDb(taskDir: string): DatabaseSync {
       finding_ids_json TEXT NOT NULL DEFAULT '[]'
     );
     CREATE INDEX IF NOT EXISTS idx_exchanges_task ON exchanges(task_id, started_at);
+    CREATE INDEX IF NOT EXISTS idx_exchanges_noise ON exchanges(task_id, host, status, path);
     CREATE TABLE IF NOT EXISTS validate_jobs (
       id TEXT PRIMARY KEY,
       task_id TEXT NOT NULL,
@@ -107,6 +124,7 @@ export function closeTrafficDb(taskDir: string): void {
   const db = dbs.get(key);
   if (!db) return;
   dbs.delete(key);
+  insertsSinceCheck.delete(key);
   db.close();
 }
 
@@ -140,9 +158,94 @@ function rowToRecord(row: Record<string, unknown>): TrafficRecord {
   return TrafficRecordSchema.parse(record);
 }
 
-export function insertTraffic(taskDir: string, input: TrafficWrite): TrafficRecord {
+function noiseCounts(db: DatabaseSync, input: TrafficWrite): { samePath404: number; host404: number } {
+  if (input.status !== 404) return { samePath404: 0, host404: 0 };
+  const same = db.prepare(
+    `SELECT count(*) AS n FROM exchanges
+     WHERE task_id = ? AND host = ? AND path = ? AND method = ? AND status = 404`,
+  ).get(input.taskId, input.host, input.path, input.method) as { n: number };
+  const host = db.prepare(
+    `SELECT count(*) AS n FROM exchanges WHERE task_id = ? AND host = ? AND status = 404`,
+  ).get(input.taskId, input.host) as { n: number };
+  return { samePath404: Number(same.n), host404: Number(host.n) };
+}
+
+/** Inserts since the last lagged prune check, per task DB. */
+const insertsSinceCheck = new Map<string, number>();
+
+function pruneExchanges(db: DatabaseSync, cfg: TrafficRetentionConfig, protectId: string): number {
+  if (cfg.maxExchanges <= 0) return 0;
+  const total = Number((db.prepare("SELECT count(*) AS n FROM exchanges").get() as { n: number }).n);
+  if (!trafficPruneDue(total, cfg.maxExchanges, cfg.pruneSlack)) return 0;
+  const remove = trafficPruneCount(total, cfg.maxExchanges);
+  if (remove <= 0) return 0;
+  const info = db.prepare(
+    `DELETE FROM exchanges
+     WHERE id IN (
+       SELECT id FROM exchanges
+       WHERE id != ?
+         AND (
+           finding_ids_json = '[]'
+           OR finding_ids_json = ''
+           OR (json_valid(finding_ids_json) AND json_array_length(finding_ids_json) = 0)
+         )
+       ORDER BY started_at ASC, rowid ASC
+       LIMIT ?
+     )`,
+  ).run(protectId, remove);
+  const deleted = Number(info.changes ?? 0);
+  if (deleted > 0 && cfg.vacuumPages > 0) {
+    try {
+      // Bounded: reclaim at most N pages per prune so the proxy hot path never
+      // waits on a full-file vacuum.
+      db.prepare(`PRAGMA incremental_vacuum(${Math.floor(cfg.vacuumPages)})`).all();
+    } catch {
+      /* databases created before auto_vacuum stay at their high-water size */
+    }
+  }
+  return deleted;
+}
+
+/** Lagged prune: count + delete only once every `pruneCheckEvery` inserts. */
+function maybePrune(taskDir: string, db: DatabaseSync, cfg: TrafficRetentionConfig, protectId: string): number {
+  if (cfg.maxExchanges <= 0) return 0;
+  const key = join(taskDir);
+  const seen = (insertsSinceCheck.get(key) ?? 0) + 1;
+  if (seen < Math.max(1, cfg.pruneCheckEvery)) {
+    insertsSinceCheck.set(key, seen);
+    return 0;
+  }
+  insertsSinceCheck.set(key, 0);
+  return pruneExchanges(db, cfg, protectId);
+}
+
+/** Force one prune pass now (ignores the insert counter, honors slack). */
+export function pruneTrafficNow(taskDir: string, retention?: Partial<TrafficRetentionConfig>): number {
   const db = openTrafficDb(taskDir);
-  const id = randomUUID();
+  insertsSinceCheck.set(join(taskDir), 0);
+  return pruneExchanges(db, resolveTrafficRetention(retention), "");
+}
+
+export function insertTraffic(
+  taskDir: string,
+  input: TrafficWrite,
+  retention?: Partial<TrafficRetentionConfig>,
+): TrafficRecord {
+  const db = openTrafficDb(taskDir);
+  const cfg = resolveTrafficRetention(retention);
+  if (input.id) {
+    // Ring promotion keeps the id the agent already saw; a second promote only links.
+    const existing = getTraffic(taskDir, input.id);
+    if (existing) {
+      for (const findingId of input.findingIds ?? []) linkTrafficFinding(taskDir, input.id, findingId);
+      return getTraffic(taskDir, input.id) ?? existing;
+    }
+  }
+  const metadataOnly =
+    (cfg.compactStaticAssets && isStaticAssetExchange(input))
+    || isNoiseExchange(input, noiseCounts(db, input), cfg);
+  const shaped = shapeTrafficWrite(input, cfg, metadataOnly);
+  const id = input.id ?? randomUUID();
   db.prepare(
     `INSERT INTO exchanges (
       id, task_id, intent_id, worker_id, method, url, host, path, status, duration_ms, started_at,
@@ -151,29 +254,75 @@ export function insertTraffic(taskDir: string, input: TrafficWrite): TrafficReco
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
-    input.taskId,
-    input.intentId ?? null,
-    input.workerId ?? null,
-    input.method,
-    input.url,
-    input.host,
-    input.path,
-    input.status,
-    input.durationMs,
-    input.startedAt,
-    JSON.stringify(input.reqHeaders),
-    JSON.stringify(input.resHeaders),
-    input.reqBody?.sha256 ?? null,
-    input.reqBody?.size ?? null,
-    input.reqBody?.contentType ?? null,
-    input.resBody?.sha256 ?? null,
-    input.resBody?.size ?? null,
-    input.resBody?.contentType ?? null,
-    input.reqPreview ?? "",
-    input.resPreview ?? "",
-    JSON.stringify(input.findingIds ?? []),
+    shaped.taskId,
+    shaped.intentId ?? null,
+    shaped.workerId ?? null,
+    shaped.method,
+    shaped.url,
+    shaped.host,
+    shaped.path,
+    shaped.status,
+    shaped.durationMs,
+    shaped.startedAt,
+    JSON.stringify(shaped.reqHeaders),
+    JSON.stringify(shaped.resHeaders),
+    shaped.reqBody?.sha256 ?? null,
+    shaped.reqBody?.size ?? null,
+    shaped.reqBody?.contentType ?? null,
+    shaped.resBody?.sha256 ?? null,
+    shaped.resBody?.size ?? null,
+    shaped.resBody?.contentType ?? null,
+    shaped.reqPreview ?? "",
+    shaped.resPreview ?? "",
+    JSON.stringify(shaped.findingIds ?? []),
   );
-  return getTraffic(taskDir, id)!;
+  const record = getTraffic(taskDir, id);
+  maybePrune(taskDir, db, cfg, id);
+  if (!record) throw new Error("traffic insert failed");
+  return record;
+}
+
+export type StoredExchange = {
+  id: string;
+  reqPreview: string;
+  resPreview: string;
+  reqHeadersJson: string;
+  resHeadersJson: string;
+  findingIds: string[];
+  startedAt: string;
+};
+
+export function readStoredExchange(taskDir: string, id: string): StoredExchange | null {
+  const db = openTrafficDb(taskDir);
+  const row = db.prepare(
+    `SELECT id, req_preview, res_preview, req_headers_json, res_headers_json, finding_ids_json, started_at
+     FROM exchanges WHERE id = ?`,
+  ).get(id) as
+    | {
+      id: string;
+      req_preview: string;
+      res_preview: string;
+      req_headers_json: string;
+      res_headers_json: string;
+      finding_ids_json: string;
+      started_at: string;
+    }
+    | undefined;
+  if (!row) return null;
+  return {
+    id: row.id,
+    reqPreview: row.req_preview,
+    resPreview: row.res_preview,
+    reqHeadersJson: row.req_headers_json,
+    resHeadersJson: row.res_headers_json,
+    findingIds: JSON.parse(String(row.finding_ids_json ?? "[]")) as string[],
+    startedAt: row.started_at,
+  };
+}
+
+export function countTrafficExchanges(taskDir: string): number {
+  const db = openTrafficDb(taskDir);
+  return Number((db.prepare("SELECT count(*) AS n FROM exchanges").get() as { n: number }).n);
 }
 
 export function getTraffic(taskDir: string, id: string): TrafficRecord | null {

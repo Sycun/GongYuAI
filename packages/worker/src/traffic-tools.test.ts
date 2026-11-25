@@ -5,7 +5,12 @@ import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { startTrafficProxy } from "@gongyuai/exec";
+import {
+  clearTrafficRing,
+  countTrafficExchanges,
+  promoteTrafficForFinding,
+  startTrafficProxy,
+} from "@gongyuai/exec";
 import { runTrafficTool } from "./traffic-tools.js";
 
 const TASK = "6460e5ec-1a8c-4b95-b4e3-d77a02c79680";
@@ -68,6 +73,82 @@ test("traffic tools search, summarize, and page a body without dropping the evid
   } finally {
     await proxy.close();
     origin.close();
+    rmSync(taskDir, { recursive: true, force: true });
+  }
+});
+
+test("traffic tools merge hot ring rows with persisted rows and dedupe after promote", async () => {
+  const taskDir = mkdtempSync(join(tmpdir(), "gy-traffic-tools-live-"));
+  const FINDING = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const origin = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end(`body-of-${req.url ?? "/"}`);
+  });
+  await new Promise<void>((resolve) => origin.listen(0, "127.0.0.1", () => resolve()));
+  const address = origin.address();
+  if (!address || typeof address === "string") throw new Error("no port");
+  const proxy = await startTrafficProxy({ taskId: TASK, taskDir, mode: "finding-window" });
+  const fetchVia = (path: string) => new Promise<void>((resolve, reject) => {
+    const req = httpRequest({
+      host: "127.0.0.1",
+      port: proxy.port,
+      method: "GET",
+      path: `http://127.0.0.1:${address.port}${path}`,
+      headers: { host: `127.0.0.1:${address.port}` },
+    }, (res) => {
+      res.resume();
+      res.on("end", () => resolve());
+    });
+    req.on("error", reject);
+    req.end();
+  });
+  try {
+    await fetchVia("/probe-1");
+    await fetchVia("/probe-2");
+    assert.equal(countTrafficExchanges(taskDir), 0);
+
+    type Search = { ok: boolean; total: number; traffic: Array<{ id: string; path: string }>; hotIds?: string[] };
+    const hot = JSON.parse(runTrafficTool(taskDir, TASK, "traffic_search", { keyword: "probe" })) as Search;
+    assert.equal(hot.total, 2);
+    assert.equal(hot.hotIds?.length, 2);
+    const probe1 = hot.traffic.find((row) => row.path === "/probe-1")!;
+    const getHot = JSON.parse(runTrafficTool(taskDir, TASK, "traffic_get", { id: probe1.id })) as {
+      persisted: boolean;
+      summary: { resHead: string };
+    };
+    assert.equal(getHot.persisted, false);
+    assert.equal(getHot.summary.resHead, "body-of-/probe-1");
+    const blobHot = JSON.parse(runTrafficTool(taskDir, TASK, "traffic_blob", { id: probe1.id, side: "res" })) as { body: string };
+    assert.equal(blobHot.body, "body-of-/probe-1");
+
+    // finding_record would promote the id the agent saw; it keeps the same id.
+    const promoted = promoteTrafficForFinding(taskDir, { findingId: FINDING, trafficIds: [probe1.id], postWindowMs: 0 });
+    assert.deepEqual(promoted.trafficIds, [probe1.id]);
+
+    const merged = JSON.parse(runTrafficTool(taskDir, TASK, "traffic_search", { keyword: "probe" })) as Search;
+    assert.equal(merged.total, 2, "promoted row must not be counted twice");
+    assert.deepEqual(merged.hotIds?.length, 1);
+    assert.equal(new Set(merged.traffic.map((row) => row.id)).size, 2);
+    const getStored = JSON.parse(runTrafficTool(taskDir, TASK, "traffic_get", { id: probe1.id })) as {
+      persisted: boolean;
+      record: { findingIds?: string[] };
+    };
+    assert.equal(getStored.persisted, true);
+    assert.deepEqual(getStored.record.findingIds, [FINDING]);
+
+    // Paging walks hot rows first, then stored rows, without gaps.
+    const page1 = JSON.parse(runTrafficTool(taskDir, TASK, "traffic_search", { keyword: "probe", limit: 1 })) as Search & { nextOffset: number | null };
+    const page2 = JSON.parse(runTrafficTool(taskDir, TASK, "traffic_search", { keyword: "probe", limit: 1, offset: 1 })) as Search & { nextOffset: number | null };
+    assert.equal(page1.nextOffset, 1);
+    assert.equal(page2.nextOffset, null);
+    assert.notEqual(page1.traffic[0]!.id, page2.traffic[0]!.id);
+
+    const missing = JSON.parse(runTrafficTool(taskDir, TASK, "traffic_get", { id: "00000000-0000-4000-8000-000000000000" })) as { ok: boolean };
+    assert.equal(missing.ok, false);
+  } finally {
+    await proxy.close();
+    origin.close();
+    clearTrafficRing(taskDir);
     rmSync(taskDir, { recursive: true, force: true });
   }
 });

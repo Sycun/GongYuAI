@@ -6,11 +6,17 @@ import type { WorkerPhase } from "@gongyuai/contracts";
 export type CheckpointState = {
   phase: WorkerPhase;
   step: number;
+  /** Persisted Pi continue-round counter; survives restart so requestId never replays a committed round. */
+  round: number;
+  /** Monotonic worker boot epoch (bumped once per process); keeps requestId unique across pause/resume. */
+  bootEpoch: number;
   toolCalls: number;
   installs: number;
   tokens: number;
   /** Session Relay generation; next π index to write. */
   relayGeneration: number;
+  /** step index when the last background π audit snapshot was written (step-paced, not token-paced). */
+  lastRelaySnapshotStep: number;
   /** Tokens accumulated since last successful relay (auto trigger). */
   tokensSinceRelay: number;
   /** Tool calls since last successful relay (min-interval guard). */
@@ -29,6 +35,8 @@ export type CheckpointState = {
   lastSoftSurfaceMilestone: number;
   /** Advisory text waiting to inject on next model turn (Pi afterTools). */
   pendingSoftPaceMessage: string | null;
+  /** Fingerprint of the last Observe entities injected into the live session; enables incremental resume deltas. */
+  observeFingerprint: Record<string, string>;
   lastError: string | null;
   updatedAt: string;
 };
@@ -36,10 +44,13 @@ export type CheckpointState = {
 const DEFAULT: CheckpointState = {
   phase: "init",
   step: 0,
+  round: 0,
+  bootEpoch: 0,
   toolCalls: 0,
   installs: 0,
   tokens: 0,
   relayGeneration: 0,
+  lastRelaySnapshotStep: 0,
   tokensSinceRelay: 0,
   toolCallsSinceRelay: 0,
   activeIntentId: null,
@@ -49,6 +60,7 @@ const DEFAULT: CheckpointState = {
   toolsAtIntentClaim: null,
   lastSoftSurfaceMilestone: 0,
   pendingSoftPaceMessage: null,
+  observeFingerprint: {},
   lastError: null,
   updatedAt: new Date().toISOString(),
 };
@@ -83,7 +95,10 @@ export class CheckpointStore {
       ...DEFAULT,
       ...parsed,
       phase,
+      round: parsed.round ?? 0,
+      bootEpoch: parsed.bootEpoch ?? 0,
       relayGeneration: parsed.relayGeneration ?? 0,
+      lastRelaySnapshotStep: parsed.lastRelaySnapshotStep ?? 0,
       tokensSinceRelay: parsed.tokensSinceRelay ?? parsed.tokens ?? 0,
       toolCallsSinceRelay: parsed.toolCallsSinceRelay ?? 0,
       activeIntentId: parsed.activeIntentId ?? null,
@@ -93,6 +108,7 @@ export class CheckpointStore {
       toolsAtIntentClaim: parsed.toolsAtIntentClaim ?? null,
       lastSoftSurfaceMilestone: parsed.lastSoftSurfaceMilestone ?? 0,
       pendingSoftPaceMessage: parsed.pendingSoftPaceMessage ?? null,
+      observeFingerprint: parsed.observeFingerprint ?? {},
     };
   }
 

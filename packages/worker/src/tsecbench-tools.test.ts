@@ -5,9 +5,15 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
+import { clearTrafficRing, closeTrafficDb, getTraffic, pushTrafficRing, trafficLabelUuid } from "@gongyuai/exec";
 import { boardClearPolicyBlock, hasBenchmarkHarness } from "./board-policy.js";
 import { assertCommandAllowed } from "./tools.js";
-import { autoAdmitContainerTargets, parseContainerAddresses } from "./tsecbench-tools.js";
+import {
+  autoAdmitContainerTargets,
+  captureSolveTraffic,
+  parseContainerAddresses,
+  submitCorrect,
+} from "./tsecbench-tools.js";
 
 function makeManifest(dir: string): WorkerManifest {
   return {
@@ -130,6 +136,57 @@ test("boardClearPolicyBlock centers on root-cause vulnerability discovery and is
   } finally {
     if (prevUrl !== undefined) process.env.BENCHMARK_BASE_URL = prevUrl;
     if (prevTok !== undefined) process.env.BENCHMARK_TOKEN = prevTok;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tsecbench correct submit keeps the solve traffic window under tsecbench:<code>", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gy-tsec-solve-"));
+  const m = makeManifest(dir);
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(m, null, 2));
+  const history = openHistory({ dbPath: m.historyDb, evidenceDir: m.evidenceDir });
+  try {
+    assert.equal(submitCorrect({ correct: true }), true);
+    assert.equal(submitCorrect({ data: { correct: true } }), true);
+    assert.equal(submitCorrect({ correct: false }), false);
+    assert.equal(submitCorrect("ok"), false);
+
+    const ctx = { manifest: m, history, usage: { toolCalls: 0, installs: 0 } };
+    autoAdmitContainerTargets(ctx, "WEB-777", "http://10.0.200.77:32888");
+    const push = (n: number, host: string) => pushTrafficRing(dir, {
+      id: `77777777-7777-4777-8777-${String(n).padStart(12, "0")}`,
+      write: {
+        taskId: m.taskId,
+        method: "GET",
+        url: `http://${host}:32888/flag`,
+        host,
+        path: "/flag",
+        status: 200,
+        durationMs: 2,
+        startedAt: new Date().toISOString(),
+        reqHeaders: {},
+        resHeaders: { "content-type": "text/plain" },
+      },
+      resBody: { head: Buffer.from(`flag-${n}`), size: 6, sha256: "2".repeat(64) },
+    });
+    push(1, "10.0.200.77");
+    push(2, "10.0.200.88");
+
+    const kept = captureSolveTraffic(ctx, "WEB-777");
+    assert.ok(kept);
+    assert.equal(kept.label, "tsecbench:WEB-777");
+    assert.equal(kept.findingId, trafficLabelUuid("tsecbench:WEB-777"));
+    assert.deepEqual(kept.trafficIds, ["77777777-7777-4777-8777-000000000001"]);
+    assert.deepEqual(getTraffic(dir, kept.trafficIds[0]!)?.findingIds, [kept.findingId]);
+    // Unknown code falls back to the most recent challenge host.
+    const fallback = captureSolveTraffic(ctx, "UNKNOWN");
+    assert.equal(fallback?.findingId, trafficLabelUuid("tsecbench:UNKNOWN"));
+    assert.deepEqual(fallback?.trafficIds, ["77777777-7777-4777-8777-000000000001"]);
+    assert.equal(getTraffic(dir, "77777777-7777-4777-8777-000000000002"), null);
+  } finally {
+    clearTrafficRing(dir);
+    closeTrafficDb(dir);
+    history.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

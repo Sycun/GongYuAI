@@ -2,13 +2,19 @@
  * Graph-driven Bootstrap → Explore → Reason protocol (P2 / handbook polish).
  * History remains authoritative; phase only gates Worker tool surface.
  */
-import type { ExecutionConfig, FindingConfidence, FindingSeverity, WorkerPhase } from "@gongyuai/contracts";
+import type { ExecutionConfig, Finding, FindingConfidence, FindingSeverity, WorkerPhase } from "@gongyuai/contracts";
 import {
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
   DEFAULT_MAX_INTENTS_PER_REASON,
   DEFAULT_REASON_LEASE_MS,
   PlanSetInputSchema,
 } from "@gongyuai/contracts";
+import {
+  closeFindingWindow,
+  promoteTrafficForFinding,
+  targetHostOf,
+  type PromoteTrafficResult,
+} from "@gongyuai/exec";
 import type { ConcludeFactInput, FanoutPolicy, HistoryStore } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import { appendProgress } from "./tools.js";
@@ -381,6 +387,10 @@ export const GRAPH_PHASE_TOOLS = [
           factIds: { type: "string" },
           impact: { type: "string" },
           fix: { type: "string" },
+          trafficIds: {
+            type: "string",
+            description: "Optional comma-separated traffic ids (from traffic_search, http:<id> ok) to persist with this finding. Recent same-intent/same-host traffic is kept automatically.",
+          },
         },
         required: ["title", "asset", "vulnClass", "severity"],
       },
@@ -401,6 +411,7 @@ export const GRAPH_PHASE_TOOLS = [
           impact: { type: "string" },
           fix: { type: "string" },
           cvss: { type: "string" },
+          trafficIds: { type: "string", description: "Optional comma-separated traffic ids of the reproduction." },
         },
         required: ["findingId", "evidencePaths", "repro"],
       },
@@ -561,7 +572,50 @@ export type GraphToolCtx = {
   /** slot 0 leader owns Bootstrap/Reason/Report; followers only Explore. */
   leader?: boolean;
   workerCount?: number;
+  /** Task data dir holding traffic/ (proxy taskDir). Enables finding traffic capture. */
+  trafficDir?: string;
 };
+
+type CapturedTraffic = {
+  trafficIds: string[];
+  finding: Finding | null;
+  summary: { trafficIds: string[]; promoted: number; window: PromoteTrafficResult["window"] };
+};
+
+/**
+ * Persist the traffic around a finding: promote matching recent exchanges
+ * from the in-memory ring and open (or converge) the post-window. Best-effort:
+ * never fails the finding tool.
+ */
+function captureFindingTraffic(
+  ctx: GraphToolCtx,
+  finding: Finding,
+  opts: { trafficIds?: string[]; converge?: boolean },
+): CapturedTraffic | null {
+  if (!ctx.trafficDir) return null;
+  try {
+    const endpointHost = finding.endpoint ? targetHostOf(finding.endpoint) : undefined;
+    const endpointIsUrl = !!finding.endpoint && /^[a-z][a-z0-9+.-]*:\/\//i.test(finding.endpoint);
+    const res = promoteTrafficForFinding(ctx.trafficDir, {
+      findingId: finding.id,
+      intentId: finding.intentId ?? ctx.state.activeIntentId ?? null,
+      host: (endpointIsUrl ? endpointHost : undefined) ?? targetHostOf(finding.asset) ?? null,
+      asset: finding.asset,
+      trafficIds: opts.trafficIds ?? [],
+      ...(opts.converge ? { converge: true } : {}),
+    });
+    const linked = res.trafficIds.length
+      ? ctx.history.linkFindingTraffic(ctx.taskId, finding.id, res.trafficIds)
+      : null;
+    return {
+      trafficIds: res.trafficIds,
+      finding: linked,
+      summary: { trafficIds: res.trafficIds, promoted: res.promoted, window: res.window },
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function handleGraphTool(
   name: string,
@@ -879,11 +933,15 @@ export function handleGraphTool(
         impact: args.impact ?? "",
         fix: args.fix ?? "",
       });
+      const traffic = captureFindingTraffic(ctx, r.finding, {
+        trafficIds: parseFactIds(args.trafficIds ?? ""),
+      });
       appendProgress(
         ctx.workspaceDir,
-        `finding_record ${r.finding.id} (${r.finding.severity}/${r.finding.status}) ${r.finding.title}${r.created ? "" : " [dedup]"}`,
+        `finding_record ${r.finding.id} (${r.finding.severity}/${r.finding.status}) ${r.finding.title}${r.created ? "" : " [dedup]"}${traffic?.trafficIds.length ? ` traffic=${traffic.trafficIds.length}` : ""}`,
       );
-      return JSON.stringify(r);
+      if (!traffic) return JSON.stringify(r);
+      return JSON.stringify({ ...r, finding: traffic.finding ?? r.finding, traffic: traffic.summary });
     } catch (err) {
       return `错误: ${err instanceof Error ? err.message : String(err)}`;
     }
@@ -904,11 +962,18 @@ export function handleGraphTool(
           intentId: ctx.state.activeIntentId ?? undefined,
         },
       );
+      // Verified: keep the reproduction traffic, then converge the post-window
+      // to a few confirmation captures.
+      const traffic = captureFindingTraffic(ctx, finding, {
+        trafficIds: parseFactIds(args.trafficIds ?? ""),
+        converge: true,
+      });
       appendProgress(
         ctx.workspaceDir,
-        `finding_verify ${finding.id} → ${finding.status} evidence=${finding.evidence.length}`,
+        `finding_verify ${finding.id} → ${finding.status} evidence=${finding.evidence.length}${traffic?.trafficIds.length ? ` traffic=${traffic.trafficIds.length}` : ""}`,
       );
-      return JSON.stringify(finding);
+      if (!traffic) return JSON.stringify(finding);
+      return JSON.stringify({ ...(traffic.finding ?? finding), traffic: traffic.summary });
     } catch (err) {
       return `错误: ${err instanceof Error ? err.message : String(err)}`;
     }
@@ -958,6 +1023,7 @@ export function handleGraphTool(
         args.findingId ?? "",
         args.reason ?? "",
       );
+      if (ctx.trafficDir) closeFindingWindow(ctx.trafficDir, finding.id);
       appendProgress(ctx.workspaceDir, `finding_retract ${finding.id}`);
       return JSON.stringify(finding);
     } catch (err) {

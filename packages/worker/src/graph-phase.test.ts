@@ -6,6 +6,14 @@ import assert from "node:assert/strict";
 import { ORIGIN_FACT_ID } from "@gongyuai/contracts";
 import { openHistory, writeEvidenceFile } from "@gongyuai/history";
 import {
+  activeFindingWindows,
+  clearTrafficRing,
+  closeTrafficDb,
+  countTrafficExchanges,
+  getTraffic,
+  pushTrafficRing,
+} from "@gongyuai/exec";
+import {
   allowedToolNames,
   asGraphPhase,
   executionIntentDenial,
@@ -19,10 +27,13 @@ function tmpState(phase: CheckpointState["phase"] = "bootstrap"): CheckpointStat
   return {
     phase,
     step: 0,
+    round: 0,
+    bootEpoch: 0,
     toolCalls: 0,
     installs: 0,
     tokens: 0,
     relayGeneration: 0,
+    lastRelaySnapshotStep: 0,
     tokensSinceRelay: 0,
     toolCallsSinceRelay: 0,
     activeIntentId: null,
@@ -32,6 +43,7 @@ function tmpState(phase: CheckpointState["phase"] = "bootstrap"): CheckpointStat
     toolsAtIntentClaim: null,
     lastSoftSurfaceMilestone: 0,
     pendingSoftPaceMessage: null,
+    observeFingerprint: {},
     lastError: null,
     updatedAt: new Date().toISOString(),
   };
@@ -534,6 +546,83 @@ test("multi-worker leader delegates execution; follower cannot enter Reason", ()
     assert.equal(soloState.phase, "explore");
     assert.equal(soloState.activeIntentId, soloOut.id);
   } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("finding_record/verify/retract persist ring traffic around the finding and drive the post-window", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-phase-traffic-"));
+  const history = openHistory({ dbPath: join(root, "h.sqlite"), evidenceDir: join(root, "evidence") });
+  const state = tmpState("explore");
+  const taskId = "6460e5ec-1a8c-4b95-b4e3-d77a02c79680";
+  const ringId = (n: number) => `99999999-9999-4999-8999-${String(n).padStart(12, "0")}`;
+  const push = (n: number, host: string) => pushTrafficRing(root, {
+    id: ringId(n),
+    write: {
+      taskId,
+      method: "POST",
+      url: `https://${host}/login`,
+      host,
+      path: "/login",
+      status: 200,
+      durationMs: 3,
+      startedAt: new Date().toISOString(),
+      reqHeaders: { "content-type": "application/x-www-form-urlencoded" },
+      resHeaders: { "content-type": "text/html" },
+    },
+    reqBody: { head: Buffer.from(`user=probe-${n}`), size: 12, sha256: "1".repeat(64) },
+  });
+  try {
+    push(1, "a.com");
+    push(2, "other.com");
+    push(3, "a.com");
+    const ctx = { history, taskId, workspaceDir: root, state, save: () => {}, trafficDir: root };
+    const recorded = JSON.parse(handleGraphTool("finding_record", {
+      title: "SQLi",
+      asset: "https://a.com/login",
+      vulnClass: "CWE-89",
+      severity: "high",
+      endpoint: "/login",
+      trafficIds: `http:${ringId(2)}`,
+    }, ctx)!) as {
+      finding: { id: string; trafficIds?: string[] };
+      traffic: { trafficIds: string[]; promoted: number; window: { host?: string; remaining: number } | null };
+    };
+    // Same host (1, 3) plus the explicitly named exchange on another host (2).
+    assert.deepEqual(new Set(recorded.traffic.trafficIds), new Set([ringId(1), ringId(2), ringId(3)]));
+    assert.equal(recorded.traffic.promoted, 3);
+    assert.equal(recorded.traffic.window?.host, "a.com");
+    assert.equal(recorded.traffic.window?.remaining, 30);
+    assert.deepEqual(new Set(recorded.finding.trafficIds), new Set([ringId(1), ringId(2), ringId(3)]));
+    assert.deepEqual(getTraffic(root, ringId(1))?.findingIds, [recorded.finding.id]);
+    assert.equal(countTrafficExchanges(root), 3);
+
+    writeEvidenceFile(join(root, "evidence"), "findings/sqli.txt", "proof\n");
+    push(4, "a.com");
+    const verified = JSON.parse(handleGraphTool("finding_verify", {
+      findingId: recorded.finding.id,
+      evidencePaths: "findings/sqli.txt",
+      repro: "replay login",
+    }, ctx)!) as { status: string; trafficIds?: string[]; traffic: { window: { remaining: number } | null } };
+    assert.equal(verified.status, "verified");
+    assert.ok(verified.trafficIds?.includes(ringId(4)));
+    assert.equal(verified.traffic.window?.remaining, 5);
+
+    handleGraphTool("finding_retract", { findingId: recorded.finding.id, reason: "误报" }, ctx);
+    assert.deepEqual(activeFindingWindows(root), []);
+
+    // No trafficDir: finding tools behave exactly as before (no traffic key).
+    const plain = JSON.parse(handleGraphTool("finding_record", {
+      title: "XSS",
+      asset: "a.com",
+      vulnClass: "CWE-79",
+      severity: "low",
+    }, { history, taskId, workspaceDir: root, state, save: () => {} })!) as Record<string, unknown>;
+    assert.equal("traffic" in plain, false);
+  } finally {
+    clearTrafficRing(root);
+    closeTrafficDb(root);
     history.close();
     rmSync(root, { recursive: true, force: true });
   }

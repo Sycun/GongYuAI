@@ -10,7 +10,23 @@ import { once } from "node:events";
 import type { TrafficBlobRef } from "@gongyuai/contracts";
 import { commitHashedFile } from "./blobs.js";
 import { ensureTaskCa, leafFor, type TaskCa } from "./ca.js";
-import { closeTrafficDb, insertTraffic } from "./store.js";
+import {
+  isNoiseExchange,
+  isStaticAssetExchange,
+  resolveTrafficMode,
+  resolveTrafficRetention,
+  type TrafficMode,
+} from "./retention.js";
+import {
+  consumeFindingWindows,
+  matchFindingWindows,
+  noteNoise404,
+  persistCapturedExchange,
+  pushTrafficRing,
+  trafficWindowDefaults,
+  type CapturedBody,
+} from "./ring.js";
+import { closeTrafficDb, insertTraffic, type TrafficWrite } from "./store.js";
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -35,6 +51,8 @@ export type TrafficProxyOptions = {
   upstream?: string | null;
   /** Accept upstream TLS certificates that this process does not trust. */
   insecureUpstream?: boolean;
+  /** Retention mode. Default: `GY_TRAFFIC_MODE`, else `finding-window`. */
+  mode?: TrafficMode;
 };
 
 export type TrafficProxy = {
@@ -78,7 +96,7 @@ type Spool = {
   done: Promise<{ ref?: TrafficBlobRef; preview: string }>;
 };
 
-function spool(source: Readable, taskDir: string, type?: string): Spool {
+function spool(source: Readable, taskDir: string, type: string | undefined, maxPreviewBytes: number): Spool {
   const forward = new PassThrough();
   const tmpDir = join(taskDir, "traffic", "_tmp");
   mkdirSync(tmpDir, { recursive: true, mode: 0o700 });
@@ -88,6 +106,7 @@ function spool(source: Readable, taskDir: string, type?: string): Spool {
   let size = 0;
   const preview: Buffer[] = [];
   let previewLen = 0;
+  const previewCap = Math.max(0, Math.min(8192, maxPreviewBytes));
   const done = new Promise<{ ref?: TrafficBlobRef; preview: string }>((resolve, reject) => {
     const fail = (err: Error) => {
       forward.destroy(err);
@@ -98,7 +117,7 @@ function spool(source: Readable, taskDir: string, type?: string): Spool {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       hash.update(buf);
       size += buf.length;
-      if (previewLen < 8192) {
+      if (previewCap > 0 && previewLen < previewCap) {
         preview.push(buf);
         previewLen += buf.length;
       }
@@ -112,7 +131,9 @@ function spool(source: Readable, taskDir: string, type?: string): Spool {
       forward.end();
       file.end(() => {
         const sha256 = hash.digest("hex");
-        const text = Buffer.concat(preview).subarray(0, 8192).toString("utf8");
+        const text = previewCap > 0
+          ? Buffer.concat(preview).subarray(0, previewCap).toString("utf8")
+          : "";
         try {
           const ref = commitHashedFile(taskDir, tmp, sha256, size, type);
           resolve({ ...(ref ? { ref } : {}), preview: text });
@@ -123,6 +144,52 @@ function spool(source: Readable, taskDir: string, type?: string): Spool {
     });
     source.on("error", fail);
     file.on("error", fail);
+  });
+  return { forward, done };
+}
+
+type Capture = {
+  forward: PassThrough;
+  done: Promise<CapturedBody>;
+};
+
+/**
+ * Memory-only capture: forwards every byte, keeps at most `cap` head bytes
+ * (copied, so upstream chunks are not retained) plus true size + sha256.
+ * No temp file, no blob.
+ */
+function capture(source: Readable, cap: number, type: string | undefined): Capture {
+  const forward = new PassThrough();
+  const hash = createHash("sha256");
+  const parts: Buffer[] = [];
+  let kept = 0;
+  let size = 0;
+  const done = new Promise<CapturedBody>((resolve, reject) => {
+    source.on("data", (chunk: Buffer | string) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      hash.update(buf);
+      size += buf.length;
+      if (kept < cap) {
+        const take = buf.subarray(0, cap - kept);
+        parts.push(Buffer.from(take));
+        kept += take.length;
+      }
+      if (!forward.write(buf)) source.pause();
+    });
+    forward.on("drain", () => source.resume());
+    source.on("end", () => {
+      forward.end();
+      resolve({
+        head: Buffer.concat(parts),
+        size,
+        sha256: hash.digest("hex"),
+        ...(type ? { contentType: type } : {}),
+      });
+    });
+    source.on("error", (err) => {
+      forward.destroy(err);
+      reject(err);
+    });
   });
   return { forward, done };
 }
@@ -228,6 +295,10 @@ async function openUpstream(
  */
 export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<TrafficProxy> {
   const ca = ensureTaskCa(opts.taskDir);
+  const retention = resolveTrafficRetention();
+  const previewBytes = retention.maxPreviewChars;
+  const mode = opts.mode ?? resolveTrafficMode();
+  const ringBodyBytes = trafficWindowDefaults().ringBodyBytes;
   let upstream = parseUpstream(opts.upstream);
   const insecureUpstream = opts.insecureUpstream === true;
   const sockets = new Set<Socket>();
@@ -250,7 +321,7 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
     started: number,
   ): Promise<void> {
     const type = contentType(headerMap(upstreamRes.headers));
-    const resSpool = spool(upstreamRes, opts.taskDir, type);
+    const resSpool = spool(upstreamRes, opts.taskDir, type, previewBytes);
     const headers = { ...headerMap(upstreamRes.headers) };
     delete headers["content-length"];
     // Hold the client response open until the index row is durable.
@@ -262,6 +333,7 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
     const resHeaders = headerMap(upstreamRes.headers);
     const [reqBody, resBody] = await Promise.all([reqSpool.done, resSpool.done]);
     const currentIntentId = opts.getIntentId?.() ?? opts.intentId;
+    const windowIds = matchFindingWindows(opts.taskDir, { intentId: currentIntentId, host: target.hostname });
     try {
       insertTraffic(opts.taskDir, {
         taskId: opts.taskId,
@@ -280,7 +352,66 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
         ...(resBody.ref ? { resBody: resBody.ref } : {}),
         reqPreview: reqBody.preview,
         resPreview: resBody.preview,
+        ...(windowIds.length ? { findingIds: windowIds } : {}),
       });
+      if (windowIds.length) consumeFindingWindows(opts.taskDir, windowIds);
+    } finally {
+      gate.end();
+    }
+  }
+
+  /**
+   * finding-window mode. Static assets and repeated 404s stream straight
+   * through (no memory, no disk). Exchanges that hit a live finding
+   * post-window go to blobs/ + index.sqlite. Everything else lands only in the
+   * bounded in-memory ring.
+   */
+  async function handleWindowed(target: URL, req: IncomingMessage, res: ServerResponse, started: number): Promise<void> {
+    const method = (req.method ?? "GET").toUpperCase();
+    const reqHeaders = headerMap(req.headers);
+    const reqCap = capture(req, ringBodyBytes, contentType(reqHeaders));
+    reqCap.done.catch(() => {});
+    const upstreamRes = await openUpstream(target, method, reqHeaders, reqCap.forward, upstream, insecureUpstream);
+    const resHeaders = headerMap(upstreamRes.headers);
+    const outHeaders = { ...resHeaders };
+    delete outHeaders["content-length"];
+    const currentIntentId = opts.getIntentId?.() ?? opts.intentId;
+    const write: Omit<TrafficWrite, "reqBody" | "resBody" | "findingIds" | "id"> = {
+      taskId: opts.taskId,
+      ...(currentIntentId ? { intentId: currentIntentId } : {}),
+      ...(opts.workerId ? { workerId: opts.workerId } : {}),
+      method,
+      url: target.href,
+      host: target.hostname,
+      path: `${target.pathname}${target.search}` || "/",
+      status: upstreamRes.statusCode ?? 0,
+      durationMs: 0,
+      startedAt: new Date(started).toISOString(),
+      reqHeaders,
+      resHeaders,
+    };
+    const skip = (retention.compactStaticAssets && isStaticAssetExchange(write))
+      || isNoiseExchange(write, noteNoise404(opts.taskDir, write), retention);
+    res.writeHead(upstreamRes.statusCode ?? 502, outHeaders);
+    if (skip) {
+      upstreamRes.pipe(res);
+      return;
+    }
+    const resCap = capture(upstreamRes, ringBodyBytes, contentType(resHeaders));
+    // Hold the client response open until the exchange is searchable.
+    const gate = new PassThrough();
+    gate.pipe(res);
+    resCap.forward.pipe(gate, { end: false });
+    try {
+      const [reqBody, resBody] = await Promise.all([reqCap.done, resCap.done]);
+      const done = { ...write, durationMs: Date.now() - started };
+      const windowIds = matchFindingWindows(opts.taskDir, { intentId: currentIntentId, host: target.hostname });
+      if (windowIds.length) {
+        persistCapturedExchange(opts.taskDir, { write: done, reqBody, resBody, findingIds: windowIds });
+        consumeFindingWindows(opts.taskDir, windowIds);
+      } else {
+        pushTrafficRing(opts.taskDir, { id: randomUUID(), atMs: started, write: done, reqBody, resBody });
+      }
     } finally {
       gate.end();
     }
@@ -302,8 +433,12 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
       if (!host) throw new Error("proxy request is missing a host");
       target = new URL(req.url ?? "/", `http://${host}`);
     }
+    if (mode === "finding-window") {
+      await handleWindowed(target, req, res, started);
+      return;
+    }
     const reqHeaders = headerMap(req.headers);
-    const reqSpool = spool(req, opts.taskDir, contentType(reqHeaders));
+    const reqSpool = spool(req, opts.taskDir, contentType(reqHeaders), previewBytes);
     const upstreamRes = await openUpstream(
       target,
       (req.method ?? "GET").toUpperCase(),
