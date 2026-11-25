@@ -85,6 +85,7 @@ export class ExecRuntime {
 }
 
 export * from "./http.js";
+export * from "./http-sessions.js";
 export * from "./traffic/index.js";
 export * from "./oast.js";
 export * from "./oast-dns.js";

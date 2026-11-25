@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { performHttpRequest, type HttpRequestOptions } from "./http.js";
+import { DEFAULT_BROWSER_USER_AGENT, performHttpRequest, type HttpRequestOptions } from "./http.js";
 
 /** 只放行实验本机；任何外域（如 other.invalid）都被拒。 */
 const allowLocal: HttpRequestOptions["authorizeHost"] = (host) =>
@@ -381,4 +381,58 @@ test("始发 host 被拒：不发起网络请求、status 0、blockedRedirect �
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+test("未传 User-Agent 时使用浏览器默认值，显式头优先于选项与环境变量", async () => {
+  const previous = process.env.GY_HTTP_USER_AGENT;
+  const seen: string[] = [];
+  const server = createServer((req, res) => {
+    seen.push(String(req.headers["user-agent"] ?? ""));
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("ok");
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("test server did not bind");
+  const dir = tempEvidence();
+  const url = `http://127.0.0.1:${address.port}/ua`;
+  try {
+    delete process.env.GY_HTTP_USER_AGENT;
+    const first = await performHttpRequest(
+      { url },
+      { evidenceDir: dir, authorizeHost: allowLocal },
+    );
+    assert.equal(seen.at(-1), DEFAULT_BROWSER_USER_AGENT);
+    const requestText = readFileSync(join(dir, first.artifact.requestPath), "utf8");
+    assert.ok(requestText.includes(`User-Agent: ${DEFAULT_BROWSER_USER_AGENT}`));
+
+    await performHttpRequest(
+      { url, headers: { "User-Agent": "CustomAgent/1" } },
+      { evidenceDir: dir, authorizeHost: allowLocal, userAgent: "OptAgent/3" },
+    );
+    assert.equal(seen.at(-1), "CustomAgent/1");
+
+    process.env.GY_HTTP_USER_AGENT = "EnvAgent/2";
+    await performHttpRequest(
+      { url },
+      { evidenceDir: dir, authorizeHost: allowLocal },
+    );
+    assert.equal(seen.at(-1), "EnvAgent/2");
+
+    await performHttpRequest(
+      { url },
+      { evidenceDir: dir, authorizeHost: allowLocal, userAgent: "OptAgent/3" },
+    );
+    assert.equal(seen.at(-1), "OptAgent/3");
+  } finally {
+    if (previous === undefined) delete process.env.GY_HTTP_USER_AGENT;
+    else process.env.GY_HTTP_USER_AGENT = previous;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

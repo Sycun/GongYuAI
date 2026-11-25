@@ -56,7 +56,7 @@ import type { WorkerRunner } from "./runner.js";
 import type { PlatformStore } from "./platform.js";
 import { assembleHandoff, sweepTaskConsults, todayWork } from "./handoff.js";
 import { assetHistory } from "./asset-history.js";
-import { TunnelManager } from "@gongyuai/exec";
+import { TunnelManager, deleteHttpSession, listHttpSessionSummaries, upsertHttpSession } from "@gongyuai/exec";
 import {
   buildAssetGraph,
   buildExecutionGraph,
@@ -169,7 +169,7 @@ export async function handleOpsRoute(
 
   /* ------------------------------ 任务级路由 ------------------------------ */
   const taskMatch = path.match(
-    /^\/tasks\/([^/]+)\/(handoff|consults|jobs|materials|coverage-matrix|coverage-cells|freshness|changes|rollback|graphs|causality|roles|provider|model-request|memory|alerts|p14|asset-history|audit|validations|command-reset|chain)(\/.*)?$/,
+    /^\/tasks\/([^/]+)\/(handoff|consults|jobs|materials|coverage-matrix|coverage-cells|freshness|changes|rollback|graphs|causality|roles|provider|model-request|memory|alerts|p14|asset-history|audit|validations|command-reset|chain|http-sessions)(\/.*)?$/,
   );
   if (!taskMatch) return handlePlatformRoute(req, res, method, url, deps);
 
@@ -189,6 +189,50 @@ export async function handleOpsRoute(
   const now = nowIso(url);
 
   try {
+    if (group === "http-sessions") {
+      if (method === "GET" && rest === "") {
+        return send(res, 200, { sessions: listHttpSessionSummaries(task.dataDir) }), true;
+      }
+      if (method === "POST" && rest === "") {
+        const body = await readJson(req) as {
+          name?: unknown;
+          host?: unknown;
+          cookies?: unknown;
+          headers?: unknown;
+          cookie?: unknown;
+        };
+        const record = (value: unknown): Record<string, unknown> | undefined =>
+          value && typeof value === "object" && !Array.isArray(value)
+            ? value as Record<string, unknown>
+            : undefined;
+        const saved = upsertHttpSession(task.dataDir, {
+          name: typeof body.name === "string" ? body.name : "",
+          host: typeof body.host === "string" ? body.host : "",
+          ...(record(body.cookies) ? { cookies: record(body.cookies) } : {}),
+          ...(record(body.headers) ? { headers: record(body.headers) } : {}),
+          ...(typeof body.cookie === "string" ? { cookie: body.cookie } : {}),
+        });
+        return send(res, 200, {
+          ok: true,
+          session: {
+            name: saved.name,
+            host: saved.host,
+            cookieKeys: Object.keys(saved.cookies).sort(),
+            headerKeys: Object.keys(saved.headers).sort(),
+          },
+        }), true;
+      }
+      const removed = method === "DELETE" ? /^\/([^/]+)$/.exec(rest) : null;
+      if (removed) {
+        const name = decodeURIComponent(removed[1]!);
+        if (!deleteHttpSession(task.dataDir, name)) {
+          return send(res, 404, { error: "session not found" }), true;
+        }
+        return send(res, 200, { ok: true, name }), true;
+      }
+      return send(res, 404, { error: "not found" }), true;
+    }
+
     if (group === "handoff" && method === "GET") {
       const history = open(task);
       try {

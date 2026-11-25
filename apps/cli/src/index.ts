@@ -99,6 +99,9 @@ Usage:
   gy role <taskId> --role planner|reviewer|assistant --kind plan|review|incident [--file F]
   gy provider-fault <taskId> --provider NAME --fault rate-limit|timeout|insufficient-balance|egress-denied
         [--attempt N] [--fallback true] [--billing billed] [--tokens N]
+  gy session import <taskId> --name NAME --host HOST [--cookie COOKIE] [--header "Name: Value"]
+  gy session list <taskId>
+  gy session delete <taskId> --name NAME
 
 Defaults: all budget gates unlimited (0). Pass --max-* only when you want a hard cap.
 Data dir defaults to <repo>/.gongyuai (not cwd). Legacy ~/.gongyuai tasks are imported on boot.
@@ -139,6 +142,29 @@ function parseGlobal(argv: string[]): { cmd: string; rest: string[]; opts: Globa
   }
   const cmd = out[0] ?? "help";
   return { cmd, rest: out.slice(1), opts };
+}
+
+/** Positional args, skipping `--flag value` pairs. */
+function positional(rest: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const token = rest[i]!;
+    if (token.startsWith("--")) {
+      i += 1;
+      continue;
+    }
+    out.push(token);
+  }
+  return out;
+}
+
+function parseHeaderFlag(raw: string): [string, string] {
+  const idx = raw.indexOf(":");
+  if (idx <= 0) throw new Error(`--header must be "Name: Value" (got ${raw})`);
+  const name = raw.slice(0, idx).trim();
+  const value = raw.slice(idx + 1).trim();
+  if (!name || !value) throw new Error(`--header must be "Name: Value" (got ${raw})`);
+  return [name, value];
 }
 
 function flag(rest: string[], name: string): string | undefined {
@@ -1305,6 +1331,51 @@ async function main(): Promise<void> {
         billing: flag(rest, "--billing") ?? "none",
         tokens: flag(rest, "--tokens") ? Number(flag(rest, "--tokens")) : null,
       });
+      if (r.status >= 400) throw new Error(r.text);
+      console.log(r.text);
+    } finally {
+      if (owned.close) await owned.close();
+    }
+    return;
+  }
+
+  if (cmd === "session") {
+    const pos = positional(rest);
+    const sub = pos[0];
+    const id = pos[1];
+    if (!id || (sub !== "import" && sub !== "list" && sub !== "delete")) {
+      throw new Error("usage: gy session import|list|delete <taskId> [--name NAME --host HOST]");
+    }
+    const owned = await ensureServer(opts);
+    try {
+      if (sub === "list") {
+        const r = await api(opts, "GET", `/tasks/${id}/http-sessions`);
+        if (r.status >= 400) throw new Error(r.text);
+        console.log(r.text);
+        return;
+      }
+      if (sub === "delete") {
+        const name = flag(rest, "--name");
+        if (!name) throw new Error("gy session delete <taskId> --name NAME");
+        const r = await api(opts, "DELETE", `/tasks/${id}/http-sessions/${encodeURIComponent(name)}`);
+        if (r.status >= 400) throw new Error(r.text);
+        console.log(r.text);
+        return;
+      }
+      const name = flag(rest, "--name");
+      const host = flag(rest, "--host");
+      if (!name || !host) throw new Error("gy session import <taskId> --name NAME --host HOST");
+      const cookies = flags(rest, "--cookie");
+      const headerPairs = flags(rest, "--header");
+      const headers: Record<string, string> = {};
+      for (const raw of headerPairs) {
+        const [headerName, headerValue] = parseHeaderFlag(raw);
+        headers[headerName] = headerValue;
+      }
+      const body: Record<string, unknown> = { name, host };
+      if (cookies.length) body.cookie = cookies.join("; ");
+      if (Object.keys(headers).length) body.headers = headers;
+      const r = await api(opts, "POST", `/tasks/${id}/http-sessions`, body);
       if (r.status >= 400) throw new Error(r.text);
       console.log(r.text);
     } finally {

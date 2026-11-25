@@ -1,6 +1,12 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { insertTraffic, performHttpRequest, putBlob } from "@gongyuai/exec";
+import {
+  applySessionToHeaders,
+  insertTraffic,
+  loadHttpSessions,
+  performHttpRequest,
+  putBlob,
+  saveHttpSessions,
+  type HttpSessionStore,
+} from "@gongyuai/exec";
 import { capabilityAtLeast } from "./tools.js";
 import { scopeAllows } from "@gongyuai/contracts";
 import { readEvidenceBytes } from "@gongyuai/history";
@@ -22,34 +28,6 @@ export type HttpToolArgs = {
   compareWith?: string;
 };
 
-type SessionJarStore = Record<string, Record<string, Record<string, string>>>;
-
-function sessionStorePath(dataDir: string): string {
-  return join(dataDir, "http-sessions.json");
-}
-
-function loadSessionJars(dataDir: string): SessionJarStore {
-  const path = sessionStorePath(dataDir);
-  if (!existsSync(path)) return {};
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as SessionJarStore;
-    }
-  } catch {
-    /* ignore corrupt jar */
-  }
-  return {};
-}
-
-function saveSessionJars(dataDir: string, store: SessionJarStore): void {
-  try {
-    writeFileSync(sessionStorePath(dataDir), JSON.stringify(store, null, 2), { mode: 0o600 });
-  } catch {
-    /* best-effort persistence */
-  }
-}
-
 function extractSetCookiesFromRawResponse(rawResponse: string): Array<{ name: string; value: string }> {
   const headEnd = rawResponse.indexOf("\n\n");
   const headerBlock = headEnd >= 0 ? rawResponse.slice(0, headEnd) : rawResponse;
@@ -60,35 +38,6 @@ function extractSetCookiesFromRawResponse(rawResponse: string): Array<{ name: st
       out.push({ name: m[1].trim(), value: (m[2] ?? "").trim() });
     }
   }
-  return out;
-}
-
-function mergeCookiesForHost(
-  headers: Record<string, string>,
-  jarForHost: Record<string, string> | undefined,
-): Record<string, string> {
-  if (!jarForHost || Object.keys(jarForHost).length === 0) return headers;
-  const out = { ...headers };
-  const existingKey = Object.keys(out).find((k) => k.toLowerCase() === "cookie");
-  const jarPairs = Object.entries(jarForHost).map(([k, v]) => `${k}=${v}`);
-  if (!existingKey) {
-    out.Cookie = jarPairs.join("; ");
-    return out;
-  }
-  const existing = out[existingKey]!;
-  const explicitNames = new Set(
-    existing
-      .split(";")
-      .map((s) => s.trim().split("=")[0]?.trim())
-      .filter(Boolean),
-  );
-  const merged = [
-    existing.trim(),
-    ...Object.entries(jarForHost)
-      .filter(([k]) => !explicitNames.has(k))
-      .map(([k, v]) => `${k}=${v}`),
-  ].filter(Boolean);
-  out[existingKey] = merged.join("; ");
   return out;
 }
 
@@ -179,9 +128,11 @@ export async function httpRequestTool(
   } catch {
     /* performHttpRequest will return structured URL error */
   }
-  const jars = sessionName && ctx.manifest.dataDir ? loadSessionJars(ctx.manifest.dataDir) : {};
+  const sessions: HttpSessionStore = sessionName && ctx.manifest.dataDir
+    ? loadHttpSessions(ctx.manifest.dataDir)
+    : {};
   if (sessionName && targetHost) {
-    headers = mergeCookiesForHost(headers, jars[sessionName]?.[targetHost]);
+    headers = applySessionToHeaders(headers, sessions[sessionName]?.[targetHost]);
   }
 
   const follow = args.follow !== "false" && args.follow !== "0";
@@ -213,17 +164,18 @@ export async function httpRequestTool(
     try {
       const rawRes = readEvidenceBytes(ctx.manifest.evidenceDir, artifact.responsePath).toString("utf8");
       const setCookies = extractSetCookiesFromRawResponse(rawRes);
-      if (!jars[sessionName]) jars[sessionName] = {};
-      if (!jars[sessionName]![artifact.host]) jars[sessionName]![artifact.host] = {};
-      for (const c of setCookies) {
-        if (c.value === "" || /^deleted$/i.test(c.value)) {
-          delete jars[sessionName]![artifact.host]![c.name];
+      if (!sessions[sessionName]) sessions[sessionName] = {};
+      const hostState = sessions[sessionName]![artifact.host] ?? { cookies: {}, headers: {} };
+      for (const cookie of setCookies) {
+        if (cookie.value === "" || /^deleted$/i.test(cookie.value)) {
+          delete hostState.cookies[cookie.name];
         } else {
-          jars[sessionName]![artifact.host]![c.name] = c.value;
+          hostState.cookies[cookie.name] = cookie.value;
         }
       }
-      saveSessionJars(ctx.manifest.dataDir, jars);
-      sessionCookieCount = Object.keys(jars[sessionName]![artifact.host] ?? {}).length;
+      sessions[sessionName]![artifact.host] = hostState;
+      saveHttpSessions(ctx.manifest.dataDir, sessions);
+      sessionCookieCount = Object.keys(hostState.cookies).length;
     } catch {
       /* non-fatal cookie jar update */
     }

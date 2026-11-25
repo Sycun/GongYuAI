@@ -20,7 +20,9 @@ import { join } from "node:path";
  * 序列化（UTF-8 文本）：
  * - 请求：`METHOD URL\nHeader: v\n...\n\n<body>`
  * - 响应：`HTTP/1.1 <status>\nHeader: v\n...\n\n<body>`
- * 只记录调用方提供的请求 header；Host/Content-Length 等运行时补充的传输细节不写进证据。
+ * 记录调用方提供的请求 header。未提供 User-Agent 时写入默认浏览器 UA
+ * （`userAgent` 选项或 `GY_HTTP_USER_AGENT` 可覆盖，显式头优先）。
+ * Host/Content-Length 等运行时补充的传输细节不写进证据。
  * 响应正文是 fetch 交给我们的 UTF-8 文本（可能已被透明解压）；response header 原样记录
  * fetch 暴露的内容，因此记录不是逐字节的线上报文，而是可复读的文本事务。
  * `timeoutMs` 覆盖整条重定向链（从首跳到终结响应），不是每跳单独计时。
@@ -59,7 +61,24 @@ export type HttpRequestOptions = {
   maxRedirects?: number;
   /** Max stored response body bytes (default 2 MiB). */
   maxResponseBytes?: number;
+  /**
+   * User-Agent used when the caller did not set one.
+   * Falls back to `GY_HTTP_USER_AGENT`, then {@link DEFAULT_BROWSER_USER_AGENT}.
+   */
+  userAgent?: string;
 };
+
+/** Standard browser UA so target requests do not fall back to undici's default. */
+export const DEFAULT_BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+export function resolveDefaultUserAgent(configured?: string | null): string {
+  const fromOption = configured?.trim();
+  if (fromOption) return fromOption;
+  const fromEnv = process.env.GY_HTTP_USER_AGENT?.trim();
+  if (fromEnv) return fromEnv;
+  return DEFAULT_BROWSER_USER_AGENT;
+}
 
 const DEFAULT_MAX_REDIRECTS = 5;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -295,6 +314,21 @@ function normalizeTimeout(value: number | undefined): number {
   return Math.trunc(value);
 }
 
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  const target = name.toLowerCase();
+  return Object.keys(headers).some((key) => key.toLowerCase() === target);
+}
+
+function applyDefaultUserAgent(
+  headers: Record<string, string>,
+  configured?: string,
+): Record<string, string> {
+  if (hasHeader(headers, "user-agent")) return headers;
+  const userAgent = resolveDefaultUserAgent(configured);
+  if (/[\r\n\u0000]/.test(userAgent)) throw new TypeError("invalid User-Agent");
+  return { ...headers, "User-Agent": userAgent };
+}
+
 function stripSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
   const next: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
@@ -379,7 +413,7 @@ export async function performHttpRequest(
 ): Promise<{ artifact: HttpArtifact; headers: Record<string, string>; bodyHead: string }> {
   const startedAtMs = Date.now();
   const method = normalizeMethod(input.method);
-  const headers = normalizeHeaders(input.headers);
+  const headers = applyDefaultUserAgent(normalizeHeaders(input.headers), opts.userAgent);
   const initialUrl = normalizeUrl(input.url);
   const url = initialUrl.href;
   const host = initialUrl.hostname.toLowerCase();
