@@ -54,7 +54,7 @@ pnpm --filter @gongyuai/console build
 
 if ! command -v aimy-mcp >/dev/null 2>&1; then
   echo "install aimy-skill[mcp] for builtin aimy MCP..."
-  python3 -m pip install --user --break-system-packages "git+https://github.com/Prohao42/aimy-skill.git[mcp]" || true
+  python3 -m pip install --user --break-system-packages "aimy-skill[mcp] @ git+https://github.com/Prohao42/aimy-skill.git" "mcp>=1.0.0,<2.0.0" || true
 fi
 
 DATA_DIR="$GY/.gongyuai"

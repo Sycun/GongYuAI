@@ -91,7 +91,7 @@ prepare() {
 
   if ! command -v aimy-mcp >/dev/null 2>&1; then
     log "== prepare: 安装 aimy-skill[mcp]（Kali 执行机）=="
-    python3 -m pip install --user --break-system-packages "git+https://github.com/Prohao42/aimy-skill.git[mcp]" >/tmp/gy-deploy-aimy.log 2>&1 \
+    python3 -m pip install --user --break-system-packages "aimy-skill[mcp] @ git+https://github.com/Prohao42/aimy-skill.git" "mcp>=1.0.0,<2.0.0" >/tmp/gy-deploy-aimy.log 2>&1 \
       && log "aimy-mcp 安装完成: $(command -v aimy-mcp || echo ~/.local/bin/aimy-mcp)" \
       || log "!! aimy-skill 安装失败（非致命，见 /tmp/gy-deploy-aimy.log）"
   fi

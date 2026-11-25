@@ -5,7 +5,7 @@ RUN apt-get update -qq \
   && apt-get install -y -qq curl ca-certificates git python3 python3-pip \
   && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
   && apt-get install -y -qq nodejs \
-  && pip3 install --no-cache-dir --break-system-packages "git+https://github.com/Prohao42/aimy-skill.git[mcp]" \
+  && pip3 install --no-cache-dir --break-system-packages "aimy-skill[mcp] @ git+https://github.com/Prohao42/aimy-skill.git" "mcp>=1.0.0,<2.0.0" \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/gongyuai
