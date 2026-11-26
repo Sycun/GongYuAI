@@ -1,6 +1,7 @@
 import { Banner, Button, Card, Form, Radio, RadioGroup, Space, Table, Tag, Toast, Typography } from "@douyinfe/semi-ui";
 import { IconDelete, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
 import { api, type McpServerPublic, type PublicSettings } from "../../api";
+import { useClientPagination } from "../../components/useClientPagination";
 
 export function SettingsMcpPanel({
   settings,
@@ -9,6 +10,7 @@ export function SettingsMcpPanel({
   settings: PublicSettings;
   onSettings: (next: PublicSettings) => void;
 }) {
+    const mcpPager = useClientPagination(settings.mcpServers ?? [], 12);
 
     const toggleMcp = async (id: string, loadAtStartup: boolean) => {
       try {
@@ -66,9 +68,9 @@ export function SettingsMcpPanel({
         <Card title="MCP 连接器" style={{ width: "100%", background: "var(--semi-color-bg-1)" }}>
           <Table
             size="small"
-            pagination={{ pageSize: 12 }}
+            pagination={mcpPager.pagination}
             rowKey="id"
-            dataSource={settings.mcpServers ?? []}
+            dataSource={mcpPager.dataSource}
             columns={[
               { title: "ID", dataIndex: "id", width: 110 },
               { title: "分类", dataIndex: "category", width: 90 },

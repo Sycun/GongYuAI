@@ -16,6 +16,7 @@ import { ReportMarkdown } from "./ReportMarkdown";
 import { RetestsSection } from "./RecordSections";
 import { SEVERITY_ORDER } from "./reportFormat";
 import { buildRawRequest, buildRawResponse, formatBytes, formatDuration, httpStatusColor } from "./trafficFormat";
+import { useClientPagination } from "./useClientPagination";
 
 const VERDICT_LABEL: Record<string, string> = {
   confirmed: "独立确认", refuted: "已推翻", inconclusive: "无法判定", "out-of-scope": "超出授权",
@@ -84,6 +85,7 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
     () => [...active].sort((a, b) => (SEVERITY_ORDER[b.severity] ?? 0) - (SEVERITY_ORDER[a.severity] ?? 0) || b.createdAt.localeCompare(a.createdAt)),
     [active],
   );
+  const findingsPager = useClientPagination(sorted, 20, taskId);
   const severityCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const f of active) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
@@ -233,8 +235,8 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
             <Table
               size="small"
               rowKey="id"
-              pagination={sorted.length > 20 ? { pageSize: 20 } : false}
-              dataSource={sorted}
+              pagination={findingsPager.pagination}
+              dataSource={findingsPager.dataSource}
               onRow={(record) => ({ onClick: () => setSelectedId((record as FindingRecord).id), style: { cursor: "pointer" } })}
               columns={[
                 { title: "严重性", dataIndex: "severity", width: 90, render: (s: string) => <Tag color={findingSeverityColor(s)} size="small">{FINDING_SEVERITY_LABEL[s] ?? s}</Tag> },

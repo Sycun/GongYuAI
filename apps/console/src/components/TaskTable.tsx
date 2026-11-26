@@ -3,6 +3,7 @@ import { IconArchive, IconUndo } from "@douyinfe/semi-icons";
 import type { TaskRecord } from "../api";
 import { isArchivedTask, isArchivableStatus, shortId } from "../labels";
 import { StatusTag } from "./StatusTag";
+import { useClientPagination } from "./useClientPagination";
 
 type Props = {
   tasks: TaskRecord[];
@@ -10,6 +11,7 @@ type Props = {
   onArchive?: (task: TaskRecord) => void;
   onUnarchive?: (task: TaskRecord) => void;
   actionBusyId?: string | null;
+  resetKey?: string | number | boolean;
 };
 
 export function TaskTable({
@@ -18,12 +20,14 @@ export function TaskTable({
   onArchive,
   onUnarchive,
   actionBusyId,
+  resetKey,
 }: Props) {
+  const pager = useClientPagination(tasks, 12, resetKey);
   return (
     <Table
       rowKey="id"
-      dataSource={tasks}
-      pagination={tasks.length > 12 ? { pageSize: 12 } : false}
+      dataSource={pager.dataSource}
+      pagination={pager.pagination}
       empty="暂无任务"
       onRow={(record) => ({
         onClick: () => record && onSelect(record.id),

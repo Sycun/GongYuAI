@@ -2,6 +2,7 @@ import { Empty, Table, Tag, Typography } from "@douyinfe/semi-ui";
 import type { FindingRetest, PlanStep } from "@gongyuai/contracts";
 import { shortId } from "../labels";
 import { formatDateTime } from "../time";
+import { useClientPagination } from "./useClientPagination";
 
 const PLAN_STATUS_LABEL: Record<string, string> = {
   pending: "待处理", ready: "可执行", dispatched: "已派发", done: "完成", blocked: "受阻",
@@ -22,11 +23,12 @@ function planDependencyCount(step: PlanStep): number {
 
 /** 计划步骤（只读）：ord / 状态 / 标题 / 依赖；状态由系统派生，步骤本身不派发。 */
 export function PlanSection({ rows }: { rows: PlanStep[] }) {
+  const pager = useClientPagination(rows, 20);
   if (!rows.length) return <Empty description="暂无计划步骤" style={{ padding: "24px 0" }} />;
   return (
     <Table
-      size="small" rowKey="id" dataSource={rows}
-      pagination={rows.length > 20 ? { pageSize: 20 } : false}
+      size="small" rowKey="id" dataSource={pager.dataSource}
+      pagination={pager.pagination}
       expandedRowRender={(record?: PlanStep) => record ? (
         <div style={{ padding: "8px 16px" }}>
           <Typography.Paragraph size="small" style={{ margin: 0 }}>摘要：{record.summary || "—"}</Typography.Paragraph>
@@ -50,11 +52,12 @@ export function PlanSection({ rows }: { rows: PlanStep[] }) {
 
 /** 修复后复测（只读）：verdict 与关联 finding 对应，证据哈希在展开行。 */
 export function RetestsSection({ rows }: { rows: FindingRetest[] }) {
+  const pager = useClientPagination(rows, 20);
   if (!rows.length) return <Empty description="暂无复测记录" style={{ padding: "24px 0" }} />;
   return (
     <Table
-      size="small" rowKey="id" dataSource={rows}
-      pagination={rows.length > 20 ? { pageSize: 20 } : false}
+      size="small" rowKey="id" dataSource={pager.dataSource}
+      pagination={pager.pagination}
       expandedRowRender={(record?: FindingRetest) => record ? (
         <div style={{ padding: "8px 16px" }}>
           <Typography.Paragraph size="small" style={{ margin: 0 }}>复现步骤：{record.repro || "—"}</Typography.Paragraph>

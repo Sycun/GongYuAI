@@ -276,6 +276,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
           onArchive={(t) => void archiveTask(t)}
           onUnarchive={(t) => void unarchiveTask(t)}
           actionBusyId={actionBusyId}
+          resetKey={showArchived}
         />
       </Card>
 

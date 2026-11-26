@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Card, Form, Table, Tag, Toast, Typography } from "@douyinfe/semi-ui";
 import { api, type ReconcileResultPayload } from "../api";
+import { useClientPagination } from "./useClientPagination";
 
 const STATUS_LABEL: Record<string, string> = {
   added: "新增",
@@ -36,6 +37,7 @@ export function ReconcilePanel({ taskId, onDone }: { taskId: string; onDone?: ()
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<ReconcileResultPayload | null>(null);
   const [recent, setRecent] = useState<Array<{ factId: string; title: string; summary: string; evidencePath: string | null }>>([]);
+  const itemPager = useClientPagination(outcome?.result.items ?? [], 20, `${taskId}:${outcome?.evidenceSha256 ?? ""}`);
 
   const loadRecent = async () => {
     try {
@@ -106,8 +108,9 @@ export function ReconcilePanel({ taskId, onDone }: { taskId: string; onDone?: ()
           </Typography.Paragraph>
           <Table
             size="small"
-            pagination={outcome.result.items.length > 20 ? { pageSize: 20 } : false}
-            dataSource={outcome.result.items.map((item) => ({ ...item, key: item.key }))}
+            rowKey="key"
+            pagination={itemPager.pagination}
+            dataSource={itemPager.dataSource}
             columns={[
               { title: "主键", dataIndex: "key" },
               {

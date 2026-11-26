@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Empty, Input, Space, Table, Tabs, Tag, Toast, Typography } from "@douyinfe/semi-ui";
 import type { Credential, HostProfile, OastHit, OastToken } from "@gongyuai/contracts";
 import { api, type AssetRecord, type AssetHistoryPayload, type TaskP14Payload, type TunnelMeta } from "../api";
 import { ASSET_KIND_LABEL, shortId, statusColor } from "../labels";
 import { formatDateTime } from "../time";
 import { StatusTag } from "./StatusTag";
+import { useClientPagination } from "./useClientPagination";
 
 const CREDENTIAL_KIND_LABEL: Record<string, string> = {
   password: "密码", hash: "哈希", ticket: "票据", token: "令牌", key: "密钥",
@@ -37,9 +38,13 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
     return () => { cancelled = true; controller.abort(); };
   }, [taskId, attempt]);
 
-  const credentials = payload?.credentials ?? [];
-  const sessions = credentials.filter((c) => c.kind === "session" || c.kind === "foothold-shell");
-  const hostProfiles = payload?.hostProfiles ?? [];
+  const credentials = useMemo(() => payload?.credentials ?? [], [payload]);
+  const sessions = useMemo(
+    () => credentials.filter((c) => c.kind === "session" || c.kind === "foothold-shell"),
+    [credentials],
+  );
+  const hostProfiles = useMemo(() => payload?.hostProfiles ?? [], [payload]);
+  const assetPager = useClientPagination(assets, 20, taskId);
 
   return (
     <div className="gy-battlefield">
@@ -66,8 +71,8 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
             </Space>
             <Table
               size="small" rowKey="address"
-              pagination={assets.length > 20 ? { pageSize: 20 } : false}
-              dataSource={assets.map((a) => ({ ...a, key: a.address }))}
+              pagination={assetPager.pagination}
+              dataSource={assetPager.dataSource}
               rowClassName={(record?: AssetRecord) => record?.address === focusAsset ? "gy-list-active" : ""}
               columns={[
                 { title: "地址 / 模式", dataIndex: "address", render: (v: string) => <Typography.Text style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>{v}</Typography.Text> },
@@ -94,7 +99,7 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
         {!payload && !error ? <Typography.Text type="tertiary">正在读取战场对象…</Typography.Text> : (
           <Tabs type="line" collapsible defaultActiveKey="hosts">
             <Tabs.TabPane itemKey="hosts" tab={`主机画像 ${hostProfiles.length}`}>
-              <HostProfileSection rows={hostProfiles} />
+              <HostProfileSection taskId={taskId} rows={hostProfiles} />
             </Tabs.TabPane>
             <Tabs.TabPane itemKey="credentials" tab={`已获凭据 ${credentials.length}`}>
               <CredentialsSection taskId={taskId} rows={credentials} />
@@ -106,7 +111,7 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
               <TunnelsSection rows={payload?.tunnels ?? []} />
             </Tabs.TabPane>
             <Tabs.TabPane itemKey="oast" tab={`带外回调 ${(payload?.oastTokens.length ?? 0)}/${(payload?.oastHits.length ?? 0)}`}>
-              <OastSection tokens={payload?.oastTokens ?? []} hits={payload?.oastHits ?? []} />
+              <OastSection taskId={taskId} tokens={payload?.oastTokens ?? []} hits={payload?.oastHits ?? []} />
             </Tabs.TabPane>
           </Tabs>
         )}
@@ -119,12 +124,13 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
   );
 }
 
-function HostProfileSection({ rows }: { rows: HostProfile[] }) {
+function HostProfileSection({ taskId, rows }: { taskId: string; rows: HostProfile[] }) {
+  const pager = useClientPagination(rows, 20, taskId);
   if (!rows.length) return <Empty description="暂无主机画像；立足点后由执行节点回填。" style={{ padding: "24px 0" }} />;
   return (
     <Table
-      size="small" rowKey="id" dataSource={rows}
-      pagination={rows.length > 20 ? { pageSize: 20 } : false}
+      size="small" rowKey="id" dataSource={pager.dataSource}
+      pagination={pager.pagination}
       expandedRowRender={(record?: HostProfile) => record ? (
         <div style={{ padding: "8px 16px", display: "grid", gap: 4 }}>
           <ProfileList label="用户" items={record.users} />
@@ -257,6 +263,7 @@ function SecretPreviewCard({
 
 function CredentialsSection({ taskId, rows }: { taskId: string; rows: Credential[] }) {
   const [preview, setPreview] = useState<{ path: string; body: string } | null>(null);
+  const pager = useClientPagination(rows, 20, taskId);
   return (
     <>
       <Typography.Paragraph type="tertiary" size="small" style={{ margin: "0 0 8px" }}>
@@ -264,8 +271,8 @@ function CredentialsSection({ taskId, rows }: { taskId: string; rows: Credential
       </Typography.Paragraph>
       {rows.length ? (
         <Table
-          size="small" rowKey="id" dataSource={rows}
-          pagination={rows.length > 20 ? { pageSize: 20 } : false}
+          size="small" rowKey="id" dataSource={pager.dataSource}
+          pagination={pager.pagination}
           columns={[
             { title: "类型", dataIndex: "kind", width: 120, render: (k: string) => <Tag color={CREDENTIAL_KIND_COLOR[k] ?? "grey"} size="small">{CREDENTIAL_KIND_LABEL[k] ?? k}</Tag> },
             { title: "资产", dataIndex: "asset", render: (v: string) => <Typography.Text style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
@@ -282,12 +289,13 @@ function CredentialsSection({ taskId, rows }: { taskId: string; rows: Credential
 
 function SessionsSection({ taskId, rows }: { taskId: string; rows: Credential[] }) {
   const [preview, setPreview] = useState<{ path: string; body: string } | null>(null);
+  const pager = useClientPagination(rows, 20, taskId);
   if (!rows.length) return <Empty description="暂无驻留会话；获取会话或立足点 Shell 后记录在这里。" style={{ padding: "24px 0" }} />;
   return (
     <>
       <Table
-        size="small" rowKey="id" dataSource={rows}
-        pagination={rows.length > 20 ? { pageSize: 20 } : false}
+        size="small" rowKey="id" dataSource={pager.dataSource}
+        pagination={pager.pagination}
         columns={[
           { title: "类型", dataIndex: "kind", width: 130, render: (k: string) => <Tag color={CREDENTIAL_KIND_COLOR[k] ?? "grey"} size="small">{CREDENTIAL_KIND_LABEL[k] ?? k}</Tag> },
           { title: "资产", dataIndex: "asset", render: (v: string) => <Typography.Text style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
@@ -320,14 +328,16 @@ function TunnelsSection({ rows }: { rows: TunnelMeta[] }) {
   );
 }
 
-function OastSection({ tokens, hits }: { tokens: OastToken[]; hits: OastHit[] }) {
+function OastSection({ taskId, tokens, hits }: { taskId: string; tokens: OastToken[]; hits: OastHit[] }) {
+  const tokenPager = useClientPagination(tokens, 20, taskId);
+  const hitPager = useClientPagination(hits, 20, taskId);
   return (
     <>
       <Typography.Title heading={6} style={{ margin: "0 0 8px" }}>令牌</Typography.Title>
       {tokens.length ? (
         <Table
-          size="small" rowKey="token" dataSource={tokens}
-          pagination={tokens.length > 20 ? { pageSize: 20 } : false}
+          size="small" rowKey="token" dataSource={tokenPager.dataSource}
+          pagination={tokenPager.pagination}
           columns={[
             { title: "令牌", dataIndex: "token", width: 180, render: (t: string) => <Typography.Text code size="small" style={{ wordBreak: "break-all" }}>{t}</Typography.Text> },
             { title: "类型", dataIndex: "kind", width: 80, render: (k: string) => <Tag color={k === "dns" ? "blue" : "green"} size="small">{k.toUpperCase()}</Tag> },
@@ -342,7 +352,7 @@ function OastSection({ tokens, hits }: { tokens: OastToken[]; hits: OastHit[] })
       {hits.length ? (
         <Table
           size="small" rowKey={(r?: OastHit) => `${r?.token ?? ""}:${r?.at ?? ""}:${r?.sourceIp ?? ""}`}
-          dataSource={hits} pagination={hits.length > 20 ? { pageSize: 20 } : false}
+          dataSource={hitPager.dataSource} pagination={hitPager.pagination}
           columns={[
             { title: "令牌", dataIndex: "token", width: 160, render: (t: string) => <Typography.Text code size="small" style={{ wordBreak: "break-all" }}>{t}</Typography.Text> },
             { title: "时间", dataIndex: "at", width: 160, render: (at: string) => formatDateTime(at, true) },
@@ -362,6 +372,7 @@ function HistoryContact({ taskId }: { taskId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AssetHistoryPayload | null>(null);
+  const hitsPager = useClientPagination(result?.hits ?? [], 10, `${taskId}:${result?.host ?? ""}`);
 
   async function query() {
     const value = address.trim();
@@ -387,8 +398,8 @@ function HistoryContact({ taskId }: { taskId: string }) {
         <div style={{ marginTop: 12 }}>
           <Typography.Paragraph style={{ margin: "0 0 8px" }}>历史接触 · {result.host || "—"} · {result.hits.length} 条</Typography.Paragraph>
           <Table
-            size="small" rowKey="taskId" dataSource={result.hits}
-            pagination={result.hits.length > 10 ? { pageSize: 10 } : false} empty="暂无历史接触"
+            size="small" rowKey="taskId" dataSource={hitsPager.dataSource}
+            pagination={hitsPager.pagination} empty="暂无历史接触"
             columns={[
               { title: "任务名", dataIndex: "name", render: (name: string, record: AssetHistoryPayload["hits"][number]) => (
                 <div style={{ wordBreak: "break-all" }}>
