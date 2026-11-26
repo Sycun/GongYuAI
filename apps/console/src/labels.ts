@@ -120,8 +120,8 @@ export function formatWorkerStatus(ws: unknown): Array<{ key: string; value: str
 }
 
 export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
-  overview: { title: "总览", subtitle: "系统态势 · 活跃任务与恢复" },
-  tasks: { title: "任务", subtitle: "任务列表 · 已暂停或终态可归档 · 点选进入深潜" },
+  overview: { title: "总览", subtitle: "系统态势 · 活跃任务与守护恢复" },
+  tasks: { title: "任务工作台", subtitle: "单兵红队任务台账 · Fact–Intent–Goal 真相核 · 点选进入深潜" },
   live: { title: "运行态", subtitle: "相位 · 租约 · 预算 · 战术提示 · 待审批命令" },
   assets: { title: "资产与战场", subtitle: "授权靶标 · 主机画像 · 凭据 · 驻留会话 · 隧道 · 带外回调" },
   graph: { title: "意图图谱", subtitle: "目标契约 · 资产 → 事实 → 意图 → 漏洞 因果联动" },
@@ -131,8 +131,8 @@ export const ROUTE_META: Record<string, { title: string; subtitle: string }> = {
   settings: { title: "设置", subtitle: "模型 · 资产 · MCP · Skill · Token · 更新" },
   "settings-model": { title: "模型配置", subtitle: "OpenAI 兼容 API · 视觉能力" },
   "settings-approval": { title: "命令审批", subtitle: "审批模型与风险范围" },
-  graphs: { title: "图谱中心", subtitle: "资产 · 攻击面 · 执行 · 记忆" },
-  demo: { title: "演示场景", subtitle: "规划者与 Worker 的标注演示，不调用控制面" },
+  graphs: { title: "图谱中心", subtitle: "跨视图投影（资产 · 攻击面 · 执行）" },
+  demo: { title: "演示场景", subtitle: "离线标注演示（辅助视图，不调用控制面）" },
   knowledge: { title: "知识库", subtitle: "全局文档 · 导入与向量化 · 混合检索" },
   "settings-assets": {
     title: "资产收集",

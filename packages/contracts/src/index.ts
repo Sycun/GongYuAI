@@ -256,6 +256,18 @@ export const AuthScopeSchema = z.object({
 });
 export type AuthScope = z.infer<typeof AuthScopeSchema>;
 
+/**
+ * P16 语义收敛别名（`docs/red-team-positioning.md`）：
+ * `task.auth` 线协议字段名保留向后兼容，但其业务语义是单兵红队任务的「操作坐标与档位」，
+ * 而非运行时合法性审查或审批门。新代码优先使用 `TaskCoordinates` / `TaskScope` / `TaskCapability`。
+ */
+export const TaskCapabilitySchema = AuthCapabilitySchema;
+export type TaskCapability = AuthCapability;
+export const TaskCoordinatesSchema = AuthScopeSchema;
+export type TaskCoordinates = AuthScope;
+export const TaskScopeSchema = AuthScopeSchema;
+export type TaskScope = AuthScope;
+
 export * from "./scope.js";
 export * from "./dsml.js";
 export * from "./credentials.js";

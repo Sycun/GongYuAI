@@ -40,26 +40,17 @@
 
 ---
 
-## 3. 理论基础：女娲 × DAG × Super-agent
+## 3. 架构收敛：一主两辅（DAG 主核 × 薄调度 × 薄保活）
 
-| 基座 | 治什么病 | 核心机制 | 在 GongYuAI 中的落点 |
-| --- | --- | --- | --- |
-| **女娲** | 人死了、上下文没了、经验传不下去 | Lease、Watchdog、checkpoint、分层 History、Relay、全局记忆、数据飞轮 | 个体可死、图必须活；同任务可换班，跨任务可复用经验 |
-| **DAG** | 路走歪、无因探索、猜测当事实 | Fact–Intent 因果边、Intent FSM/CAS、conclude 回写、证据闸、复核撤回 | 只有图状态生成任务；路径合法性与结论真相都在图里 |
-| **Super-agent** | 钱花错、模型错配、重复派单 | 脑手分离、相位工具面、异步 Explore、模型分层、观察员记分卡 | 主脑不拿执行工具；便宜模型跑腿，强模型决策，浪费可见 |
+项目早期分别吸收了女娲、Fact–Intent DAG 与 Super-agent 三条思路；在 2026-11-26 收敛后，不再平行扩张三套大系统，而是定型为**「一主两辅」**：
 
-三者不是三套并行系统，而是一条职责链：
+| 层级 | 治什么病 | 核心机制与落点 |
+| --- | --- | --- |
+| **主核：Fact–Intent–Goal DAG + 证据封存** | 路走歪、无因探索、猜测当事实、报告无据可查 | 唯一状态真相源：无因探索禁令、Intent CAS、证据 SHA-256 封存、Finding 状态机、复核撤回 |
+| **辅 1：薄调度层（Super-agent 角色定型）** | 脑手混用、跨靶标上下文污染、双循环维护漂移 | 统一工具目录 `tool-catalog.ts`；默认 `1 Leader + 3 Followers`：Leader 物理剥离执行工具专职拆单/验卷，Follower 领单 `Intent` 跑干净短会话，`intent_conclude` 即终止并重置本地上下文 |
+| **辅 2：薄保活层（女娲基础设施）** | 进程崩溃中断、Leader 超长会话窗口饱和 | 控制面租约 + Watchdog 指数退避重启 + Checkpoint + Leader/Solo 边界 Session Relay |
 
-```text
-女娲让作业活着
-  → DAG 让路径可信
-  → Evidence 让结论可复核
-  → Relay 让上下文可换班
-  → Super-agent 让预算花在更可能出结论的面上
-  → 记忆与飞轮让使用变成进化
-```
-
-**执行权归属：** 只有 Fact–Intent DAG 有执行权；Pi Durable 是运行时传动；资产图、攻击面图、执行图、记忆图是只读投影。投影想影响执行，只能通过 Hint 进入建议层，再经过 DAG 硬闸。即“**一图驱动、一图传动、四图旁观，旁观递条子过闸**”。
+**执行权归属与冻结边界：** 只有 Fact–Intent DAG 有执行权；Pi Durable 是运行时传动；其余图视图与统计均为只读投影（建议只走 Hint 过闸）。跨任务全局记忆蒸馏（P8）、飞轮自动晋升（P9）与多角色子会话模拟已列入**冻结支线**，主航道专注单次长程作业的稳定性与可复核交付。
 
 ---
 
@@ -153,12 +144,12 @@ Fact ──front──▶ Intent ──back──▶ Fact'
 
 1. **建档：** 输入作业坐标、排除项、能力档位、节奏建议、Goal 与证据判据；目标进入任务即生效。
 2. **Bootstrap：** 只有 origin 与 Goal 时，生成首批 Fact 与候选 Intent。
-3. **Explore：** 每个 Worker 一次 claim 一个 Intent，调用 shell/MCP/Skill，留存证据，conclude 后回写 Fact。
-4. **Reason：** 在没有 open Explore 时判断是否完成、是否换面、是否提出下一批 Intent；有未完成工作则回到 Explore。
+3. **Explore：** 每个 Follower（或单节点 Worker）一次 claim 一个 Intent，调用 shell/MCP/Skill，留存证据，`intent_conclude` 后同事务回写 Fact（多节点 Follower 随即终止本轮并在下一题前重置干净上下文）。
+4. **Reason：** Leader 在槽位空闲或无 open Explore 时判断是否完成、滑动补单或换面，提出下一批独立 Intent。
 5. **Finding 与独立复核：** 漏洞先记 tentative，满足证据与复现条件才 verified；独立 Validator 可确认、反驳或标记不确定。
 6. **Goal Gate：** 证据、内容判据、Finding 门槛与资产归属在同一事务里核对；不满足则继续探索，不以模型自述完成。
 7. **交付：** 从 History 渲染报告，生成可复算快照与记分卡；撤回、更正、复测、客户处置分别留痕。
-8. **繁衍：** 终态列出经验候选，经人工复核后进入全局记忆；新任务只以 Hint 注入，旧 Fact 不直写新任务图。
+8. **经验归档（远期支线 · 已冻结自动扩面）：** 跨任务全局记忆与飞轮提案保留人工复核入口，旧 Fact 永不直写新任务图。
 
 相位工具面从结构上保证脑手分离：Bootstrap/Reason 没有 shell 与 MCP 执行权，Explore 才持有执行工具。
 
@@ -192,7 +183,7 @@ Fact ──front──▶ Intent ──back──▶ Fact'
 
 ### 8.2 仍有边界
 
-- **P16 代码语义尚未收敛：** 授权台账、`needs_authorization`、一次纠偏后 `MODEL_REFUSED`、默认能力档位等仍需按 [red-team-positioning.md §8](./red-team-positioning.md) 改造。
+- **P16 遗留命名清理：** Worker 侧解释性拒绝重问与模型切换链已落地；契约侧 `authorization.ts` 与控制面多租户边界头等历史命名仍可进一步收敛为纯单用户任务坐标。
 - **真实供应商与生产效果未证明：** 契约模拟不等于真实 429/余额/账单；合成验收不等于真实客户委托盲评。
 - **Provider 热切换未接：** 当前为启动期 tier 路由与 fallback 链，Pi root model 进程内固定。
 - **部分前端与运行时接线未闭环：** 记录代理、Chromium、自动蒸馏、部分 Worker 自动注入/求助/唤醒仍需按台账推进。

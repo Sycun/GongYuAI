@@ -37,7 +37,7 @@ GY_REVIEW_OUTPUT="$PWD/out/readme-review" pnpm review:offline
 | 模型上下文快用完时交给谁？ | **Session Relay** 在换会话时写下当前进度、相关记录和待办。继任会话按交接线索回到 History 查原件。进程意外退出时，恢复所依赖的是上一次已经落盘的检查点和记录。 |
 | 怎样判断目标已经完成？ | **证据校验**检查目标声明的文件匹配规则，以及该目标配置的内容判据。报告分别列出历史通过、当前仍有证据支持和人工覆盖情况。读者可以据此决定哪些结论需要重核。 |
 
-这些选择有三条设计来源。Cairn 的 Fact–Intent 图把观察与后续工作连起来。女娲的接班思路要求继任者能从任务记录重建进度。Super-agent 的设计则提出把规划、执行和复核分工，并用对照实验衡量分工的收益。控制台里的多角色会议场景是这项设计的演示。[Fact–Intent 设计](docs/theory-fact-intent-dag.md) · [女娲与交接](docs/absorb-sapper-v2-nuwa.md) · [Super-agent 设计](docs/absorb-super-agent.md) · [运行与恢复契约](docs/long-run-contract.md)
+项目按**「一主两辅」**收敛这三条设计来源：**Fact–Intent DAG + 证据封存**（源自 Cairn / Intentest）是唯一的真相与交付主核；**Super-agent 角色定型**收敛为「1 个纯规划/验卷 Leader + N 个按单 `Intent` 独立短会话执行的 Follower」（`intent_conclude` 结项即终止并重置本地上下文，消除跨目标污染）；**女娲底座**收敛为幕后的进程租约自愈与长会话交接基础设施，不再向上叠加多余控制流。[架构说明](docs/architecture.md) · [Fact–Intent 设计](docs/theory-fact-intent-dag.md) · [运行与恢复契约](docs/long-run-contract.md) · [女娲与交接](docs/absorb-sapper-v2-nuwa.md) · [Super-agent 设计](docs/absorb-super-agent.md)
 
 ## 打开 Web 工作台
 

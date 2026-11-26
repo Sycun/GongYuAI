@@ -1,4 +1,14 @@
-import { createHash, randomUUID } from "node:crypto";
+/**
+ * Core Fact–Intent–Goal DAG & Evidence Gate (`HistoryStore`).
+ *
+ * Domain sub-stores (sharing the same SQLite connection & ACID transactions):
+ * - `schema.ts`: DDL & additive migrations
+ * - `surface-store.ts`: Assets, HTTP transactions, Host profiles, OAST, Credentials, Plan
+ * - `finding-store.ts`: Findings, Proofs, Independent Validations, Retests, Actions
+ * - `review-store.ts`: Reconcile archives, Delivery corrections, Reviews, Citations
+ * - `observe-view.ts`: Read-only Observe & Engagement Audit rendering
+ */
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -6,97 +16,90 @@ import type {
   AssetKind,
   AssetRecord,
   AssetSource,
+  AssetType,
+  AttackEdge,
+  AttackGraph,
+  AttackNode,
+  AttackPath,
   AuthScope,
+  BusinessReconcileConfig,
+  CoverageReview,
+  CoverageReviewInput,
+  CreateFactReview,
+  Credential,
+  CredentialKind,
+  CredentialTier,
+  EngagementAudit,
   Fact,
   FactLayer,
   Finding,
   FindingConfidence,
   FindingQualification,
+  FindingRetest,
   FindingSeverity,
   FindingValidation,
   FindingValidationDraft,
-  FindingValidationMethod,
-  FindingValidationVerdict,
-  FindingStatus,
   FindingsGate,
   GoalState,
   Hint,
   HintSource,
   HistoryEvent,
   HistoryEventKind,
+  HostProfile,
+  HostProfileDraftInput,
+  HttpTransaction,
   Intent,
   IntentStatus,
+  KnowledgeSection,
+  MaterialCitation,
+  MaterialCitationInput,
+  OastHit,
+  OastToken,
+  PeerReview,
+  PeerReviewInput,
+  PlanStep,
+  PlanStepDraftInput,
   ReconcileGate,
-  ReconcileInputStamp,
   ReconcileRequest,
   ReconcileResult,
   ReconcileRevision,
-  BusinessReconcileConfig,
-  Credential,
-  CredentialKind,
-  CredentialTier,
-  HttpTransaction,
-  OastHit,
-  OastToken,
-  PlanStep,
-  PlanStepDraftInput,
-  FindingRetest,
+  RetestRequest,
+  RetestRequestInput,
   RetestVerdict,
-  HostProfile,
-  HostProfileDraftInput,
 } from "@gongyuai/contracts";
 import {
-  ASSET_KIND_RANK,
   ASSET_TAG,
-  credentialTierUpgrades,
-  defaultCredentialTier,
-  FINDING_SEVERITY_RANK,
   ORIGIN_FACT_ID,
   TRANSFERABLE_TAG,
-  admitAddress,
   assetRootKey,
-  assetTags,
+  attackEdgeTags,
+  attackNodeTags,
+  buildAttackGraph,
   familyTag,
-  matchTarget,
+  findAttackPaths,
   findingAssetInScope,
-  findingDedupKey,
   findingSatisfiesGate,
-  resolveGateAssets,
-  findingStatusAllows,
+  matchTarget,
   normalizeFamilyKey,
   normalizeHost,
-  normalizeTargetPattern,
-  normalizeEndpointAddress,
-  normalizeServiceAddress,
   parseAssetAddrFromTags,
   parseAssetKindFromTags,
-  parseAssetSourceFromTags,
-  parseAssetTypeFromTags,
-  parseAssetParentFromTags,
-  parseAssetWeightFromTags,
-  type AssetType,
-  suggestFamilyKey,
-  deriveEngagementAudit,
-  formatEngagementAuditSummary,
-  attackNodeTags,
-  attackEdgeTags,
-  buildAttackGraph,
-  findAttackPaths,
-  type AttackEdge,
-  type AttackNode,
-  type AttackGraph,
-  type AttackPath,
-  type EngagementAudit,
-  businessConfigFromRequest,
-  nextReconcileRevisionId,
-  parseMaterial,
   reconcileConfigDigest,
-  reconcileInputDigest,
-  reconcileMaterials,
-  summarizeReconcile,
+  resolveGateAssets,
+  suggestFamilyKey,
 } from "@gongyuai/contracts";
+import type {
+  DeliveryCorrection,
+  FactReview,
+  FindingAction,
+  GoalFindingSupport,
+  GoalProof,
+  HistoryDomainDeps,
+  MaterialCitationSeal,
+} from "./context.js";
+import { buildDagExport, type DagExport } from "./dag.js";
+import { FindingLedgerStore } from "./finding-store.js";
 import {
-  captureEvidence,
   collectGoalEvidence,
   describeReconcileState,
   selectAdoptedReconcile,
@@ -105,61 +108,36 @@ import {
   type EvidenceSnapshot,
   type ReconcileStateReport,
 } from "./goal-evidence.js";
-import { readEvidenceBytes, resolveEvidenceFile, writeEvidenceFile } from "./evidence.js";
-import { buildDagExport, type DagExport } from "./dag.js";
-import { TaskOperations } from "./ops.js";
 import { readIntegrationUsage, trackIntegrationCalls } from "./integration-usage.js";
+import {
+  deriveHistoryEngagementAudit,
+  renderHistoryObserve,
+  renderHistoryOverview,
+} from "./observe-view.js";
+import { TaskOperations } from "./ops.js";
+import { DeliveryReviewStore } from "./review-store.js";
+import { eventHash, migrateHistorySchema } from "./schema.js";
 import {
   computeScorecard,
   finalizeSnapshot,
   type DeliverySnapshot,
   type Scorecard,
+  type SnapshotCoverage,
   type SnapshotFinding,
   type SnapshotGoal,
-  type SnapshotGoalFinding,
-  type SnapshotCoverage,
 } from "./scorecard.js";
-import { CoverageReviewSchema, type CoverageReview, type CoverageReviewInput, CreateFactReviewSchema, type CreateFactReview } from "@gongyuai/contracts";
-import {
-  PeerReviewSchema,
-  RetestRequestSchema,
-  type PeerReview,
-  type PeerReviewInput,
-  type RetestRequest,
-  type RetestRequestInput,
-  type RetestRequestStatus,
-} from "@gongyuai/contracts";
-import {
-  MaterialCitationSchema,
-  type KnowledgeBodyFormat,
-  type KnowledgeSection,
-  type KnowledgeSourceKind,
-  type MaterialCitation,
-  type MaterialCitationInput,
-} from "@gongyuai/contracts";
+import { SurfaceIntelStore } from "./surface-store.js";
 
-/**
- * 控制面在知识库侧校验通过后交来的定版标签与快照字节。
- * 标签只用于渲染报告；正文仍从密封快照回读，不在这里存第二份真相。
- */
-export type MaterialCitationSeal = {
-  materialTitle: string;
-  publisher: string;
-  sourceKind: KnowledgeSourceKind;
-  versionNo: number;
-  versionLabel: string;
-  bodyFormat: KnowledgeBodyFormat;
-  sectionHeading: string | null;
-  sectionPage: number | null;
-  sectionOrdinal: number;
-  /** 片段元数据（不含正文）：标题路径、父章节、片序、行号、页码依据。 */
-  sectionMeta: Omit<KnowledgeSection, "text">;
-  snapshot: Buffer;
-};
-
+export type {
+  DeliveryCorrection,
+  FactReview,
+  FindingAction,
+  GoalFindingSupport,
+  GoalProof,
+  MaterialCitationSeal,
+} from "./context.js";
 export { TaskOperations } from "./ops.js";
 export type { OpsScope, JobPatch } from "./ops.js";
-
 export {
   collectGoalEvidence,
   describeReconcileState,
@@ -169,36 +147,8 @@ export {
   type ReconcileState,
   type ReconcileStateReport,
 } from "./goal-evidence.js";
-export type FactReview = CreateFactReview & { id: string; sha256: string; createdAt: string };
-export type GoalProof = { goalId: string; path: string; sha256: string };
-export type GoalFindingSupport = SnapshotGoalFinding;
-export type FindingAction = {
-  id: string;
-  taskId: string;
-  findingId: string;
-  action: "retest" | "accept";
-  result: string;
-  note: string;
-  path: string;
-  sha256: string;
-  createdAt: string;
-};
-export type DeliveryCorrection = {
-  id: string;
-  taskId: string;
-  number: number;
-  reason: string;
-  findings: string[];
-  goals: string[];
-  report: Array<{ path: string; sha256: string }>;
-  noticeStatus: "pending" | "notified" | "confirmed";
-  evidencePath?: string;
-  sha256?: string;
-  createdAt: string;
-};
 export type { DeliverySnapshot, Scorecard, ScorecardGoal } from "./scorecard.js";
 export { computeScorecard, finalizeSnapshot, scorecardFromSnapshot, snapshotSha256 } from "./scorecard.js";
-
 export { describeGoalEvidence, formatAccounting, formatCorrections, type GoalEvidenceSupport } from "./delivery.js";
 export { minimatch } from "./minimatch.js";
 export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
@@ -225,42 +175,22 @@ export type ConcludeFactInput = {
   tags?: string[];
 };
 
-type Row = Record<string, unknown>;
-
 export type OpenHistoryOptions = {
   readOnly?: boolean;
   dbPath: string;
   evidenceDir: string;
 };
 
-
-const eventHash = (
-  prev: string | null,
-  event: { id: string; taskId: string; kind: string; payloadJson: string; createdAt: string },
-): string =>
-  createHash("sha256")
-    .update(
-      [prev ?? "", event.id, event.taskId, event.kind, event.payloadJson, event.createdAt].join("\n"),
-    )
-    .digest("hex");
-
 export class HistoryStore {
   readonly dbPath: string;
   readonly evidenceDir: string;
-  /** 第九轮：持久作业 / 人工求助 / 材料 / 变更台账（同一任务的库）。 */
   readonly ops: TaskOperations;
   private readonly db: DatabaseSync;
-
   private readonly archiveTables?: Set<string>;
-
-  /**
-   * Lane D — 每个 task 的“当前活跃 Intent”（进程内，只由 claim / heartbeat / 收卷维护）。
-   * 不落库：它不是第二真相源，只是把「这次 Explore 属于哪个 Intent」传给
-   * history_append_fact / asset_record / credential_record / finding_record 这类
-   * 不显式传 intentId 的写入，治本 Fact 断链。控制面进程从不 claim/heartbeat，
-   * 因此操作员写入的事实不会被误挂到 worker 的 Intent 上。
-   */
   private readonly activeIntentBindings = new Map<string, string>();
+  private readonly surface: SurfaceIntelStore;
+  private readonly findingsStore: FindingLedgerStore;
+  private readonly reviewsStore: DeliveryReviewStore;
 
   constructor(opts: OpenHistoryOptions) {
     this.dbPath = opts.dbPath;
@@ -269,118 +199,52 @@ export class HistoryStore {
       this.db = new DatabaseSync(opts.dbPath, { readOnly: true });
       try {
         this.db.exec("PRAGMA busy_timeout = 10000;");
-        this.archiveTables = new Set(this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-          .all().map((row) => String(row.name)));
+        this.archiveTables = new Set(
+          this.db
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all()
+            .map((row) => String(row.name)),
+        );
       } catch (err) {
         this.db.close();
         throw err;
       }
       this.ops = new TaskOperations(this.db, { readOnly: true });
-      return;
+    } else {
+      mkdirSync(dirname(opts.dbPath), { recursive: true });
+      mkdirSync(opts.evidenceDir, { recursive: true });
+      this.db = new DatabaseSync(opts.dbPath);
+      this.db.exec("PRAGMA busy_timeout = 10000;");
+      this.db.exec("PRAGMA journal_mode = WAL;");
+      this.db.exec("PRAGMA foreign_keys = ON;");
+      migrateHistorySchema(this.db);
+      this.ops = new TaskOperations(this.db);
     }
-    mkdirSync(dirname(opts.dbPath), { recursive: true });
-    mkdirSync(opts.evidenceDir, { recursive: true });
-    this.db = new DatabaseSync(opts.dbPath);
-    // busy_timeout MUST be set before any statement that can take a lock:
-    // switching the journal mode needs an exclusive moment, and a worker that
-    // starts while the control plane is still writing used to die with
-    // "database is locked" instead of waiting a few milliseconds.
-    this.db.exec("PRAGMA busy_timeout = 10000;");
-    this.db.exec("PRAGMA journal_mode = WAL;");
-    this.db.exec("PRAGMA foreign_keys = ON;");
-    this.migrate();
-    this.migrateColumns();
-    this.ops = new TaskOperations(this.db);
-  }
 
-  /** Additive column migrations for DBs created by earlier P14 builds. */
-  private migrateColumns(): void {
-    const columns = new Set(
-      (this.db.prepare("PRAGMA table_info(credentials)").all() as Array<Record<string, unknown>>)
-        .map((row) => String(row.name)),
-    );
-    if (!columns.has("fact_id")) {
-      this.db.exec("ALTER TABLE credentials ADD COLUMN fact_id TEXT");
-    }
-    if (!columns.has("tier")) {
-      this.db.exec("ALTER TABLE credentials ADD COLUMN tier TEXT");
-      this.db.exec(`
-        UPDATE credentials
-        SET tier = CASE
-          WHEN verified_at IS NOT NULL AND length(trim(verified_at)) > 0 THEN 'L2'
-          ELSE 'L1'
-        END
-        WHERE tier IS NULL OR length(trim(tier)) = 0
-      `);
-    }
-    if (!columns.has("impact_summary")) {
-      this.db.exec("ALTER TABLE credentials ADD COLUMN impact_summary TEXT");
-    }
-    // P15-C1: legacy findings have no verifier identity. NULL means "unknown",
-    // so a later independent validation can still be recorded.
-    const findingCols = new Set(
-      (this.db.prepare("PRAGMA table_info(findings)").all() as Array<Record<string, unknown>>)
-        .map((row) => String(row.name)),
-    );
-    if (!findingCols.has("verified_by")) {
-      this.db.exec("ALTER TABLE findings ADD COLUMN verified_by TEXT");
-    }
-    if (!findingCols.has("qualification")) {
-      this.db.exec("ALTER TABLE findings ADD COLUMN qualification TEXT");
-    }
-    if (!findingCols.has("traffic_ids_json")) {
-      this.db.exec("ALTER TABLE findings ADD COLUMN traffic_ids_json TEXT");
-    }
-    if (!findingCols.has("root_cause")) {
-      this.db.exec("ALTER TABLE findings ADD COLUMN root_cause TEXT");
-    }
-    if (!findingCols.has("poc_curl")) {
-      this.db.exec("ALTER TABLE findings ADD COLUMN poc_curl TEXT");
-    }
-    this.ensureEventHashChain();
-  }
-
-  /** P17 — additive event-chain columns + backfill for pre-P17 rows. */
-  private ensureEventHashChain(): void {
-    const cols = new Set(
-      (this.db.prepare("PRAGMA table_info(events)").all() as Array<Record<string, unknown>>)
-        .map((row) => String(row.name)),
-    );
-    if (!cols.has("prev_hash")) this.db.exec("ALTER TABLE events ADD COLUMN prev_hash TEXT");
-    if (!cols.has("hash")) this.db.exec("ALTER TABLE events ADD COLUMN hash TEXT");
-    const legacy = this.db
-      .prepare("SELECT DISTINCT task_id FROM events WHERE hash IS NULL")
-      .all() as Array<{ task_id: string }>;
-    for (const row of legacy) {
-      const taskId = String(row.task_id);
-      const events = this.db
-        .prepare(
-          "SELECT id, task_id, kind, payload_json, created_at FROM events WHERE task_id = ? ORDER BY rowid",
-        )
-        .all(taskId) as Array<Record<string, unknown>>;
-      let prev: string | null = null;
-      const update = this.db.prepare(
-        "UPDATE events SET prev_hash = ?, hash = ? WHERE id = ?",
-      );
-      this.db.exec("BEGIN");
-      try {
-        for (const event of events) {
-          const hash = eventHash(prev, {
-            id: String(event.id),
-            taskId,
-            kind: String(event.kind),
-            payloadJson: String(event.payload_json),
-            createdAt: String(event.created_at),
-          });
-          update.run(prev, hash, String(event.id));
-          prev = hash;
-        }
-        this.db.exec("COMMIT");
-      } catch (err) {
-        this.db.exec("ROLLBACK");
-        throw err;
-      }
-    }
+    const domainDeps: HistoryDomainDeps = {
+      db: this.db,
+      evidenceDir: this.evidenceDir,
+      archiveTables: this.archiveTables,
+      now: () => this.now(),
+      emit: (taskId, kind, payload) => this.emit(taskId, kind, payload),
+      saveVersion: (file) => this.saveVersion(file),
+      resolveIntentIdForWrite: (taskId, intentId) => this.resolveIntentIdForWrite(taskId, intentId),
+      appendFact: (input) => this.appendFact(input),
+      getFact: (taskId, factId) => this.getFact(taskId, factId),
+      listFacts: (taskId, layer) => this.listFacts(taskId, layer),
+      getIntent: (taskId, intentId) => this.getIntent(taskId, intentId),
+      listIntents: (taskId, status) => this.listIntents(taskId, status),
+      listGoals: (taskId) => this.listGoals(taskId),
+      listGoalProofs: (taskId) => this.listGoalProofs(taskId),
+      listGoalFindings: (taskId) => this.listGoalFindings(taskId),
+      getFinding: (taskId, findingId) => this.getFinding(taskId, findingId),
+      listFindings: (taskId) => this.listFindings(taskId),
+      hasConfirmedValidation: (taskId, findingId) => this.hasConfirmedValidation(taskId, findingId),
+      resolveEvidenceRef: (taskId, ref) => this.resolveEvidenceRef(taskId, ref),
+    };
+    this.surface = new SurfaceIntelStore(domainDeps);
+    this.findingsStore = new FindingLedgerStore(domainDeps);
+    this.reviewsStore = new DeliveryReviewStore(domainDeps);
   }
 
   close(): void {
@@ -395,493 +259,14 @@ export class HistoryStore {
     return readIntegrationUsage(this.db, taskId);
   }
 
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS facts (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        layer TEXT NOT NULL,
-        title TEXT NOT NULL,
-        summary TEXT NOT NULL DEFAULT '',
-        evidence_path TEXT,
-        tags_json TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL,
-        intent_id TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_facts_task ON facts(task_id, created_at);
-
-      CREATE TABLE IF NOT EXISTS intents (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        summary TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL,
-        source_fact_ids_json TEXT NOT NULL DEFAULT '["origin"]',
-        claimed_by TEXT,
-        technique TEXT,
-        asset_root TEXT,
-        requeue_count INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        concluded_at TEXT,
-        conclusion TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_intents_task ON intents(task_id, status);
-
-      CREATE TABLE IF NOT EXISTS goals (
-        id TEXT NOT NULL,
-        task_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        evidence_patterns_json TEXT NOT NULL,
-        passes INTEGER NOT NULL DEFAULT 0,
-        evidence_paths_json TEXT NOT NULL DEFAULT '[]',
-        asserted_at TEXT,
-        PRIMARY KEY (task_id, id)
-      );
-
-      CREATE TABLE IF NOT EXISTS goal_checks (
-        task_id TEXT NOT NULL, goal_id TEXT NOT NULL, checks_json TEXT NOT NULL,
-        PRIMARY KEY(task_id, goal_id)
-      );
-      CREATE TABLE IF NOT EXISTS evidence_versions (
-        sha256 TEXT PRIMARY KEY, content BLOB NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS goal_proofs (
-        task_id TEXT NOT NULL, goal_id TEXT NOT NULL, path TEXT NOT NULL,
-        sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256),
-        PRIMARY KEY(task_id, goal_id, path)
-      );
-      -- 第八轮：核算版本归档。首次判定以这里的顺序为准（版本号单调唯一），
-      -- 不靠文件名排序或秒级时间戳；每条都记下对应目标、两侧材料内容哈希
-      -- 与采用的核算口径摘要。
-      CREATE TABLE IF NOT EXISTS reconcile_revisions (
-        task_id TEXT NOT NULL,
-        id TEXT NOT NULL,
-        revision_json TEXT NOT NULL,
-        goal_ids_json TEXT NOT NULL DEFAULT '[]',
-        config_digest TEXT NOT NULL,
-        evidence_path TEXT NOT NULL,
-        evidence_sha256 TEXT NOT NULL,
-        counts_json TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        PRIMARY KEY (task_id, id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_reconcile_revisions_task ON reconcile_revisions(task_id, id);
-      CREATE TABLE IF NOT EXISTS coverage_reviews (
-        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, goal_id TEXT NOT NULL,
-        status TEXT NOT NULL, reviewer TEXT NOT NULL, reason TEXT NOT NULL,
-        path TEXT, sha256 TEXT REFERENCES evidence_versions(sha256), created_at TEXT NOT NULL,
-        FOREIGN KEY(task_id, goal_id) REFERENCES goals(task_id, id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_coverage_task ON coverage_reviews(task_id, goal_id);
-      CREATE TABLE IF NOT EXISTS fact_reviews (
-        id TEXT PRIMARY KEY, task_id TEXT NOT NULL, fact_id TEXT NOT NULL REFERENCES facts(id),
-        goal_id TEXT NOT NULL, decision TEXT NOT NULL, replacement_fact_id TEXT REFERENCES facts(id),
-        reviewer TEXT NOT NULL, reason TEXT NOT NULL, path TEXT NOT NULL,
-        sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256), created_at TEXT NOT NULL,
-        FOREIGN KEY(task_id, goal_id) REFERENCES goals(task_id, id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_reviews_task ON fact_reviews(task_id, goal_id);
-
-      CREATE TABLE IF NOT EXISTS events (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        payload_json TEXT NOT NULL DEFAULT '{}',
-        created_at TEXT NOT NULL,
-        prev_hash TEXT,
-        hash TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id, created_at);
-
-      -- P15-C2：同一命令（归一化哈希）在任务内的执行计数；断路器读它。
-      CREATE TABLE IF NOT EXISTS command_attempts (
-        task_id TEXT NOT NULL,
-        command_hash TEXT NOT NULL,
-        count INTEGER NOT NULL DEFAULT 0,
-        first_at TEXT NOT NULL,
-        last_at TEXT NOT NULL,
-        PRIMARY KEY(task_id, command_hash)
-      );
-
-      CREATE TABLE IF NOT EXISTS hints (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        text TEXT NOT NULL,
-        source TEXT NOT NULL DEFAULT 'human',
-        tags_json TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_hints_task ON hints(task_id, created_at);
-
-      -- P14-B4：foothold 主机画像（每任务每资产一行，字段仍须证据支撑）。
-      CREATE TABLE IF NOT EXISTS host_profiles (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        asset TEXT NOT NULL,
-        hostname TEXT,
-        os TEXT,
-        domain TEXT,
-        users_json TEXT NOT NULL DEFAULT '[]',
-        privileges_json TEXT NOT NULL DEFAULT '[]',
-        services_json TEXT NOT NULL DEFAULT '[]',
-        shares_json TEXT NOT NULL DEFAULT '[]',
-        av_json TEXT NOT NULL DEFAULT '[]',
-        evidence_path TEXT,
-        source TEXT NOT NULL DEFAULT 'worker',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_host_profiles_unique ON host_profiles(task_id, asset);
-
-      -- P14-B6：复测结论（append-only；只有 fixed 推进 finding 状态）。
-      CREATE TABLE IF NOT EXISTS finding_retests (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        finding_id TEXT NOT NULL,
-        verdict TEXT NOT NULL,
-        evidence_json TEXT NOT NULL DEFAULT '[]',
-        repro TEXT NOT NULL DEFAULT '',
-        note TEXT NOT NULL DEFAULT '',
-        reviewer TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_retests_finding ON finding_retests(task_id, finding_id, created_at);
-
-      -- P15-C1：独立确认（append-only；validator 不得等于 finding.verified_by）。
-      CREATE TABLE IF NOT EXISTS finding_validations (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        finding_id TEXT NOT NULL,
-        verdict TEXT NOT NULL,
-        method TEXT NOT NULL,
-        evidence_json TEXT NOT NULL DEFAULT '[]',
-        note TEXT NOT NULL DEFAULT '',
-        validator TEXT NOT NULL,
-        independent INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_validations_finding
-        ON finding_validations(task_id, finding_id, created_at);
-
-      -- P14-B5：跨唤醒作战计划（状态由系统派生，模型不能自报完成）。
-      CREATE TABLE IF NOT EXISTS plan_steps (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        ord INTEGER NOT NULL,
-        title TEXT NOT NULL,
-        summary TEXT NOT NULL DEFAULT '',
-        needs_fact_ids_json TEXT NOT NULL DEFAULT '[]',
-        needs_intent_ids_json TEXT NOT NULL DEFAULT '[]',
-        needs_finding_ids_json TEXT NOT NULL DEFAULT '[]',
-        status TEXT NOT NULL DEFAULT 'pending',
-        intent_id TEXT,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_plan_task ON plan_steps(task_id, ord);
-
-      -- P14-B2：带外令牌与命中（命中只证明目标发起了回调，不等于可利用）。
-      CREATE TABLE IF NOT EXISTS oast_tokens (
-        token TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        callback TEXT NOT NULL,
-        note TEXT NOT NULL DEFAULT '',
-        issued_at TEXT NOT NULL,
-        expires_at TEXT NOT NULL,
-        hits INTEGER NOT NULL DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS oast_hits (
-        id TEXT PRIMARY KEY,
-        token TEXT NOT NULL,
-        task_id TEXT NOT NULL,
-        at TEXT NOT NULL,
-        source_ip TEXT NOT NULL DEFAULT '',
-        method TEXT NOT NULL DEFAULT '',
-        path TEXT NOT NULL DEFAULT '',
-        user_agent TEXT NOT NULL DEFAULT '',
-        protocol TEXT NOT NULL DEFAULT 'http'
-      );
-      CREATE INDEX IF NOT EXISTS idx_oast_hits_task ON oast_hits(task_id, at);
-
-      -- P14-B1：HTTP 事务索引（正文在 evidence/http/<sha>.{req,res}.txt，内容寻址）。
-      CREATE TABLE IF NOT EXISTS http_transactions (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        intent_id TEXT,
-        method TEXT NOT NULL,
-        url TEXT NOT NULL,
-        host TEXT NOT NULL,
-        path TEXT NOT NULL,
-        status INTEGER NOT NULL,
-        request_sha256 TEXT NOT NULL,
-        response_sha256 TEXT NOT NULL,
-        request_path TEXT NOT NULL,
-        response_path TEXT NOT NULL,
-        request_bytes INTEGER NOT NULL,
-        response_bytes INTEGER NOT NULL,
-        response_head TEXT NOT NULL DEFAULT '',
-        truncated INTEGER NOT NULL DEFAULT 0,
-        redirects_json TEXT NOT NULL DEFAULT '[]',
-        started_at TEXT NOT NULL,
-        duration_ms INTEGER NOT NULL,
-        note TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_http_tx_task ON http_transactions(task_id, created_at);
-
-      -- P14-B0：凭据只存指针与指纹，明文永不入库。
-      CREATE TABLE IF NOT EXISTS credentials (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        asset TEXT NOT NULL,
-        username TEXT,
-        secret_ref TEXT NOT NULL,
-        secret_hmac TEXT,
-        source_finding_id TEXT,
-        fact_id TEXT,
-        verified_at TEXT,
-        last_used_at TEXT,
-        reuse_count INTEGER NOT NULL DEFAULT 0,
-        expires_at TEXT,
-        created_at TEXT NOT NULL,
-        tier TEXT,
-        impact_summary TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_credentials_task ON credentials(task_id, asset);
-
-      CREATE TABLE IF NOT EXISTS leases (
-        task_id TEXT NOT NULL,
-        kind TEXT NOT NULL,
-        owner TEXT NOT NULL,
-        until_iso TEXT NOT NULL,
-        PRIMARY KEY (task_id, kind)
-      );
-
-      CREATE TABLE IF NOT EXISTS findings (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        asset TEXT NOT NULL,
-        vuln_class TEXT NOT NULL,
-        severity TEXT NOT NULL,
-        cvss TEXT,
-        confidence TEXT NOT NULL,
-        status TEXT NOT NULL,
-        endpoint TEXT,
-        dedup_key TEXT NOT NULL,
-        intent_id TEXT,
-        fact_ids_json TEXT NOT NULL DEFAULT '[]',
-        evidence_json TEXT NOT NULL DEFAULT '[]',
-        repro TEXT NOT NULL DEFAULT '',
-        impact TEXT NOT NULL DEFAULT '',
-        fix TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        verified_at TEXT,
-        verified_by TEXT,
-        qualification TEXT,
-        traffic_ids_json TEXT,
-        root_cause TEXT,
-        poc_curl TEXT,
-        UNIQUE(task_id, dedup_key)
-      );
-      CREATE INDEX IF NOT EXISTS idx_findings_task ON findings(task_id, status);
-      CREATE TABLE IF NOT EXISTS finding_proofs (
-        task_id TEXT NOT NULL, finding_id TEXT NOT NULL, path TEXT NOT NULL,
-        sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256),
-        PRIMARY KEY(task_id, finding_id, path)
-      );
-
-      -- A1/A3/A5: which findings supported a goal at first pass, and with which
-      -- sealed evidence. Keeping this row is what lets a later reader separate
-      -- "what passed then" from "what still stands now".
-      CREATE TABLE IF NOT EXISTS goal_findings (
-        task_id TEXT NOT NULL,
-        goal_id TEXT NOT NULL,
-        finding_id TEXT NOT NULL,
-        status_at_assert TEXT NOT NULL,
-        evidence_json TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL,
-        PRIMARY KEY (task_id, goal_id, finding_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_goal_findings_task ON goal_findings(task_id, goal_id);
-
-      -- Stage 5: delivered-report corrections. Numbered, deduped by the set of
-      -- retracted findings they cover; the old report version is never rewritten.
-      -- Stage 5: remediation retests and client risk decisions are separate
-      -- records from technical verification; both keep sealed evidence.
-      CREATE TABLE IF NOT EXISTS finding_actions (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        finding_id TEXT NOT NULL,
-        action TEXT NOT NULL,
-        result TEXT NOT NULL,
-        note TEXT NOT NULL DEFAULT '',
-        path TEXT NOT NULL,
-        sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256),
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_finding_actions_task ON finding_actions(task_id, finding_id);
-
-      CREATE TABLE IF NOT EXISTS delivery_corrections (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        number INTEGER NOT NULL,
-        reason TEXT NOT NULL,
-        findings_json TEXT NOT NULL,
-        goals_json TEXT NOT NULL,
-        report_json TEXT NOT NULL DEFAULT '[]',
-        notice_status TEXT NOT NULL DEFAULT 'pending',
-        evidence_path TEXT,
-        sha256 TEXT,
-        dedup_key TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        UNIQUE(task_id, number),
-        UNIQUE(task_id, dedup_key)
-      );
-
-      -- 阶段 5：客户从正常入口发起的复测申请。请求本身 append-only；
-      -- 操作员完成复测后只追加 fulfilled_at/result，不改写原始请求。
-      CREATE TABLE IF NOT EXISTS retest_requests (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        requester TEXT NOT NULL,
-        role TEXT,
-        finding_ids_json TEXT NOT NULL,
-        reason TEXT NOT NULL,
-        path TEXT,
-        sha256 TEXT REFERENCES evidence_versions(sha256),
-        status TEXT NOT NULL DEFAULT 'pending',
-        fulfilled_at TEXT,
-        fulfilled_result TEXT,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_retest_requests_task ON retest_requests(task_id, created_at);
-
-      -- 阶段 5：同一委托内的跨任务署名复核。source_task_id 必须是同
-      -- engagement 的任务；跨委托由控制面拒绝，这里只存已校验的记录。
-      CREATE TABLE IF NOT EXISTS peer_reviews (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        engagement_id TEXT NOT NULL,
-        reviewer TEXT NOT NULL,
-        role TEXT NOT NULL,
-        source_task_id TEXT NOT NULL,
-        finding_id TEXT,
-        fact_id TEXT,
-        decision TEXT NOT NULL,
-        basis TEXT NOT NULL,
-        path TEXT,
-        sha256 TEXT REFERENCES evidence_versions(sha256),
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_peer_reviews_task ON peer_reviews(task_id, created_at);
-      CREATE INDEX IF NOT EXISTS idx_peer_reviews_engagement ON peer_reviews(engagement_id, created_at);
-
-      -- 知识库首版：报告里的定版资料引用。快照字节密封进 evidence_versions，
-      -- 因此资料更新、旧版停用、服务重启或上游离线后，旧报告仍能回读原段落。
-      CREATE TABLE IF NOT EXISTS material_citations (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        engagement_id TEXT NOT NULL,
-        material_id TEXT NOT NULL,
-        version_id TEXT NOT NULL,
-        locator TEXT NOT NULL,
-        claim TEXT NOT NULL,
-        body_format TEXT NOT NULL,
-        material_title TEXT NOT NULL,
-        publisher TEXT NOT NULL,
-        source_kind TEXT NOT NULL,
-        version_no INTEGER NOT NULL,
-        version_label TEXT NOT NULL,
-        section_heading TEXT,
-        section_page INTEGER,
-        section_ordinal INTEGER NOT NULL,
-        sha256 TEXT NOT NULL REFERENCES evidence_versions(sha256),
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_material_citations_task ON material_citations(task_id, created_at);
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_material_citations_dedup
-        ON material_citations(task_id, material_id, version_id, locator, claim);
-    `);
-    this.ensureIntentSourceFactIdsColumn();
-    this.ensureIntentTechniqueColumns();
-    this.ensureGoalColumns();
-    this.ensureCitationPinColumns();
-  }
-
-  /**
-   * 定版引用的原文范围与片段校验值。旧行没有这些值，pin_kind 保持 locator，
-   * 回读走旧切分，因此升级前后读到的是同一段。
-   * section_json 只存片段元数据（不含正文），正文一律从密封快照回读。
-   */
-  private ensureCitationPinColumns(): void {
-    const cols = this.db.prepare(`PRAGMA table_info(material_citations)`).all() as Array<{ name: string }>;
-    const have = new Set(cols.map((c) => c.name));
-    const add: Record<string, string> = {
-      pin_kind: "TEXT NOT NULL DEFAULT 'locator'",
-      char_start: "INTEGER",
-      char_end: "INTEGER",
-      chunk_sha256: "TEXT",
-      section_json: "TEXT",
-    };
-    for (const [name, definition] of Object.entries(add)) {
-      if (!have.has(name)) this.db.exec(`ALTER TABLE material_citations ADD COLUMN ${name} ${definition}`);
-    }
-  }
-
-  /** Migrate older DBs that predate goal-level assets / findings / board gate. */
-  private ensureGoalColumns(): void {
-    const cols = this.db
-      .prepare(`PRAGMA table_info(goals)`)
-      .all() as Array<{ name: string }>;
-    const have = new Set(cols.map((c) => c.name));
-    if (!have.has("findings_gate_json")) {
-      this.db.exec(`ALTER TABLE goals ADD COLUMN findings_gate_json TEXT`);
-    }
-    if (!have.has("assets_json")) {
-      this.db.exec(`ALTER TABLE goals ADD COLUMN assets_json TEXT`);
-    }
-    if (!have.has("board_gate")) {
-      this.db.exec(`ALTER TABLE goals ADD COLUMN board_gate TEXT`);
-    }
-    if (!have.has("reconcile_gate_json")) {
-      this.db.exec(`ALTER TABLE goals ADD COLUMN reconcile_gate_json TEXT`);
-    }
-    if (!have.has("goal_kind")) {
-      this.db.exec(`ALTER TABLE goals ADD COLUMN goal_kind TEXT`);
-    }
-    if (!have.has("business_json")) {
-      this.db.exec(`ALTER TABLE goals ADD COLUMN business_json TEXT`);
-    }
-  }
-
-  /** 第九轮：覆盖矩阵需要 Intent 的测试类与资产根（缺省允许）。 */
-  private ensureIntentTechniqueColumns(): void {
-    const cols = this.db.prepare(`PRAGMA table_info(intents)`).all() as Array<{ name: string }>;
-    const have = new Set(cols.map((column) => column.name));
-    if (!have.has("technique")) this.db.exec(`ALTER TABLE intents ADD COLUMN technique TEXT`);
-    if (!have.has("asset_root")) this.db.exec(`ALTER TABLE intents ADD COLUMN asset_root TEXT`);
-    if (!have.has("requeue_count")) {
-      this.db.exec(`ALTER TABLE intents ADD COLUMN requeue_count INTEGER NOT NULL DEFAULT 0`);
-    }
-  }
-
-  /** Migrate pre-P0 DBs that lack source_fact_ids_json. */
-  private ensureIntentSourceFactIdsColumn(): void {
-    const cols = this.db
-      .prepare(`PRAGMA table_info(intents)`)
-      .all() as Array<{ name: string }>;
-    if (cols.some((c) => c.name === "source_fact_ids_json")) return;
-    this.db.exec(
-      `ALTER TABLE intents ADD COLUMN source_fact_ids_json TEXT NOT NULL DEFAULT '["origin"]'`,
-    );
-  }
-
   private now(): string {
     return new Date().toISOString();
+  }
+
+  private saveVersion(file: EvidenceSnapshot): void {
+    this.db
+      .prepare("INSERT INTO evidence_versions(sha256, content) VALUES (?, ?) ON CONFLICT DO NOTHING")
+      .run(file.sha256, file.content);
   }
 
   private emit(
@@ -889,9 +274,6 @@ export class HistoryStore {
     kind: HistoryEventKind,
     payload: Record<string, unknown> = {},
   ): HistoryEvent {
-    // The hash must cover the previous event. When this is a top-level emit,
-    // take a write lock first so two worker processes cannot fork the chain.
-    // Nested emits (inside appendFact's transaction) keep the outer lock.
     const ownTx = !this.db.isTransaction;
     if (ownTx) this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -928,13 +310,19 @@ export class HistoryStore {
     }
   }
 
-  /** 公开的事件写入口（控制面用它记录状态迁移，例如补交后重新判定）。 */
-  recordEvent(taskId: string, kind: HistoryEventKind, payload: Record<string, unknown> = {}): HistoryEvent {
+  recordEvent(
+    taskId: string,
+    kind: HistoryEventKind,
+    payload: Record<string, unknown> = {},
+  ): HistoryEvent {
     return this.emit(taskId, kind, payload);
   }
 
+  /* ====================================================================== *
+   * 1. Core DAG: Goals, Facts, Intents, Leases & Evidence Gate
+   * ====================================================================== */
+
   seedGoals(taskId: string, goals: GoalState[]): void {
-    // Control-plane snapshots can be older than the worker's evidence assertions.
     const stmt = this.db.prepare(`
       INSERT INTO goals
         (id, task_id, title, description, evidence_patterns_json, passes, evidence_paths_json,
@@ -959,13 +347,12 @@ export class HistoryStore {
           g.assets?.length ? JSON.stringify(g.assets) : null,
           g.boardGate ?? null,
           g.reconcileGate ? JSON.stringify(g.reconcileGate) : null,
-          // 目标类型与业务核算配置和 reconcileGate 一起落库：恢复后的任务读的
-          // 是同一份配置，不需要操作员再手抄一遍。
           g.kind ?? "file",
           g.business ? JSON.stringify(g.business) : null,
         );
         if (inserted.changes && g.evidenceChecks?.length) {
-          this.db.prepare("INSERT INTO goal_checks VALUES (?, ?, ?)")
+          this.db
+            .prepare("INSERT INTO goal_checks VALUES (?, ?, ?)")
             .run(taskId, g.id, JSON.stringify(g.evidenceChecks));
         }
       }
@@ -976,940 +363,12 @@ export class HistoryStore {
     }
   }
 
-  /**
-   * Idempotent: each auth.targets entry → one seed asset Fact (projection row).
-   * Call on task create and again on worker bootstrap; duplicates are skipped.
-   */
-  seedAssetsFromAuth(taskId: string, auth: Pick<AuthScope, "targets">): Fact[] {
-    const written: Fact[] = [];
-    for (const raw of auth.targets) {
-      const address = normalizeTargetPattern(raw);
-      if (!address) continue;
-      const existing = this.findAssetFact(taskId, address);
-      if (existing) continue;
-      written.push(
-        this.appendFact({
-          taskId,
-          layer: "title",
-          title: `资产 · seed · ${address}`,
-          summary: `授权靶标（auth.targets）：${raw.trim()}`,
-          tags: assetTags({ kind: "seed", address, source: "auth" }),
-        }),
-      );
-    }
-    return written;
-  }
-
-  /**
-   * Record a discovered (or promoted) asset. Auto-admits against auth when kind omitted.
-   * Append-only: upgrades write a new Fact; listAssets keeps the highest kind per address.
-   */
-  recordAsset(input: {
-    taskId: string;
-    address: string;
-    auth: Pick<AuthScope, "targets" | "outOfScope" | "pivotPolicy">;
-    /** Force kind; default = admitAddress result (admitted|oos). */
-    kind?: AssetKind;
-    source?: AssetSource;
-    summary?: string;
-    intentId?: string | null;
-    /** If true and address is in-scope, write kind=live. */
-    live?: boolean;
-    /** P14-B3 — typed surface unit. */
-    assetType?: AssetType | null;
-    parentAddress?: string | null;
-    weight?: number;
-  }): { fact: Fact; asset: AssetRecord; created: boolean } {
-    const rawAddress = input.address.trim();
-    // Typed units keep their own identity: endpoints keep path, services keep
-    // host:port. Host-ish assets keep the legacy normalized address.
-    const address =
-      input.assetType === "endpoint"
-        ? normalizeEndpointAddress(rawAddress)
-        : input.assetType === "service"
-          ? normalizeServiceAddress(rawAddress)
-          : normalizeTargetPattern(rawAddress) || rawAddress.toLowerCase();
-    if (!address) throw new Error("asset address required");
-    const scopeHost = normalizeHost(rawAddress) || rawAddress;
-
-    let kind: AssetKind =
-      input.kind ??
-      admitAddress(
-        { targets: input.auth.targets, outOfScope: input.auth.outOfScope, pivotPolicy: input.auth.pivotPolicy },
-        scopeHost,
-      ).kind;
-    if (input.live) {
-      const gate = admitAddress(
-        { targets: input.auth.targets, outOfScope: input.auth.outOfScope, pivotPolicy: input.auth.pivotPolicy },
-        scopeHost,
-      );
-      if (gate.kind === "oos") kind = "oos";
-      else kind = "live";
-    }
-
-    const source: AssetSource = input.source ?? "discover";
-    const current = this.listAssets(input.taskId).find((a) => a.address === address);
-    if (current && ASSET_KIND_RANK[current.kind] >= ASSET_KIND_RANK[kind]) {
-      return {
-        fact: this.getFact(input.taskId, current.factId)!,
-        asset: current,
-        created: false,
-      };
-    }
-
-    const admission = admitAddress(
-      { targets: input.auth.targets, outOfScope: input.auth.outOfScope, pivotPolicy: input.auth.pivotPolicy },
-      scopeHost,
-    );
-    const summary =
-      input.summary ??
-      (kind === "oos"
-        ? `范围外（未匹配 auth.targets）`
-        : kind === "live"
-          ? `已核实存活 · 匹配 ${admission.matchedBy ?? "auth.targets"}`
-          : `自动准入 · 匹配 ${admission.matchedBy ?? "auth.targets"}`);
-
-    const fact = this.appendFact({
-      taskId: input.taskId,
-      layer: "title",
-      title: `资产 · ${kind}${input.assetType ? ` · ${input.assetType}` : ""} · ${address}`,
-      summary,
-      tags: assetTags({
-        kind,
-        address,
-        source,
-        ...(input.assetType ? { assetType: input.assetType } : {}),
-        ...(input.parentAddress ? { parentAddress: input.parentAddress } : {}),
-        ...(typeof input.weight === "number" ? { weight: input.weight } : {}),
-      }),
-      intentId: this.resolveIntentIdForWrite(input.taskId, input.intentId),
-    });
-    return {
-      fact,
-      asset: this.factToAsset(fact)!,
-      created: true,
-    };
-  }
-
-  /** Deduped inventory: highest kind per address. */
-  listAssets(taskId: string): AssetRecord[] {
-    const byAddr = new Map<string, AssetRecord>();
-    for (const fact of this.listFacts(taskId)) {
-      if (!fact.tags.includes(ASSET_TAG)) continue;
-      const asset = this.factToAsset(fact);
-      if (!asset) continue;
-      const prev = byAddr.get(asset.address);
-      if (!prev || ASSET_KIND_RANK[asset.kind] > ASSET_KIND_RANK[prev.kind]) {
-        byAddr.set(asset.address, asset);
-      } else if (
-        prev &&
-        ASSET_KIND_RANK[asset.kind] === ASSET_KIND_RANK[prev.kind] &&
-        asset.createdAt > prev.createdAt
-      ) {
-        byAddr.set(asset.address, asset);
-      }
-    }
-    return [...byAddr.values()].sort((a, b) => a.address.localeCompare(b.address));
-  }
-
-  /* --------------------------- P14 事务 --------------------------- */
-
-  /**
-   * P14-B1 — index one HTTP transaction. Idempotent on
-   * task|method|url|requestSha|responseSha (re-running the same request is
-   * evidence reuse, not a new transaction).
-   */
-  recordHttpTransaction(
-    input: Omit<HttpTransaction, "id" | "createdAt"> & { id?: string; createdAt?: string },
-  ): { transaction: HttpTransaction; created: boolean } {
-    if (input.intentId && !this.getIntent(input.taskId, input.intentId)) {
-      throw new Error(`unknown http transaction intent: ${input.intentId}`);
-    }
-    const existing = this.listHttpTransactions(input.taskId, 500).find(
-      (tx) =>
-        tx.method === input.method &&
-        tx.url === input.url &&
-        tx.requestSha256 === input.requestSha256 &&
-        tx.responseSha256 === input.responseSha256,
-    );
-    if (existing) return { transaction: existing, created: false };
-    const transaction: HttpTransaction = {
-      id: input.id ?? randomUUID(),
-      taskId: input.taskId,
-      intentId: input.intentId ?? null,
-      method: input.method,
-      url: input.url,
-      host: input.host,
-      path: input.path,
-      status: input.status,
-      requestSha256: input.requestSha256,
-      responseSha256: input.responseSha256,
-      requestPath: input.requestPath,
-      responsePath: input.responsePath,
-      requestBytes: input.requestBytes,
-      responseBytes: input.responseBytes,
-      responseHead: input.responseHead ?? "",
-      truncated: Boolean(input.truncated),
-      redirects: input.redirects ?? [],
-      startedAt: input.startedAt,
-      durationMs: input.durationMs,
-      note: input.note ?? "",
-    };
-    this.db.prepare(
-      `INSERT INTO http_transactions
-        (id, task_id, intent_id, method, url, host, path, status, request_sha256, response_sha256,
-         request_path, response_path, request_bytes, response_bytes, response_head, truncated,
-         redirects_json, started_at, duration_ms, note, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      transaction.id, transaction.taskId, transaction.intentId, transaction.method, transaction.url,
-      transaction.host, transaction.path, transaction.status, transaction.requestSha256,
-      transaction.responseSha256, transaction.requestPath, transaction.responsePath,
-      transaction.requestBytes, transaction.responseBytes, transaction.responseHead,
-      transaction.truncated ? 1 : 0, JSON.stringify(transaction.redirects), transaction.startedAt,
-      transaction.durationMs, transaction.note, input.createdAt ?? this.now(),
-    );
-    this.emit(input.taskId, "http_transaction_recorded", {
-      transactionId: transaction.id,
-      method: transaction.method,
-      host: transaction.host,
-      status: transaction.status,
-    });
-    return { transaction, created: true };
-  }
-
-  listHttpTransactions(taskId: string, limit = 50): HttpTransaction[] {
-    const rows = this.db
-      .prepare("SELECT * FROM http_transactions WHERE task_id = ? ORDER BY created_at DESC LIMIT ?")
-      .all(taskId, limit) as Row[];
-    return rows.map((row) => this.rowToHttpTransaction(row));
-  }
-
-  getHttpTransaction(taskId: string, id: string): HttpTransaction | null {
-    const row = this.db
-      .prepare("SELECT * FROM http_transactions WHERE task_id = ? AND id = ?")
-      .get(taskId, id) as Row | undefined;
-    return row ? this.rowToHttpTransaction(row) : null;
-  }
-
-  /**
-   * Resolve an evidence ref (`http:<id>` / `oast:<token>` / file path) to a
-   * sealed artifact. Returns null when the ref is not a known ref kind.
-   */
-  resolveEvidenceRef(
-    taskId: string,
-    ref: string,
-  ): { path: string; sha256: string; content: Buffer } | null {
-    if (ref.startsWith("http:")) {
-      const id = ref.slice("http:".length);
-      const tx = this.getHttpTransaction(taskId, id);
-      if (!tx) throw new Error(`unknown http transaction ref: ${ref}`);
-      const content = readEvidenceBytes(this.evidenceDir, tx.responsePath);
-      const sha256 = createHash("sha256").update(content).digest("hex");
-      if (sha256 !== tx.responseSha256) {
-        throw new Error(`http transaction ${id} response hash mismatch (evidence changed)`);
-      }
-      return { path: ref, sha256, content };
-    }
-    if (ref.startsWith("oast:")) {
-      const token = ref.slice("oast:".length);
-      if (!this.getOastToken(taskId, token)) throw new Error(`unknown oast token ref: ${ref}`);
-      const hits = this.listOastHits(taskId, token);
-      if (!hits.length) {
-        throw new Error(`oast ref has no hit yet: ${ref}（命中才能作证据）`);
-      }
-      const content = Buffer.from(JSON.stringify({ token, hits }, null, 2), "utf8");
-      return { path: ref, sha256: createHash("sha256").update(content).digest("hex"), content };
-    }
-    return null;
-  }
-
-  private rowToHttpTransaction(row: Row): HttpTransaction {
-    return {
-      id: String(row.id),
-      taskId: String(row.task_id),
-      intentId: row.intent_id === null || row.intent_id === undefined ? null : String(row.intent_id),
-      method: String(row.method),
-      url: String(row.url),
-      host: String(row.host),
-      path: String(row.path),
-      status: Number(row.status),
-      requestSha256: String(row.request_sha256),
-      responseSha256: String(row.response_sha256),
-      requestPath: String(row.request_path),
-      responsePath: String(row.response_path),
-      requestBytes: Number(row.request_bytes),
-      responseBytes: Number(row.response_bytes),
-      responseHead: String(row.response_head ?? ""),
-      truncated: Number(row.truncated ?? 0) === 1,
-      redirects: JSON.parse(String(row.redirects_json ?? "[]")) as string[],
-      startedAt: String(row.started_at),
-      durationMs: Number(row.duration_ms),
-      note: String(row.note ?? ""),
-    };
-  }
-
-  /* --------------------------- P14 复测 --------------------------- */
-
-  /**
-   * P14-B6 — append-only remediation retest.
-   * fixed: requires repro + ≥1 proof evidence, and only then moves the finding
-   * to `retested`. reproduced/inconclusive never move it (a failed request or a
-   * WAF block cannot prove a fix).
-   */
-  recordFindingRetest(
-    taskId: string,
-    findingId: string,
-    input: {
-      verdict: RetestVerdict;
-      evidencePaths?: string[];
-      repro?: string;
-      note?: string;
-      reviewer: string;
-    },
-  ): { retest: FindingRetest; finding: Finding } {
-    const finding = this.getFinding(taskId, findingId);
-    if (!finding) throw new Error(`unknown finding: ${findingId}`);
-    if (finding.status === "retracted") throw new Error("retracted finding cannot be retested");
-    const reviewer = input.reviewer.trim();
-    if (!reviewer) throw new Error("retest requires reviewer");
-    const repro = (input.repro ?? "").trim();
-    const note = (input.note ?? "").trim();
-    const paths = [...new Set((input.evidencePaths ?? []).map((p) => p.trim()).filter(Boolean))];
-
-    if (input.verdict === "fixed" && (!repro || !paths.length)) {
-      throw new Error("retest fixed requires repro/复测步骤 + ≥1 证据（事务或文件）");
-    }
-    if (input.verdict === "inconclusive" && !note) {
-      throw new Error("retest inconclusive requires note（缺什么/为什么无法确认）");
-    }
-
-    const evidence = paths.map((p) => {
-      const ref = this.resolveEvidenceRef(taskId, p);
-      if (ref) return { path: p, sha256: ref.sha256, content: ref.content };
-      try {
-        return captureEvidence(this.evidenceDir, p);
-      } catch {
-        throw new Error(`missing or invalid retest evidence: ${p}`);
-      }
-    });
-    for (const file of evidence) this.saveVersion(file);
-
-    const retest: FindingRetest = {
-      id: randomUUID(),
-      taskId,
-      findingId,
-      verdict: input.verdict,
-      evidence: evidence.map((file) => ({ path: file.path, sha256: file.sha256, role: "proof" as const })),
-      repro,
-      note,
-      reviewer,
-      createdAt: this.now(),
-    };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.db.prepare(
-        `INSERT INTO finding_retests
-          (id, task_id, finding_id, verdict, evidence_json, repro, note, reviewer, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        retest.id, taskId, findingId, retest.verdict, JSON.stringify(retest.evidence),
-        retest.repro, retest.note, retest.reviewer, retest.createdAt,
-      );
-      if (retest.verdict === "fixed") {
-        this.db.prepare(
-          `UPDATE findings SET status = 'retested' WHERE task_id = ? AND id = ?
-           AND status IN ('verified', 'retested', 'accepted')`,
-        ).run(taskId, findingId);
-      }
-      this.emit(taskId, "finding_retest_concluded", {
-        findingId,
-        retestId: retest.id,
-        verdict: retest.verdict,
-        evidencePaths: retest.evidence.map((e) => e.path),
-      });
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return { retest, finding: this.getFinding(taskId, findingId)! };
-  }
-
-  listFindingRetests(taskId: string, findingId?: string): FindingRetest[] {
-    const rows = findingId
-      ? this.db.prepare(
-          "SELECT * FROM finding_retests WHERE task_id = ? AND finding_id = ? ORDER BY created_at",
-        ).all(taskId, findingId)
-      : this.db.prepare("SELECT * FROM finding_retests WHERE task_id = ? ORDER BY created_at").all(taskId);
-    return (rows as Row[]).map((row) => ({
-      id: String(row.id),
-      taskId: String(row.task_id),
-      findingId: String(row.finding_id),
-      verdict: String(row.verdict) as RetestVerdict,
-      evidence: JSON.parse(String(row.evidence_json ?? "[]")),
-      repro: String(row.repro ?? ""),
-      note: String(row.note ?? ""),
-      reviewer: String(row.reviewer),
-      createdAt: String(row.created_at),
-    }));
-  }
-
-  /* --------------------------- P14 主机画像 --------------------------- */
-
-  /** Upsert one foothold profile per (task, asset); unknown fields stay empty. */
-  recordHostProfile(taskId: string, draft: HostProfileDraftInput): HostProfile {
-    const asset = normalizeTargetPattern(draft.asset) || draft.asset.trim().toLowerCase();
-    if (!asset) throw new Error("host profile asset required");
-    const now = this.now();
-    const existing = this.getHostProfile(taskId, asset);
-    const profile: HostProfile = {
-      id: existing?.id ?? randomUUID(),
-      taskId,
-      asset,
-      hostname: draft.hostname?.trim() || null,
-      os: draft.os?.trim() || null,
-      domain: draft.domain?.trim() || null,
-      users: [...new Set((draft.users ?? []).map((v) => v.trim()).filter(Boolean))],
-      privileges: [...new Set((draft.privileges ?? []).map((v) => v.trim()).filter(Boolean))],
-      services: [...new Set((draft.services ?? []).map((v) => v.trim()).filter(Boolean))],
-      shares: [...new Set((draft.shares ?? []).map((v) => v.trim()).filter(Boolean))],
-      av: [...new Set((draft.av ?? []).map((v) => v.trim()).filter(Boolean))],
-      evidencePath: draft.evidencePath?.trim() || null,
-      source: draft.source?.trim() || "worker",
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
-    this.db.prepare(
-      `INSERT INTO host_profiles
-        (id, task_id, asset, hostname, os, domain, users_json, privileges_json, services_json,
-         shares_json, av_json, evidence_path, source, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(task_id, asset) DO UPDATE SET
-         hostname = excluded.hostname, os = excluded.os, domain = excluded.domain,
-         users_json = excluded.users_json, privileges_json = excluded.privileges_json,
-         services_json = excluded.services_json, shares_json = excluded.shares_json,
-         av_json = excluded.av_json, evidence_path = excluded.evidence_path,
-         source = excluded.source, updated_at = excluded.updated_at`,
-    ).run(
-      profile.id, taskId, asset, profile.hostname, profile.os, profile.domain,
-      JSON.stringify(profile.users), JSON.stringify(profile.privileges),
-      JSON.stringify(profile.services), JSON.stringify(profile.shares),
-      JSON.stringify(profile.av), profile.evidencePath, profile.source,
-      profile.createdAt, profile.updatedAt,
-    );
-    this.emit(taskId, "host_profile_recorded", {
-      profileId: profile.id,
-      asset,
-      users: profile.users.length,
-      privileges: profile.privileges.length,
-    });
-    return profile;
-  }
-
-  getHostProfile(taskId: string, asset: string): HostProfile | null {
-    const row = this.db
-      .prepare("SELECT * FROM host_profiles WHERE task_id = ? AND asset = ?")
-      .get(taskId, normalizeTargetPattern(asset) || asset.trim().toLowerCase()) as Row | undefined;
-    return row ? this.rowToHostProfile(row) : null;
-  }
-
-  listHostProfiles(taskId: string): HostProfile[] {
-    const rows = this.db
-      .prepare("SELECT * FROM host_profiles WHERE task_id = ? ORDER BY updated_at DESC")
-      .all(taskId) as Row[];
-    return rows.map((row) => this.rowToHostProfile(row));
-  }
-
-  private rowToHostProfile(row: Row): HostProfile {
-    const parseList = (raw: unknown): string[] => {
-      try {
-        const parsed = JSON.parse(String(raw ?? "[]")) as unknown;
-        return Array.isArray(parsed) ? parsed.map(String) : [];
-      } catch {
-        return [];
-      }
-    };
-    return {
-      id: String(row.id),
-      taskId: String(row.task_id),
-      asset: String(row.asset),
-      hostname: row.hostname === null || row.hostname === undefined ? null : String(row.hostname),
-      os: row.os === null || row.os === undefined ? null : String(row.os),
-      domain: row.domain === null || row.domain === undefined ? null : String(row.domain),
-      users: parseList(row.users_json),
-      privileges: parseList(row.privileges_json),
-      services: parseList(row.services_json),
-      shares: parseList(row.shares_json),
-      av: parseList(row.av_json),
-      evidencePath: row.evidence_path === null || row.evidence_path === undefined ? null : String(row.evidence_path),
-      source: String(row.source ?? "worker"),
-      createdAt: String(row.created_at),
-      updatedAt: String(row.updated_at),
-    };
-  }
-
-  /* --------------------------- P14 计划 --------------------------- */
-
-  /** Replace the task plan atomically. Dependencies must already exist. */
-  setPlan(taskId: string, drafts: PlanStepDraftInput[]): PlanStep[] {
-    if (!drafts.length) throw new Error("plan_set requires at least one step");
-    if (drafts.length > 20) throw new Error("plan_set accepts at most 20 steps");
-    for (const draft of drafts) {
-      for (const id of draft.needsFactIds ?? []) {
-        if (!this.getFact(taskId, id)) throw new Error(`plan needs unknown fact: ${id}`);
-      }
-      for (const id of draft.needsIntentIds ?? []) {
-        if (!this.getIntent(taskId, id)) throw new Error(`plan needs unknown intent: ${id}`);
-      }
-      for (const id of draft.needsFindingIds ?? []) {
-        if (!this.getFinding(taskId, id)) throw new Error(`plan needs unknown finding: ${id}`);
-      }
-    }
-    const now = this.now();
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.db.prepare("DELETE FROM plan_steps WHERE task_id = ?").run(taskId);
-      drafts.forEach((draft, ord) => {
-        this.db.prepare(
-          `INSERT INTO plan_steps
-            (id, task_id, ord, title, summary, needs_fact_ids_json, needs_intent_ids_json,
-             needs_finding_ids_json, status, intent_id, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?)`,
-        ).run(
-          randomUUID(), taskId, ord, draft.title, draft.summary ?? "",
-          JSON.stringify(draft.needsFactIds ?? []), JSON.stringify(draft.needsIntentIds ?? []),
-          JSON.stringify(draft.needsFindingIds ?? []), now,
-        );
-      });
-      this.emit(taskId, "plan_updated", { steps: drafts.length, action: "set" });
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return this.listPlan(taskId);
-  }
-
-  listPlan(taskId: string): PlanStep[] {
-    const rows = this.db
-      .prepare("SELECT * FROM plan_steps WHERE task_id = ? ORDER BY ord")
-      .all(taskId) as Row[];
-    return rows.map((row) => {
-      const needsFactIds = JSON.parse(String(row.needs_fact_ids_json ?? "[]")) as string[];
-      const needsIntentIds = JSON.parse(String(row.needs_intent_ids_json ?? "[]")) as string[];
-      const needsFindingIds = JSON.parse(String(row.needs_finding_ids_json ?? "[]")) as string[];
-      const stored = String(row.status ?? "pending");
-      const intentId = row.intent_id === null || row.intent_id === undefined ? null : String(row.intent_id);
-      let status = stored as PlanStep["status"];
-      if (intentId) {
-        const intent = this.getIntent(taskId, intentId);
-        if (intent?.status === "succeeded") status = "done";
-        else if (intent && ["failed", "expired"].includes(intent.status)) status = "ready";
-        else status = "dispatched";
-      } else if (status === "pending" || status === "ready") {
-        status = this.planDepsSatisfied(taskId, needsFactIds, needsIntentIds, needsFindingIds)
-          ? "ready"
-          : "pending";
-      }
-      return {
-        id: String(row.id),
-        taskId,
-        ord: Number(row.ord),
-        title: String(row.title),
-        summary: String(row.summary ?? ""),
-        needsFactIds,
-        needsIntentIds,
-        needsFindingIds,
-        status,
-        intentId,
-        updatedAt: String(row.updated_at),
-      };
-    });
-  }
-
-  /** Only labels are editable; status is system-derived. */
-  updatePlanStep(taskId: string, stepId: string, patch: { title?: string; summary?: string }): PlanStep {
-    const existing = this.listPlan(taskId).find((step) => step.id === stepId);
-    if (!existing) throw new Error(`unknown plan step: ${stepId}`);
-    const title = patch.title?.trim() || existing.title;
-    const summary = patch.summary !== undefined ? patch.summary.trim() : existing.summary;
-    this.db.prepare("UPDATE plan_steps SET title = ?, summary = ?, updated_at = ? WHERE task_id = ? AND id = ?")
-      .run(title, summary, this.now(), taskId, stepId);
-    this.emit(taskId, "plan_updated", { stepId, action: "update" });
-    return this.listPlan(taskId).find((step) => step.id === stepId)!;
-  }
-
-  /** First actionable step (lowest ord, status=ready). */
-  nextPlanStep(taskId: string): PlanStep | null {
-    return this.listPlan(taskId).find((step) => step.status === "ready") ?? null;
-  }
-
-  private planDepsSatisfied(
-    taskId: string,
-    factIds: string[],
-    intentIds: string[],
-    findingIds: string[],
-  ): boolean {
-    for (const id of factIds) if (!this.getFact(taskId, id)) return false;
-    for (const id of intentIds) {
-      const intent = this.getIntent(taskId, id);
-      if (!intent || !["succeeded", "failed", "expired"].includes(intent.status)) return false;
-    }
-    for (const id of findingIds) {
-      const finding = this.getFinding(taskId, id);
-      if (!finding || !["verified", "retested", "accepted"].includes(finding.status)) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Plan gate used by proposeIntent: when a plan exists, the caller must point
-   * at a ready step; the plan never dispatches on its own.
-   */
-  private assertPlanAllows(taskId: string, planStepId?: string | null): void {
-    const steps = this.listPlan(taskId);
-    if (!steps.length) {
-      if (planStepId) throw new Error(`unknown plan step: ${planStepId}`);
-      return;
-    }
-    // A finished plan no longer constrains ad-hoc intents.
-    if (!planStepId && steps.every((step) => step.status === "done")) return;
-    if (planStepId) {
-      const step = steps.find((entry) => entry.id === planStepId);
-      if (!step) throw new Error(`unknown plan step: ${planStepId}`);
-      if (step.status !== "ready") {
-        throw new Error(`plan step ${planStepId} is ${step.status}, not ready (deps unmet)`);
-      }
-      return;
-    }
-    const ready = steps.find((step) => step.status === "ready");
-    if (ready) {
-      throw new Error(
-        `task has a ready plan step ${ready.id} ("${ready.title}"); pass planStepId or clear the plan with plan_set`,
-      );
-    }
-    throw new Error("task has a plan but no ready step; wait for deps or update the plan");
-  }
-
-  private markPlanStepDispatched(taskId: string, stepId: string, intentId: string): void {
-    const row = this.db
-      .prepare("SELECT id FROM plan_steps WHERE task_id = ? AND id = ?")
-      .get(taskId, stepId) as Row | undefined;
-    if (!row) return;
-    this.db.prepare(
-      "UPDATE plan_steps SET status = 'dispatched', intent_id = ?, updated_at = ? WHERE task_id = ? AND id = ?",
-    ).run(intentId, this.now(), taskId, stepId);
-  }
-
-  /* --------------------------- P14 带外 --------------------------- */
-
-  recordOastToken(input: {
-    token: string;
-    taskId: string;
-    kind: "http" | "dns";
-    callback: string;
-    note?: string;
-    issuedAt?: string;
-    expiresAt: string;
-  }): OastToken {
-    const token = input.token.trim();
-    if (!/^[a-z0-9]{8,64}$/i.test(token)) throw new Error("oast token must be 8-64 alphanumerics");
-    const issuedAt = input.issuedAt ?? this.now();
-    this.db.prepare(
-      `INSERT INTO oast_tokens (token, task_id, kind, callback, note, issued_at, expires_at, hits)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT(token) DO NOTHING`,
-    ).run(token, input.taskId, input.kind, input.callback, input.note ?? "", issuedAt, input.expiresAt);
-    this.emit(input.taskId, "oast_token_issued", { token, kind: input.kind });
-    return this.getOastToken(input.taskId, token)!;
-  }
-
-  getOastToken(taskId: string, token: string): OastToken | null {
-    const row = this.db
-      .prepare("SELECT * FROM oast_tokens WHERE task_id = ? AND token = ?")
-      .get(taskId, token) as Row | undefined;
-    return row ? this.rowToOastToken(row) : null;
-  }
-
-  listOastTokens(taskId: string): OastToken[] {
-    const rows = this.db
-      .prepare("SELECT * FROM oast_tokens WHERE task_id = ? ORDER BY issued_at")
-      .all(taskId) as Row[];
-    return rows.map((row) => this.rowToOastToken(row));
-  }
-
-  /** Record one inbound callback; only known task tokens are stored. */
-  recordOastHit(taskId: string, input: {
-    token: string;
-    at?: string;
-    sourceIp?: string;
-    method?: string;
-    path?: string;
-    userAgent?: string;
-    protocol?: "http" | "dns";
-  }): OastHit {
-    const token = this.getOastToken(taskId, input.token);
-    if (!token) throw new Error(`unknown oast token: ${input.token}`);
-    const hit: OastHit = {
-      token: input.token,
-      taskId,
-      at: input.at ?? this.now(),
-      sourceIp: input.sourceIp ?? "",
-      method: input.method ?? "",
-      path: input.path ?? "",
-      userAgent: input.userAgent ?? "",
-      protocol: input.protocol ?? "http",
-    };
-    this.db.prepare(
-      `INSERT INTO oast_hits (id, token, task_id, at, source_ip, method, path, user_agent, protocol)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(randomUUID(), hit.token, taskId, hit.at, hit.sourceIp, hit.method, hit.path, hit.userAgent, hit.protocol);
-    this.db.prepare("UPDATE oast_tokens SET hits = hits + 1 WHERE task_id = ? AND token = ?")
-      .run(taskId, hit.token);
-    this.emit(taskId, "oast_hit", { token: hit.token, sourceIp: hit.sourceIp, path: hit.path, protocol: hit.protocol });
-    return hit;
-  }
-
-  listOastHits(taskId: string, token?: string): OastHit[] {
-    const rows = token
-      ? this.db.prepare("SELECT * FROM oast_hits WHERE task_id = ? AND token = ? ORDER BY at").all(taskId, token)
-      : this.db.prepare("SELECT * FROM oast_hits WHERE task_id = ? ORDER BY at").all(taskId);
-    return (rows as Row[]).map((row) => ({
-      token: String(row.token),
-      taskId: String(row.task_id),
-      at: String(row.at),
-      sourceIp: String(row.source_ip ?? ""),
-      method: String(row.method ?? ""),
-      path: String(row.path ?? ""),
-      userAgent: String(row.user_agent ?? ""),
-      protocol: String(row.protocol ?? "http") as "http" | "dns",
-    }));
-  }
-
-  private rowToOastToken(row: Row): OastToken {
-    return {
-      token: String(row.token),
-      taskId: String(row.task_id),
-      kind: String(row.kind) as "http" | "dns",
-      callback: String(row.callback),
-      note: String(row.note ?? ""),
-      issuedAt: String(row.issued_at),
-      expiresAt: String(row.expires_at),
-      hits: Number(row.hits ?? 0),
-    };
-  }
-
-  /* --------------------------- P14 凭据 --------------------------- */
-
-  /**
-   * Record a credential pointer (never plaintext). Dedup by
-   * task|kind|asset|username|secretRef; repeating is idempotent.
-   */
-  recordCredential(input: {
-    taskId: string;
-    kind: CredentialKind;
-    asset: string;
-    username?: string | null;
-    secretRef: string;
-    secretHmac?: string | null;
-    sourceFindingId?: string | null;
-    verified?: boolean;
-    expiresAt?: string | null;
-    tier?: CredentialTier;
-    impactSummary?: string | null;
-    /** 未传（undefined）→ 继承当前活跃 Intent；显式 null = 不挂父节点。 */
-    intentId?: string | null;
-  }): { credential: Credential; created: boolean } {
-    const asset = normalizeTargetPattern(input.asset) || input.asset.trim().toLowerCase();
-    if (!asset) throw new Error("credential asset required");
-    const secretRef = input.secretRef.trim();
-    if (!secretRef) throw new Error("credential secretRef required (pointer, not plaintext)");
-    if (input.sourceFindingId && !this.getFinding(input.taskId, input.sourceFindingId)) {
-      throw new Error(`unknown credential source finding: ${input.sourceFindingId}`);
-    }
-    const username = input.username?.trim() || null;
-    const existing = this.listCredentials(input.taskId).find(
-      (row) =>
-        row.kind === input.kind &&
-        row.asset === asset &&
-        (row.username ?? null) === username &&
-        row.secretRef === secretRef,
-    );
-    if (existing) {
-      const patch: { tier?: CredentialTier; impactSummary?: string | null } = {};
-      if (input.tier && credentialTierUpgrades(existing.tier, input.tier)) patch.tier = input.tier;
-      if (input.impactSummary !== undefined) {
-        const next = input.impactSummary?.trim() || null;
-        if (next !== existing.impactSummary) patch.impactSummary = next;
-      }
-      if (patch.tier || patch.impactSummary !== undefined) {
-        return { credential: this.updateCredential(input.taskId, existing.id, patch), created: false };
-      }
-      return { credential: existing, created: false };
-    }
-
-    const now = this.now();
-    const credentialId = randomUUID();
-    // P14-B4 bridge: a credential is also a Fact, so lateral Intents can cite it
-    // through sourceFactIds without inventing a second truth source. The Fact
-    // never carries the secret, only the pointer label.
-    const fact = this.appendFact({
-      taskId: input.taskId,
-      layer: "title",
-      title: `凭据 · ${input.kind} · ${asset}`,
-      summary: `${username ? `user=${username} · ` : ""}secret 不入图（按 credential_list 的 secretRef 读取）`,
-      tags: ["credential", `credential.id:${credentialId}`],
-      intentId: this.resolveIntentIdForWrite(input.taskId, input.intentId),
-    });
-    const credential: Credential = {
-      id: credentialId,
-      taskId: input.taskId,
-      kind: input.kind,
-      asset,
-      username,
-      secretRef,
-      secretHmac: input.secretHmac?.trim().toLowerCase() || null,
-      sourceFindingId: input.sourceFindingId ?? null,
-      factId: fact.id,
-      verifiedAt: input.verified ? now : null,
-      lastUsedAt: null,
-      reuseCount: 0,
-      expiresAt: input.expiresAt ?? null,
-      createdAt: now,
-      tier: defaultCredentialTier({ tier: input.tier, verified: input.verified === true }),
-      impactSummary: input.impactSummary?.trim() || null,
-    };
-    this.db.prepare(
-      `INSERT INTO credentials
-        (id, task_id, kind, asset, username, secret_ref, secret_hmac, source_finding_id,
-         fact_id, verified_at, last_used_at, reuse_count, expires_at, created_at,
-         tier, impact_summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      credential.id, credential.taskId, credential.kind, credential.asset, credential.username,
-      credential.secretRef, credential.secretHmac, credential.sourceFindingId, credential.factId,
-      credential.verifiedAt, null, 0, credential.expiresAt, credential.createdAt,
-      credential.tier, credential.impactSummary,
-    );
-    this.emit(input.taskId, "credential_recorded", {
-      credentialId: credential.id,
-      factId: credential.factId,
-      kind: credential.kind,
-      asset: credential.asset,
-      verified: Boolean(credential.verifiedAt),
-    });
-    return { credential, created: true };
-  }
-
-  listCredentials(taskId: string): Credential[] {
-    const rows = this.db
-      .prepare("SELECT * FROM credentials WHERE task_id = ? ORDER BY created_at")
-      .all(taskId) as Row[];
-    return rows.map((row) => this.rowToCredential(row));
-  }
-
-  getCredential(taskId: string, credentialId: string): Credential | null {
-    const row = this.db
-      .prepare("SELECT * FROM credentials WHERE task_id = ? AND id = ?")
-      .get(taskId, credentialId) as Row | undefined;
-    return row ? this.rowToCredential(row) : null;
-  }
-
-  /** Mark one reuse on a live credential (横向复用计数，供报告排序). */
-  touchCredential(taskId: string, credentialId: string): Credential {
-    const current = this.getCredential(taskId, credentialId);
-    if (!current) throw new Error(`unknown credential: ${credentialId}`);
-    const now = this.now();
-    this.db.prepare(
-      "UPDATE credentials SET reuse_count = reuse_count + 1, last_used_at = ? WHERE task_id = ? AND id = ?",
-    ).run(now, taskId, credentialId);
-    this.emit(taskId, "credential_reused", { credentialId, asset: current.asset });
-    return this.getCredential(taskId, credentialId)!;
-  }
-
-  /** Raise tier and/or replace the L3 impact summary. Omitted fields stay as stored. */
-  updateCredential(
-    taskId: string,
-    credentialId: string,
-    patch: { tier?: CredentialTier; impactSummary?: string | null },
-  ): Credential {
-    const current = this.getCredential(taskId, credentialId);
-    if (!current) throw new Error(`unknown credential: ${credentialId}`);
-    if (patch.tier && patch.tier !== "L1" && patch.tier !== "L2" && patch.tier !== "L3") {
-      throw new Error(`invalid credential tier: ${patch.tier}`);
-    }
-    const tier = patch.tier ?? current.tier;
-    const impactSummary = patch.impactSummary === undefined
-      ? current.impactSummary
-      : (patch.impactSummary?.trim() || null);
-    this.db.prepare(
-      "UPDATE credentials SET tier = ?, impact_summary = ? WHERE task_id = ? AND id = ?",
-    ).run(tier, impactSummary, taskId, credentialId);
-    return this.getCredential(taskId, credentialId)!;
-  }
-
-  private rowToCredential(row: Row): Credential {
-    return {
-      id: String(row.id),
-      taskId: String(row.task_id),
-      kind: String(row.kind) as CredentialKind,
-      asset: String(row.asset),
-      username: row.username === null || row.username === undefined ? null : String(row.username),
-      secretRef: String(row.secret_ref),
-      secretHmac: row.secret_hmac === null || row.secret_hmac === undefined ? null : String(row.secret_hmac),
-      sourceFindingId: row.source_finding_id === null || row.source_finding_id === undefined
-        ? null
-        : String(row.source_finding_id),
-      factId: row.fact_id === null || row.fact_id === undefined ? null : String(row.fact_id),
-      verifiedAt: row.verified_at === null || row.verified_at === undefined ? null : String(row.verified_at),
-      lastUsedAt: row.last_used_at === null || row.last_used_at === undefined ? null : String(row.last_used_at),
-      reuseCount: Number(row.reuse_count ?? 0),
-      expiresAt: row.expires_at === null || row.expires_at === undefined ? null : String(row.expires_at),
-      createdAt: String(row.created_at),
-      tier: defaultCredentialTier({
-        tier: row.tier === "L1" || row.tier === "L2" || row.tier === "L3" ? row.tier : undefined,
-        verifiedAt: row.verified_at === null || row.verified_at === undefined ? null : String(row.verified_at),
-      }),
-      impactSummary: row.impact_summary === null || row.impact_summary === undefined || row.impact_summary === ""
-        ? null
-        : String(row.impact_summary),
-    };
-  }
-
-  private findAssetFact(taskId: string, address: string): Fact | null {
-    const needle = `asset.addr:${address}`;
-    for (const fact of this.listFacts(taskId)) {
-      if (fact.tags.includes(ASSET_TAG) && fact.tags.includes(needle)) return fact;
-    }
-    return null;
-  }
-
-  private factToAsset(fact: Fact): AssetRecord | null {
-    const kind = parseAssetKindFromTags(fact.tags);
-    const address = parseAssetAddrFromTags(fact.tags);
-    if (!kind || !address) return null;
-    return {
-      address,
-      kind,
-      assetType: parseAssetTypeFromTags(fact.tags),
-      parentAddress: parseAssetParentFromTags(fact.tags),
-      weight: parseAssetWeightFromTags(fact.tags),
-      factId: fact.id,
-      title: fact.title,
-      summary: fact.summary,
-      source: parseAssetSourceFromTags(fact.tags),
-      createdAt: fact.createdAt,
-      intentId: fact.intentId,
-    };
-  }
-
   listGoals(taskId: string): GoalState[] {
-    const query = this.archiveTables && !this.archiveTables.has("goal_checks")
-      ? "SELECT *, NULL AS checks_json FROM goals WHERE task_id = ? ORDER BY id"
-      : "SELECT g.*, c.checks_json FROM goals g LEFT JOIN goal_checks c ON c.goal_id = g.id AND c.task_id = g.task_id WHERE g.task_id = ? ORDER BY g.id";
-    const rows = this.db
-      .prepare(query)
-      .all(taskId) as Array<Record<string, unknown>>;
+    const query =
+      this.archiveTables && !this.archiveTables.has("goal_checks")
+        ? "SELECT *, NULL AS checks_json FROM goals WHERE task_id = ? ORDER BY id"
+        : "SELECT g.*, c.checks_json FROM goals g LEFT JOIN goal_checks c ON c.goal_id = g.id AND c.task_id = g.task_id WHERE g.task_id = ? ORDER BY g.id";
+    const rows = this.db.prepare(query).all(taskId) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: String(r.id),
       title: String(r.title),
@@ -1934,6 +393,11 @@ export class HistoryStore {
     }));
   }
 
+  allGoalsPass(taskId: string): boolean {
+    const goals = this.listGoals(taskId);
+    return goals.length > 0 && goals.every((g) => g.passes);
+  }
+
   appendFact(input: {
     taskId: string;
     layer: FactLayer;
@@ -1941,7 +405,6 @@ export class HistoryStore {
     summary?: string;
     evidencePath?: string | null;
     tags?: string[];
-    /** 未传（undefined）→ 继承当前活跃 Intent；显式 null = 明确不挂父节点。 */
     intentId?: string | null;
   }): Fact {
     const fact: Fact = {
@@ -1983,9 +446,7 @@ export class HistoryStore {
   listFacts(taskId: string, layer?: FactLayer): Fact[] {
     const rows = layer
       ? (this.db
-          .prepare(
-            `SELECT * FROM facts WHERE task_id = ? AND layer = ? ORDER BY created_at ASC`,
-          )
+          .prepare(`SELECT * FROM facts WHERE task_id = ? AND layer = ? ORDER BY created_at ASC`)
           .all(taskId, layer) as Array<Record<string, unknown>>)
       : (this.db
           .prepare(`SELECT * FROM facts WHERE task_id = ? ORDER BY created_at ASC`)
@@ -1997,15 +458,9 @@ export class HistoryStore {
     const r = this.db
       .prepare(`SELECT * FROM facts WHERE task_id = ? AND id = ?`)
       .get(taskId, factId) as Record<string, unknown> | undefined;
-    if (!r) return null;
-    return this.rowToFact(r);
+    return r ? this.rowToFact(r) : null;
   }
 
-  /**
-   * Structured neighborhood for drill-down (Resurface discipline):
-   * same `intentId` chain, ordered by write-time. Missing intent → empty neighbors.
-   * Never invents event timestamps; `recordedAt` is History write time only.
-   */
   getFactNeighborhood(
     taskId: string,
     factId: string,
@@ -2028,13 +483,9 @@ export class HistoryStore {
     }>;
   } {
     const fact = this.getFact(taskId, factId);
-    if (!fact) {
-      return { fact: null, before: [], after: [] };
-    }
+    if (!fact) return { fact: null, before: [], after: [] };
     const win = Math.max(0, Math.min(8, Math.floor(window)));
-    if (!fact.intentId) {
-      return { fact, before: [], after: [] };
-    }
+    if (!fact.intentId) return { fact, before: [], after: [] };
     const chain = this.db
       .prepare(
         `SELECT * FROM facts WHERE task_id = ? AND intent_id = ? ORDER BY created_at ASC, rowid ASC`,
@@ -2042,9 +493,7 @@ export class HistoryStore {
       .all(taskId, fact.intentId) as Array<Record<string, unknown>>;
     const facts = chain.map((r) => this.rowToFact(r));
     const idx = facts.findIndex((f) => f.id === factId);
-    if (idx < 0) {
-      return { fact, before: [], after: [] };
-    }
+    if (idx < 0) return { fact, before: [], after: [] };
     const toSummary = (f: Fact) => ({
       id: f.id,
       title: f.title,
@@ -2059,12 +508,9 @@ export class HistoryStore {
     };
   }
 
-  /** Drill payload: Fact + neighbors; labels write-time as recordedAt (no invented event time). */
   formatFactDrill(taskId: string, factId: string, window = 2): Record<string, unknown> {
     const { fact, before, after } = this.getFactNeighborhood(taskId, factId, window);
-    if (!fact) {
-      return { ok: false, reason: `unknown fact: ${factId}` };
-    }
+    if (!fact) return { ok: false, reason: `unknown fact: ${factId}` };
     return {
       ok: true,
       fact: {
@@ -2109,9 +555,7 @@ export class HistoryStore {
       const row = this.db
         .prepare(`SELECT 1 AS ok FROM facts WHERE task_id = ? AND id = ?`)
         .get(taskId, id) as { ok: number } | undefined;
-      if (!row) {
-        throw new Error(`unknown source fact: ${id}`);
-      }
+      if (!row) throw new Error(`unknown source fact: ${id}`);
     }
     return unique;
   }
@@ -2123,14 +567,8 @@ export class HistoryStore {
     sourceFactIds: string[];
     technique?: string | null;
     assetRoot?: string | null;
-    /**
-     * When true (default), reject Intents whose only asset predecessors are oos.
-     * Intel-only / origin-only Intents still pass.
-     */
     rejectOosOnly?: boolean;
-    /** Apply Reason fanout hard caps (open count + same-root). */
     fanout?: FanoutPolicy;
-    /** P14-B5 — dispatch the next ready plan step instead of an ad-hoc intent. */
     planStepId?: string | null;
   }): Intent {
     const sourceFactIds = this.validateSourceFactIds(input.taskId, input.sourceFactIds);
@@ -2140,7 +578,7 @@ export class HistoryStore {
     if (input.fanout) {
       this.assertFanoutAllows(input.taskId, sourceFactIds, input.fanout);
     }
-    this.assertPlanAllows(input.taskId, input.planStepId);
+    this.surface.assertPlanAllows(input.taskId, input.planStepId);
     const now = this.now();
     const intent: Intent = {
       id: randomUUID(),
@@ -2180,7 +618,7 @@ export class HistoryStore {
         intent.conclusion,
       );
     if (input.planStepId) {
-      this.markPlanStepDispatched(input.taskId, input.planStepId, intent.id);
+      this.surface.markPlanStepDispatched(input.taskId, input.planStepId, intent.id);
     }
     this.emit(input.taskId, "intent_proposed", {
       intentId: intent.id,
@@ -2190,7 +628,6 @@ export class HistoryStore {
     return intent;
   }
 
-  /** Primary asset address among source facts (first asset.* tag wins). */
   primaryAssetAddress(taskId: string, sourceFactIds: string[]): string | null {
     for (const id of sourceFactIds) {
       if (id === ORIGIN_FACT_ID) continue;
@@ -2202,13 +639,6 @@ export class HistoryStore {
     return null;
   }
 
-  /**
-   * Lane D — Intent.assetRoot 边界校验（确定性，不做网络/授权推断）。
-   *
-   * assetRoot 只能落在「前驱 Fact 已确认的资产」或「资产清单里已登记的资产」上，
-   * 且不能把范围外（oos）资产当根。否则拒绝：先 asset_record 或把该资产 Fact
-   * 列入 sourceFactIds。目的：不留“凭意图发明资产”的因果缺口。
-   */
   groundedAssetRoot(
     taskId: string,
     assetRoot: string,
@@ -2234,7 +664,6 @@ export class HistoryStore {
       const addr = parseAssetAddrFromTags(fact.tags);
       if (!addr) continue;
       const host = normalizeHost(addr);
-      // 父域承接只在 address 至少两段时成立（拒绝用「com」这类公共后缀当根）。
       const parentGrounded =
         address.split(".").filter(Boolean).length >= 2 &&
         host.length > address.length &&
@@ -2305,18 +734,13 @@ export class HistoryStore {
     }
   }
 
-  /**
-   * Project-level Reason lease (Cairn Project.reason). CAS via SQLite.
-   * Returns true when acquired or refreshed by the same owner.
-   */
   tryAcquireReasonLease(
     taskId: string,
     owner: string,
     ttlMs: number,
   ): { ok: true; until: string } | { ok: false; owner: string; until: string } {
     if (ttlMs <= 0) {
-      const until = this.now();
-      return { ok: true, until };
+      return { ok: true, until: this.now() };
     }
     const nowMs = Date.now();
     const until = new Date(nowMs + ttlMs).toISOString();
@@ -2350,20 +774,13 @@ export class HistoryStore {
     return false;
   }
 
-  getReasonLease(
-    taskId: string,
-  ): { owner: string; until: string } | null {
+  getReasonLease(taskId: string): { owner: string; until: string } | null {
     const row = this.db
       .prepare(`SELECT owner, until_iso FROM leases WHERE task_id = ? AND kind = 'reason'`)
       .get(taskId) as { owner: string; until_iso: string } | undefined;
-    if (!row) return null;
-    return { owner: row.owner, until: row.until_iso };
+    return row ? { owner: row.owner, until: row.until_iso } : null;
   }
 
-  /**
-   * Cairn dual-stage: Explore timeout → force conclude with ≥1 partial Fact.
-   * Always writes a Fact so the graph keeps the partial result.
-   */
   forceConcludeExploreTimeout(input: {
     taskId: string;
     intentId: string;
@@ -2402,14 +819,6 @@ export class HistoryStore {
     return done;
   }
 
-  /**
-   * Lane D — 绑定 Explore 的活跃 Intent。
-   *
-   * 绑定来源只有两个确定性信号：`claimIntent`（CAS 成功 = 认领人身份）与
-   * `heartbeatIntent`（CAS 成功 = 仍持有该 Intent 的 worker），因此 relay 重启后
-   * 第一轮 heartbeat 就能恢复绑定；控制面进程从不 claim/heartbeat，不会被误绑。
-   * intentId=null 表示解绑。绑定前必须确认 Intent 存在：不猜、不建。
-   */
   bindActiveIntent(taskId: string, intentId: string | null): void {
     if (!intentId) {
       this.activeIntentBindings.delete(taskId);
@@ -2421,10 +830,6 @@ export class HistoryStore {
     this.activeIntentBindings.set(taskId, intentId);
   }
 
-  /**
-   * 当前活跃 Intent：只认「已绑定且仍 claimed/running」的 Intent。
-   * 绑定的 Intent 已收卷/过期 → 解绑并返回 null（宁可不挂，不乱挂）。
-   */
   resolveActiveIntentId(taskId: string): string | null {
     const bound = this.activeIntentBindings.get(taskId);
     if (!bound) return null;
@@ -2436,10 +841,6 @@ export class HistoryStore {
     return bound;
   }
 
-  /**
-   * 写入时解析 intentId：显式传入（含显式 null）优先，未传（undefined）才继承活跃 Intent。
-   * 这是「伞形 Intent 数据断链」的治本点：调用方不传不等于没有父节点。
-   */
   private resolveIntentIdForWrite(taskId: string, intentId?: string | null): string | null {
     return intentId === undefined ? this.resolveActiveIntentId(taskId) : intentId;
   }
@@ -2454,16 +855,11 @@ export class HistoryStore {
       )
       .run(workerId, now, intentId, taskId);
     if ((result.changes ?? 0) === 0) return null;
-    // CAS 成功即证明认领人身份 → 自动绑定，后续不传 intentId 的写入自动挂父节点。
     this.bindActiveIntent(taskId, intentId);
     this.emit(taskId, "intent_claimed", { intentId, workerId });
     return this.getIntent(taskId, intentId);
   }
 
-  /**
-   * Conclude an Intent. On `succeeded`, must append ≥1 Fact bound to this Intent
-   * (Fact←Intent back-edge) in the same call — no success without graph writeback.
-   */
   concludeIntent(
     taskId: string,
     intentId: string,
@@ -2473,9 +869,7 @@ export class HistoryStore {
   ): Intent | null {
     const facts = opts?.facts ?? [];
     if (!opts?.system) {
-      if (!opts?.workerId) {
-        throw new Error("conclude requires workerId (or system timeout)");
-      }
+      if (!opts?.workerId) throw new Error("conclude requires workerId (or system timeout)");
       const current = this.getIntent(taskId, intentId);
       if (!current) return null;
       if (current.claimedBy !== opts.workerId) {
@@ -2485,9 +879,7 @@ export class HistoryStore {
       }
     }
     if (status === "succeeded" && facts.length === 0) {
-      throw new Error(
-        "conclude(succeeded) requires ≥1 Fact with intentId (Explore writeback)",
-      );
+      throw new Error("conclude(succeeded) requires ≥1 Fact with intentId (Explore writeback)");
     }
 
     const now = this.now();
@@ -2548,7 +940,6 @@ export class HistoryStore {
       this.db.exec("ROLLBACK");
       throw err;
     }
-    // Explore 结束：解绑，后续不传 intentId 的写入不再继承（宁可不挂，不乱挂）。
     if (this.activeIntentBindings.get(taskId) === intentId) {
       this.activeIntentBindings.delete(taskId);
     }
@@ -2559,8 +950,7 @@ export class HistoryStore {
     const r = this.db
       .prepare(`SELECT * FROM intents WHERE task_id = ? AND id = ?`)
       .get(taskId, intentId) as Record<string, unknown> | undefined;
-    if (!r) return null;
-    return this.rowToIntent(r);
+    return r ? this.rowToIntent(r) : null;
   }
 
   listIntents(taskId: string, status?: IntentStatus): Intent[] {
@@ -2574,7 +964,6 @@ export class HistoryStore {
     return rows.map((r) => this.rowToIntent(r));
   }
 
-  /** Refresh `updated_at` on an active claimed/running Intent so live workers are not swept as stale. */
   heartbeatIntent(taskId: string, intentId: string, workerId: string): boolean {
     const result = this.db
       .prepare(
@@ -2584,16 +973,10 @@ export class HistoryStore {
       )
       .run(this.now(), intentId, taskId, workerId);
     if ((result.changes ?? 0) === 0) return false;
-    // Heartbeat 成功 = 该 worker 仍持有此 Intent（relay 重启后第一轮即可恢复绑定）。
     this.bindActiveIntent(taskId, intentId);
     return true;
   }
 
-  /**
-   * Heartbeat / lease timeout: claimed|running older than maxAgeMs → expired,
-   * or back to `proposed` when `opts.requeue` is enabled (bounded by `maxRequeues`
-   * so poison-pill Intents still terminate as `expired`). Zero tactical policy.
-   */
   expireStaleIntents(
     taskId: string,
     maxAgeMs: number,
@@ -2660,7 +1043,6 @@ export class HistoryStore {
     return swept;
   }
 
-  /** Open Explore intents (proposed|claimed|running). */
   openIntents(taskId: string): Intent[] {
     return this.listIntents(taskId).filter((i) =>
       ["proposed", "claimed", "running"].includes(i.status),
@@ -2698,11 +1080,6 @@ export class HistoryStore {
     taskId: string,
     goalId: string,
     evidencePaths: string[],
-    /**
-     * 测试注入点：用来制造“核算完成之后、首次通过提交之前输入又发生变化”
-     * 那个窗口（在通过事务内、封存之前触发），验证二次核对能把首次通过整体
-     * 回滚。生产路径不传。
-     */
     hooks?: { beforeCommit?: () => void },
   ): { ok: true; goal: GoalState } | { ok: false; reason: string } {
     const goals = this.listGoals(taskId);
@@ -2713,18 +1090,12 @@ export class HistoryStore {
     let files: EvidenceSnapshot[];
     try {
       files = collectGoalEvidence(this.evidenceDir, goal, evidencePaths, {
-        // 业务核算目标由核算条件判定是否缺件，并点名缺哪一份材料。
         deferPatternsToReconcileGate: Boolean(goal.reconcileGate),
       });
     } catch (err) {
       return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
 
-    // 第七轮 + 第八轮：目标自报“完成差异比对”时，验收的是**本次首次通过所对应
-    // 的那一版输入**算出的结果。只有归档里、口径一致、且两侧材料现在仍然是
-    // 核算时那两份字节的核算版本才能支撑首次通过；曾经合格但材料已撤走 /
-    // 已替换的旧结果只保留供追溯。重复提交时 passes=1 与事务内的二次核对
-    // 一起保证只记一条首次通过事件。
     let adopted: {
       path: string;
       sha256: string;
@@ -2756,9 +1127,6 @@ export class HistoryStore {
       files = [outcome.adopted];
     }
 
-    // A1: resolve which assets may testify for this goal *before* opening the
-    // write transaction. A goal-scoped gate with no declared assets is refused
-    // instead of silently falling back to "any finding in the task".
     let gateAssets: string[] | null = null;
     if (goal.findingsGate) {
       try {
@@ -2770,18 +1138,16 @@ export class HistoryStore {
 
     const normalized = files.map((f) => f.path);
 
-    // A3: the findings read and the first pass share one commit order. A
-    // retraction committed before this point is invisible to the assertion; a
-    // retraction committed after it keeps the historical pass and its支持依据.
     this.db.exec("BEGIN IMMEDIATE");
     try {
       let supporting: Finding[] = [];
       if (goal.findingsGate) {
         const gate = goal.findingsGate;
         const candidates = this.listFindings(taskId).filter((f) => findingSatisfiesGate(f, gate));
-        supporting = gateAssets === null
-          ? candidates
-          : candidates.filter((f) => findingAssetInScope(f.asset, gateAssets!));
+        supporting =
+          gateAssets === null
+            ? candidates
+            : candidates.filter((f) => findingAssetInScope(f.asset, gateAssets!));
         if (supporting.length < gate.minVerified) {
           this.db.exec("ROLLBACK");
           return {
@@ -2819,8 +1185,6 @@ export class HistoryStore {
         )
         .run(JSON.stringify(normalized), this.now(), taskId, goalId);
       if (result.changes) {
-        // 核算完成之后、首次通过提交之前的最后一次核对：材料在这期间被撤走
-        // 或替换，本次首次通过整体回滚，旧结果保留供追溯。
         hooks?.beforeCommit?.();
         if (adopted) {
           const recheck = verifyRevisionInputs(this.evidenceDir, adopted.revision);
@@ -2837,10 +1201,12 @@ export class HistoryStore {
         }
         const stamp = this.now();
         for (const finding of supporting) {
-          this.db.prepare(
-            `INSERT INTO goal_findings (task_id, goal_id, finding_id, status_at_assert, evidence_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
-          ).run(taskId, goalId, finding.id, finding.status, JSON.stringify(finding.evidence), stamp);
+          this.db
+            .prepare(
+              `INSERT INTO goal_findings (task_id, goal_id, finding_id, status_at_assert, evidence_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+            )
+            .run(taskId, goalId, finding.id, finding.status, JSON.stringify(finding.evidence), stamp);
         }
         this.emit(taskId, "goal_asserted", {
           goalId,
@@ -2873,222 +1239,15 @@ export class HistoryStore {
       this.db.exec("COMMIT");
       return updated ? { ok: true, goal: updated } : { ok: false, reason: `unknown goal: ${goalId}` };
     } catch (err) {
-      try { this.db.exec("ROLLBACK"); } catch { /* already rolled back */ }
-      throw err;
-    }
-  }
-
-  /**
-   * 第八轮：执行一次核算并归档成“核算版本”。
-   *
-   * 一次核算 = 一份带版本号的结果文件 + 一条数据库记录。记录里有：对应的目标、
-   * 两侧材料的路径与内容哈希、采用的核算口径摘要、结果文件哈希。首次判定只认
-   * 这里的记录（顺序由单调版本号给出），文件本身则作为可复核的证据留在
-   * evidence/ 下；同名连续核算因为版本号不同而互不覆盖、互不混淆。
-   */
-  archiveReconcile(input: {
-    taskId: string;
-    request: ReconcileRequest;
-    /** 本次核算对应的目标；业务目标的核算必须点名。 */
-    goalIds?: string[];
-  }): {
-    revision: ReconcileRevision;
-    result: ReconcileResult;
-    evidencePath: string;
-    evidenceSha256: string;
-    factId: string;
-  } {
-    const { taskId, request } = input;
-    const goalIds = [...new Set(input.goalIds ?? request.goalIds ?? [])];
-    if (goalIds.length) {
-      const known = new Set(this.listGoals(taskId).map((goal) => goal.id));
-      for (const goalId of goalIds) {
-        if (!known.has(goalId)) throw new Error(`unknown goal: ${goalId}`);
+      try {
+        this.db.exec("ROLLBACK");
+      } catch {
+        /* already rolled back */
       }
-    }
-
-    const baselineState = this.stampMaterial(request.baseline.path);
-    const currentState = this.stampMaterial(request.current.path);
-    const baselineParsed = baselineState.bytes
-      ? parseMaterial({
-          path: request.baseline.path,
-          content: baselineState.bytes.toString("utf8"),
-          keyField: request.baseline.keyField ?? request.keyField,
-          ...(request.baseline.format ? { format: request.baseline.format } : {}),
-        })
-      : null;
-    const currentParsed = currentState.bytes
-      ? parseMaterial({
-          path: request.current.path,
-          content: currentState.bytes.toString("utf8"),
-          keyField: request.current.keyField ?? request.keyField,
-          ...(request.current.format ? { format: request.current.format } : {}),
-        })
-      : null;
-
-    const result = reconcileMaterials({
-      request,
-      baseline: baselineParsed,
-      current: currentParsed,
-      baselineSha256: baselineState.sha256,
-      currentSha256: currentState.sha256,
-    });
-
-    const config: BusinessReconcileConfig = businessConfigFromRequest(request);
-    const configDigest = reconcileConfigDigest(config);
-    const baselineStamp: ReconcileInputStamp = {
-      path: request.baseline.path,
-      format: baselineParsed?.format ?? request.baseline.format ?? null,
-      present: baselineState.present,
-      sha256: baselineState.sha256,
-      rows: baselineParsed?.rows.length ?? 0,
-    };
-    const currentStamp: ReconcileInputStamp = {
-      path: request.current.path,
-      format: currentParsed?.format ?? request.current.format ?? null,
-      present: currentState.present,
-      sha256: currentState.sha256,
-      rows: currentParsed?.rows.length ?? 0,
-    };
-
-    const revision: ReconcileRevision = {
-      id: nextReconcileRevisionId(this.listReconcileRevisions(taskId).map((entry) => entry.revision.id)),
-      taskId,
-      goalIds,
-      config,
-      configDigest,
-      inputDigest: reconcileInputDigest(configDigest, baselineStamp, currentStamp),
-      baseline: baselineStamp,
-      current: currentStamp,
-      createdAt: this.now(),
-    };
-
-    const resultWithRevision: ReconcileResult = { ...result, revision };
-    const serialized = JSON.stringify(resultWithRevision, null, 2) + "\n";
-    // 版本号进文件名：同名同路径的连续核算各自留档，不会互相覆盖。
-    const relativePath = `reconcile/${request.name}-${revision.id}.json`;
-    writeEvidenceFile(this.evidenceDir, relativePath, serialized);
-    const evidenceSha256 = createHash("sha256").update(Buffer.from(serialized, "utf8")).digest("hex");
-
-    const fact = this.appendFact({
-      taskId,
-      layer: "evidence",
-      title: `原始材料差异核算 · ${request.name}`,
-      summary: summarizeReconcile(resultWithRevision),
-      evidencePath: relativePath,
-      tags: ["reconcile", `reconcile:${request.name}`, `reconcile-revision:${revision.id}`, "source:operator"],
-    });
-
-    this.db
-      .prepare(
-        `INSERT INTO reconcile_revisions
-           (task_id, id, revision_json, goal_ids_json, config_digest, evidence_path, evidence_sha256, counts_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        taskId,
-        revision.id,
-        JSON.stringify(revision),
-        JSON.stringify(goalIds),
-        configDigest,
-        relativePath,
-        evidenceSha256,
-        JSON.stringify(resultWithRevision.counts),
-        revision.createdAt,
-      );
-
-    return { revision, result: resultWithRevision, evidencePath: relativePath, evidenceSha256, factId: fact.id };
-  }
-
-  /** 材料在“现在”的样子：读得到就有哈希，读不到就标记缺件（不猜）。 */
-  private stampMaterial(path: string): { path: string; present: boolean; sha256: string | null; bytes: Buffer | null } {
-    try {
-      resolveEvidenceFile(this.evidenceDir, path);
-      const bytes = readEvidenceBytes(this.evidenceDir, path);
-      return {
-        path,
-        present: true,
-        sha256: createHash("sha256").update(bytes).digest("hex"),
-        bytes,
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (/ENOENT|no such file/i.test(message)) return { path, present: false, sha256: null, bytes: null };
       throw err;
     }
   }
 
-  /** 任务的全部核算版本（按版本号倒序 = 时间倒序）。 */
-  listReconcileRevisions(taskId: string): ArchivedReconcile[] {
-    if (this.archiveTables && !this.archiveTables.has("reconcile_revisions")) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT revision_json, evidence_path, evidence_sha256, counts_json
-         FROM reconcile_revisions WHERE task_id = ? ORDER BY id DESC`,
-      )
-      .all(taskId) as Array<{
-        revision_json: string;
-        evidence_path: string;
-        evidence_sha256: string;
-        counts_json: string;
-      }>;
-    return rows.map((row) => ({
-      revision: JSON.parse(String(row.revision_json)) as ReconcileRevision,
-      evidencePath: String(row.evidence_path),
-      evidenceSha256: String(row.evidence_sha256),
-      counts: JSON.parse(String(row.counts_json)) as ReconcileResult["counts"],
-    }));
-  }
-
-  /** 某个目标的核算态：缺材料 / 待重算 / 结论不合格 / 可判定（或已通过）。 */
-  goalReconcileState(taskId: string, goalId: string): ReconcileStateReport | null {
-    const goal = this.listGoals(taskId).find((entry) => entry.id === goalId);
-    if (!goal?.reconcileGate) return null;
-    if (goal.passes) {
-      const proofs = this.listGoalProofs(taskId).filter((proof) => proof.goalId === goalId);
-      return {
-        state: "passed",
-        reason: null,
-        latestRevisionId: proofs[0]?.path.match(/r\d{13}-\d{4}/)?.[0] ?? null,
-        readyRevisionId: null,
-        materials: goal.business
-          ? {
-              baseline: { path: goal.business.baseline.path, present: this.hasEvidence(goal.business.baseline.path) },
-              current: { path: goal.business.current.path, present: this.hasEvidence(goal.business.current.path) },
-            }
-          : null,
-        drift: null,
-        // 已通过的目标不必再提示冲突项（当时的结论已经归档在首次通过依据里）。
-        ambiguous: [],
-      };
-    }
-    return describeReconcileState({
-      evidenceDir: this.evidenceDir,
-      gate: goal.reconcileGate,
-      goalId,
-      ...(goal.business
-        ? { expectedConfigDigest: reconcileConfigDigest(goal.business), goalConfig: goal.business }
-        : {}),
-      archives: this.listReconcileRevisions(taskId),
-      ...(goal.business
-        ? { declaredMaterials: { baseline: goal.business.baseline.path, current: goal.business.current.path } }
-        : {}),
-    });
-  }
-
-  private hasEvidence(path: string): boolean {
-    try {
-      resolveEvidenceFile(this.evidenceDir, path);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * 目标未通过的原因要能被人读到（不只是一次工具返回值）。同一目标同一原因
-   * 只记一次，避免每个循环都刷一条事件。
-   */
   private recordGoalRejection(taskId: string, goalId: string, reason: string): void {
     const recent = this.db
       .prepare(
@@ -3102,13 +1261,21 @@ export class HistoryStore {
         const payload = JSON.parse(row.payload_json) as { goalId?: string; reason?: string };
         if (payload.goalId === goalId && payload.reason === reason) return;
       } catch {
-        /* 忽略坏事件，继续判断 */
+        /* ignore malformed */
       }
     }
     this.emit(taskId, "goal_assert_rejected", { goalId, reason });
   }
 
-  /** First-pass finding attribution (A1/A3/A5). Empty for older archives. */
+  listGoalProofs(taskId: string): GoalProof[] {
+    if (this.archiveTables && !this.archiveTables.has("goal_proofs")) return [];
+    return this.db
+      .prepare(
+        "SELECT goal_id AS goalId, path, sha256 FROM goal_proofs WHERE task_id = ? ORDER BY goal_id, path",
+      )
+      .all(taskId) as GoalProof[];
+  }
+
   listGoalFindings(taskId: string): GoalFindingSupport[] {
     if (this.archiveTables && !this.archiveTables.has("goal_findings")) return [];
     return this.db
@@ -3119,7 +1286,13 @@ export class HistoryStore {
       )
       .all(taskId)
       .map((row) => {
-        const r = row as { goalId: string; findingId: string; statusAtAssert: string; evidenceJson: string; createdAt: string };
+        const r = row as {
+          goalId: string;
+          findingId: string;
+          statusAtAssert: string;
+          evidenceJson: string;
+          createdAt: string;
+        };
         return {
           goalId: r.goalId,
           findingId: r.findingId,
@@ -3130,7 +1303,45 @@ export class HistoryStore {
       });
   }
 
-  /** A4/A5 — a frozen delivery snapshot any reviewer can recompute from. */
+  readProofVersion(taskId: string, sha256: string): Buffer | undefined {
+    const sites: Array<[string, string]> = [
+      ["goal_proofs", "task_id"],
+      ["fact_reviews", "task_id"],
+      ["coverage_reviews", "task_id"],
+      ["finding_proofs", "task_id"],
+      ["finding_actions", "task_id"],
+      ["retest_requests", "task_id"],
+      ["peer_reviews", "task_id"],
+      ["delivery_corrections", "task_id"],
+      ["material_citations", "task_id"],
+    ];
+    const clauses: string[] = [];
+    const params: Array<string> = [sha256];
+    for (const [table, column] of sites) {
+      if (this.archiveTables && !this.archiveTables.has(table)) continue;
+      clauses.push(`EXISTS (SELECT 1 FROM ${table} WHERE ${column} = ? AND sha256 = ?)`);
+      params.push(taskId, sha256);
+    }
+    if (!clauses.length) return undefined;
+    const row = this.db
+      .prepare(`SELECT content FROM evidence_versions WHERE sha256 = ? AND (${clauses.join(" OR ")})`)
+      .get(...params) as { content: Uint8Array } | undefined;
+    return row && Buffer.from(row.content);
+  }
+
+  withReportTransaction<T>(render: () => T): T {
+    if (this.db.isTransaction) return render();
+    this.db.exec(this.archiveTables ? "BEGIN" : "BEGIN IMMEDIATE");
+    try {
+      const result = render();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
   deliverySnapshot(taskId: string, capturedAt = this.now()): DeliverySnapshot {
     const goals: SnapshotGoal[] = this.listGoals(taskId).map((goal) => ({
       id: goal.id,
@@ -3181,604 +1392,144 @@ export class HistoryStore {
     return computeScorecard(this.deliverySnapshot(taskId));
   }
 
-  /**
-   * Stage 5 — a delivered report is immutable; a retraction produces a numbered
-   * correction that lists the affected goals/findings and keeps notice state.
-   * Deduped by the retracted-finding set: processing the same retraction twice
-   * yields one correction.
-   */
-  recordDeliveryCorrection(
+  /* ====================================================================== *
+   * 2. Delegated Attack Surface & Tactical Intelligence (`surface-store.ts`)
+   * ====================================================================== */
+
+  seedAssetsFromAuth(taskId: string, auth: Pick<AuthScope, "targets">): Fact[] {
+    return this.surface.seedAssetsFromAuth(taskId, auth);
+  }
+  recordAsset(input: {
+    taskId: string;
+    address: string;
+    auth: Pick<AuthScope, "targets" | "outOfScope" | "pivotPolicy">;
+    kind?: AssetKind;
+    source?: AssetSource;
+    summary?: string;
+    intentId?: string | null;
+    live?: boolean;
+    assetType?: AssetType | null;
+    parentAddress?: string | null;
+    weight?: number;
+  }): { fact: Fact; asset: AssetRecord; created: boolean } {
+    return this.surface.recordAsset(input);
+  }
+  listAssets(taskId: string): AssetRecord[] {
+    return this.surface.listAssets(taskId);
+  }
+  recordHttpTransaction(
+    input: Omit<HttpTransaction, "id" | "createdAt"> & { id?: string; createdAt?: string },
+  ): { transaction: HttpTransaction; created: boolean } {
+    return this.surface.recordHttpTransaction(input);
+  }
+  listHttpTransactions(taskId: string, limit = 50): HttpTransaction[] {
+    return this.surface.listHttpTransactions(taskId, limit);
+  }
+  getHttpTransaction(taskId: string, id: string): HttpTransaction | null {
+    return this.surface.getHttpTransaction(taskId, id);
+  }
+  resolveEvidenceRef(
+    taskId: string,
+    ref: string,
+  ): { path: string; sha256: string; content: Buffer } | null {
+    return this.surface.resolveEvidenceRef(taskId, ref);
+  }
+  recordHostProfile(taskId: string, draft: HostProfileDraftInput): HostProfile {
+    return this.surface.recordHostProfile(taskId, draft);
+  }
+  getHostProfile(taskId: string, asset: string): HostProfile | null {
+    return this.surface.getHostProfile(taskId, asset);
+  }
+  listHostProfiles(taskId: string): HostProfile[] {
+    return this.surface.listHostProfiles(taskId);
+  }
+  setPlan(taskId: string, drafts: PlanStepDraftInput[]): PlanStep[] {
+    return this.surface.setPlan(taskId, drafts);
+  }
+  listPlan(taskId: string): PlanStep[] {
+    return this.surface.listPlan(taskId);
+  }
+  updatePlanStep(
+    taskId: string,
+    stepId: string,
+    patch: { title?: string; summary?: string },
+  ): PlanStep {
+    return this.surface.updatePlanStep(taskId, stepId, patch);
+  }
+  nextPlanStep(taskId: string): PlanStep | null {
+    return this.surface.nextPlanStep(taskId);
+  }
+  recordOastToken(input: {
+    token: string;
+    taskId: string;
+    kind: "http" | "dns";
+    callback: string;
+    note?: string;
+    issuedAt?: string;
+    expiresAt: string;
+  }): OastToken {
+    return this.surface.recordOastToken(input);
+  }
+  getOastToken(taskId: string, token: string): OastToken | null {
+    return this.surface.getOastToken(taskId, token);
+  }
+  listOastTokens(taskId: string): OastToken[] {
+    return this.surface.listOastTokens(taskId);
+  }
+  recordOastHit(
     taskId: string,
     input: {
-      reason: string;
-      findings?: string[];
-      report?: Array<{ path: string; sha256: string }>;
-      noticeStatus?: DeliveryCorrection["noticeStatus"];
-      evidencePath?: string;
+      token: string;
+      at?: string;
+      sourceIp?: string;
+      method?: string;
+      path?: string;
+      userAgent?: string;
+      protocol?: "http" | "dns";
     },
-  ): { correction: DeliveryCorrection; created: boolean } {
-    const reason = input.reason.trim();
-    if (!reason) throw new Error("correction reason required");
-    const allFindings = this.listFindings(taskId);
-    const retracted = new Set(
-      input.findings?.length
-        ? input.findings
-        : allFindings.filter((f) => f.status === "retracted").map((f) => f.id),
-    );
-    for (const id of retracted) {
-      const finding = allFindings.find((f) => f.id === id);
-      if (!finding) throw new Error(`unknown finding: ${id}`);
-      if (finding.status !== "retracted") throw new Error(`finding is not retracted: ${id}`);
-    }
-    const goalFindings = this.listGoalFindings(taskId);
-    const affectedFindings = [...retracted].filter((id) => goalFindings.some((s) => s.findingId === id)).sort();
-    const goals = [...new Set(goalFindings.filter((s) => retracted.has(s.findingId)).map((s) => s.goalId))].sort();
-    if (!affectedFindings.length) throw new Error("没有已通过的结论引用被撤回的发现，无需更正");
-    const dedupKey = createHash("sha256")
-      .update(JSON.stringify({ findings: affectedFindings, goals }))
-      .digest("hex");
-    const existing = this.listDeliveryCorrections(taskId).find((c) => {
-      const key = createHash("sha256")
-        .update(JSON.stringify({ findings: [...c.findings].sort(), goals: [...c.goals].sort() }))
-        .digest("hex");
-      return key === dedupKey;
-    });
-    if (existing) return { correction: existing, created: false };
-
-    const report = (input.report ?? []).map((entry) => ({ path: entry.path, sha256: entry.sha256 }));
-    const evidence = input.evidencePath ? captureEvidence(this.evidenceDir, input.evidencePath) : undefined;
-    const number = this.listDeliveryCorrections(taskId).length + 1;
-    const correction: DeliveryCorrection = {
-      id: randomUUID(),
-      taskId,
-      number,
-      reason,
-      findings: affectedFindings,
-      goals,
-      report,
-      noticeStatus: input.noticeStatus ?? "pending",
-      ...(evidence ? { evidencePath: evidence.path, sha256: evidence.sha256 } : {}),
-      createdAt: this.now(),
-    };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      if (evidence) this.saveVersion(evidence);
-      this.db.prepare(
-        `INSERT INTO delivery_corrections
-          (id, task_id, number, reason, findings_json, goals_json, report_json,
-           notice_status, evidence_path, sha256, dedup_key, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        correction.id, taskId, correction.number, correction.reason,
-        JSON.stringify(correction.findings), JSON.stringify(correction.goals),
-        JSON.stringify(correction.report), correction.noticeStatus,
-        correction.evidencePath ?? null, correction.sha256 ?? null,
-        dedupKey, correction.createdAt,
-      );
-      this.emit(taskId, "delivery_corrected", {
-        correctionId: correction.id,
-        number: correction.number,
-        findings: correction.findings,
-        goals: correction.goals,
-      });
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return { correction, created: true };
+  ): OastHit {
+    return this.surface.recordOastHit(taskId, input);
   }
-
-  listDeliveryCorrections(taskId: string): DeliveryCorrection[] {
-    if (this.archiveTables && !this.archiveTables.has("delivery_corrections")) return [];
-    return this.db
-      .prepare(
-        `SELECT id, task_id AS taskId, number, reason, findings_json AS findingsJson,
-                goals_json AS goalsJson, report_json AS reportJson, notice_status AS noticeStatus,
-                evidence_path AS evidencePath, sha256, created_at AS createdAt
-         FROM delivery_corrections WHERE task_id = ? ORDER BY number`,
-      )
-      .all(taskId)
-      .map((row) => {
-        const r = row as Record<string, unknown>;
-        return {
-          id: String(r.id),
-          taskId: String(r.taskId),
-          number: Number(r.number),
-          reason: String(r.reason),
-          findings: JSON.parse(String(r.findingsJson)) as string[],
-          goals: JSON.parse(String(r.goalsJson)) as string[],
-          report: JSON.parse(String(r.reportJson)) as Array<{ path: string; sha256: string }>,
-          noticeStatus: String(r.noticeStatus) as DeliveryCorrection["noticeStatus"],
-          ...(r.evidencePath ? { evidencePath: String(r.evidencePath) } : {}),
-          ...(r.sha256 ? { sha256: String(r.sha256) } : {}),
-          createdAt: String(r.createdAt),
-        };
-      });
+  listOastHits(taskId: string, token?: string): OastHit[] {
+    return this.surface.listOastHits(taskId, token);
   }
-
-  /** "已通知" / "已确认收悉" need an operator action; confirmation needs evidence. */
-  setDeliveryCorrectionNotice(
+  recordCredential(input: {
+    taskId: string;
+    kind: CredentialKind;
+    asset: string;
+    username?: string | null;
+    secretRef: string;
+    secretHmac?: string | null;
+    sourceFindingId?: string | null;
+    verified?: boolean;
+    expiresAt?: string | null;
+    tier?: CredentialTier;
+    impactSummary?: string | null;
+    intentId?: string | null;
+  }): { credential: Credential; created: boolean } {
+    return this.surface.recordCredential(input);
+  }
+  listCredentials(taskId: string): Credential[] {
+    return this.surface.listCredentials(taskId);
+  }
+  getCredential(taskId: string, credentialId: string): Credential | null {
+    return this.surface.getCredential(taskId, credentialId);
+  }
+  touchCredential(taskId: string, credentialId: string): Credential {
+    return this.surface.touchCredential(taskId, credentialId);
+  }
+  updateCredential(
     taskId: string,
-    correctionId: string,
-    status: DeliveryCorrection["noticeStatus"],
-    evidencePath?: string,
-  ): DeliveryCorrection {
-    const existing = this.listDeliveryCorrections(taskId).find((c) => c.id === correctionId);
-    if (!existing) throw new Error(`unknown correction: ${correctionId}`);
-    const evidence = evidencePath ? captureEvidence(this.evidenceDir, evidencePath) : undefined;
-    if (status === "confirmed" && !evidence) {
-      throw new Error("confirmed 通知状态需要客户确认证据文件");
-    }
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      if (evidence) this.saveVersion(evidence);
-      this.db.prepare(
-        `UPDATE delivery_corrections SET notice_status = ?, evidence_path = COALESCE(?, evidence_path),
-           sha256 = COALESCE(?, sha256) WHERE task_id = ? AND id = ?`,
-      ).run(status, evidence?.path ?? null, evidence?.sha256 ?? null, taskId, correctionId);
-      this.emit(taskId, "delivery_correction_notice", { correctionId, status });
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return this.listDeliveryCorrections(taskId).find((c) => c.id === correctionId)!;
+    credentialId: string,
+    patch: { tier?: CredentialTier; impactSummary?: string | null },
+  ): Credential {
+    return this.surface.updateCredential(taskId, credentialId, patch);
   }
 
-  withReportTransaction<T>(render: () => T): T {
-    if (this.db.isTransaction) return render();
-    this.db.exec(this.archiveTables ? "BEGIN" : "BEGIN IMMEDIATE");
-    try {
-      const result = render();
-      this.db.exec("COMMIT");
-      return result;
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-  }
+  /* ====================================================================== *
+   * 3. Delegated Finding Ledger & Proof Validation (`finding-store.ts`)
+   * ====================================================================== */
 
-  private saveVersion(file: EvidenceSnapshot): void {
-    this.db.prepare("INSERT INTO evidence_versions(sha256, content) VALUES (?, ?) ON CONFLICT DO NOTHING")
-      .run(file.sha256, file.content);
-  }
-
-  relayCount(taskId: string): number {
-    const row = this.db.prepare("SELECT COUNT(*) AS n FROM events WHERE task_id = ? AND kind = 'relay_written'").get(taskId);
-    return Number(row?.n ?? 0);
-  }
-
-  listGoalProofs(taskId: string): GoalProof[] {
-    if (this.archiveTables && !this.archiveTables.has("goal_proofs")) return [];
-    return this.db.prepare("SELECT goal_id AS goalId, path, sha256 FROM goal_proofs WHERE task_id = ? ORDER BY goal_id, path")
-      .all(taskId) as GoalProof[];
-  }
-
-  readProofVersion(taskId: string, sha256: string): Buffer | undefined {
-    // 证据版本可回读的条件：它确实被本任务的某条密封记录引用过。新增的
-    // 记录类型（复测/受理/复测申请/署名复核/更正通知）都必须列进来，否则
-    // 报告重新渲染时会把“有引用但读不到”的证据判成错误。
-    const sites: Array<[string, string]> = [
-      ["goal_proofs", "task_id"],
-      ["fact_reviews", "task_id"],
-      ["coverage_reviews", "task_id"],
-      ["finding_proofs", "task_id"],
-      ["finding_actions", "task_id"],
-      ["retest_requests", "task_id"],
-      ["peer_reviews", "task_id"],
-      ["delivery_corrections", "task_id"],
-      ["material_citations", "task_id"],
-    ];
-    const clauses: string[] = [];
-    const params: Array<string> = [sha256];
-    for (const [table, column] of sites) {
-      if (this.archiveTables && !this.archiveTables.has(table)) continue;
-      clauses.push(`EXISTS (SELECT 1 FROM ${table} WHERE ${column} = ? AND sha256 = ?)`);
-      params.push(taskId, sha256);
-    }
-    if (!clauses.length) return undefined;
-    const row = this.db
-      .prepare(`SELECT content FROM evidence_versions WHERE sha256 = ? AND (${clauses.join(" OR ")})`)
-      .get(...params) as { content: Uint8Array } | undefined;
-    return row && Buffer.from(row.content);
-  }
-
-  listReviews(taskId: string): FactReview[] {
-    if (this.archiveTables && !this.archiveTables.has("fact_reviews")) return [];
-    const rows = this.db.prepare(`SELECT id, fact_id AS factId, goal_id AS goalId, decision,
-      replacement_fact_id AS replacementFactId, reviewer, reason, path AS evidencePath, sha256,
-      created_at AS createdAt FROM fact_reviews WHERE task_id = ? ORDER BY rowid`)
-      .all(taskId);
-    return rows.map(({ replacementFactId, ...r }) => ({
-      ...r, ...(replacementFactId ? { replacementFactId } : {}),
-    }) as FactReview);
-  }
-
-  listCoverage(taskId: string): CoverageReview[] {
-    if (this.archiveTables && !this.archiveTables.has("coverage_reviews")) return [];
-    return this.db.prepare(`SELECT id, goal_id AS goalId, status, reviewer, reason,
-      path AS evidencePath, sha256, created_at AS createdAt FROM coverage_reviews WHERE task_id = ? ORDER BY rowid`)
-      .all(taskId).map(({ evidencePath, sha256, ...record }) => ({
-        ...record, ...(evidencePath ? { evidencePath, sha256 } : {}),
-      }) as CoverageReview);
-  }
-
-  recordCoverage(taskId: string, input: CoverageReviewInput): CoverageReview {
-    const entry = CoverageReviewSchema.parse(input);
-    const file = entry.evidencePath ? captureEvidence(this.evidenceDir, entry.evidencePath) : undefined;
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      if (!this.listGoals(taskId).some((g) => g.id === entry.goalId)) throw new Error("unknown coverage goal");
-      const prior = this.listCoverage(taskId).filter((r) => r.goalId === entry.goalId).at(-1);
-      if (prior && prior.status === entry.status && prior.reason === entry.reason && prior.reviewer === entry.reviewer &&
-          prior.evidencePath === file?.path && prior.sha256 === file?.sha256) {
-        this.db.exec("COMMIT");
-        return prior;
-      }
-      const review: CoverageReview = { ...entry, id: randomUUID(), createdAt: this.now(),
-        ...(file ? { evidencePath: file.path, sha256: file.sha256 } : {}) };
-      if (file) this.saveVersion(file);
-      this.db.prepare("INSERT INTO coverage_reviews (id, task_id, goal_id, status, reviewer, reason, path, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(review.id, taskId, review.goalId, review.status, review.reviewer, review.reason,
-          file?.path ?? null, file?.sha256 ?? null, review.createdAt);
-      this.db.exec("COMMIT");
-      return review;
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-  }
-
-  /**
-   * 阶段 5 — 客户从正常入口发起的复测申请。append-only：原始请求不改写，
-   * 操作员完成复测时只追加 completed 标记。
-   */
-  recordRetestRequest(taskId: string, input: RetestRequestInput): RetestRequest {
-    const entry = RetestRequestSchema.parse(input);
-    const file = entry.evidencePath ? captureEvidence(this.evidenceDir, entry.evidencePath) : undefined;
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const findings = new Map(this.listFindings(taskId).map((f) => [f.id, f]));
-      for (const id of entry.findingIds) {
-        const finding = findings.get(id);
-        if (!finding) throw new Error(`retest request references unknown finding: ${id}`);
-        if (finding.status === "retracted") throw new Error(`cannot request retest for retracted finding: ${id}`);
-      }
-      const request: RetestRequest = {
-        ...entry,
-        id: randomUUID(),
-        status: "pending" as RetestRequestStatus,
-        createdAt: this.now(),
-        ...(file ? { evidencePath: file.path, sha256: file.sha256 } : {}),
-      };
-      if (file) this.saveVersion(file);
-      this.db
-        .prepare(
-          `INSERT INTO retest_requests (id, task_id, requester, role, finding_ids_json, reason, path, sha256, status, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          request.id, taskId, request.requester, request.role ?? null,
-          JSON.stringify(request.findingIds), request.reason,
-          file?.path ?? null, file?.sha256 ?? null, request.status, request.createdAt,
-        );
-      this.emit(taskId, "retest_requested", {
-        requestId: request.id,
-        requester: request.requester,
-        findingIds: request.findingIds,
-      });
-      this.db.exec("COMMIT");
-      return request;
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-  }
-
-  listRetestRequests(taskId: string): RetestRequest[] {
-    if (this.archiveTables && !this.archiveTables.has("retest_requests")) return [];
-    return this.db
-      .prepare(
-        `SELECT id, requester, role, finding_ids_json AS findingIdsJson, reason, path AS evidencePath,
-                sha256, status, fulfilled_at AS fulfilledAt, fulfilled_result AS fulfilledResult,
-                created_at AS createdAt
-         FROM retest_requests WHERE task_id = ? ORDER BY rowid`,
-      )
-      .all(taskId)
-      .map((row) => {
-        const r = row as {
-          id: string; requester: string; role: string | null; findingIdsJson: string; reason: string;
-          evidencePath: string | null; sha256: string | null; status: string;
-          fulfilledAt: string | null; fulfilledResult: string | null; createdAt: string;
-        };
-        return {
-          id: r.id,
-          requester: r.requester,
-          ...(r.role ? { role: r.role } : {}),
-          findingIds: JSON.parse(r.findingIdsJson) as string[],
-          reason: r.reason,
-          ...(r.evidencePath ? { evidencePath: r.evidencePath } : {}),
-          ...(r.sha256 ? { sha256: r.sha256 } : {}),
-          status: r.status as RetestRequestStatus,
-          ...(r.fulfilledAt ? { fulfilledAt: r.fulfilledAt } : {}),
-          ...(r.fulfilledResult ? { fulfilledResult: r.fulfilledResult } : {}),
-          createdAt: r.createdAt,
-        };
-      });
-  }
-
-  /** Called right after a retest is recorded; returns the requests it closed. */
-  fulfillRetestRequests(taskId: string, findingId: string, result: string): RetestRequest[] {
-    if (this.archiveTables && !this.archiveTables.has("retest_requests")) return [];
-    const due = this.listRetestRequests(taskId).filter(
-      (request) => request.status === "pending" && request.findingIds.includes(findingId),
-    );
-    if (!due.length) return [];
-    const at = this.now();
-    const update = this.db.prepare(
-      `UPDATE retest_requests SET status = 'fulfilled', fulfilled_at = ?, fulfilled_result = ? WHERE id = ?`,
-    );
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      for (const request of due) update.run(at, result, request.id);
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return this.listRetestRequests(taskId).filter((request) => due.some((d) => d.id === request.id));
-  }
-
-  /**
-   * 阶段 5 — 同一委托内的跨任务署名复核。engagementId 由控制面按两端任务
-   * 记录核对后传入；这里只做结构校验与留痕，不改写被复核的任务。
-   */
-  recordPeerReview(taskId: string, engagementId: string, input: PeerReviewInput): PeerReview {
-    const entry = PeerReviewSchema.parse(input);
-    if (!engagementId.trim()) throw new Error("peer review requires an engagement");
-    const file = entry.evidencePath ? captureEvidence(this.evidenceDir, entry.evidencePath) : undefined;
-    const review: PeerReview = {
-      ...entry,
-      id: randomUUID(),
-      engagementId,
-      taskId,
-      createdAt: this.now(),
-      ...(file ? { evidencePath: file.path, sha256: file.sha256 } : {}),
-    };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      if (file) this.saveVersion(file);
-      this.db
-        .prepare(
-          `INSERT INTO peer_reviews (id, task_id, engagement_id, reviewer, role, source_task_id,
-             finding_id, fact_id, decision, basis, path, sha256, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          review.id, taskId, engagementId, review.reviewer, review.role, review.sourceTaskId,
-          review.findingId ?? null, review.factId ?? null, review.decision, review.basis,
-          file?.path ?? null, file?.sha256 ?? null, review.createdAt,
-        );
-      this.emit(taskId, "peer_review_recorded", {
-        reviewId: review.id,
-        reviewer: review.reviewer,
-        sourceTaskId: review.sourceTaskId,
-        decision: review.decision,
-      });
-      this.db.exec("COMMIT");
-      return review;
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-  }
-
-  listPeerReviews(taskId: string): PeerReview[] {
-    if (this.archiveTables && !this.archiveTables.has("peer_reviews")) return [];
-    return this.db
-      .prepare(
-        `SELECT id, task_id AS taskId, engagement_id AS engagementId, reviewer, role,
-                source_task_id AS sourceTaskId, finding_id AS findingId, fact_id AS factId,
-                decision, basis, path AS evidencePath, sha256, created_at AS createdAt
-         FROM peer_reviews WHERE task_id = ? ORDER BY rowid`,
-      )
-      .all(taskId)
-      .map((row) => {
-        const r = row as Record<string, string | null>;
-        return {
-          id: String(r.id),
-          taskId: String(r.taskId),
-          engagementId: String(r.engagementId),
-          reviewer: String(r.reviewer),
-          role: String(r.role),
-          sourceTaskId: String(r.sourceTaskId),
-          ...(r.findingId ? { findingId: r.findingId } : {}),
-          ...(r.factId ? { factId: r.factId } : {}),
-          decision: r.decision as PeerReview["decision"],
-          basis: String(r.basis),
-          ...(r.evidencePath ? { evidencePath: r.evidencePath } : {}),
-          ...(r.sha256 ? { sha256: r.sha256 } : {}),
-          createdAt: String(r.createdAt),
-        } as PeerReview;
-      });
-  }
-
-  /**
-   * 定版资料引用。快照字节在此密封进本任务的 evidence_versions，报告因此
-   * 不依赖知识库快照或上游网络。重复提交同一引用返回已有记录，不追加。
-   */
-  recordMaterialCitation(
-    taskId: string,
-    engagementId: string,
-    input: MaterialCitationInput,
-    seal: MaterialCitationSeal,
-  ): MaterialCitation {
-    const entry = MaterialCitationSchema.parse(input);
-    if (!engagementId.trim()) throw new Error("material citation requires an engagement");
-    const sha256 = createHash("sha256").update(seal.snapshot).digest("hex");
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const existing = this.db.prepare(
-        `SELECT id FROM material_citations
-         WHERE task_id = ? AND material_id = ? AND version_id = ? AND locator = ? AND claim = ?`,
-      ).get(taskId, entry.materialId, entry.versionId, entry.locator, entry.claim) as { id: string } | undefined;
-      if (existing) {
-        this.db.exec("COMMIT");
-        return this.getMaterialCitation(taskId, existing.id)!;
-      }
-      const citation: MaterialCitation = {
-        id: randomUUID(),
-        taskId,
-        engagementId,
-        materialId: entry.materialId,
-        versionId: entry.versionId,
-        locator: entry.locator,
-        claim: entry.claim,
-        snapshotSha256: sha256,
-        bodyFormat: seal.bodyFormat,
-        materialTitle: seal.materialTitle,
-        publisher: seal.publisher,
-        sourceKind: seal.sourceKind,
-        versionNo: seal.versionNo,
-        versionLabel: seal.versionLabel,
-        sectionHeading: seal.sectionHeading,
-        sectionPage: seal.sectionPage,
-        sectionOrdinal: seal.sectionOrdinal,
-        createdAt: this.now(),
-        pinKind: entry.charStart === undefined ? "locator" : "range",
-        charStart: entry.charStart ?? null,
-        charEnd: entry.charEnd ?? null,
-        chunkSha256: entry.chunkSha256 ?? null,
-        headingPath: seal.sectionMeta.headingPath,
-        pageBasis: seal.sectionMeta.pageBasis,
-      };
-      this.saveVersion({ path: `knowledge/${sha256}`, sha256, content: seal.snapshot });
-      this.db.prepare(
-        `INSERT INTO material_citations (id, task_id, engagement_id, material_id, version_id, locator, claim,
-           body_format, material_title, publisher, source_kind, version_no, version_label,
-           section_heading, section_page, section_ordinal, sha256, created_at,
-           pin_kind, char_start, char_end, chunk_sha256, section_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(citation.id, taskId, engagementId, citation.materialId, citation.versionId, citation.locator,
-        citation.claim, citation.bodyFormat, citation.materialTitle, citation.publisher, citation.sourceKind,
-        citation.versionNo, citation.versionLabel, citation.sectionHeading, citation.sectionPage,
-        citation.sectionOrdinal, sha256, citation.createdAt,
-        citation.pinKind, citation.charStart, citation.charEnd, citation.chunkSha256,
-        JSON.stringify(seal.sectionMeta));
-      this.emit(taskId, "material_citation_recorded", {
-        citationId: citation.id,
-        materialId: citation.materialId,
-        versionId: citation.versionId,
-        locator: citation.locator,
-        sha256,
-      });
-      this.db.exec("COMMIT");
-      return citation;
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-  }
-
-  private static readonly CITATION_BASE_COLUMNS = `id, task_id AS taskId, engagement_id AS engagementId,
-    material_id AS materialId, version_id AS versionId, locator, claim, body_format AS bodyFormat,
-    material_title AS materialTitle, publisher, source_kind AS sourceKind,
-    version_no AS versionNo, version_label AS versionLabel, section_heading AS sectionHeading,
-    section_page AS sectionPage, section_ordinal AS sectionOrdinal,
-    sha256 AS snapshotSha256, created_at AS createdAt`;
-
-  private citationColumnNames: Set<string> | null = null;
-
-  /**
-   * 只读连接不跑迁移，因此升级前的库可能还没有定版范围列。
-   * 缺列时用 SQL 常量补默认值，让旧引用照样读得出来（pinKind 回落 locator）。
-   */
-  private citationColumns(): string {
-    if (!this.citationColumnNames) {
-      this.citationColumnNames = new Set(
-        (this.db.prepare(`PRAGMA table_info(material_citations)`).all() as Array<{ name: string }>)
-          .map((row) => row.name),
-      );
-    }
-    const have = this.citationColumnNames;
-    const optional: Array<[string, string, string]> = [
-      ["pin_kind", "pinKind", "'locator'"],
-      ["char_start", "charStart", "NULL"],
-      ["char_end", "charEnd", "NULL"],
-      ["chunk_sha256", "chunkSha256", "NULL"],
-      ["section_json", "sectionJson", "NULL"],
-    ];
-    const extras = optional.map(([column, alias, fallback]) =>
-      have.has(column) ? `${column} AS ${alias}` : `${fallback} AS ${alias}`);
-    return `${HistoryStore.CITATION_BASE_COLUMNS}, ${extras.join(", ")}`;
-  }
-
-  private mapCitation(row: Omit<MaterialCitation, "headingPath" | "pageBasis"> & { sectionJson: string | null }): MaterialCitation {
-    const { sectionJson, ...rest } = row;
-    const meta = sectionJson ? JSON.parse(sectionJson) as Omit<KnowledgeSection, "text"> : null;
-    return { ...rest, headingPath: meta?.headingPath ?? [], pageBasis: meta?.pageBasis ?? null };
-  }
-
-  /** 定版时登记的片段元数据，回读时与密封快照切出的正文合并。 */
-  citationSectionMeta(taskId: string, citationId: string): Omit<KnowledgeSection, "text"> | null {
-    const rows = this.db.prepare(
-      `SELECT ${this.citationColumns()} FROM material_citations WHERE task_id = ? AND id = ?`,
-    ).all(taskId, citationId) as Array<{ sectionJson: string | null }>;
-    const json = rows[0]?.sectionJson;
-    return json ? JSON.parse(json) as Omit<KnowledgeSection, "text"> : null;
-  }
-
-  getMaterialCitation(taskId: string, citationId: string): MaterialCitation | null {
-    if (this.archiveTables && !this.archiveTables.has("material_citations")) return null;
-    const row = this.db.prepare(
-      `SELECT ${this.citationColumns()} FROM material_citations WHERE task_id = ? AND id = ?`,
-    ).get(taskId, citationId) as (Omit<MaterialCitation, "headingPath" | "pageBasis"> & { sectionJson: string | null }) | undefined;
-    return row ? this.mapCitation(row) : null;
-  }
-
-  listMaterialCitations(taskId: string): MaterialCitation[] {
-    if (this.archiveTables && !this.archiveTables.has("material_citations")) return [];
-    return (this.db.prepare(
-      `SELECT ${this.citationColumns()} FROM material_citations WHERE task_id = ? ORDER BY rowid`,
-    ).all(taskId) as Array<Omit<MaterialCitation, "headingPath" | "pageBasis"> & { sectionJson: string | null }>)
-      .map((row) => this.mapCitation(row));
-  }
-
-  appendReview(taskId: string, input: CreateFactReview): FactReview {
-    const r = CreateFactReviewSchema.parse(input);
-    if (!this.getFact(taskId, r.factId) || (r.replacementFactId && !this.getFact(taskId, r.replacementFactId))) {
-      throw new Error("review references a fact outside this task or an unknown fact");
-    }
-    if (!this.listGoals(taskId).some((g) => g.id === r.goalId)) throw new Error("unknown review goal");
-    const file = captureEvidence(this.evidenceDir, r.evidencePath);
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const prior = this.listReviews(taskId).filter((p) => p.goalId === r.goalId && p.factId === r.factId).at(-1);
-      if (prior && prior.decision === r.decision && prior.reviewer === r.reviewer && prior.reason === r.reason &&
-          prior.replacementFactId === r.replacementFactId && prior.sha256 === file.sha256 && prior.evidencePath === file.path) {
-        this.db.exec("COMMIT");
-        return prior;
-      }
-      const review = { ...r, id: randomUUID(), createdAt: this.now(), evidencePath: file.path, sha256: file.sha256 };
-      this.saveVersion(file);
-      this.db.prepare(`INSERT INTO fact_reviews
-        (id, task_id, fact_id, goal_id, decision, replacement_fact_id, reviewer, reason, path, sha256, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(review.id, taskId, r.factId, r.goalId, r.decision, r.replacementFactId ?? null, r.reviewer,
-          r.reason, file.path, file.sha256, review.createdAt);
-      this.db.exec("COMMIT");
-      return review;
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-  }
-
-  /**
-   * P6-E1: record a finding lead. Always starts `tentative`; dedupKey is
-   * idempotent (same key → existing row, no duplicate). Never deletes rows.
-   */
   recordFinding(input: {
     taskId: string;
     title: string;
@@ -3797,108 +1548,8 @@ export class HistoryStore {
     pocCurl?: string | null;
     qualification?: FindingQualification | null;
   }): { finding: Finding; created: boolean } {
-    const title = input.title.trim();
-    const vulnClass = input.vulnClass.trim();
-    if (!title) throw new Error("finding title required");
-    if (!vulnClass) throw new Error("finding vulnClass required (CWE-* / AUTHZ-* …)");
-    const asset =
-      normalizeTargetPattern(input.asset) || input.asset.trim().toLowerCase();
-    if (!asset) throw new Error("finding asset required");
-    const endpoint = input.endpoint?.trim() || null;
-    const dedupKey =
-      input.dedupKey?.trim() ||
-      findingDedupKey({ asset, vulnClass, endpoint });
-
-    const existing = this.findFindingByDedupKey(input.taskId, dedupKey);
-    const factIds = [...new Set((input.factIds ?? []).map((s) => s.trim()).filter(Boolean))];
-    for (const id of factIds) {
-      if (!this.getFact(input.taskId, id)) {
-        throw new Error(`unknown finding source fact: ${id}`);
-      }
-    }
-    // 未传 intentId → 继承当前活跃 Intent（Explore 内 finding 不再孤立）；
-    // 显式传入（含 null）保持调用方语义。
-    const intentId = this.resolveIntentIdForWrite(input.taskId, input.intentId);
-    if (intentId && !this.getIntent(input.taskId, intentId)) {
-      throw new Error(`unknown finding intent: ${intentId}`);
-    }
-    const pocCurl = input.pocCurl?.trim() || null;
-    const qualification = input.qualification ?? null;
-    if (existing) {
-      const mergedFactIds = [...new Set([...existing.factIds, ...factIds])];
-      const nextIntentId = existing.intentId ?? intentId;
-      const nextPocCurl = existing.pocCurl ?? pocCurl;
-      const nextQualification = existing.qualification ?? qualification;
-      const changed =
-        nextIntentId !== existing.intentId ||
-        mergedFactIds.length !== existing.factIds.length ||
-        nextPocCurl !== (existing.pocCurl ?? null) ||
-        nextQualification !== (existing.qualification ?? null);
-      if (changed) {
-        this.db
-          .prepare(
-            `UPDATE findings SET intent_id = ?, fact_ids_json = ?, poc_curl = ?, qualification = ? WHERE task_id = ? AND id = ?`,
-          )
-          .run(nextIntentId, JSON.stringify(mergedFactIds), nextPocCurl, nextQualification, input.taskId, existing.id);
-        return { finding: this.getFinding(input.taskId, existing.id)!, created: false };
-      }
-      return { finding: existing, created: false };
-    }
-
-    const finding: Finding = {
-      id: randomUUID(),
-      taskId: input.taskId,
-      title,
-      asset,
-      vulnClass,
-      severity: input.severity,
-      cvss: input.cvss?.trim() || null,
-      confidence: input.confidence ?? "tentative",
-      status: "tentative",
-      endpoint,
-      dedupKey,
-      intentId,
-      factIds,
-      evidence: [],
-      repro: input.repro ?? "",
-      impact: input.impact ?? "",
-      fix: input.fix ?? "",
-      createdAt: this.now(),
-      verifiedAt: null,
-      verifiedBy: null,
-      ...(qualification ? { qualification } : {}),
-      ...(pocCurl ? { pocCurl } : {}),
-    };
-    this.db
-      .prepare(
-        `INSERT INTO findings
-          (id, task_id, title, asset, vuln_class, severity, cvss, confidence, status,
-           endpoint, dedup_key, intent_id, fact_ids_json, evidence_json, repro, impact, fix,
-           created_at, verified_at, qualification, poc_curl)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        finding.id, finding.taskId, finding.title, finding.asset, finding.vulnClass,
-        finding.severity, finding.cvss, finding.confidence, finding.status,
-        finding.endpoint, finding.dedupKey, finding.intentId,
-        JSON.stringify(finding.factIds), JSON.stringify(finding.evidence),
-        finding.repro, finding.impact, finding.fix, finding.createdAt, finding.verifiedAt,
-        qualification, pocCurl,
-      );
-    this.emit(input.taskId, "finding_recorded", {
-      findingId: finding.id,
-      dedupKey,
-      severity: finding.severity,
-      asset: finding.asset,
-      vulnClass: finding.vulnClass,
-    });
-    return { finding, created: true };
+    return this.findingsStore.recordFinding(input);
   }
-
-  /**
-   * P6-E1 hard gate: verified requires ≥1 sealed evidence file under evidence/
-   * plus a non-empty repro. tentative → verified only; repeat calls idempotent.
-   */
   verifyFinding(
     taskId: string,
     findingId: string,
@@ -3908,121 +1559,33 @@ export class HistoryStore {
       impact?: string;
       fix?: string;
       cvss?: string | null;
-      /** P15-C1 — identity that performed the verification (worker id / operator). */
       verifiedBy?: string;
-      /** Backfill intent link if the finding was originally recorded outside an active Intent. */
       intentId?: string | null;
       pocCurl?: string | null;
       qualification?: FindingQualification | null;
     },
   ): Finding {
-    const finding = this.getFinding(taskId, findingId);
-    if (!finding) throw new Error(`unknown finding: ${findingId}`);
-    if (finding.status === "retracted") {
-      throw new Error("finding retracted: 误报撤回后不可再验证（另录新 finding）");
-    }
-    if (finding.status !== "tentative") return finding;
-
-    const repro = input.repro.trim();
-    if (!repro) throw new Error("finding_verify requires repro (可复现步骤)");
-    const paths = [...new Set(input.evidencePaths.map((p) => p.trim()).filter(Boolean))];
-    if (!paths.length) {
-      throw new Error("finding_verify requires ≥1 evidence file under evidence/");
-    }
-    const files = paths.map((p) => {
-      // P14-B1: refs like `http:<id>` resolve to the sealed transaction artifact;
-      // everything else stays a file under evidence/.
-      const ref = this.resolveEvidenceRef(taskId, p);
-      if (ref) return ref;
-      try {
-        return captureEvidence(this.evidenceDir, p);
-      } catch {
-        throw new Error(`missing or invalid evidence file: ${p}`);
-      }
-    });
-
-    const resolvedIntentId = finding.intentId ?? this.resolveIntentIdForWrite(taskId, input.intentId);
-    const nextIntentId = resolvedIntentId && this.getIntent(taskId, resolvedIntentId) ? resolvedIntentId : finding.intentId;
-    const normEvPath = (p: string) => p.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^evidence\//, "");
-    const evidenceSet = new Set(files.map((f) => normEvPath(f.path)).filter(Boolean));
-    const matchedFactIds = evidenceSet.size
-      ? (this.db
-          .prepare("SELECT id, evidence_path FROM facts WHERE task_id = ? AND evidence_path IS NOT NULL")
-          .all(taskId) as Array<{ id: string; evidence_path: string }>)
-          .filter((row) => evidenceSet.has(normEvPath(row.evidence_path)))
-          .map((row) => row.id)
-      : [];
-    const nextFactIds = [...new Set([...finding.factIds, ...matchedFactIds])];
-
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      const evidence = [...finding.evidence];
-      for (const file of files) {
-        this.saveVersion(file);
-        this.db
-          .prepare("INSERT INTO finding_proofs VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING")
-          .run(taskId, findingId, file.path, file.sha256);
-        if (!evidence.some((e) => e.path === file.path)) {
-          evidence.push({ path: file.path, sha256: file.sha256 });
-        }
-      }
-      const now = this.now();
-      const nextPocCurl = input.pocCurl?.trim() || finding.pocCurl || null;
-      const nextQualification = input.qualification ?? finding.qualification ?? null;
-      this.db
-        .prepare(
-          `UPDATE findings
-           SET status = 'verified', confidence = 'firm', evidence_json = ?,
-               intent_id = ?, fact_ids_json = ?,
-               repro = ?, impact = ?, fix = ?, cvss = ?, verified_at = ?, verified_by = ?,
-               poc_curl = ?, qualification = ?
-           WHERE task_id = ? AND id = ? AND status = 'tentative'`,
-        )
-        .run(
-          JSON.stringify(evidence),
-          nextIntentId,
-          JSON.stringify(nextFactIds),
-          repro,
-          input.impact?.trim() || finding.impact,
-          input.fix?.trim() || finding.fix,
-          input.cvss?.trim() || finding.cvss,
-          now,
-          input.verifiedBy?.trim() || finding.verifiedBy,
-          nextPocCurl,
-          nextQualification,
-          taskId,
-          findingId,
-        );
-      this.emit(taskId, "finding_verified", {
-        findingId,
-        evidencePaths: files.map((f) => f.path),
-        sha256: files.map((f) => f.sha256),
-      });
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return this.getFinding(taskId, findingId)!;
+    return this.findingsStore.verifyFinding(taskId, findingId, input);
   }
-
-  /** Backfill `poc_curl` on an existing finding (e.g. synthesized from captured traffic). */
   updateFindingPocCurl(taskId: string, findingId: string, pocCurl: string): Finding | null {
-    const clean = pocCurl.trim();
-    if (!clean) return this.getFinding(taskId, findingId);
-    const existing = this.getFinding(taskId, findingId);
-    if (!existing || existing.pocCurl) return existing;
-    this.db
-      .prepare(`UPDATE findings SET poc_curl = ? WHERE task_id = ? AND id = ?`)
-      .run(clean, taskId, findingId);
-    return this.getFinding(taskId, findingId);
+    return this.findingsStore.updateFindingPocCurl(taskId, findingId, pocCurl);
   }
-
-  /**
-   * Stage 5 — remediation retest: technical result of a fix round, sealed with
-   * its own evidence. Keeps every round (multi-round retests), never overwrites
-   * the original verification.
-   */
+  recordFindingRetest(
+    taskId: string,
+    findingId: string,
+    input: {
+      verdict: RetestVerdict;
+      evidencePaths?: string[];
+      repro?: string;
+      note?: string;
+      reviewer: string;
+    },
+  ): { retest: FindingRetest; finding: Finding } {
+    return this.findingsStore.recordFindingRetest(taskId, findingId, input);
+  }
+  listFindingRetests(taskId: string, findingId?: string): FindingRetest[] {
+    return this.findingsStore.listFindingRetests(taskId, findingId);
+  }
   retestFinding(
     taskId: string,
     findingId: string,
@@ -4033,360 +1596,151 @@ export class HistoryStore {
       note?: string;
     },
   ): { finding: Finding; action: FindingAction } {
-    const finding = this.getFinding(taskId, findingId);
-    if (!finding) throw new Error(`unknown finding: ${findingId}`);
-    if (finding.status === "retracted") throw new Error("retracted finding cannot be retested");
-    if (finding.status === "tentative") throw new Error("finding must be verified before a remediation retest");
-    const paths = [...new Set(input.evidencePaths.map((p) => p.trim()).filter(Boolean))];
-    if (!paths.length) throw new Error("finding retest requires ≥1 evidence file under evidence/");
-    if (!input.repro.trim()) throw new Error("finding retest requires repro/复测步骤");
-    const files = paths.map((p) => {
-      try { return captureEvidence(this.evidenceDir, p); }
-      catch { throw new Error(`missing or invalid evidence file: ${p}`); }
-    });
-    const action: FindingAction = {
-      id: randomUUID(),
-      taskId,
-      findingId,
-      action: "retest",
-      result: input.result,
-      note: (input.note ?? input.repro).trim(),
-      path: files[0]!.path,
-      sha256: files[0]!.sha256,
-      createdAt: this.now(),
-    };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      for (const file of files) this.saveVersion(file);
-      this.db.prepare(
-        `INSERT INTO finding_actions (id, task_id, finding_id, action, result, note, path, sha256, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(action.id, taskId, findingId, action.action, action.result, action.note, action.path, action.sha256, action.createdAt);
-      this.db.prepare(`UPDATE findings SET status = 'retested' WHERE task_id = ? AND id = ? AND status IN ('verified','retested','accepted')`)
-        .run(taskId, findingId);
-      this.emit(taskId, "finding_retested", {
-        findingId,
-        result: input.result,
-        evidencePaths: files.map((f) => f.path),
-        sha256: files.map((f) => f.sha256),
-        repro: input.repro.trim(),
-      });
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return { finding: this.getFinding(taskId, findingId)!, action };
+    return this.findingsStore.retestFinding(taskId, findingId, input);
   }
-
-  /** Stage 5 — client risk decision; requires a sealed decision document. */
   acceptFinding(
     taskId: string,
     findingId: string,
     input: { note: string; evidencePath: string },
   ): { finding: Finding; action: FindingAction } {
-    const finding = this.getFinding(taskId, findingId);
-    if (!finding) throw new Error(`unknown finding: ${findingId}`);
-    if (!["verified", "retested"].includes(finding.status)) {
-      throw new Error("仅已验证或已复测的发现可登记客户风险处置");
-    }
-    if (!input.note.trim()) throw new Error("client risk decision requires a note");
-    const file = captureEvidence(this.evidenceDir, input.evidencePath);
-    const action: FindingAction = {
-      id: randomUUID(),
-      taskId,
-      findingId,
-      action: "accept",
-      result: "accepted",
-      note: input.note.trim(),
-      path: file.path,
-      sha256: file.sha256,
-      createdAt: this.now(),
-    };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.saveVersion(file);
-      this.db.prepare(
-        `INSERT INTO finding_actions (id, task_id, finding_id, action, result, note, path, sha256, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(action.id, taskId, findingId, action.action, action.result, action.note, action.path, action.sha256, action.createdAt);
-      this.db.prepare(`UPDATE findings SET status = 'accepted' WHERE task_id = ? AND id = ?`).run(taskId, findingId);
-      this.emit(taskId, "finding_accepted", { findingId, note: action.note, path: file.path, sha256: file.sha256 });
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return { finding: this.getFinding(taskId, findingId)!, action };
+    return this.findingsStore.acceptFinding(taskId, findingId, input);
   }
-
   listFindingActions(taskId: string): FindingAction[] {
-    if (this.archiveTables && !this.archiveTables.has("finding_actions")) return [];
-    return this.db.prepare(
-      `SELECT id, task_id AS taskId, finding_id AS findingId, action, result, note,
-              path, sha256, created_at AS createdAt
-       FROM finding_actions WHERE task_id = ? ORDER BY created_at, rowid`,
-    ).all(taskId) as FindingAction[];
+    return this.findingsStore.listFindingActions(taskId);
   }
-
-  /** Retract a false positive; row retained (append-only semantics). */
   retractFinding(taskId: string, findingId: string, reason: string): Finding {
-    const finding = this.getFinding(taskId, findingId);
-    if (!finding) throw new Error(`unknown finding: ${findingId}`);
-    const note = reason.trim();
-    if (!note) throw new Error("finding_retract requires reason");
-    if (!findingStatusAllows(finding.status, "retracted")) {
-      throw new Error(`finding already retracted: ${findingId}`);
-    }
-    this.db
-      .prepare(`UPDATE findings SET status = 'retracted' WHERE task_id = ? AND id = ?`)
-      .run(taskId, findingId);
-    this.emit(taskId, "finding_retracted", { findingId, reason: note });
-    return this.getFinding(taskId, findingId)!;
+    return this.findingsStore.retractFinding(taskId, findingId, reason);
   }
-
-  /**
-   * Merge traffic ids (UUIDs, optional `http:` prefix) into a finding's
-   * `trafficIds`. Idempotent; unknown finding returns null.
-   */
-  linkFindingTraffic(taskId: string, findingId: string, trafficIds: readonly string[]): Finding | null {
-    const finding = this.getFinding(taskId, findingId);
-    if (!finding) return null;
-    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const merged = [...(finding.trafficIds ?? [])];
-    for (const raw of trafficIds) {
-      const id = String(raw).trim().replace(/^http:/, "");
-      if (uuid.test(id) && !merged.includes(id)) merged.push(id);
-    }
-    if (merged.length === (finding.trafficIds ?? []).length) return finding;
-    this.db
-      .prepare(`UPDATE findings SET traffic_ids_json = ? WHERE task_id = ? AND id = ?`)
-      .run(JSON.stringify(merged), taskId, findingId);
-    return this.getFinding(taskId, findingId);
+  linkFindingTraffic(
+    taskId: string,
+    findingId: string,
+    trafficIds: readonly string[],
+  ): Finding | null {
+    return this.findingsStore.linkFindingTraffic(taskId, findingId, trafficIds);
   }
-
-  /**
-   * P15-C1 — record one independent opinion about a verified finding.
-   *
-   * Hard rules:
-   * - only verified/retested/accepted findings can be validated;
-   * - `validator` must differ from the recorded verifier (self-validation refused);
-   * - `confirmed` / `refuted` need at least one sealed evidence item;
-   * - rows are append-only; the finding itself is never mutated here.
-   */
   recordFindingValidation(
     taskId: string,
     findingId: string,
     input: FindingValidationDraft,
   ): { validation: FindingValidation; finding: Finding } {
-    const finding = this.getFinding(taskId, findingId);
-    if (!finding) throw new Error(`unknown finding: ${findingId}`);
-    if (!["verified", "retested", "accepted"].includes(finding.status)) {
-      throw new Error(`finding ${findingId} is ${finding.status}; validate only verified findings`);
-    }
-    const validator = input.validator.trim();
-    if (!validator) throw new Error("finding_validate requires validator identity");
-    if (finding.verifiedBy && validator === finding.verifiedBy) {
-      throw new Error(
-        `self-validation refused: ${validator} is also the verifier; use another worker session or operator:<name>`,
-      );
-    }
-    const verdict = input.verdict;
-    const method = input.method;
-    const paths = [...new Set(input.evidencePaths.map((p) => p.trim()).filter(Boolean))];
-    if ((verdict === "confirmed" || verdict === "refuted") && paths.length === 0) {
-      throw new Error(`finding_validate(${verdict}) requires ≥1 evidence item`);
-    }
-    const files: EvidenceSnapshot[] = [];
-    for (const item of paths) {
-      const ref = this.resolveEvidenceRef(taskId, item);
-      if (ref) {
-        files.push(ref);
-        continue;
-      }
-      try {
-        files.push(captureEvidence(this.evidenceDir, item));
-      } catch {
-        throw new Error(`missing or invalid validation evidence: ${item}`);
-      }
-    }
-    const now = this.now();
-    const validation: FindingValidation = {
-      id: randomUUID(),
-      taskId,
-      findingId,
-      verdict,
-      method,
-      evidence: files.map((file) => ({ path: file.path, sha256: file.sha256 })),
-      note: input.note.trim(),
-      validator,
-      independent: !finding.verifiedBy || validator !== finding.verifiedBy,
-      createdAt: now,
-    };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      for (const file of files) this.saveVersion(file);
-      this.db
-        .prepare(
-          `INSERT INTO finding_validations
-             (id, task_id, finding_id, verdict, method, evidence_json, note, validator, independent, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          validation.id,
-          taskId,
-          findingId,
-          validation.verdict,
-          validation.method,
-          JSON.stringify(validation.evidence),
-          validation.note,
-          validation.validator,
-          validation.independent ? 1 : 0,
-          validation.createdAt,
-        );
-      this.emit(taskId, "finding_validated", {
-        findingId,
-        validationId: validation.id,
-        verdict: validation.verdict,
-        method: validation.method,
-        validator: validation.validator,
-        independent: validation.independent,
-      });
-      this.db.exec("COMMIT");
-    } catch (err) {
-      this.db.exec("ROLLBACK");
-      throw err;
-    }
-    return { validation, finding: this.getFinding(taskId, findingId)! };
+    return this.findingsStore.recordFindingValidation(taskId, findingId, input);
   }
-
   listFindingValidations(taskId: string, findingId?: string): FindingValidation[] {
-    if (this.archiveTables && !this.archiveTables.has("finding_validations")) return [];
-    const rows = findingId
-      ? this.db
-          .prepare(
-            "SELECT * FROM finding_validations WHERE task_id = ? AND finding_id = ? ORDER BY created_at, rowid",
-          )
-          .all(taskId, findingId)
-      : this.db
-          .prepare("SELECT * FROM finding_validations WHERE task_id = ? ORDER BY created_at, rowid")
-          .all(taskId);
-    return rows.map((r) => this.rowToFindingValidation(r as Record<string, unknown>));
+    return this.findingsStore.listFindingValidations(taskId, findingId);
   }
-
-  /**
-   * Gate view: the latest independent validation must be `confirmed`.
-   * A later refuted/inconclusive/out-of-scope revokes the confirmation.
-   */
   hasConfirmedValidation(taskId: string, findingId: string): boolean {
-    const rows = this.listFindingValidations(taskId, findingId).filter((row) => row.independent);
-    const latest = rows.at(-1);
-    return latest?.verdict === "confirmed";
+    return this.findingsStore.hasConfirmedValidation(taskId, findingId);
   }
-
-  private rowToFindingValidation(r: Record<string, unknown>): FindingValidation {
-    return {
-      id: String(r.id),
-      taskId: String(r.task_id),
-      findingId: String(r.finding_id),
-      verdict: r.verdict as FindingValidation["verdict"],
-      method: r.method as FindingValidation["method"],
-      evidence: JSON.parse(String(r.evidence_json ?? "[]")) as FindingValidation["evidence"],
-      note: String(r.note ?? ""),
-      validator: String(r.validator),
-      independent: Number(r.independent) !== 0,
-      createdAt: String(r.created_at),
-    };
-  }
-
   getFinding(taskId: string, findingId: string): Finding | null {
-    if (this.archiveTables && !this.archiveTables.has("findings")) return null;
-    const r = this.db
-      .prepare(`SELECT * FROM findings WHERE task_id = ? AND id = ?`)
-      .get(taskId, findingId) as Record<string, unknown> | undefined;
-    return r ? this.rowToFinding(r) : null;
+    return this.findingsStore.getFinding(taskId, findingId);
   }
-
-  private findFindingByDedupKey(taskId: string, dedupKey: string): Finding | null {
-    if (this.archiveTables && !this.archiveTables.has("findings")) return null;
-    const r = this.db
-      .prepare(`SELECT * FROM findings WHERE task_id = ? AND dedup_key = ?`)
-      .get(taskId, dedupKey) as Record<string, unknown> | undefined;
-    return r ? this.rowToFinding(r) : null;
-  }
-
-  /** All rows incl. retracted (保留可查); severity desc, then write time. */
   listFindings(taskId: string): Finding[] {
-    if (this.archiveTables && !this.archiveTables.has("findings")) return [];
-    const rows = this.db
-      .prepare(`SELECT * FROM findings WHERE task_id = ? ORDER BY created_at ASC, rowid ASC`)
-      .all(taskId) as Array<Record<string, unknown>>;
-    return rows
-      .map((r) => this.rowToFinding(r))
-      .sort(
-        (a, b) =>
-          FINDING_SEVERITY_RANK[b.severity] - FINDING_SEVERITY_RANK[a.severity] ||
-          a.createdAt.localeCompare(b.createdAt),
-      );
+    return this.findingsStore.listFindings(taskId);
   }
-
   listFindingProofs(taskId: string): GoalProof[] {
-    if (this.archiveTables && !this.archiveTables.has("finding_proofs")) return [];
-    return this.db
-      .prepare("SELECT finding_id AS goalId, path, sha256 FROM finding_proofs WHERE task_id = ? ORDER BY finding_id, path")
-      .all(taskId) as GoalProof[];
+    return this.findingsStore.listFindingProofs(taskId);
   }
 
-  private rowToFinding(r: Record<string, unknown>): Finding {
-    const rawQual = typeof r.qualification === "string" ? r.qualification : undefined;
-    const qualification =
-      rawQual === "exploited" || rawQual === "confirmed" || rawQual === "unconfirmed"
-        ? (rawQual as FindingQualification)
-        : undefined;
-    let trafficIds: string[] | undefined;
-    if (typeof r.traffic_ids_json === "string" && r.traffic_ids_json.trim()) {
-      try {
-        const parsed = JSON.parse(r.traffic_ids_json) as unknown;
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          trafficIds = parsed.map((id) => String(id));
-        }
-      } catch {
-        /* ignore malformed legacy json */
-      }
-    }
-    const rootCause = typeof r.root_cause === "string" && r.root_cause.length > 0 ? r.root_cause : undefined;
-    const pocCurl = typeof r.poc_curl === "string" && r.poc_curl.length > 0 ? r.poc_curl : undefined;
-    return {
-      id: String(r.id),
-      taskId: String(r.task_id),
-      title: String(r.title),
-      asset: String(r.asset),
-      vulnClass: String(r.vuln_class),
-      severity: r.severity as FindingSeverity,
-      cvss: (r.cvss as string | null) ?? null,
-      confidence: r.confidence as FindingConfidence,
-      status: r.status as FindingStatus,
-      endpoint: (r.endpoint as string | null) ?? null,
-      dedupKey: String(r.dedup_key),
-      intentId: (r.intent_id as string | null) ?? null,
-      factIds: JSON.parse(String(r.fact_ids_json ?? "[]")) as string[],
-      evidence: JSON.parse(String(r.evidence_json ?? "[]")) as Finding["evidence"],
-      repro: String(r.repro ?? ""),
-      impact: String(r.impact ?? ""),
-      fix: String(r.fix ?? ""),
-      createdAt: String(r.created_at),
-      verifiedAt: (r.verified_at as string | null) ?? null,
-      verifiedBy: (r.verified_by as string | null) ?? null,
-      ...(qualification ? { qualification } : {}),
-      ...(trafficIds ? { trafficIds } : {}),
-      ...(rootCause ? { rootCause } : {}),
-      ...(pocCurl ? { pocCurl } : {}),
-    };
+  /* ====================================================================== *
+   * 4. Delegated Delivery Assurance & Reviews (`review-store.ts`)
+   * ====================================================================== */
+
+  archiveReconcile(input: {
+    taskId: string;
+    request: ReconcileRequest;
+    goalIds?: string[];
+  }): {
+    revision: ReconcileRevision;
+    result: ReconcileResult;
+    evidencePath: string;
+    evidenceSha256: string;
+    factId: string;
+  } {
+    return this.reviewsStore.archiveReconcile(input);
+  }
+  listReconcileRevisions(taskId: string): ArchivedReconcile[] {
+    return this.reviewsStore.listReconcileRevisions(taskId);
+  }
+  goalReconcileState(taskId: string, goalId: string): ReconcileStateReport | null {
+    return this.reviewsStore.goalReconcileState(taskId, goalId);
+  }
+  recordDeliveryCorrection(
+    taskId: string,
+    input: {
+      reason: string;
+      findings?: string[];
+      report?: Array<{ path: string; sha256: string }>;
+      noticeStatus?: DeliveryCorrection["noticeStatus"];
+      evidencePath?: string;
+    },
+  ): { correction: DeliveryCorrection; created: boolean } {
+    return this.reviewsStore.recordDeliveryCorrection(taskId, input);
+  }
+  listDeliveryCorrections(taskId: string): DeliveryCorrection[] {
+    return this.reviewsStore.listDeliveryCorrections(taskId);
+  }
+  setDeliveryCorrectionNotice(
+    taskId: string,
+    correctionId: string,
+    status: DeliveryCorrection["noticeStatus"],
+    evidencePath?: string,
+  ): DeliveryCorrection {
+    return this.reviewsStore.setDeliveryCorrectionNotice(taskId, correctionId, status, evidencePath);
+  }
+  listReviews(taskId: string): FactReview[] {
+    return this.reviewsStore.listReviews(taskId);
+  }
+  appendReview(taskId: string, input: CreateFactReview): FactReview {
+    return this.reviewsStore.appendReview(taskId, input);
+  }
+  listCoverage(taskId: string): CoverageReview[] {
+    return this.reviewsStore.listCoverage(taskId);
+  }
+  recordCoverage(taskId: string, input: CoverageReviewInput): CoverageReview {
+    return this.reviewsStore.recordCoverage(taskId, input);
+  }
+  recordRetestRequest(taskId: string, input: RetestRequestInput): RetestRequest {
+    return this.reviewsStore.recordRetestRequest(taskId, input);
+  }
+  listRetestRequests(taskId: string): RetestRequest[] {
+    return this.reviewsStore.listRetestRequests(taskId);
+  }
+  fulfillRetestRequests(taskId: string, findingId: string, result: string): RetestRequest[] {
+    return this.reviewsStore.fulfillRetestRequests(taskId, findingId, result);
+  }
+  recordPeerReview(taskId: string, engagementId: string, input: PeerReviewInput): PeerReview {
+    return this.reviewsStore.recordPeerReview(taskId, engagementId, input);
+  }
+  listPeerReviews(taskId: string): PeerReview[] {
+    return this.reviewsStore.listPeerReviews(taskId);
+  }
+  recordMaterialCitation(
+    taskId: string,
+    engagementId: string,
+    input: MaterialCitationInput,
+    seal: MaterialCitationSeal,
+  ): MaterialCitation {
+    return this.reviewsStore.recordMaterialCitation(taskId, engagementId, input, seal);
+  }
+  citationSectionMeta(taskId: string, citationId: string): Omit<KnowledgeSection, "text"> | null {
+    return this.reviewsStore.citationSectionMeta(taskId, citationId);
+  }
+  getMaterialCitation(taskId: string, citationId: string): MaterialCitation | null {
+    return this.reviewsStore.getMaterialCitation(taskId, citationId);
+  }
+  listMaterialCitations(taskId: string): MaterialCitation[] {
+    return this.reviewsStore.listMaterialCitations(taskId);
   }
 
-  allGoalsPass(taskId: string): boolean {
-    const goals = this.listGoals(taskId);
-    return goals.length > 0 && goals.every((g) => g.passes);
+  /* ====================================================================== *
+   * 5. Hints, Stigmergy Technique Broadcast, Event Hash Chain & Observe
+   * ====================================================================== */
+
+  relayCount(taskId: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS n FROM events WHERE task_id = ? AND kind = 'relay_written'")
+      .get(taskId);
+    return Number(row?.n ?? 0);
   }
 
   recordInstall(taskId: string, tool: string, detail: Record<string, unknown>): void {
@@ -4401,7 +1755,6 @@ export class HistoryStore {
     this.emit(taskId, "relay_written", { generation, trigger });
   }
 
-  /** Resource provisioning audit: scale-up only, decided from asset counts (non-tactical). */
   recordExploreScaled(
     taskId: string,
     input: { from: number; to: number; assetCount: number },
@@ -4409,17 +1762,13 @@ export class HistoryStore {
     this.emit(taskId, "explore_scaled", { ...input });
   }
 
-  /** P15-C2 — how many times this exact normalized command has run in the task. */
   commandAttemptCount(taskId: string, commandHash: string): number {
     const row = this.db
-      .prepare(
-        "SELECT count FROM command_attempts WHERE task_id = ? AND command_hash = ?",
-      )
+      .prepare("SELECT count FROM command_attempts WHERE task_id = ? AND command_hash = ?")
       .get(taskId, commandHash) as { count?: number } | undefined;
     return Number(row?.count ?? 0);
   }
 
-  /** Record one allowed attempt; returns the new count (caller decides the limit). */
   recordCommandAttempt(taskId: string, commandHash: string): number {
     const now = this.now();
     const result = this.db
@@ -4434,7 +1783,6 @@ export class HistoryStore {
     return Number(result?.count ?? 1);
   }
 
-  /** Operator reset after an intentional re-run; leaves audit trail in events. */
   resetCommandAttempts(taskId: string, reason = ""): void {
     this.db.prepare("DELETE FROM command_attempts WHERE task_id = ?").run(taskId);
     this.emit(taskId, "tool_gate", {
@@ -4444,7 +1792,6 @@ export class HistoryStore {
     });
   }
 
-  /** P5 tool single-gate audit: allow and deny both recorded. */
   recordToolGate(
     taskId: string,
     input: {
@@ -4462,7 +1809,6 @@ export class HistoryStore {
     });
   }
 
-  /** P4 Hint: human/system tactical injection into the blackboard. */
   appendHint(input: {
     taskId: string;
     text: string;
@@ -4502,9 +1848,7 @@ export class HistoryStore {
 
   listHints(taskId: string, limit = 50): Hint[] {
     const rows = this.db
-      .prepare(
-        `SELECT * FROM hints WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`,
-      )
+      .prepare(`SELECT * FROM hints WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`)
       .all(taskId, limit) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: String(r.id),
@@ -4520,18 +1864,12 @@ export class HistoryStore {
     return this.listFacts(taskId).filter((f) => f.tags.includes(TRANSFERABLE_TAG));
   }
 
-  /**
-   * P4 同族迁移：把已验证打法写成 transferable Fact，并为对端资产扇出 Intent。
-   * 协作只写图（stigmergy），不点对点私聊。
-   * familyKey 可省略 → 从 title/summary/tags/资产根启发式补全。
-   */
   broadcastTechnique(input: {
     taskId: string;
     sourceFactIds: string[];
     title: string;
     summary: string;
     familyKey?: string;
-    /** Empty → all non-oos assets (admitted/live/seed). */
     targetAddresses?: string[];
     fanout?: FanoutPolicy;
   }): {
@@ -4545,17 +1883,13 @@ export class HistoryStore {
     if (!sources.length) throw new Error("broadcastTechnique requires sourceFactIds");
     for (const id of sources) {
       if (id === ORIGIN_FACT_ID) continue;
-      if (!this.getFact(input.taskId, id)) {
-        throw new Error(`unknown source fact: ${id}`);
-      }
+      if (!this.getFact(input.taskId, id)) throw new Error(`unknown source fact: ${id}`);
     }
 
     const assetsAll = this.listAssets(input.taskId);
     const assets = assetsAll.filter((a) => a.kind !== "oos");
     const wanted = input.targetAddresses?.map((a) => a.trim()).filter(Boolean);
-    let peers = wanted?.length
-      ? assets.filter((a) => wanted.includes(a.address))
-      : assets;
+    let peers = wanted?.length ? assets.filter((a) => wanted.includes(a.address)) : assets;
 
     const sourceTags = sources.flatMap((id) => this.getFact(input.taskId, id)?.tags ?? []);
     const hint = suggestFamilyKey({
@@ -4564,13 +1898,8 @@ export class HistoryStore {
       tags: sourceTags,
       addresses: peers.map((p) => p.address),
     });
-    const familyKey =
-      normalizeFamilyKey(input.familyKey) ?? hint?.key ?? null;
-    const familyKeyVia = input.familyKey?.trim()
-      ? "explicit"
-      : hint
-        ? hint.via
-        : null;
+    const familyKey = normalizeFamilyKey(input.familyKey) ?? hint?.key ?? null;
+    const familyKeyVia = input.familyKey?.trim() ? "explicit" : hint ? hint.via : null;
 
     const tags = [TRANSFERABLE_TAG];
     if (familyKey) tags.push(familyTag(familyKey));
@@ -4583,7 +1912,6 @@ export class HistoryStore {
       tags,
     });
 
-    // Prefer peers sharing the family root when key is root:* or stack fingerprint.
     if (familyKey?.startsWith("root:")) {
       const root = familyKey.slice("root:".length);
       const narrowed = peers.filter((p) => assetRootKey(p.address) === root);
@@ -4666,9 +1994,7 @@ export class HistoryStore {
 
   listEvents(taskId: string, limit = 200): HistoryEvent[] {
     const rows = this.db
-      .prepare(
-        `SELECT * FROM events WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`,
-      )
+      .prepare(`SELECT * FROM events WHERE task_id = ? ORDER BY created_at DESC LIMIT ?`)
       .all(taskId, limit) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: String(r.id),
@@ -4681,7 +2007,6 @@ export class HistoryStore {
     }));
   }
 
-  /** P17 — recompute the task's event chain from genesis; stored hashes must match. */
   verifyEventChain(taskId: string): {
     ok: boolean;
     length: number;
@@ -4728,13 +2053,6 @@ export class HistoryStore {
     return row?.hash ?? null;
   }
 
-  /** P17 — record one AD/cloud node as a Fact; graph is derived, not stored. */
-  /**
-   * Lane D — 前端图谱投影的唯一取数入口：资产 → 事实 → 意图 → 漏洞 全链路，
-   * 每条因果边带确定性 `verification`（proven/proposed + abstentionReason）。
-   *
-   * 只读：不改任何表，不写事件。`generatedAt` 只标投影时点，不参与因果判定。
-   */
   dagExport(taskId: string, generatedAt = this.now()): DagExport {
     return buildDagExport({
       taskId,
@@ -4758,7 +2076,6 @@ export class HistoryStore {
     });
   }
 
-  /** P17 — record one attack edge as a Fact. */
   recordAttackEdge(taskId: string, edge: AttackEdge): Fact {
     return this.appendFact({
       taskId,
@@ -4780,334 +2097,16 @@ export class HistoryStore {
     return findAttackPaths(this.attackGraph(taskId), opts);
   }
 
-  /**
-   * P15 观察员：只读、确定性、可复算。
-   *
-   * 规则只读现有图（资产 / Intent / Finding / 凭据），不写库、不派单、不改授权。
-   * 返回 observations 供 Observe 与 `engagement_audit` 工具注入，scorecard 供
-   * Reason 判断「继续磨 vs 换面 vs 收口」。空台账会被明确标成缺口，而不是干净。
-   */
   engagementAudit(taskId: string): EngagementAudit {
-    return deriveEngagementAudit({
-      now: this.now(),
-      assets: this.listAssets(taskId).map((asset) => ({
-        address: asset.address,
-        kind: asset.kind,
-        weight: asset.weight,
-        assetType: asset.assetType,
-      })),
-      intents: this.listIntents(taskId).map((intent) => ({
-        id: intent.id,
-        title: intent.title,
-        technique: intent.technique,
-        assetRoot: intent.assetRoot,
-        status: intent.status,
-        createdAt: intent.createdAt,
-        updatedAt: intent.updatedAt,
-        concludedAt: intent.concludedAt,
-      })),
-      findings: this.listFindings(taskId).map((finding) => ({
-        id: finding.id,
-        asset: finding.asset,
-        endpoint: finding.endpoint,
-        vulnClass: finding.vulnClass,
-        status: finding.status,
-        severity: finding.severity,
-        createdAt: finding.createdAt,
-        verifiedAt: finding.verifiedAt,
-        evidence: finding.evidence.map((item) => ({
-          path: item.path,
-          ...(item.role ? { role: item.role } : {}),
-        })),
-        independentConfirmed: this.hasConfirmedValidation(taskId, finding.id),
-      })),
-      credentials: this.listCredentials(taskId).map((credential) => ({
-        id: credential.id,
-        asset: credential.asset,
-        kind: credential.kind,
-        reuseCount: credential.reuseCount,
-        verifiedAt: credential.verifiedAt,
-        tier: credential.tier,
-      })),
-    });
+    return deriveHistoryEngagementAudit(this, taskId);
   }
 
-  /**
-   * Worker Observe surface: Goals + title-layer Facts + open Intents only.
-   * Summary / evidence stay out of the default prompt — drill via getFact / listFacts.
-   */
   observe(taskId: string): string {
-    const lines = this.observeCore(taskId);
-    lines.push(
-      "",
-      "（Observe 不含 summary/evidence；需要时用 history_read_fact / history_list_layer。）",
-    );
-    return lines.join("\n");
+    return renderHistoryObserve(this, taskId);
   }
 
-  /** Human / report view: Observe + recent summaries (not injected into Worker system prompt). */
   overview(taskId: string): string {
-    const lines = this.observeCore(taskId);
-    const summaries = this.listFacts(taskId, "summary").slice(-20);
-    lines.push("", "## 近期摘要");
-    if (summaries.length === 0) {
-      lines.push("- （无）");
-    } else {
-      for (const f of summaries) {
-        lines.push(`- [${f.id}] ${f.title}: ${f.summary.slice(0, 240)}`);
-      }
-    }
-    return lines.join("\n");
-  }
-
-  private observeCore(taskId: string): string[] {
-    const MAX_OBSERVE_ASSETS = 40;
-    const MAX_HOT_FACTS = 25;
-    const MAX_RECENT_TITLES = 40;
-    const MAX_OPEN_INTENTS = 30;
-
-    const goals = this.listGoals(taskId);
-    const assets = this.listAssets(taskId);
-    const allFacts = this.listFacts(taskId);
-    const allTitleFacts = allFacts.filter((f) => f.layer === "title");
-    const allIntents = this.listIntents(taskId);
-    const open = allIntents.filter((i) =>
-      ["proposed", "claimed", "running"].includes(i.status),
-    );
-    const hints = this.listHints(taskId, 20);
-    const transferable = this.listTransferableFacts(taskId).slice(-20);
-    const findings = this.listFindings(taskId).filter((f) => f.status !== "retracted");
-
-    // P13-A1 热祖先保活：从进行中 Intent、未撤回 Finding、可迁移打法与凭据/立足点标签向上闭包求热 Fact，
-    // 防止超过滑动窗口后丢失第 1 小时的关键网段/立足点/凭据观察。
-    const factById = new Map(allFacts.map((f) => [f.id, f]));
-    const intentById = new Map(allIntents.map((i) => [i.id, i]));
-    const hotFactIds = new Set<string>();
-    const factQueue: string[] = [];
-    const enqueueFact = (id: string) => {
-      if (!id || id === ORIGIN_FACT_ID || hotFactIds.has(id)) return;
-      hotFactIds.add(id);
-      factQueue.push(id);
-    };
-    for (const intent of open) {
-      for (const id of intent.sourceFactIds) enqueueFact(id);
-    }
-    for (const finding of findings) {
-      for (const id of finding.factIds ?? []) enqueueFact(id);
-    }
-    for (const f of transferable) enqueueFact(f.id);
-    for (const f of allTitleFacts) {
-      if (f.tags.some((t) => t === "foothold" || t === "credential" || t === "transferable")) {
-        enqueueFact(f.id);
-      }
-    }
-    // 沿 Fact → 产出它的 Intent → 前驱 sourceFactIds 向上追溯最多 64 步，保留完整因果链根。
-    let steps = 0;
-    while (factQueue.length > 0 && steps < 64) {
-      steps += 1;
-      const fid = factQueue.shift()!;
-      const f = factById.get(fid);
-      if (!f?.intentId) continue;
-      const parentIntent = intentById.get(f.intentId);
-      if (!parentIntent) continue;
-      for (const srcId of parentIntent.sourceFactIds) enqueueFact(srcId);
-    }
-
-    const recentTitles = allTitleFacts.slice(-MAX_RECENT_TITLES);
-    const recentTitleSet = new Set(recentTitles.map((f) => f.id));
-    const hotOlderTitles = allTitleFacts
-      .filter((f) => hotFactIds.has(f.id) && !recentTitleSet.has(f.id))
-      .slice(-MAX_HOT_FACTS);
-    const titles = [...hotOlderTitles, ...recentTitles];
-    const foldedTitleCount = Math.max(0, allTitleFacts.length - titles.length);
-
-    // 资产优先级截断：live > admitted > seed > oos，高权重优先，防止大网段/FOFA 扫描百条资产撑爆上下文。
-    const hotAssetSet = new Set<string>([
-      ...open.map((i) => i.assetRoot).filter((x): x is string => Boolean(x)),
-      ...findings.map((f) => f.asset),
-    ]);
-    const sortedAssets = [...assets].sort((a, b) => {
-      const aHot = hotAssetSet.has(a.address) ? 1 : 0;
-      const bHot = hotAssetSet.has(b.address) ? 1 : 0;
-      if (aHot !== bHot) return bHot - aHot;
-      const kindOrder: Record<AssetKind, number> = {
-        live: 5,
-        admitted: 4,
-        seed: 3,
-        candidate: 2,
-        oos: 1,
-      };
-      if (kindOrder[a.kind] !== kindOrder[b.kind]) return kindOrder[b.kind] - kindOrder[a.kind];
-      const aw = a.weight ?? 0;
-      const bw = b.weight ?? 0;
-      if (aw !== bw) return bw - aw;
-      return a.address.localeCompare(b.address);
-    });
-    const shownAssets = sortedAssets.slice(0, MAX_OBSERVE_ASSETS);
-    const omittedAssets = Math.max(0, sortedAssets.length - shownAssets.length);
-    const omittedOos = sortedAssets.slice(MAX_OBSERVE_ASSETS).filter((a) => a.kind === "oos").length;
-
-    const lines: string[] = [];
-    lines.push("## 目标");
-    for (const g of goals) {
-      lines.push(`- [${g.passes ? "通过" : "未通过"}] ${g.id}: ${g.title}`);
-    }
-    lines.push("", `## 资产清单（${assets.length}）`);
-    if (assets.length === 0) {
-      lines.push("- （无；Bootstrap / seedAssetsFromAuth 应写入 auth.targets）");
-    } else {
-      for (const a of shownAssets) {
-        lines.push(
-          `- [${a.kind}] ${a.address} ←fact ${a.factId} · ${a.source}${a.intentId ? ` ←intent ${a.intentId}` : ""}`,
-        );
-      }
-      if (omittedAssets > 0) {
-        lines.push(
-          `- … 另有 ${omittedAssets} 个资产已折叠（其中 oos=${omittedOos}）；需全量清单请调用 asset_list。`,
-        );
-      }
-      lines.push(
-        "（seed/admitted/live 可作 Intent 前驱继续测；oos 禁止作为利用 Intent 唯一前驱；Reason 扇出受 maxIntentsPerReason / 同根硬顶；发现用 asset_record。）",
-      );
-    }
-    lines.push("", "## Hint（战术注入）");
-    if (hints.length === 0) {
-      lines.push("- （无）");
-    } else {
-      for (const h of hints) {
-        lines.push(`- [${h.id}] (${h.source}) ${h.text.slice(0, 320)}`);
-      }
-      lines.push("（人类/同族 Hint 须吸收进下一轮 Explore/Reason；勿忽略。）");
-    }
-    lines.push("", "## 可迁移打法（同族）");
-    if (transferable.length === 0) {
-      lines.push("- （无；验证手法后用 technique_transfer 广播）");
-    } else {
-      for (const f of transferable) {
-        lines.push(`- [${f.id}] ${f.title}${f.summary ? `: ${f.summary.slice(0, 160)}` : ""}`);
-      }
-    }
-    lines.push("", `## Findings 台账（${findings.length}）`);
-    if (findings.length === 0) {
-      lines.push("- （无；发现线索即 finding_record，复现后 finding_verify 才可进交付）");
-    } else {
-      for (const f of findings.slice(-30)) {
-        lines.push(
-          `- [${f.id}] (${f.status}/${f.severity}) ${f.title} · ${f.asset}${f.endpoint ? ` · ${f.endpoint}` : ""} · ${f.vulnClass}`,
-        );
-      }
-      lines.push("（tentative 不得写进交付叙述；verified 须附证据与 repro；同 dedupKey 幂等。）");
-    }
-    lines.push(
-      "",
-      foldedTitleCount > 0
-        ? `## 事实标题（title 层 · 显示 ${titles.length}/${allTitleFacts.length}，已折叠冷历史 ${foldedTitleCount} 条）`
-        : "## 事实标题（title 层）",
-    );
-    for (const f of titles) {
-      const intent = f.intentId ? ` ←intent ${f.intentId}` : "";
-      const hotPin = !recentTitleSet.has(f.id) ? " [热祖先]" : "";
-      lines.push(`- [${f.id}]${hotPin} ${f.title}${intent}`);
-    }
-    lines.push("", `## 进行中意图（${open.length}）`);
-    if (open.length === 0) {
-      lines.push("- （无）");
-    } else {
-      for (const i of open.slice(0, MAX_OPEN_INTENTS)) {
-        const src = i.sourceFactIds.join(",");
-        lines.push(`- [${i.id}] (${i.status}) ${i.title} ←facts ${src}`);
-      }
-      if (open.length > MAX_OPEN_INTENTS) {
-        lines.push(`- … 另有 ${open.length - MAX_OPEN_INTENTS} 条进行中意图未展开。`);
-      }
-    }
-    // P14-B4: foothold profiles (structured, bounded).
-    const profiles = this.listHostProfiles(taskId);
-    if (profiles.length) {
-      lines.push("", "## Foothold 主机画像");
-      for (const profile of profiles.slice(0, 10)) {
-        lines.push(
-          `- ${profile.asset} · ${profile.os ?? "os?"} · ${profile.domain ?? "domain?"} · users=${profile.users.length} priv=${profile.privileges.join("/") || "-"} svc=${profile.services.length} share=${profile.shares.length} av=${profile.av.join("/") || "-"}`,
-        );
-      }
-    }
-    // P14-B5: the plan survives Reason wake-ups; show only what is actionable.
-    const plan = this.listPlan(taskId);
-    if (plan.length) {
-      lines.push("", "## 作战计划（plan_step）");
-      for (const step of plan.slice(0, 12)) {
-        const needs = [
-          ...step.needsFactIds.map((id) => `fact:${id}`),
-          ...step.needsIntentIds.map((id) => `intent:${id}`),
-          ...step.needsFindingIds.map((id) => `finding:${id}`),
-        ];
-        lines.push(
-          `- [${step.id}] #${step.ord} (${step.status}) ${step.title}${needs.length ? ` ←${needs.join(",")}` : ""}`,
-        );
-      }
-      lines.push("（ready 才是可派单的下一步；intent_propose 带 planStepId；计划≠授权。）");
-    }
-
-    // 体系化漏洞大类覆盖账本（只读派生）：区分「已证实 / 线索 / 已测无发现 / 未测」，防止只盯熟悉类型而漏测。
-    const vulnClasses: Array<{ id: string; label: string; pattern: RegExp }> = [
-      { id: "injection", label: "注入(SQLi/CMDi/SSTI/XXE)", pattern: /\b(sqli|sql|cmdi|rce|ssti|xxe|nosql|ldap|cwe-89|cwe-78|cwe-94|cwe-611)\b|注入|命令执行|模板注入/i },
-      { id: "authz", label: "越权(IDOR/BOLA/BFLA)", pattern: /\b(idor|bola|bfla|authz|rbac|acl|privilege|cwe-639|cwe-862|cwe-863)\b|越权|水平|垂直|权限绕过/i },
-      { id: "authn", label: "认证会话(AuthN/JWT/OAuth)", pattern: /\b(authn|jwt|oauth|oidc|session|cookie|login|reset|mfa|cwe-287|cwe-384)\b|认证|登录|令牌|会话|密码重置/i },
-      { id: "bizlogic", label: "业务逻辑(状态机/竞态/支付)", pattern: /\b(bizlogic|business|workflow|race|toctou|state|price|coupon|replay|cwe-362|cwe-840)\b|业务逻辑|状态机|竞态|重放|越步|金额/i },
-      { id: "ssrf-file", label: "SSRF/文件(穿越/LFI/上传)", pattern: /\b(ssrf|lfi|rfi|traversal|upload|file|path|cwe-918|cwe-22|cwe-434)\b|路径穿越|任意文件|文件读取|文件上传/i },
-      { id: "client-api", label: "前端与API(XSS/CORS/GraphQL)", pattern: /\b(xss|csrf|cors|graphql|proto|prototype|dom|cwe-79|cwe-352|cwe-942)\b|跨站|原型链/i },
-      { id: "deser-config", label: "反序列化/组件CVE/配置", pattern: /\b(deser|deserialize|cve-|config|misconfig|actuator|swagger|debug|cwe-502|cwe-200)\b|反序列化|信息泄露|弱配置|默认口令/i },
-    ];
-    const verifiedVulnText = findings
-      .filter((f) => f.status === "verified" || f.status === "retested" || f.status === "accepted")
-      .map((f) => `${f.vulnClass} ${f.title}`)
-      .join(" ");
-    const tentativeVulnText = findings
-      .filter((f) => f.status === "tentative")
-      .map((f) => `${f.vulnClass} ${f.title}`)
-      .join(" ");
-    const testedText = [
-      ...allIntents.map((i) => `${i.title} ${i.technique ?? ""} ${i.conclusion ?? ""}`),
-      ...allTitleFacts.map((f) => `${f.title} ${f.tags.join(" ")}`),
-    ].join(" ");
-    const covParts: string[] = [];
-    const untestedLabels: string[] = [];
-    for (const vc of vulnClasses) {
-      if (vc.pattern.test(verifiedVulnText)) {
-        covParts.push(`${vc.label}=已证实`);
-      } else if (vc.pattern.test(tentativeVulnText)) {
-        covParts.push(`${vc.label}=待验证`);
-      } else if (vc.pattern.test(testedText)) {
-        covParts.push(`${vc.label}=已测无洞`);
-      } else {
-        covParts.push(`${vc.label}=未测`);
-        untestedLabels.push(vc.label);
-      }
-    }
-    lines.push("", "## 漏洞大类覆盖矩阵（防漏测 · 区分已测与未测）");
-    lines.push(`- ${covParts.join(" · ")}`);
-    if (untestedLabels.length > 0) {
-      lines.push(
-        `（尚有 ${untestedLabels.length} 类未测：${untestedLabels.join("、")}；收口前须核查是否适用于当前目标，避免把“未测”误当作“安全”。）`,
-      );
-    }
-
-    // P15 观察员：只读派生，不写「观察事实」，避免第二真相源。
-    const audit = this.engagementAudit(taskId);
-    lines.push("", "## 观察员（只读自动派生）");
-    if (audit.observations.length === 0) {
-      lines.push("- （无重复失败 / 重复派单 / 停滞 / 未经营高权重资产）");
-    } else {
-      for (const item of audit.observations.slice(0, 4)) {
-        lines.push(`- [${item.severity}] ${item.text}`);
-      }
-    }
-    lines.push("", "## 作业记分卡");
-    lines.push(formatEngagementAuditSummary(audit));
-    lines.push(
-      "（观察员只给建议，不派单、不改授权；完整观察项用 engagement_audit。）",
-    );
-    return lines;
+    return renderHistoryOverview(this, taskId);
   }
 
   relativeEvidencePath(absPath: string): string {
@@ -5119,11 +2118,14 @@ export function openHistory(opts: OpenHistoryOptions): HistoryStore {
   return new HistoryStore(opts);
 }
 
-export { CommandLedger, hasCommandLedger, localProbes, type CommandOutcome, type CommandProposal, type CommandTicket } from "./command-reviews.js";
-
-/* ------------------------------------------------------------------ *
- * Lane D — 确定性符号因果边校验 + DAG 导出
- * ------------------------------------------------------------------ */
+export {
+  CommandLedger,
+  hasCommandLedger,
+  localProbes,
+  type CommandOutcome,
+  type CommandProposal,
+  type CommandTicket,
+} from "./command-reviews.js";
 export {
   applyCausalVerdict,
   artifact,

@@ -1,46 +1,38 @@
 /**
- * 第九轮新增路由：委托边界、持久作业、人工求助/交接、材料与覆盖、
- * 四图与因果、记忆/档案、飞轮与提案、角色与供应商韧性。
+ * 活跃红队任务作战路由（Active Task Operations Routes）。
  *
- * 约定：新入口统一返回 JSON；委托不匹配 403；缺输入 400；业务冲突 409。
+ * 仅承载围绕单兵红队工作台与 `Fact–Intent–Goal` DAG 真相核的实战运行接口：
+ * - 今日工作面（`/today`）
+ * - 驻留会话（`http-sessions`）、持久作业（`jobs`）、人工求助与交接（`consults` / `handoff`）
+ * - 证据材料与覆盖矩阵（`materials` / `coverage-cells` / `coverage-matrix` / `freshness`）
+ * - 靶标变更与回滚脚本（`changes` / `rollback`）、只读历史接触（`asset-history`）
+ * - 事件哈希链（`chain`）、命令熔断重置（`command-reset`）、审计与独立复核（`audit` / `validations`）
+ * - 战场态势投影（`p14`）、图谱与因果链（`graphs` / `causality`）、空转告警（`alerts`）
+ *
+ * 冻结的 P8/P9 支线（全局记忆、提案飞轮、基准评测、趋势）及模拟推演接口（`roles` / `provider` / `model-request`）
+ * 已解耦至 `./routes-frozen.ts`。
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import {
+  AckJobSchema,
   AnswerConsultSchema,
   BoundaryError,
   CONSULT_BLOCKING_TTL_MS,
   CreateConsultSchema,
-  CreateMemoryDraftSchema,
-  CreateProposalSchema,
   ImportMaterialSchema,
-  MEMORY_INJECTION_TITLE_LIMIT,
   ManualCoverageSchema,
-  ProposalSchema,
-  ProviderPolicySchema,
-  ReviewMemorySchema,
-  RunEvaluationSchema,
-  RunRoleWorkSchema,
   SubmitJobSchema,
-  AckJobSchema,
-  assetIdentity,
   classifyMaterial,
   deriveCoverageMatrix,
-  detectMaterialKind,
   findAttackPaths,
   freshnessOf,
-  matchMemory,
   noProgressAlarm,
-  normalizeHost,
-  planProviderAttempt,
   rollbackScript,
-  targetAllows,
   visibilityDenial,
   type EvidenceImport,
   type GraphView,
-  type MemoryNode,
-  type ProviderFault,
   type TaskRecord,
 } from "@gongyuai/contracts";
 import {
@@ -60,13 +52,11 @@ import { TunnelManager, deleteHttpSession, listHttpSessionSummaries, upsertHttpS
 import {
   buildAssetGraph,
   buildExecutionGraph,
-  buildMemoryGraph,
   buildSurfaceGraph,
   causalityTrace,
 } from "./graphs.js";
-import { simulateRoleWork } from "./roles.js";
-import { MEMORY_READ_UNAVAILABLE, beginMemoryReview, memoryReadAllowed, memoryReviewEngagementMatches, verifiedIdentityFromRequest } from "./memory-access.js";
 import { taskPaths } from "./paths.js";
+import { areFrozenRoutesEnabled, handleFrozenRoute, handleFrozenTaskRoute } from "./routes-frozen.js";
 
 export type OpsRouteDeps = {
   store: ControlStore;
@@ -75,7 +65,7 @@ export type OpsRouteDeps = {
   runner: WorkerRunner;
 };
 
-function send(res: ServerResponse, status: number, body: unknown): void {
+export function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body, null, 2);
   res.writeHead(status, {
     "content-type": "application/json",
@@ -84,12 +74,17 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-function sendText(res: ServerResponse, status: number, body: string, type = "text/plain; charset=utf-8"): void {
+export function sendText(
+  res: ServerResponse,
+  status: number,
+  body: string,
+  type = "text/plain; charset=utf-8",
+): void {
   res.writeHead(status, { "content-type": type, "content-length": Buffer.byteLength(body) });
   res.end(body);
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+export async function readJson(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   const raw = Buffer.concat(chunks).toString("utf8");
@@ -97,11 +92,11 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(raw);
 }
 
-function sha256(bytes: Buffer | string): string {
+export function sha256(bytes: Buffer | string): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function nowIso(url: URL, fallback = Date.now()): string {
+export function nowIso(url: URL, fallback = Date.now()): string {
   const raw = url.searchParams.get("now");
   if (raw) {
     const parsed = Date.parse(raw);
@@ -110,16 +105,20 @@ function nowIso(url: URL, fallback = Date.now()): string {
   return new Date(fallback).toISOString();
 }
 
-function boundaryOf(task: TaskRecord, url: URL, req: IncomingMessage) {
+/**
+ * 单兵工作台委托边界检查：
+ * - 默认无显式 `tenantId` / `engagementId` 时直接放行（任务 ID 即唯一寻址）；
+ * - 仅在调用方显式传入租户或委托标识时校验一致性，保持既有隔离契约兼容。
+ */
+export function checkSingleUserBoundary(task: TaskRecord, url: URL, req: IncomingMessage) {
   const headerEngagement = req.headers["x-engagement-id"];
   const headerTenant = req.headers["x-tenant-id"];
   const tenant = url.searchParams.get("tenantId") ?? (typeof headerTenant === "string" ? headerTenant : undefined);
-  const engagement = url.searchParams.get("engagementId") ?? (typeof headerEngagement === "string" ? headerEngagement : undefined);
-  // 未显式声明上下文时，任务 ID 本身已决定委托；显式声明就必须匹配。
+  const engagement =
+    url.searchParams.get("engagementId") ?? (typeof headerEngagement === "string" ? headerEngagement : undefined);
+  if (tenant === undefined && engagement === undefined) return null;
   return visibilityDenial(
     {
-      // visibilityDenial 会与任务的 tenantId 比较；未声明时直接传任务自身的租户，
-      // 等价于“不额外限制”，但一旦调用方声明了别的租户就会 403。
       tenantId: tenant ?? task.tenantId,
       ...(engagement ? { engagementId: engagement } : {}),
       role: "operator",
@@ -128,17 +127,9 @@ function boundaryOf(task: TaskRecord, url: URL, req: IncomingMessage) {
   );
 }
 
-function open(task: TaskRecord, readOnly = false): HistoryStore {
+export function openTaskHistory(task: TaskRecord, readOnly = false): HistoryStore {
   const paths = taskPaths(task.dataDir);
   return openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly });
-}
-
-function memoryVisible(node: MemoryNode, scope: { tenantId: string; engagementId?: string; mode: "tenant" | "engagement" }, store: ControlStore): boolean {
-  return node.provenance.some((pointer) => {
-    if (scope.mode === "engagement") return scope.engagementId !== undefined && pointer.engagementId === scope.engagementId;
-    const task = store.get(pointer.taskId);
-    return (task?.tenantId ?? "default") === scope.tenantId;
-  });
 }
 
 export async function handleOpsRoute(
@@ -148,7 +139,7 @@ export async function handleOpsRoute(
   url: URL,
   deps: OpsRouteDeps,
 ): Promise<boolean> {
-  const { store, jobs, platform } = deps;
+  const { store, jobs } = deps;
   const path = url.pathname;
 
   /* ------------------------------- 今日工作 ------------------------------- */
@@ -162,28 +153,28 @@ export async function handleOpsRoute(
       tasks: visible,
       generatedAt: new Date().toISOString(),
       nowMs: Date.parse(nowIso(url)),
-      open: (task) => open(task, true),
+      open: (task) => openTaskHistory(task, true),
     });
-    return send(res, 200, work), true;
+    return sendJson(res, 200, work), true;
   }
 
-  /* ------------------------------ 任务级路由 ------------------------------ */
+  /* ---------------------------- 活跃任务级路由 ---------------------------- */
   const taskMatch = path.match(
-    /^\/tasks\/([^/]+)\/(handoff|consults|jobs|materials|coverage-matrix|coverage-cells|freshness|changes|rollback|graphs|causality|roles|provider|model-request|memory|alerts|p14|asset-history|audit|validations|command-reset|chain|http-sessions)(\/.*)?$/,
+    /^\/tasks\/([^/]+)\/(handoff|consults|jobs|materials|coverage-matrix|coverage-cells|freshness|changes|rollback|graphs|causality|alerts|p14|asset-history|audit|validations|command-reset|chain|http-sessions)(\/.*)?$/,
   );
-  if (!taskMatch) return handlePlatformRoute(req, res, method, url, deps);
+  if (!taskMatch) return handleFrozenRoute(req, res, method, url, deps);
 
   const taskId = decodeURIComponent(taskMatch[1]!);
   const group = taskMatch[2]!;
   const rest = taskMatch[3] ?? "";
   const task = store.get(taskId);
   if (!task) {
-    send(res, 404, { error: "task-not-found" });
+    sendJson(res, 404, { error: "task-not-found" });
     return true;
   }
-  const denial = boundaryOf(task, url, req);
+  const denial = checkSingleUserBoundary(task, url, req);
   if (denial) {
-    send(res, 403, { error: denial.code, message: denial.message });
+    sendJson(res, 403, { error: denial.code, message: denial.message });
     return true;
   }
   const now = nowIso(url);
@@ -191,10 +182,10 @@ export async function handleOpsRoute(
   try {
     if (group === "http-sessions") {
       if (method === "GET" && rest === "") {
-        return send(res, 200, { sessions: listHttpSessionSummaries(task.dataDir) }), true;
+        return sendJson(res, 200, { sessions: listHttpSessionSummaries(task.dataDir) }), true;
       }
       if (method === "POST" && rest === "") {
-        const body = await readJson(req) as {
+        const body = (await readJson(req)) as {
           name?: unknown;
           host?: unknown;
           cookies?: unknown;
@@ -203,7 +194,7 @@ export async function handleOpsRoute(
         };
         const record = (value: unknown): Record<string, unknown> | undefined =>
           value && typeof value === "object" && !Array.isArray(value)
-            ? value as Record<string, unknown>
+            ? (value as Record<string, unknown>)
             : undefined;
         const saved = upsertHttpSession(task.dataDir, {
           name: typeof body.name === "string" ? body.name : "",
@@ -212,7 +203,7 @@ export async function handleOpsRoute(
           ...(record(body.headers) ? { headers: record(body.headers) } : {}),
           ...(typeof body.cookie === "string" ? { cookie: body.cookie } : {}),
         });
-        return send(res, 200, {
+        return sendJson(res, 200, {
           ok: true,
           session: {
             name: saved.name,
@@ -226,15 +217,15 @@ export async function handleOpsRoute(
       if (removed) {
         const name = decodeURIComponent(removed[1]!);
         if (!deleteHttpSession(task.dataDir, name)) {
-          return send(res, 404, { error: "session not found" }), true;
+          return sendJson(res, 404, { error: "session not found" }), true;
         }
-        return send(res, 200, { ok: true, name }), true;
+        return sendJson(res, 200, { ok: true, name }), true;
       }
-      return send(res, 404, { error: "not found" }), true;
+      return sendJson(res, 404, { error: "not found" }), true;
     }
 
     if (group === "handoff" && method === "GET") {
-      const history = open(task);
+      const history = openTaskHistory(task);
       try {
         const swept = sweepTaskConsults(history, taskId, Date.parse(now));
         const packet = assembleHandoff({
@@ -243,7 +234,7 @@ export async function handleOpsRoute(
           generatedAt: now,
           nextOwner: url.searchParams.get("nextOwner") ?? null,
         });
-        return send(res, 200, { handoff: packet, releasedConsults: swept.length }), true;
+        return sendJson(res, 200, { handoff: packet, releasedConsults: swept.length }), true;
       } finally {
         history.close();
       }
@@ -251,23 +242,23 @@ export async function handleOpsRoute(
 
     if (group === "consults") {
       if (method === "GET" && rest === "") {
-        const history = open(task, true);
+        const history = openTaskHistory(task, true);
         try {
-          return send(res, 200, { consults: history.ops.listConsults(taskId) }), true;
+          return sendJson(res, 200, { consults: history.ops.listConsults(taskId) }), true;
         } finally {
           history.close();
         }
       }
       if (method === "POST" && rest === "") {
         const input = CreateConsultSchema.parse(await readJson(req));
-        const history = open(task);
+        const history = openTaskHistory(task);
         try {
           const consult = history.ops.createConsult(
             { taskId, engagementId: task.engagementId, scopeVersion: task.scopeVersion },
             input,
             Date.parse(now),
           );
-          return send(res, 201, { consult }), true;
+          return sendJson(res, 201, { consult }), true;
         } finally {
           history.close();
         }
@@ -275,10 +266,10 @@ export async function handleOpsRoute(
       if (method === "POST" && rest === "/sweep") {
         const body = (await readJson(req)) as { now?: string };
         const at = body.now && Number.isFinite(Date.parse(body.now)) ? Date.parse(body.now) : Date.parse(now);
-        const history = open(task);
+        const history = openTaskHistory(task);
         try {
           const changed = history.ops.sweepConsults(taskId, at);
-          return send(res, 200, { released: changed, now: new Date(at).toISOString() }), true;
+          return sendJson(res, 200, { released: changed, now: new Date(at).toISOString() }), true;
         } finally {
           history.close();
         }
@@ -286,7 +277,7 @@ export async function handleOpsRoute(
       const answerMatch = rest.match(/^\/([^/]+)\/answer$/);
       if (method === "POST" && answerMatch) {
         const input = AnswerConsultSchema.parse(await readJson(req));
-        const history = open(task);
+        const history = openTaskHistory(task);
         try {
           const consult = history.ops.answerConsult(taskId, decodeURIComponent(answerMatch[1]!), input, Date.parse(now));
           let hintId: string | null = null;
@@ -299,7 +290,7 @@ export async function handleOpsRoute(
             });
             hintId = hint.id;
           }
-          return send(res, 200, { consult, hintId }), true;
+          return sendJson(res, 200, { consult, hintId }), true;
         } finally {
           history.close();
         }
@@ -308,19 +299,15 @@ export async function handleOpsRoute(
 
     if (group === "jobs") {
       if (method === "GET" && rest === "") {
-        const history = open(task, true);
+        const history = openTaskHistory(task, true);
         try {
           const list = history.ops.listJobs(taskId);
           const withReceipts = url.searchParams.get("receipts") === "1";
-          return send(
-            res,
-            200,
-            {
-              jobs: withReceipts
-                ? list.map((job) => ({ ...job, receipts: history.ops.listReceipts(taskId, job.id) }))
-                : list,
-            },
-          ), true;
+          return sendJson(res, 200, {
+            jobs: withReceipts
+              ? list.map((job) => ({ ...job, receipts: history.ops.listReceipts(taskId, job.id) }))
+              : list,
+          }), true;
         } finally {
           history.close();
         }
@@ -332,47 +319,47 @@ export async function handleOpsRoute(
           if (!ref.sha256) continue;
           const actual = sha256(readEvidenceBytes(evidenceDir, ref.path));
           if (actual !== ref.sha256) {
-            send(res, 409, { error: "input-sha256-mismatch", path: ref.path, expected: ref.sha256, actual });
+            sendJson(res, 409, { error: "input-sha256-mismatch", path: ref.path, expected: ref.sha256, actual });
             return true;
           }
         }
         const job = jobs.submit(taskId, input);
-        return send(res, 202, { job }), true;
+        return sendJson(res, 202, { job }), true;
       }
       const jobMatch = rest.match(/^\/([^/]+)(\/.*)?$/);
       if (jobMatch) {
         const jobId = decodeURIComponent(jobMatch[1]!);
         const action = jobMatch[2] ?? "";
         if (method === "GET" && action === "") {
-          const history = open(task, true);
+          const history = openTaskHistory(task, true);
           try {
             const job = history.ops.getJob(taskId, jobId);
-            if (!job) return send(res, 404, { error: "job-not-found" }), true;
-            return send(res, 200, { job, receipts: history.ops.listReceipts(taskId, jobId) }), true;
+            if (!job) return sendJson(res, 404, { error: "job-not-found" }), true;
+            return sendJson(res, 200, { job, receipts: history.ops.listReceipts(taskId, jobId) }), true;
           } finally {
             history.close();
           }
         }
         if (method === "POST" && action === "/retry") {
           const job = jobs.retry(taskId, jobId);
-          return send(res, 202, { job }), true;
+          return sendJson(res, 202, { job }), true;
         }
         if (method === "POST" && action === "/receipt") {
           const input = AckJobSchema.parse(await readJson(req));
-          const history = open(task);
+          const history = openTaskHistory(task);
           try {
             const result = history.ops.ackJob(taskId, jobId, input, now);
-            return send(res, 200, result), true;
+            return sendJson(res, 200, result), true;
           } finally {
             history.close();
           }
         }
         if (method === "POST" && action === "/cancel") {
-          const history = open(task);
+          const history = openTaskHistory(task);
           try {
             const job = history.ops.updateJob(taskId, jobId, { status: "canceled", pauseState: "none" }, now);
-            if (!job) return send(res, 404, { error: "job-not-found" }), true;
-            return send(res, 200, { job }), true;
+            if (!job) return sendJson(res, 404, { error: "job-not-found" }), true;
+            return sendJson(res, 200, { job }), true;
           } finally {
             history.close();
           }
@@ -382,9 +369,9 @@ export async function handleOpsRoute(
 
     if (group === "materials") {
       if (method === "GET" && rest === "") {
-        const history = open(task, true);
+        const history = openTaskHistory(task, true);
         try {
-          return send(res, 200, { materials: history.ops.listMaterials(taskId) }), true;
+          return sendJson(res, 200, { materials: history.ops.listMaterials(taskId) }), true;
         } finally {
           history.close();
         }
@@ -406,7 +393,7 @@ export async function handleOpsRoute(
         });
         const secretLike = /(password|passwd|secret|token|api[_-]?key)\s*[:=]\s*\S{6,}/i.test(input.content);
         if (secretLike && !input.secretRef) {
-          send(res, 422, {
+          sendJson(res, 422, {
             error: "secret-material-requires-controlled-ref",
             message: "材料疑似包含明文凭据；请改为 secretRef 受控引用后重试（不写入明文）",
           });
@@ -437,10 +424,10 @@ export async function handleOpsRoute(
           reason: classification.reason,
           scopeVersion: task.scopeVersion,
         };
-        const history = open(task);
+        const history = openTaskHistory(task);
         try {
           history.ops.recordMaterial(material);
-          return send(res, 201, { material, classification }), true;
+          return sendJson(res, 201, { material, classification }), true;
         } finally {
           history.close();
         }
@@ -450,22 +437,22 @@ export async function handleOpsRoute(
     if (group === "coverage-cells") {
       if (method === "POST" && rest === "") {
         const input = ManualCoverageSchema.parse(await readJson(req));
-        const history = open(task);
+        const history = openTaskHistory(task);
         try {
           const row = history.ops.recordManualCoverage(
             { taskId, engagementId: task.engagementId, scopeVersion: task.scopeVersion },
             input,
             now,
           );
-          return send(res, 201, { coverage: row }), true;
+          return sendJson(res, 201, { coverage: row }), true;
         } finally {
           history.close();
         }
       }
       if (method === "GET" && rest === "") {
-        const history = open(task, true);
+        const history = openTaskHistory(task, true);
         try {
-          return send(res, 200, { coverage: history.ops.listManualCoverage(taskId) }), true;
+          return sendJson(res, 200, { coverage: history.ops.listManualCoverage(taskId) }), true;
         } finally {
           history.close();
         }
@@ -473,7 +460,7 @@ export async function handleOpsRoute(
     }
 
     if (group === "coverage-matrix" && method === "GET") {
-      const history = open(task, true);
+      const history = openTaskHistory(task, true);
       try {
         const events = history.listEvents(taskId, 2000);
         const retractedEvidence = events
@@ -530,12 +517,16 @@ export async function handleOpsRoute(
             evidence: finding.evidence,
             endpoint: finding.endpoint,
           })),
-          intents: input.intents.map((intent) => ({ technique: intent.technique, asset: intent.assetRoot, status: intent.status })),
+          intents: input.intents.map((intent) => ({
+            technique: intent.technique,
+            asset: intent.assetRoot,
+            status: intent.status,
+          })),
           manual: input.manual,
           retractedEvidence,
         });
         const graph = buildSurfaceGraph(input);
-        return send(res, 200, {
+        return sendJson(res, 200, {
           cells,
           summary: {
             total: cells.length,
@@ -554,7 +545,7 @@ export async function handleOpsRoute(
 
     if (group === "freshness" && method === "GET") {
       const at = Date.parse(now);
-      const history = open(task, true);
+      const history = openTaskHistory(task, true);
       try {
         const facts = history.listFacts(taskId).map((fact) => ({
           factId: fact.id,
@@ -564,7 +555,7 @@ export async function handleOpsRoute(
           createdAt: fact.createdAt,
           freshness: freshnessOf(fact, at),
         }));
-        return send(res, 200, {
+        return sendJson(res, 200, {
           now: new Date(at).toISOString(),
           fresh: facts.filter((entry) => entry.freshness.state === "fresh").length,
           needsReview: facts.filter((entry) => entry.freshness.state === "needs-review"),
@@ -576,17 +567,19 @@ export async function handleOpsRoute(
 
     if (group === "changes") {
       if (method === "GET" && rest === "") {
-        const history = open(task, true);
+        const history = openTaskHistory(task, true);
         try {
           const changes = history.ops.listChanges(taskId);
           const open = changes.filter((change) => !change.closedAt);
-          return send(res, 200, { changes, open, script: rollbackScript(changes) }), true;
+          return sendJson(res, 200, { changes, open, script: rollbackScript(changes) }), true;
         } finally {
           history.close();
         }
       }
       if (method === "POST" && rest === "") {
-        const body = (await readJson(req)) as Record<string, unknown> & { beforeMaterial?: { path: string; content: string } };
+        const body = (await readJson(req)) as Record<string, unknown> & {
+          beforeMaterial?: { path: string; content: string };
+        };
         const before = body.beforeMaterial;
         let beforeSha: string | null = null;
         const materials: Array<{ path: string; sha256: string }> = [];
@@ -597,7 +590,7 @@ export async function handleOpsRoute(
           writeEvidenceFile(paths.evidenceDir, before.path, before.content);
           materials.push({ path: before.path, sha256: beforeSha });
         }
-        const history = open(task);
+        const history = openTaskHistory(task);
         try {
           const change = history.ops.recordChange(
             { taskId, engagementId: task.engagementId, scopeVersion: task.scopeVersion },
@@ -616,7 +609,7 @@ export async function handleOpsRoute(
             now,
             materials,
           );
-          return send(res, 201, { change }), true;
+          return sendJson(res, 201, { change }), true;
         } finally {
           history.close();
         }
@@ -624,11 +617,16 @@ export async function handleOpsRoute(
       const confirmMatch = rest.match(/^\/([^/]+)\/confirm$/);
       if (method === "POST" && confirmMatch) {
         const body = (await readJson(req)) as { confirmedBy?: string };
-        const history = open(task);
+        const history = openTaskHistory(task);
         try {
-          const change = history.ops.confirmChange(taskId, decodeURIComponent(confirmMatch[1]!), body.confirmedBy ?? "operator", now);
-          if (!change) return send(res, 404, { error: "change-not-found" }), true;
-          return send(res, 200, { change }), true;
+          const change = history.ops.confirmChange(
+            taskId,
+            decodeURIComponent(confirmMatch[1]!),
+            body.confirmedBy ?? "operator",
+            now,
+          );
+          if (!change) return sendJson(res, 404, { error: "change-not-found" }), true;
+          return sendJson(res, 200, { change }), true;
         } finally {
           history.close();
         }
@@ -636,7 +634,7 @@ export async function handleOpsRoute(
     }
 
     if (group === "rollback" && method === "GET") {
-      const history = open(task, true);
+      const history = openTaskHistory(task, true);
       try {
         return sendText(res, 200, rollbackScript(history.ops.listChanges(taskId)), "text/x-shellscript; charset=utf-8"), true;
       } finally {
@@ -647,14 +645,14 @@ export async function handleOpsRoute(
     // P14-B3 — cross-task read-only "历史接触"（线索，不是授权/事实）。
     if (group === "asset-history" && method === "GET") {
       const address = url.searchParams.get("address") ?? "";
-      return send(res, 200, assetHistory(store, task, address)), true;
+      return sendJson(res, 200, assetHistory(store, task, address)), true;
     }
 
     // P17 — event hash-chain head + verification.
     if (group === "chain" && method === "GET") {
-      const history = open(task, true);
+      const history = openTaskHistory(task, true);
       try {
-        return send(res, 200, history.verifyEventChain(taskId)), true;
+        return sendJson(res, 200, history.verifyEventChain(taskId)), true;
       } finally {
         history.close();
       }
@@ -663,10 +661,10 @@ export async function handleOpsRoute(
     // P15-C2 — operator reset for the repeated-command breaker.
     if (group === "command-reset" && method === "POST") {
       const body = (await readJson(req).catch(() => ({}))) as { reason?: unknown };
-      const history = open(task);
+      const history = openTaskHistory(task);
       try {
         history.resetCommandAttempts(taskId, typeof body.reason === "string" ? body.reason : "");
-        return send(res, 200, { ok: true }), true;
+        return sendJson(res, 200, { ok: true }), true;
       } finally {
         history.close();
       }
@@ -674,9 +672,9 @@ export async function handleOpsRoute(
 
     // P15 — read-only engagement audit (observations + confirmation scorecard).
     if (group === "audit" && method === "GET") {
-      const history = open(task, true);
+      const history = openTaskHistory(task, true);
       try {
-        return send(res, 200, history.engagementAudit(taskId)), true;
+        return sendJson(res, 200, history.engagementAudit(taskId)), true;
       } finally {
         history.close();
       }
@@ -684,10 +682,10 @@ export async function handleOpsRoute(
 
     // P15-C1 — append-only independent validations for this task.
     if (group === "validations" && method === "GET") {
-      const history = open(task, true);
+      const history = openTaskHistory(task, true);
       try {
         const findingId = url.searchParams.get("findingId") ?? undefined;
-        return send(res, 200, {
+        return sendJson(res, 200, {
           validations: history.listFindingValidations(taskId, findingId),
         }), true;
       } finally {
@@ -697,9 +695,9 @@ export async function handleOpsRoute(
 
     // P14 — read-only projection of transactions / plan / credentials / retests / OAST.
     if (group === "p14" && method === "GET") {
-      const history = open(task, true);
+      const history = openTaskHistory(task, true);
       try {
-        return send(res, 200, {
+        return sendJson(res, 200, {
           transactions: history.listHttpTransactions(taskId, 50),
           plan: history.listPlan(taskId),
           credentials: history.listCredentials(taskId),
@@ -711,7 +709,7 @@ export async function handleOpsRoute(
             try {
               return new TunnelManager({
                 baseDir: join(task.dataDir, "exec"),
-                authorizeHost: () => true, // read-only listing; authorization happened at open
+                authorizeHost: () => true,
               }).list();
             } catch {
               return [];
@@ -725,7 +723,10 @@ export async function handleOpsRoute(
 
     if (group === "graphs" && method === "GET") {
       const view = rest.replace(/^\//, "");
-      const history = open(task, true);
+      if (view === "memory") {
+        return await handleFrozenTaskRoute(req, res, method, url, deps, task, "graphs", rest, now);
+      }
+      const history = openTaskHistory(task, true);
       try {
         const assets = history.listAssets(taskId);
         const facts = history.listFacts(taskId);
@@ -739,21 +740,24 @@ export async function handleOpsRoute(
           const nodes = all.nodes.filter((node) => node.kind.startsWith(prefix));
           const ids = new Set(nodes.map((node) => node.id));
           const edges = all.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
-          return send(res, 200, {
+          return sendJson(res, 200, {
             view,
             nodes,
             edges,
-            paths: findAttackPaths({ nodes, edges }, {
-              maxDepth: 8,
-              maxPaths: 20,
-              ...(view === "cloud"
-                ? {
-                    targets: nodes
-                      .filter((node) => node.kind === "cloud-role" || /admin|owner|root/i.test(node.name))
-                      .map((node) => node.id),
-                  }
-                : {}),
-            }),
+            paths: findAttackPaths(
+              { nodes, edges },
+              {
+                maxDepth: 8,
+                maxPaths: 20,
+                ...(view === "cloud"
+                  ? {
+                      targets: nodes
+                        .filter((node) => node.kind === "cloud-role" || /admin|owner|root/i.test(node.name))
+                        .map((node) => node.id),
+                    }
+                  : {}),
+              },
+            ),
           }), true;
         }
         if (view === "assets") {
@@ -799,14 +803,10 @@ export async function handleOpsRoute(
             intents,
             jobs: history.ops.listJobs(taskId),
           });
-        } else if (view === "memory") {
-          // 没有可核验身份时不组装图，避免把节点标题放进响应。
-          memoryReadAllowed(verifiedIdentityFromRequest());
-          return send(res, 403, MEMORY_READ_UNAVAILABLE), true;
         } else {
-          return send(res, 404, { error: `unknown-graph-view:${view}` }), true;
+          return sendJson(res, 404, { error: `unknown-graph-view:${view}` }), true;
         }
-        return send(res, 200, { graph }), true;
+        return sendJson(res, 200, { graph }), true;
       } finally {
         history.close();
       }
@@ -814,11 +814,11 @@ export async function handleOpsRoute(
 
     if (group === "causality" && method === "GET") {
       const findingId = rest.replace(/^\//, "");
-      if (!findingId) return send(res, 400, { error: "findingId-required" }), true;
-      const history = open(task, true);
+      if (!findingId) return sendJson(res, 400, { error: "findingId-required" }), true;
+      const history = openTaskHistory(task, true);
       try {
         const finding = history.getFinding(taskId, findingId);
-        if (!finding) return send(res, 404, { error: "finding-not-found" }), true;
+        if (!finding) return sendJson(res, 404, { error: "finding-not-found" }), true;
         const trace = causalityTrace({
           taskId,
           engagementId: task.engagementId,
@@ -828,126 +828,17 @@ export async function handleOpsRoute(
           facts: history.listFacts(taskId),
           intents: history.listIntents(taskId),
         });
-        return send(res, 200, { trace }), true;
+        return sendJson(res, 200, { trace }), true;
       } finally {
         history.close();
       }
     }
 
-    if (group === "roles") {
-      if (method === "GET" && rest === "") {
-        const history = open(task, true);
-        try {
-          const list = history.ops
-            .listJobs(taskId)
-            .filter((job) => job.kind === "role-plan" || job.kind === "role-review");
-          return send(res, 200, { work: list.map((job) => ({ jobId: job.id, kind: job.kind, status: job.status, result: job.result })) }), true;
-        } finally {
-          history.close();
-        }
-      }
-      if (method === "POST" && rest === "") {
-        const input = RunRoleWorkSchema.parse(await readJson(req));
-        if (input.kind === "incident") {
-          const output = simulateRoleWork(input.role, "incident", input.input);
-          let paused: TaskRecord | null = null;
-          if (output.pauseRequested) paused = await deps.runner.pause(taskId);
-          const history = open(task);
-          try {
-            history.recordEvent(taskId, "role_work_finished", {
-              role: input.role,
-              kind: input.kind,
-              output: output as unknown as Record<string, unknown>,
-              pauseRequested: output.pauseRequested,
-              authenticity: "simulated",
-            });
-          } finally {
-            history.close();
-          }
-          return send(res, 200, { role: input.role, kind: input.kind, output, paused: Boolean(paused), authenticity: "simulated", billing: "none" }), true;
-        }
-        const job = jobs.submit(taskId, {
-          kind: input.kind === "plan" ? "role-plan" : "role-review",
-          label: `${input.role}:${input.kind}`,
-          submittedBy: "operator",
-          inputs: [{ path: `ops/roles/${taskId}.json`, sha256: null }],
-          options: { role: input.role, kind: input.kind, input: input.input, simulated: true },
-        });
-        return send(res, 202, { job }), true;
-      }
-    }
-
-    if (group === "provider") {
-      if (method === "GET" && rest === "") {
-        const history = open(task, true);
-        try {
-          const attempts = history
-            .listEvents(taskId, 1000)
-            .filter((event) => event.kind === "provider_fault_handled")
-            .map((event) => ({ id: event.id, at: event.createdAt, ...(event.payload as Record<string, unknown>) }));
-          return send(res, 200, { attempts }), true;
-        } finally {
-          history.close();
-        }
-      }
-      if (method === "POST" && rest === "") {
-        const body = (await readJson(req)) as {
-          provider?: string;
-          fault?: ProviderFault;
-          attempt?: number;
-          fallbackAllowed?: boolean;
-          billing?: "none" | "usage-only" | "billed";
-          tokens?: number;
-        };
-        if (!body.fault || !body.provider) return send(res, 400, { error: "provider-and-fault-required" }), true;
-        const policy = ProviderPolicySchema.parse({
-          engagementId: task.engagementId,
-          materialDataClass: "customer-material",
-          providers: [
-            { name: body.provider, priority: 0, allowedDataClasses: ["customer-material"] },
-            { name: `${body.provider}-fallback`, priority: 1, allowedDataClasses: body.fallbackAllowed ? ["customer-material"] : [] },
-          ],
-        });
-        const plan = planProviderAttempt({
-          policy,
-          provider: body.provider,
-          fault: body.fault,
-          attempt: Math.max(0, Number(body.attempt ?? 0)),
-          billing: body.billing ?? "none",
-        });
-        const history = open(task);
-        try {
-          const key = `${body.provider}:${body.fault}:${body.attempt ?? 0}`;
-          const duplicate = history
-            .listEvents(taskId, 2000)
-            .some(
-              (event) =>
-                event.kind === "provider_fault_handled" &&
-                String((event.payload as { key?: unknown }).key ?? "") === key &&
-                (event.payload as { tokens?: unknown }).tokens !== undefined,
-            );
-          history.recordEvent(taskId, "provider_fault_handled", {
-            key,
-            provider: body.provider,
-            fault: body.fault,
-            attempt: body.attempt ?? 0,
-            ...plan,
-            tokens: duplicate ? null : (body.tokens ?? null),
-            duplicateAccounting: duplicate,
-          });
-          return send(res, 200, { plan, duplicateAccounting: duplicate, egressEngagement: task.engagementId }), true;
-        } finally {
-          history.close();
-        }
-      }
-    }
-
     if (group === "alerts" && method === "GET") {
       const threshold = Number(url.searchParams.get("threshold") ?? 20);
-      const history = open(task, true);
+      const history = openTaskHistory(task, true);
       try {
         const events = history.listEvents(taskId, 2000);
-        // 与事件顺序无关：取最新一条 fact_appended 的时间，再数它之后的工具闸记录。
         const lastFactAt =
           events
             .filter((event) => event.kind === "fact_appended")
@@ -957,318 +848,18 @@ export async function handleOpsRoute(
         const toolCalls = events.filter((event) => event.kind === "tool_gate" && event.createdAt > lastFactAt).length;
         const waiting = history.ops.listConsults(taskId).some((consult) => consult.status === "open" && consult.blocking);
         const alarm = noProgressAlarm({ toolCallsSinceFact: toolCalls, threshold, waitingOnConsult: waiting });
-        return send(res, 200, { ...alarm, toolCallsSinceFact: toolCalls, threshold, waitingOnConsult: waiting }), true;
-      } finally {
-        history.close();
-      }
-    }
-
-    if (group === "memory") {
-      if (!memoryReadAllowed(verifiedIdentityFromRequest())) {
-        return send(res, 403, MEMORY_READ_UNAVAILABLE), true;
-      }
-      if (method === "POST" && rest === "/inject") {
-        const body = (await readJson(req)) as { asset?: string; familyKey?: string; cwes?: string[]; techniques?: string[] };
-        const history = open(task);
-        try {
-          const assets = history.listAssets(taskId);
-          const findings = history.listFindings(taskId);
-          const intents = history.listIntents(taskId);
-          const already = platform.listInjections({ taskId }).map((injection) => injection.memoryId);
-          const candidates = platform
-            .listNodes({ status: "confirmed" })
-            .filter((node) => memoryVisible(node, { tenantId: task.tenantId, engagementId: task.engagementId, mode: "engagement" }, store));
-          const matches = matchMemory(
-            candidates,
-            {
-              familyKey: body.familyKey ?? null,
-              cwes: body.cwes ?? findings.map((finding) => finding.vulnClass),
-              techniques: body.techniques ?? intents.map((intent) => intent.technique).filter((value): value is string => Boolean(value)),
-              assetKey: body.asset ?? assets[0]?.address ?? null,
-              assetClass: body.asset ?? null,
-            },
-            { limit: MEMORY_INJECTION_TITLE_LIMIT, alreadyInjected: already },
-          );
-          const injected = matches.map((match) => {
-            const hint = history.appendHint({
-              taskId,
-              text: `[全局记忆/${match.node.kind}] ${match.node.title}${match.node.body ? `｜${match.node.body.slice(0, 300)}` : ""}`,
-              source: "system",
-              tags: ["memory", `memory:${match.node.id}`, `layer:${match.layer}`, ...match.matched],
-            });
-            const injection = platform.recordInjection({
-              memoryId: match.node.id,
-              taskId,
-              engagementId: task.engagementId,
-              hintId: hint.id,
-              layer: match.layer,
-              matchedKeys: match.matched,
-              reason: match.hard ? "hard-key" : "soft-key>=2",
-              at: now,
-            });
-            history.recordEvent(taskId, "memory_injected", { memoryId: match.node.id, hintId: hint.id, layer: match.layer });
-            return { memoryId: match.node.id, title: match.node.title, layer: match.layer, matched: match.matched, hintId: hint.id, injection };
-          });
-          return send(res, 200, { injected, considered: candidates.length }), true;
-        } finally {
-          history.close();
-        }
-      }
-    }
-
-    if (group === "model-request" && method === "POST") {
-      // 模拟模型请求：只允许本任务 + 本委托记忆；不调用真实供应商。
-      const history = open(task, true);
-      try {
-        const hints = history.listHints(taskId, 20);
-        return send(res, 200, {
-          authenticity: "simulated",
-          billing: "none",
-          egress: { tenantId: task.tenantId, engagementId: task.engagementId, allowed: true },
-          payload: {
-            task: { id: task.id, name: task.name, scopeVersion: task.scopeVersion, targets: task.auth.targets },
-            hints: hints.map((hint) => ({ id: hint.id, source: hint.source, tags: hint.tags, text: hint.text })),
-            memory: [],
-            memoryAccess: MEMORY_READ_UNAVAILABLE,
-            facts: history.listFacts(taskId).slice(0, 20).map((fact) => ({ id: fact.id, title: fact.title })),
-          },
-        }), true;
+        return sendJson(res, 200, { ...alarm, toolCallsSinceFact: toolCalls, threshold, waitingOnConsult: waiting }), true;
       } finally {
         history.close();
       }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    send(res, error instanceof BoundaryError ? 403 : 400, { error: message });
+    sendJson(res, error instanceof BoundaryError ? 403 : 400, { error: message });
     return true;
   }
 
   return false;
 }
 
-async function handlePlatformRoute(
-  req: IncomingMessage,
-  res: ServerResponse,
-  method: string,
-  url: URL,
-  deps: OpsRouteDeps,
-): Promise<boolean> {
-  const { store, platform } = deps;
-  const path = url.pathname;
-  const tenantParam = url.searchParams.get("tenantId") ?? undefined;
-  const engagementParam = url.searchParams.get("engagementId") ?? undefined;
-  const tenantId = tenantParam ?? "default";
-  const engagementId = engagementParam;
-  // 未声明上下文 = 单用户本地平台，不做额外限制；一旦声明就必须匹配（客户隔离靠这条）。
-  const visible = (node: MemoryNode): boolean =>
-    tenantParam === undefined && engagementParam === undefined
-      ? true
-      : memoryVisible(node, { tenantId, engagementId, mode: engagementParam ? "engagement" : "tenant" }, store);
-  try {
-    if (path.startsWith("/memory/nodes") && method === "GET") {
-      if (!memoryReadAllowed(verifiedIdentityFromRequest())) {
-        return send(res, 403, MEMORY_READ_UNAVAILABLE), true;
-      }
-    }
-    if (path === "/memory/nodes" && method === "GET") {
-      const status = url.searchParams.get("status") ?? undefined;
-      const kind = url.searchParams.get("kind") ?? undefined;
-      const nodes = platform
-        .listNodes({
-          ...(status ? { status: status as never } : {}),
-          ...(kind ? { kind: kind as never } : {}),
-        })
-        .filter(visible);
-      return send(res, 200, { nodes }), true;
-    }
-    if (path === "/memory/nodes" && method === "POST") {
-      const input = CreateMemoryDraftSchema.parse(await readJson(req));
-      const node = platform.createDraft(input, new Date().toISOString());
-      return send(res, 201, { node }), true;
-    }
-    const nodeMatch = path.match(/^\/memory\/nodes\/([^/]+)(\/.*)?$/);
-    if (nodeMatch) {
-      const id = decodeURIComponent(nodeMatch[1]!);
-      const action = nodeMatch[2] ?? "";
-      if (method === "POST" && action === "/review") {
-        // 身份、复核权限和委托都要先成立。未获准时不读取节点、不写复核、不返回正文。
-        const gate = beginMemoryReview(verifiedIdentityFromRequest(req));
-        if (!gate.proceed) return send(res, gate.status, gate.body), true;
-        const ownership = platform.memoryOwnership(id);
-        if (!ownership) return send(res, 404, { error: "memory-not-found" }), true;
-        if (!memoryReviewEngagementMatches(ownership, gate.identity)) {
-          return send(res, 403, { error: "engagement-mismatch" }), true;
-        }
-        const input = ReviewMemorySchema.parse(await readJson(req));
-        const updated = platform.reviewNode(id, input, new Date().toISOString());
-        return send(res, 200, { node: updated }), true;
-      }
-      const node = platform.getNode(id);
-      if (!node) return send(res, 404, { error: "memory-not-found" }), true;
-      if (!visible(node)) {
-        return send(res, 403, { error: "engagement-mismatch" }), true;
-      }
-      if (method === "GET" && action === "") return send(res, 200, { node }), true;
-      if (method === "GET" && action === "/references") {
-        return send(res, 200, { references: platform.referencesFor(id) }), true;
-      }
-      if (method === "GET" && action === "/events") {
-        return send(res, 200, { events: platform.listMemoryEvents(id) }), true;
-      }
-    }
-
-    if (path === "/archive/contact" && method === "GET") {
-      const targets = (url.searchParams.get("targets") ?? "")
-        .split(",")
-        .map((entry) => entry.trim())
-        .filter(Boolean);
-      if (targets.length === 0) return send(res, 400, { error: "targets-required" }), true;
-      const limit = Math.min(50, Number(url.searchParams.get("limit") ?? 20));
-      const hits: unknown[] = [];
-      for (const task of store.list()) {
-        if ((task.tenantId ?? "default") !== tenantId) continue;
-        if (hits.length >= limit) break;
-        let history: HistoryStore;
-        try {
-          history = open(task, true);
-        } catch {
-          continue;
-        }
-        try {
-          const assets = history.listAssets(task.id);
-          const matched = assets.filter((asset) => targets.some((pattern) => targetAllows([pattern], asset.address)));
-          if (matched.length === 0) continue;
-          const findings = history.listFindings(task.id);
-          hits.push({
-            taskId: task.id,
-            engagementId: task.engagementId,
-            name: task.name,
-            status: task.status,
-            finishedAt: task.finishedAt,
-            findings: findings.length,
-            verifiedFindings: findings.filter((finding) => ["verified", "retested", "accepted"].includes(finding.status)).length,
-            retractedFindings: findings.filter((finding) => finding.status === "retracted").length,
-            pointer: { kind: "task", id: task.id, sha256: null },
-            mayHaveDrifted: task.finishedAt ? Date.now() - Date.parse(task.finishedAt) > 14 * 86_400_000 : false,
-            sameAsset: matched.some((asset) => findings.some((finding) => normalizeHost(finding.asset) === normalizeHost(asset.address))),
-          });
-        } finally {
-          history.close();
-        }
-      }
-      return send(res, 200, {
-        query: { targets, tenantId, engagementId, limit },
-        hits,
-        nonBlocking: true,
-        note: "历史接触 ≠ 本次授权；只读指针，下钻走源任务。",
-      }), true;
-    }
-
-    if (path === "/proposals" && method === "GET") {
-      const proposals = platform.listProposals({
-        ...(url.searchParams.get("status") ? { status: url.searchParams.get("status") as never } : {}),
-        ...(url.searchParams.get("kind") ? { kind: url.searchParams.get("kind") as never } : {}),
-      });
-      return send(res, 200, { proposals }), true;
-    }
-    if (path === "/proposals" && method === "POST") {
-      const input = CreateProposalSchema.parse(await readJson(req));
-      const proposal = platform.createProposal(input, new Date().toISOString());
-      return send(res, 201, { proposal }), true;
-    }
-    const proposalMatch = path.match(/^\/proposals\/([^/]+)(\/.*)?$/);
-    if (proposalMatch) {
-      const id = decodeURIComponent(proposalMatch[1]!);
-      const action = proposalMatch[2] ?? "";
-      const proposal = platform.getProposal(id);
-      if (!proposal) return send(res, 404, { error: "proposal-not-found" }), true;
-      if (method === "GET" && action === "") return send(res, 200, { proposal }), true;
-      if (method === "POST" && action === "/decide") {
-        const body = (await readJson(req)) as { decision?: "approve" | "reject"; decidedBy?: string; reason?: string };
-        if (!body.decision || !body.decidedBy) return send(res, 400, { error: "decision-and-decidedBy-required" }), true;
-        const updated = platform.decideProposal(id, { decision: body.decision, decidedBy: body.decidedBy, reason: body.reason ?? "" }, new Date().toISOString());
-        return send(res, 200, { proposal: updated }), true;
-      }
-      if (method === "POST" && action === "/promote") {
-        const body = (await readJson(req)) as { promotedBy?: string; evaluationRunId?: string };
-        if (!body.promotedBy || !body.evaluationRunId) return send(res, 400, { error: "promotedBy-and-evaluationRunId-required" }), true;
-        const updated = platform.promoteProposal(id, { promotedBy: body.promotedBy, evaluationRunId: body.evaluationRunId }, new Date().toISOString());
-        return send(res, 200, { proposal: updated }), true;
-      }
-      if (method === "POST" && action === "/rollback") {
-        const body = (await readJson(req)) as { rolledBackBy?: string; reason?: string };
-        if (!body.rolledBackBy) return send(res, 400, { error: "rolledBackBy-required" }), true;
-        const updated = platform.rollbackProposal(id, { rolledBackBy: body.rolledBackBy, reason: body.reason ?? "" }, new Date().toISOString());
-        return send(res, 200, { proposal: updated }), true;
-      }
-      if (method === "GET" && action === "/events") {
-        return send(res, 200, { events: platform.listProposalEvents(id) }), true;
-      }
-    }
-
-    if (path === "/evaluations" && method === "GET") {
-      return send(res, 200, {
-        evaluations: platform.listEvaluations({
-          ...(url.searchParams.get("suite") ? { suite: url.searchParams.get("suite")! } : {}),
-          ...(url.searchParams.get("group") ? { group: url.searchParams.get("group")! } : {}),
-        }),
-      }), true;
-    }
-    if (path === "/evaluations" && method === "POST") {
-      const input = RunEvaluationSchema.parse(await readJson(req));
-      const run = platform.recordEvaluation(input, new Date().toISOString());
-      return send(res, 201, { evaluation: run }), true;
-    }
-    const evalMatch = path.match(/^\/evaluations\/([^/]+)$/);
-    if (evalMatch && method === "GET") {
-      const run = platform.getEvaluation(decodeURIComponent(evalMatch[1]!));
-      if (!run) return send(res, 404, { error: "evaluation-not-found" }), true;
-      return send(res, 200, { evaluation: run }), true;
-    }
-
-    if (path === "/trends" && method === "GET") {
-      const points: Array<Record<string, unknown>> = [];
-      for (const task of store.list()) {
-        if ((task.tenantId ?? "default") !== tenantId) continue;
-        if (engagementId && task.engagementId !== engagementId) continue;
-        let history: HistoryStore;
-        try {
-          history = open(task, true);
-        } catch {
-          continue;
-        }
-        try {
-          const goals = history.listGoals(task.id);
-          const findings = history.listFindings(task.id);
-          const injections = platform.listInjections({ taskId: task.id });
-          points.push({
-            batch: (task.finishedAt ?? task.createdAt).slice(0, 10),
-            taskId: task.id,
-            engagementId: task.engagementId,
-            at: task.finishedAt ?? task.createdAt,
-            goalsPassed: goals.filter((goal) => goal.passes).length,
-            goalsTotal: goals.length,
-            verifiedFindings: findings.filter((finding) => ["verified", "retested", "accepted"].includes(finding.status)).length,
-            retractedFindings: findings.filter((finding) => finding.status === "retracted").length,
-            tokens: task.usage.tokens,
-            wallMs: task.startedAt && task.finishedAt ? Date.parse(task.finishedAt) - Date.parse(task.startedAt) : 0,
-            reuseCount: injections.length,
-          });
-        } finally {
-          history.close();
-        }
-      }
-      points.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-      return send(res, 200, {
-        points,
-        note: "只报可复核计数；样本不足时不宣称趋势显著。",
-      }), true;
-    }
-  } catch (error) {
-    send(res, 400, { error: error instanceof Error ? error.message : String(error) });
-    return true;
-  }
-  return false;
-}
-
-export { sha256, CONSULT_BLOCKING_TTL_MS };
+export { CONSULT_BLOCKING_TTL_MS, areFrozenRoutesEnabled, handleFrozenRoute };

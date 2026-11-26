@@ -20,6 +20,7 @@ import {
  */
 
 export type AuthorizationCapability = AuthCapability;
+export type TaskCapability = AuthCapability;
 
 // ---------------------------------------------------------------- 坐标解析
 
@@ -106,6 +107,7 @@ export type ScopeMessage = {
   outOfScope: string[];
   capability: AuthorizationCapability | null;
 };
+export type TaskCoordinatesPatch = ScopeMessage;
 
 /**
  * 从续接消息解析任务坐标：JSON、逐字段中文（目标/排除/能力）或一句话口语。
@@ -163,6 +165,16 @@ export function parseScopeMessage(text: string): ScopeMessage {
     }
   }
   return { targets: dedupe(state.targets), outOfScope: dedupe(state.outOfScope), capability: state.capability };
+}
+
+/** `parseScopeMessage` 的语义化别名：解析单兵任务坐标（目标 / 排除项 / 能力档位）。 */
+export const parseTaskCoordinates = parseScopeMessage;
+
+/** 当前生效任务坐标摘要（直接投影 `task.auth`，不依赖旧授权台账）。 */
+export function taskCoordinatesDigest(task: Pick<TaskRecord, "auth" | "scopeVersion">): string {
+  const targets = task.auth.targets.length > 0 ? task.auth.targets.join("、") : "未设目标";
+  const excluded = task.auth.outOfScope.length > 0 ? `排除:${task.auth.outOfScope.join("、")}` : "无排除";
+  return `scope#v${task.scopeVersion}/${targets}/${excluded}/${task.auth.capability}`;
 }
 
 // ---------------------------------------------------------------- 旧台账只读

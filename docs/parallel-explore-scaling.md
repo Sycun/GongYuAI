@@ -28,7 +28,7 @@ totalWorkerSlots  = effectiveExplores <= 1 ? 1 : effectiveExplores + 1   # slot 
 2. **永不超用户上限**：`maxConcurrentExplores` 是操作员契约，扩容不得越过；抬上限只能人改任务。
 3. **非战术**：扩容判定只读资产**计数**（结构投影）与租约/存活状态，不读 Fact 内容、不派 Intent、不改 Goal。这是资源供给（与 `min(配置,靶标数)` 启动解析同类），不是看门狗写战术——Watchdog 零策略军规不破，判定函数放 runner，watchdog 只在存活分支调用。
 4. **节流**：每任务扩容检查最小间隔（10s），避免每个 tick 全量扫 Fact。
-5. **新 slot 语义不变**：slot 0 仍是唯一 Bootstrap/Reason/Report leader（leader 判定只看 `slot===0`，与总数无关）；新 slot 为 follower，独立 Durable checkpoint，共享 History + Intent CAS。
+5. **新 slot 语义与单 Intent 会话隔离**：slot 0 仍是唯一 Bootstrap/Reason/Report leader（物理剥离执行工具）；slot 1..N 为 follower，采用**单 Intent 隔离短会话**——每次 `intent_claim` 一条 `proposed` Intent 独立执行，`intent_conclude` 时通过 `control: { terminate: true }` 结束本轮并在下一轮前 `reset` 清空本地会话历史，只通过共享 History SQLite 传递结构化事实与证据。
 6. **预算口径不变**：任务级累计用量 + 控制面聚合闸照旧；新 slot manifest 预算同样扣 `usageOffset`。
 
 ## 机制
@@ -42,7 +42,7 @@ totalWorkerSlots  = effectiveExplores <= 1 ? 1 : effectiveExplores + 1   # slot 
 
 ## 控制台智能推荐（3–10）
 
-- 新建任务表单：靶标数变化时自动推荐 `min(max(3, 靶标数), 10)`；靶标 ≤2 时推荐靶标数（启动期不超靶标，扩容交给动态机制）。
+- 新建任务表单：靶标数变化时自动推荐 `min(max(3, 靶标数), 10)`（保底默认 3 路并发，确保单 CIDR / 单域名也能动态扩容）。
 - 用户手动改过并发值后不再自动覆盖；范围仍 1–16。
 - extraText 说明新公式与「运行中按发现资产自动扩容（只扩不缩）」。
 - CLI 不变：`gy run --concurrency N` 显式指定。

@@ -1,12 +1,48 @@
 import { useEffect, useState } from "react";
 import { Button, Input } from "@douyinfe/semi-ui";
-import { IconArchive, IconChevronDown, IconChevronRight, IconChevronUp, IconFolder, IconCommentStroked, IconPlus, IconSearchStroked, IconSettingStroked, IconSidebar, IconUndo } from "@douyinfe/semi-icons";
+import {
+  IconArchive,
+  IconChevronDown,
+  IconChevronRight,
+  IconChevronUp,
+  IconCommentStroked,
+  IconFolder,
+  IconPlus,
+  IconSearchStroked,
+  IconSettingStroked,
+  IconSidebar,
+  IconUndo,
+} from "@douyinfe/semi-icons";
 import type { ArchiveScope } from "../chat/archives";
 import { defaultProject } from "../chat/projects";
 import type { Conversation } from "../chat/useConversations";
 
 export function BrandMark() {
   return <span className="gy-brand-mark" aria-hidden="true"><i /><b /></span>;
+}
+
+function WorkbenchTargetIcon() {
+  return (
+    <svg className="semi-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="8" cy="8" r="2.4" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 1V3.2M8 12.8V15M1 8H3.2M12.8 8H15" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function OverviewPulseIcon() {
+  return (
+    <svg className="semi-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none">
+      <path
+        d="M1.5 8.5H4.2L6.1 4.2L8.4 12L10.5 6.8L11.8 8.5H14.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 type Props = {
@@ -19,11 +55,18 @@ type Props = {
   onCreateProject: () => void; onNew: (project: string) => void;
   onToggle: () => void; onSelect: (id: string) => void; onFeatures: () => void;
   attention?: Record<string, boolean>;
+  activeRoute?: string;
+  isTaskDetailRoute?: boolean;
+  activeTaskCount?: number;
+  onNavigateWorkbench?: (route: "tasks" | "overview") => void;
 };
 
-export function ChatSidebar({ conversations, selected, collapsed, blank, projects, currentProject, projectOf, projectLabel,
+export function ChatSidebar({
+  conversations, selected, collapsed, blank, projects, currentProject, projectOf, projectLabel,
   archivedChats, archivedProjects, showArchived, archiveBusy, onArchive, onShowArchived,
-  folded, onFold, onCreateProject, onNew, onToggle, onSelect, onFeatures, attention }: Props) {
+  folded, onFold, onCreateProject, onNew, onToggle, onSelect, onFeatures, attention,
+  activeRoute, isTaskDetailRoute, activeTaskCount = 0, onNavigateWorkbench,
+}: Props) {
   const [search, setSearch] = useState(false);
   const [query, setQuery] = useState("");
   const filter = query.trim().toLocaleLowerCase();
@@ -50,7 +93,10 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
     onNew(project);
   }
 
-  return <aside aria-label="会话侧栏" className={'gy-chat-sidebar' + (collapsed ? " gy-collapsed" : "")}>
+  const tasksActive = activeRoute === "tasks" || Boolean(isTaskDetailRoute);
+  const overviewActive = activeRoute === "overview";
+
+  return <aside aria-label="会话侧栏" className={"gy-chat-sidebar" + (collapsed ? " gy-collapsed" : "")}>
     <div className="gy-sidebar-top">
       <div className="gy-brand"><BrandMark /><span>GongYu<span className="gy-brand-ai">AI</span></span></div>
       <Button className="gy-toggle" theme="borderless" type="tertiary" icon={<IconSidebar />}
@@ -60,6 +106,37 @@ export function ChatSidebar({ conversations, selected, collapsed, blank, project
       disabled={archiveBusy} title="在默认对话区新建会话" onClick={() => startChat(defaultProject)}>
       {!collapsed && "新建会话"}
     </Button>
+    {onNavigateWorkbench && (
+      <nav className="gy-workbench-nav" aria-label="作战工作台快捷入口">
+        <button
+          type="button"
+          className="gy-workbench-btn"
+          aria-label="任务工作台"
+          aria-current={tasksActive ? "page" : undefined}
+          title={activeTaskCount > 0 ? `任务工作台（${activeTaskCount} 个运行中）` : "任务工作台（意图图谱与实战深潜）"}
+          onClick={() => onNavigateWorkbench("tasks")}
+        >
+          <WorkbenchTargetIcon />
+          {!collapsed && <span className="gy-workbench-label">任务工作台</span>}
+          {activeTaskCount > 0 && (
+            <span className="gy-task-badge" aria-label={`${activeTaskCount} 个运行中任务`}>
+              {collapsed ? "" : activeTaskCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          className="gy-workbench-btn"
+          aria-label="态势总览"
+          aria-current={overviewActive ? "page" : undefined}
+          title="态势总览（活跃任务与守护恢复）"
+          onClick={() => onNavigateWorkbench("overview")}
+        >
+          <OverviewPulseIcon />
+          {!collapsed && <span className="gy-workbench-label">态势总览</span>}
+        </button>
+      </nav>
+    )}
     {!collapsed && <section className="gy-history" aria-label="工作区会话">
       <div className="gy-history-heading"><span>{showArchived ? "已归档" : "项目"}</span><div>
         <Button theme="borderless" type="tertiary" size="small" icon={<IconPlus />}

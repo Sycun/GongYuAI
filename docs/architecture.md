@@ -18,19 +18,20 @@ Long-running authorized pentest agents fail for four reasons: context windows fi
 6. **Session Relay** — 会话边界写入结构化 handoff protocol（πₙ），再启新会话；会话内保留完整工具输出，只在边界压缩。Watchdog 崩溃恢复不写 π。
 7. **Harness differential** — `bare`（无 History/Relay）vs History vs +Relay，只报相对差分。
 
-## 三层基座（女娲 × DAG × Super-agent）
+## 收敛基座：一主两辅（2026-11-26 架构瘦身）
 
-| 基座 | 职责 | 本仓落点 | 状态 |
+为消除多源机制叠加带来的门禁耦合、双循环漂移与跨题上下文污染，运行时收敛为 **「1 个核心本体 + 2 个极薄底座机制」**：
+
+| 层级 | 定位 | 运行时落点 | 瘦身边界 |
 | --- | --- | --- | --- |
-| **女娲** | 组织存活与繁衍：个体可死、图必须活、经验须传承 | 项目记忆（lease/Watchdog 接班、分层 History、Relay π、族级打法）已硬化；全局记忆（档案索引 + 蒸馏图谱 + 工具遗产，P8 提案，见 [memory-layer.md](./memory-layer.md)） | 存活已硬化；繁衍缺位 |
-| **DAG** | 路径与真相：走得对（授权在委托前提，不在运行时审查） | Fact–Intent 无因探索禁令（路径合法性）、证据闸 + SHA-256 封存、复核撤回、确定性符号因果边校验（proven/proposed） | 已硬化；渗透域语义见 P6；因果边校验单测已验证 |
-| **Super-agent** | 调度经济：花得省 | 脑手分离（相位工具面）、多 Explore 异步派单、三层模型路由（提案） | 结构已有；模型分层/偏航审计见 P7 |
+| **主核：Fact–Intent–Goal DAG + 证据封存** | 唯一真相源与交付审计契约 | `packages/history`：无因探索禁令、证据闸 + SHA-256 原版封存、复核撤回、确定性符号边校验 | 唯一拥有执行权与完成判定权的状态层；聊天记录永不作真相源 |
+| **辅 1：薄调度层（Super-agent 角色定型）** | 脑手物理分离 + 单 Intent 会话隔离 | `packages/worker/src/tool-catalog.ts` & `pi-loop.ts`：统一工具目录（消除双循环千行重复）；`Leader` 静态剥离全部执行工具专职拆单/验卷；`Follower` 领单 `Intent` 独立短会话执行，`intent_conclude` 即 `terminate` 并重置本地会话 | 砍掉 Follower 跨题长会话包袱、冗余后台 `π` 刷盘与全局软节奏说教；门禁压平为三条确定性硬规则 |
+| **辅 2：薄保活层（女娲基础设施）** | 进程崩溃自愈 + 长会话边界交接 | `packages/control-plane/src/watchdog.ts`（指数退避保活）+ `checkpoint.ts` + Leader/Solo 边界 `relay.ts` | 退居纯幕后基础设施；不再在 `beforeTool` 叠加动态封锁旗标 |
 
-细则：[absorb-super-agent.md](./absorb-super-agent.md)。Super-agent 是配置 + 小协议补丁，不是第二套编排系统；主脑永不拿回执行工具（Octop 0/5 委派教训）。执行权落到工具闸：Explore 执行必须绑定已认领 Intent，conclude 校验认领人；多 worker leader 不执行（见 [long-run-contract.md](./long-run-contract.md)）。
-
-繁衍动力学：[数据飞轮](./data-flywheel.md)（P9 提案）——采集→评测→蒸馏→改进→验证五环，让使用变成进化；转的是 harness 与知识，不是模型权重，每环过人审/差分/holdout 质量闸。
-
-产品图面：[图视图族](./graph-views.md)（P10 提案）——一图一真相、五视图投影（DAG + 资产/攻击面/执行/记忆四图），跨图同 ID 导航，图提示只走建议层。
+**支线冻结清单（未见单任务长程差分痛点前暂停扩展）**：
+- 跨任务全局记忆自动蒸馏与工具遗产繁衍（P8 远期项）；
+- 数据飞轮自动晋升闭环（P9 远期项，仅保留离线记分卡与人工复盘）；
+- 多角色模拟子会话（独立偏航审计者、辅助者 Assistant 等）与未经实测的非默认三层模型自动路由（P7/P12 提案项）。
 
 渗透执行层：[pentest-ops-design.md](./pentest-ops-design.md)（P11 提案）——任务级持久会话、后台作业异步回流、隧道/Chromium 工具、委托规则（时间窗/RoE/速率自判均默认放开）、模型主动求助、开始/暂停/继续/停止/结束生命周期；底座能力映射见 [pi-durable-integration.md](./pi-durable-integration.md)（底座管活，图管对）。
 

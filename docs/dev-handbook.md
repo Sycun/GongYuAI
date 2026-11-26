@@ -33,12 +33,12 @@ MCP / Skill 是弹药，不是产品定义。
 | Intent propose/claim/conclude | `sourceFactIds` + 成功回写 + expire；真模型工具 `intent_*` | — |
 | Goal + evidence gate | 有（含 ALL_COMPLETE） | 支持 JSON 字段判据与 SHA-256 快照，见[离线复核验收](./evidence-review.md) |
 | Router ≠ shell | 有 | — |
-| Bootstrap / Reason / Explore | Durable phase + mock + **真模型工具面按相位过滤** | Pi Durable 路径仍以 OpenAI fallback 为主纪律 |
-| Session Relay | πₙ + 双触发 + 启动注入 | — |
+| Bootstrap / Reason / Explore | **统一工具目录（`tool-catalog.ts`）+ 角色定型（`solo/leader/follower`）** | Pi Durable 为主路径，与 OpenAI 回退循环共享同一套 Schema、门禁与 `YIELD` 语义 |
+| Session Relay | πₙ + 双触发 + 启动注入 | Leader/Solo 长会话使用；Follower 采用**单 Intent 结项 `terminate + reset` 干净会话隔离** |
 | Auth ladder | `observe\|scan\|active-lab\|full` | 操作档位（工具面/风险敞口），不是授权审查 |
 | Harness 差分 | `pnpm diff-harness`：**bare**（`GY_HARNESS=bare`）/ history / relay | — |
 | TSecBench CLI | hint 默认禁；409 终态快失败；`probe` + ticket 记账 | 平台 ticket 须人工重置 |
-| 多 Worker 并行 Explore | **有（可配 + 动态扩容）** | `execution.maxConcurrentExplores`；有效并发 = min(配置, max(靶标数, admitted/live 资产数))，运行中只扩不缩；控制台推荐 3–10，见 [parallel-explore-scaling](./parallel-explore-scaling.md) |
+| 多 Worker 并行 Explore | **默认开启（`1 Leader + 3 Followers`）+ 动态扩容** | `DEFAULT_MAX_CONCURRENT_EXPLORES = 3`；有效并发 = min(配置, max(靶标数, admitted/live 资产数))，滑动窗口补单，见 [parallel-explore-scaling](./parallel-explore-scaling.md) |
 | Hint API | **有** | `POST /tasks/:id/hints` + 控制台注入；Observe 吸收 |
 | 同族迁移 | **有** | `technique_transfer` → transferable Fact + 对端 Intent 扇出 |
 | 资产清单 + CIDR/通配准入 | seed / asset_record / 控制台资产 Tab | — |
@@ -304,17 +304,16 @@ TSecBench：见 `examples/tsecbench/README.md`。VPN 先通；Worker 禁改主�
 
 ---
 
-## 9. 下一件最小可做事项
+## 9. 当前收敛纪律与下一步重点（2026-11-26 更新）
 
-**P0–P5 + 扇出硬闸 / familyKey / Cairn 调度 / 控制台 UX / TSec 子集差分 + P6-E1 Finding / P-d skill 对齐 + P16 语义收敛**已落地。  
-下一刀按**真实差分痛点**选，候选按依赖排序：
+项目已按**「一主两辅」**完成运行时瘦身：
+- **主核已硬化**：P0–P6、P14（HTTP 事务/OAST/隧道/主机画像/复测/计划链）、P15（观察员 + 独立验证）、P16（拒绝纠偏与模型切换链）、默认 `1 Leader + 3 Followers` 并发与 Follower 单 `Intent` 会话重置隔离均已落地。
+- **远期支线已冻结**：P8 全局记忆自动蒸馏、P9 数据飞轮自动晋升、P10 多图画布扩展、以及未经真跑差分证明的多角色子会话（偏航审计者 / 辅助者模拟）暂停扩面。
 
-1. **P6 E3 结构化落图 + HTTP 事务证据**（E1 已就位；finding_verify 需要事务证据时优先）或 **E2 凭据结构化**——见 [pentest-enhancements.md](./pentest-enhancements.md) §3 依赖图。
-2. **P7 相位级模型路由差分**（强脑+快兵 vs 全强模型，真 TSecBench 子集同预算）——Super-agent 层唯一需要实验背书的主张。
-3. 真 TSecBench（相对裸循环 / ARTEX）子集实测。
-4. AD/云自动采集（SharpHound/云 API 枚举器）——图已可导入可查，缺自动采集这一独立大特性。
-
-Intentest 五段检索与 History/Relay 语义 RAG 仍默认不做；P7 审计者/事件过滤差分未证明收益前不升默认。
+**下一刀优先围绕「单任务减重与实战清板稳定性」推进：**
+1. **真实靶场长程回归**：在 `1 Leader + 3 Followers` 单 `Intent` 会话隔离架构下复跑 TSecBench / 真实红队委托，验证跨题零上下文污染与 Token 降幅。
+2. **控制面入口收敛**：对齐 `ChatPage`（`AssignmentService`）与 `TasksPage`（`WorkerRunner`）双轨入口，避免控制面维护两套任务执行栈。
+3. **存储与遗留命名模块化**：按域拆分 `packages/history/src/index.ts` 大文件，完成 `authorization.ts` 到纯任务坐标（Scope）命名的清理。
 
 验收：
 

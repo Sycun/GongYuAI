@@ -31,7 +31,30 @@
 }
 .gy-chat-sidebar .gy-new-chat:hover { background: #fdfdff; border-color: #b9c6e7; }
 .gy-new-chat .semi-icon { color: var(--gy-accent); }
-.gy-history { display: flex; flex: 1; min-height: 0; flex-direction: column; margin-top: 30px; }
+.gy-workbench-nav {
+  display: grid; gap: 4px; margin-top: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--gy-rule);
+}
+.gy-workbench-btn {
+  position: relative; display: flex; align-items: center; gap: 9px; box-sizing: border-box; width: 100%;
+  padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--gy-ink);
+  font: inherit; font-size: 13.5px; font-weight: 540; text-align: left; cursor: pointer;
+}
+.gy-workbench-btn .semi-icon { flex: none; color: #5f6b82; }
+.gy-workbench-btn:hover { background: #edeff4; }
+.gy-workbench-btn[aria-current="page"] { background: #e8ecfa; color: #2e4cae; }
+.gy-workbench-btn[aria-current="page"] .semi-icon { color: var(--gy-accent); }
+.gy-workbench-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gy-task-badge {
+  margin-left: auto; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--gy-accent); color: white; font-size: 11px; font-weight: 600; line-height: 1;
+}
+.gy-collapsed .gy-workbench-nav { justify-items: center; }
+.gy-collapsed .gy-workbench-btn { justify-content: center; width: 38px; height: 38px; padding: 0; }
+.gy-collapsed .gy-task-badge {
+  position: absolute; top: 5px; right: 5px; min-width: 7px; width: 7px; height: 7px; padding: 0;
+}
+.gy-history { display: flex; flex: 1; min-height: 0; flex-direction: column; margin-top: 18px; }
 .gy-history-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 6px; font-size: 13px; color: var(--gy-muted); }
 .gy-history-search { margin-top: 8px; flex-shrink: 0; }
 .gy-history-list { overflow: auto; min-height: 0; padding: 8px 0; scrollbar-width: thin; }

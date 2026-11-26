@@ -141,6 +141,34 @@ export function asGraphPhase(phase: WorkerPhase): WorkerPhase {
 }
 
 /**
+ * Converged Super-agent role model ("一主两辅"):
+ * - `solo`: single-process worker (`workerCount <= 1`), owns Bootstrap → Explore → Reason → Report.
+ * - `leader`: multi-worker coordinator (`slot 0`, `workerCount > 1`), pure Planner/Validator/Reporter (no exec tools).
+ * - `follower`: multi-worker executor (`slot 1..N`), runs isolated single-Intent Explore turns.
+ */
+export type WorkerRole = "solo" | "leader" | "follower";
+
+export function resolveWorkerRole(opts: {
+  leader?: boolean;
+  workerCount?: number;
+}): WorkerRole {
+  if ((opts.workerCount ?? 1) <= 1) return "solo";
+  return opts.leader !== false ? "leader" : "follower";
+}
+
+/** Execution tools physically stripped from a multi-worker Leader ("脑手分离"). */
+export const FOLLOWER_ONLY_EXEC_TOOLS = new Set([
+  "shell",
+  "shell_job",
+  "shell_session",
+  "c2",
+  "http_request",
+  "tunnel_open",
+  "tunnel_close",
+  "mcp_invoke",
+]);
+
+/**
  * Reason mutex + Explore stickiness from open Intents.
  * Does not invent π; does not override relay/report/done.
  */
@@ -230,6 +258,30 @@ export function allowedToolNames(
   const out = new Set(base);
   if (p === "explore" || p === "relay") {
     for (const n of mcpToolNames) out.add(n);
+  }
+  return out;
+}
+
+/**
+ * Effective tool surface combining graph phase + static worker role:
+ * - `leader` never receives follower execution tools or dynamic `mcp__*` tools;
+ * - `follower` never receives `assert_goal` (leader owns goal assertion & final report).
+ */
+export function roleAllowedToolNames(
+  phase: WorkerPhase,
+  role: WorkerRole,
+  mcpToolNames: string[] = [],
+): Set<string> {
+  const out = allowedToolNames(
+    phase,
+    role === "leader" ? [] : mcpToolNames,
+  );
+  if (role === "leader") {
+    for (const execTool of FOLLOWER_ONLY_EXEC_TOOLS) {
+      out.delete(execTool);
+    }
+  } else if (role === "follower") {
+    out.delete("assert_goal");
   }
   return out;
 }

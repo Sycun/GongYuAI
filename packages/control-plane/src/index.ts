@@ -160,8 +160,15 @@ export {
   normalizeTargetToken,
   parseCapabilityValue,
   parseScopeMessage,
+  parseTaskCoordinates,
   readLedger,
   splitTargets,
+  taskCoordinatesDigest,
 } from "./authorization.js";
-export type { AuthorizationCapability, ScopeMessage } from "./authorization.js";
+export type {
+  AuthorizationCapability,
+  ScopeMessage,
+  TaskCapability,
+  TaskCoordinatesPatch,
+} from "./authorization.js";
 export type { AssignmentViewWithAuthorization } from "./assignments.js";

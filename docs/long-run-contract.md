@@ -163,23 +163,22 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 - 大上下文模型上增益变小；小窗口 / 长攻击链上更有价值。
 - pass@k 多跑可能收敛——应用 **同预算相对裸 agent 差分** 验收，不迷信单次分。
 
-## Graph phase tool protocol（真模型）
+## Unified role & phase tool protocol（统一工具目录与门禁）
 
-Worker OpenAI loop 按 Durable `phase` 过滤工具面：
+Pi Durable 主循环与 OpenAI 回退循环共用单一工具目录（`packages/worker/src/tool-catalog.ts`）与确定性门禁（`evaluateWorkerToolGate`），按静态角色 `WorkerRole`（`solo | leader | follower`）与图相位过滤工具面：
 
-| phase | 允许（摘要） |
+| 角色 / 相位 | 工具面与运行契约 |
 | --- | --- |
-| bootstrap | History 读写、`intent_propose`、`phase_set`、Skill；无 shell/MCP 执行 |
-| explore | claim/conclude + shell/MCP/install/`assert_goal`/`technique_transfer` + `finding_record/verify/retract`；**每 worker** 一次一个 `activeIntentId`；多 worker 靠 Intent CAS 并行 |
-| reason | propose / assert / History / `technique_transfer` / `finding_record/verify/retract`；**有 open Intent 时强制回 explore**；吸收 Hint |
+| **Leader**（`slot 0, workerCount > 1`） | 纯规划/验卷角色（`bootstrap / reason / report`）：**物理剥离**全部重型执行工具（`shell`、`shell_job`、`shell_session`、`c2`、`http_request`、`tunnel_open/close`、`mcp_invoke`、`mcp__*`）；只负责开题、扇出 `Intent`、审计与 `assert_goal`。槽位排满后通过 `YIELD` 零 Token 驻留，支持滑动窗口补单。 |
+| **Follower**（`slot 1..N`） | **单 Intent 隔离短会话角色**（固定 `explore`）：物理剥离 `assert_goal`；每次 `intent_claim` 单个 `proposed` Intent 独立取证验证；调用 `intent_conclude` 时通过 `control: { terminate: true }` 立即结束当前轮，并在认领下一条 Intent 前执行 `root.reset()` 重置本地会话上下文（所有有效事实/漏洞/凭据已落入 History SQLite），彻底消除跨目标上下文污染，且免除后台 `π` 快照刷盘与全局软节奏弹窗。 |
+| **Solo**（`workerCount = 1`） | 单进程兼任 `bootstrap → explore → reason → report`；支持 `intent_propose(claim="true")` 一步认领进入 Explore。 |
 
-**执行硬闸（2026-11-24 落地）**：相位过滤之上再绑 Intent，避免“零 Intent 进 Explore 后直接执行”。
+**确定性三条硬门禁（`evaluateWorkerToolGate`，零动态锁套娃）**：
 
-- `phase_set(explore)` 拒绝零 open Intent；必须先 `intent_propose`。
-- 执行类工具（`shell`、`http_request`、`mcp_invoke`/动态 MCP、`c2` 写操作、`tunnel_open/close`、`install_tool`、`oast_issue`、`shell_job/session` 的 start/write/open/close/kill）必须已有 `activeIntentId`，且该 Intent 为 `claimed/running`、`claimedBy` 等于当前 worker。只读 poll/wait/list/read/sessions/note 例外。
-- 多 worker 时 leader（slot 0）不持有执行工具、不 claim；follower 不进入 Bootstrap/Reason/Report，`assert_goal` 由 leader 提交。单 worker 仍兼任脑手。
-- `intent_conclude` 只允许结束当前 active Intent，并由 History 校验 `claimedBy`；非本人拒绝。
-- 拒绝写 `tool_gate` 事件，与能力阶梯/范围闸同口径。
+1. **求助永不拦截**：`operator_consult` 在任何相位与角色下均畅通放行。
+2. **静态角色与相位白名单**：`roleAllowedToolNames` 强制脑手物理隔离；`phase_set(explore)` 拒绝零 open Intent。
+3. **执行工具强制绑定活跃 Intent**：执行类工具（`shell`、`http_request`、`mcp_invoke`/动态 MCP、`c2` 写操作、`tunnel_open/close`、`install_*`、`oast_issue`、`shell_job/session` 写动作）必须持有当前 worker 本人 `claimed/running` 的 `activeIntentId`，通过时自动 `heartbeatIntent`；拒绝统一记入 `tool_gate` 事件。
+4. **证据耗尽换面不锁死工具面**：`maybeForceEvidenceStall` 超时结项旧 Intent 后，仅通过 `longTurn.notes` 注入换面提示，不再在 `beforeTool` 设置全量阻塞旗标。
 
 ## Hint（P4）
 
@@ -245,7 +244,7 @@ Loop exits on any of: all goals pass, optional hard gate, fatal error, or operat
 - **暂停确认**：`pause` 先写请求，再向 worker 发 SIGTERM，轮询确认进程消失后才写 `paused`。超时未确认则回 `recovering` 并报错——不发布"假暂停"。Checkpoint / History / 证据 / 用量全部保留；不写终态报告。
 - **恢复**：`resume` 从最新控制面记录重建 manifest，因此**恢复即读取最新操作配置**；范围更新（`POST /tasks/:id/scope`）只能在无 worker 运行时进行，`scopeVersion` 递增并写一条 summary Fact。旧的 π/图事实不会恢复旧范围。`scopeVersion` 只表示作业坐标变更，不是授权版本。
 - **外部状态**：`GET /runtime` 返回 `externalState = running | pause_requested | stopping | paused | stopped | unknown` 与 `lastConfirmedAt`。活动记录但无存活 worker、无新心跳时如实报 `unknown`，不以进程启动或端口监听冒充健康。
-- **未实现**：`operator_consult` 与"24h 无回复自动转非阻塞"仍属提案（P11 S2）。
+- **人工求助已闭环**：`operator_consult` 与「24h 无回复自动转非阻塞（保留 open 状态）」已在 `ops-tools.ts` / `handoff.ts` 落地，且在 `evaluateWorkerToolGate` 中享有最高放行优先级。
 
 ## Idempotency
 

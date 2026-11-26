@@ -4,7 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Button, Input, Modal, SideSheet, Toast } from "@douyinfe/semi-ui";
 import { IconChevronLeft, IconChevronRight } from "@douyinfe/semi-icons";
 import { api, type Overview, type TaskRecord } from "./api";
-import { DETAIL_TABS, ROUTE_META, SETTINGS_SECTIONS, isSettingsRoute, resolveDetailTab, settingsSectionOf, type DetailTab, type SettingsRoute } from "./labels";
+import { DETAIL_TABS, ROUTE_META, SETTINGS_SECTIONS, isActiveStatus, isSettingsRoute, resolveDetailTab, settingsSectionOf, type DetailTab, type SettingsRoute } from "./labels";
 import { newId } from "./chat/id";
 import { storeFiles, type DraftFile } from "./chat/attachments";
 import { useConversations } from "./chat/useConversations";
@@ -27,19 +27,19 @@ const KnowledgePage = lazy(() => import("./pages/KnowledgePage").then(m => ({ de
 type Route = "chat" | "overview" | "tasks" | "graphs" | "demo" | "knowledge" | SettingsRoute | DetailTab;
 type Location = { route: Route; id: string | null; query: Record<string, string> };
 const workPages = [
-  { key: "overview", label: "总览" },
-  { key: "tasks", label: "任务" },
+  { key: "tasks", label: "任务工作台" },
+  { key: "overview", label: "态势总览" },
+  { key: "knowledge", label: "知识库" },
+] as const;
+const auxiliaryPages = [
   { key: "graphs", label: "图谱中心" },
   { key: "demo", label: "演示场景" },
 ] as const;
-const knowledgePages = [
-  { key: "knowledge", label: "知识库" },
-] as const;
 const groups = [
-  { title: "工作区", items: workPages },
-  { title: "知识与经验", items: knowledgePages },
-  { title: "任务详情", items: DETAIL_TABS },
+  { title: "作战工作台", items: workPages },
+  { title: "任务详情深潜", items: DETAIL_TABS },
   { title: "系统设置", items: SETTINGS_SECTIONS },
+  { title: "辅助与演示", items: auxiliaryPages },
 ];
 function isDetail(value: string): value is DetailTab { return DETAIL_TABS.some(t => t.key === value); }
 
@@ -193,9 +193,9 @@ export function App() {
     await Promise.all([refresh(), taskArchives.refresh().catch(() => {})]);
   }
   useEffect(() => {
-    if (chat) return;
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 4000);
+    const intervalMs = chat ? 15_000 : 4_000;
+    const timer = window.setInterval(() => void refresh(), intervalMs);
     return () => window.clearInterval(timer);
   }, [chat, refresh]);
 
@@ -273,6 +273,7 @@ export function App() {
       setArchiveBusy(false);
     }
   }
+  const activeTaskCount = tasks.filter(t => !t.archivedAt && isActiveStatus(t.status)).length;
   const sidebarProps = {
     conversations: workspaceChats, selected: chat ? id : null, blank: chat && !conversation, onNew: newChat,
     projects: workspace.projects, currentProject: project, projectOf: workspace.projectOf, projectLabel: workspace.projectLabel,
@@ -282,6 +283,10 @@ export function App() {
     onSelect: (next: string) => navigate("chat", next),
     onFeatures: () => setPanel("features"),
     attention,
+    activeRoute: route,
+    isTaskDetailRoute: isDetail(route),
+    activeTaskCount,
+    onNavigateWorkbench: (target: "tasks" | "overview") => navigate(target),
   };
   const meta = ROUTE_META[route];
   const openTask = (nextId: string) => navigate("live", nextId);
