@@ -46,11 +46,7 @@ done
 
 cd "$GY"
 pnpm install
-pnpm --filter @gongyuai/contracts build
-pnpm --filter @gongyuai/history build
-pnpm --filter @gongyuai/control-plane build
-pnpm --filter @gongyuai/worker build
-pnpm --filter @gongyuai/console build
+pnpm run build
 
 if ! command -v aimy-mcp >/dev/null 2>&1; then
   echo "install aimy-skill[mcp] for builtin aimy MCP..."

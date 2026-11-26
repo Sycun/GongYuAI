@@ -7,6 +7,8 @@ import type { WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { clearTrafficRing, closeTrafficDb, getTraffic, pushTrafficRing, trafficLabelUuid } from "@gongyuai/exec";
 import { boardClearPolicyBlock, hasBenchmarkHarness } from "./board-policy.js";
+import { CheckpointStore } from "./checkpoint.js";
+import { handleGraphTool } from "./graph-phase.js";
 import { assertCommandAllowed } from "./tools.js";
 import {
   autoAdmitContainerTargets,
@@ -230,6 +232,121 @@ test("multi-worker follower cannot start/close tsecbench containers so slot 0 le
       ["172.18.0.55"],
     );
   } finally {
+    history.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("OpenAPI string[] container_addr auto-admits live assets, unblocks Leader intent_propose assetRoot, and drops recycled IPs on restart", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gy-tsec-array-"));
+  const leader = makeManifest(dir);
+  leader.auth.targets = ["10.0.0.0/8"];
+  leader.workerCount = 4;
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(leader, null, 2));
+
+  const history = openHistory({ dbPath: leader.historyDb, evidenceDir: leader.evidenceDir });
+  const ckpt = new CheckpointStore(join(dir, "leader.ckpt.sqlite"));
+  const prevUrl = process.env.BENCHMARK_BASE_URL;
+  const prevTok = process.env.BENCHMARK_TOKEN;
+  const origFetch = globalThis.fetch;
+  process.env.BENCHMARK_BASE_URL = "http://10.0.100.1:8000";
+  process.env.BENCHMARK_TOKEN = "test-benchmark-token";
+
+  let startedIp = "10.0.1.5:8080";
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const u = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (u.includes("/openapi/v1/challenges/start")) {
+      return new Response(
+        JSON.stringify({
+          unique_code: "web_sql_injection_01",
+          container_addr: [startedIp, "[fd00::1]:9090"],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify([
+        {
+          unique_code: "web_sql_injection_01",
+          difficulty: "easy",
+          total_score: 100,
+          flag_count: 1,
+          correct_flag_count: 0,
+          is_completed: false,
+          container_status: "available",
+          container_addr: [startedIp],
+        },
+      ]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    // 1. Direct unit checks on array / JSON-array / object-wrapped shapes
+    assert.deepEqual(parseContainerAddresses(["10.0.1.5:8080", "http://10.0.1.6:8081/app"]), [
+      { endpoint: "10.0.1.5:8080", host: "10.0.1.5" },
+      { endpoint: "http://10.0.1.6:8081/app", host: "10.0.1.6" },
+    ]);
+    assert.deepEqual(parseContainerAddresses('["10.0.1.7:80"]'), [
+      { endpoint: "10.0.1.7:80", host: "10.0.1.7" },
+    ]);
+    assert.deepEqual(parseContainerAddresses([{ addr: "10.0.1.8:8080" }]), [
+      { endpoint: "10.0.1.8:8080", host: "10.0.1.8" },
+    ]);
+
+    history.seedGoals(leader.taskId, leader.goals);
+    history.seedAssetsFromAuth(leader.taskId, leader.auth);
+    const state = ckpt.load();
+    state.phase = "bootstrap";
+    ckpt.save(state);
+
+    const ctx = { manifest: leader, history, usage: { toolCalls: 0, installs: 0 } };
+    const startRaw = await tsecbenchTool(ctx, { action: "start", code: "web_sql_injection_01" });
+    const startOut = JSON.parse(startRaw) as {
+      autoAdmittedAssets?: Array<{ address: string; factId: string }>;
+    };
+    assert.ok(startOut.autoAdmittedAssets && startOut.autoAdmittedAssets.length >= 1);
+    assert.equal(startOut.autoAdmittedAssets[0]!.address, "10.0.1.5");
+
+    // 2. Multi-worker Leader can immediately propose an Intent anchored on "10.0.1.5:8080" even with sourceFactIds="origin"
+    const proposeOut = handleGraphTool(
+      "intent_propose",
+      {
+        title: "Explore web_sql_injection_01",
+        summary: "Verify SQLi on container",
+        assetRoot: "10.0.1.5:8080",
+        sourceFactIds: "origin",
+      },
+      {
+        history,
+        taskId: leader.taskId,
+        workspaceDir: leader.workspaceDir,
+        state,
+        workerId: leader.workerId,
+        execution: leader.execution,
+        leader: true,
+        workerCount: 4,
+        save: () => ckpt.save(state),
+      },
+    );
+    assert.ok(proposeOut && !proposeOut.startsWith("错误:"), `expected intent JSON, got: ${proposeOut}`);
+    const proposedIntent = JSON.parse(proposeOut!) as { id: string; assetRoot?: string; status: string };
+    assert.equal(proposedIntent.assetRoot, "10.0.1.5");
+    assert.equal(proposedIntent.status, "proposed");
+
+    // 3. Restarting the same challenge with a newly assigned container IP drops the old recycled IP
+    startedIp = "10.0.1.99:8080";
+    await tsecbenchTool(ctx, { action: "start", code: "web_sql_injection_01" });
+    const hostsAfterRestart = resolveChallengeHosts(ctx, "web_sql_injection_01");
+    assert.ok(hostsAfterRestart.includes("10.0.1.99"));
+    assert.ok(!hostsAfterRestart.includes("10.0.1.5"));
+  } finally {
+    globalThis.fetch = origFetch;
+    if (prevUrl === undefined) delete process.env.BENCHMARK_BASE_URL;
+    else process.env.BENCHMARK_BASE_URL = prevUrl;
+    if (prevTok === undefined) delete process.env.BENCHMARK_TOKEN;
+    else process.env.BENCHMARK_TOKEN = prevTok;
+    ckpt.close();
     history.close();
     rmSync(dir, { recursive: true, force: true });
   }

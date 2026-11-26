@@ -26,11 +26,7 @@ if [[ "$BEFORE" != "$AFTER" && "${GONGYUAI_REDEPLOY_REEXEC:-}" != "1" ]]; then
 fi
 
 pnpm install
-pnpm --filter @gongyuai/contracts build
-pnpm --filter @gongyuai/history build
-pnpm --filter @gongyuai/control-plane build
-pnpm --filter @gongyuai/worker build
-pnpm --filter @gongyuai/console build
+pnpm run build
 
 DATA_DIR="$GY/.gongyuai"
 restart_nohup() {

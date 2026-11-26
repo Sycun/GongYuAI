@@ -52,26 +52,66 @@ async function api(
   return { status: res.status, text: await res.text() };
 }
 
-/** Extract host and full endpoint tokens from `container_addr` strings (URLs, host:port, comma/space lists). */
+/**
+ * Extract host and full endpoint tokens from `container_addr` payloads
+ * (OpenAPI `string[]`, URLs, `host:port`, comma/space lists, or object wrappers).
+ */
 export function parseContainerAddresses(raw: unknown): Array<{ endpoint: string; host: string }> {
-  if (typeof raw !== "string" || !raw.trim()) return [];
+  const parts: string[] = [];
+  const collect = (val: unknown): void => {
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      if (!trimmed) return;
+      if (trimmed.startsWith("[") && trimmed.endsWith("]") && /["']/.test(trimmed)) {
+        try {
+          const parsedJson = JSON.parse(trimmed) as unknown;
+          if (Array.isArray(parsedJson)) {
+            for (const item of parsedJson) collect(item);
+            return;
+          }
+        } catch {
+          /* fall through to literal token split */
+        }
+      }
+      for (const token of trimmed.split(/[,;\s]+/)) {
+        if (token.trim()) parts.push(token.trim());
+      }
+      return;
+    }
+    if (Array.isArray(val)) {
+      for (const item of val) collect(item);
+      return;
+    }
+    if (val && typeof val === "object") {
+      const rec = val as Record<string, unknown>;
+      for (const key of ["addr", "address", "url", "endpoint", "host"]) {
+        if (rec[key] !== undefined) collect(rec[key]);
+      }
+    }
+  };
+  collect(raw);
+  if (!parts.length) return [];
+
   const out: Array<{ endpoint: string; host: string }> = [];
   const seen = new Set<string>();
-  const parts = raw
-    .split(/[,;\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
   for (const part of parts) {
-    let cleaned = part.replace(/^["'`]+|["'`]+$/g, "");
+    const cleaned = part.replace(/^["'`]+|["'`]+$/g, "");
     if (!cleaned) continue;
-    let host = cleaned.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
-    host = host.split("/")[0] ?? host;
-    host = host.replace(/^\[|\]$/g, "");
-    const m = /^([^:\s]+)(?::\d+)?$/.exec(host);
-    if (!m?.[1]) continue;
-    const h = m[1].toLowerCase();
-    if (!h || h === "0.0.0.0") continue;
-    if (!/^(?:\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9.-]+\.[a-z]{2,})$/i.test(h)) continue;
+    let hostPart = cleaned.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+    hostPart = hostPart.split("/")[0] ?? hostPart;
+    let h = "";
+    const ipv6 = /^\[([0-9a-f:]+)\](?::\d+)?$/i.exec(hostPart);
+    if (ipv6?.[1]) {
+      h = ipv6[1].toLowerCase();
+      if (h === "::") continue;
+    } else {
+      hostPart = hostPart.replace(/^\[|\]$/g, "");
+      const m = /^([^:\s]+)(?::\d+)?$/.exec(hostPart);
+      if (!m?.[1]) continue;
+      h = m[1].toLowerCase();
+      if (!h || h === "0.0.0.0") continue;
+      if (!/^(?:\d{1,3}(?:\.\d{1,3}){3}|localhost|[a-z0-9.-]+\.[a-z]{2,})$/i.test(h)) continue;
+    }
     const key = `${cleaned}::${h}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -91,7 +131,8 @@ function persistChallengeHosts(dataDir: string, code: string, hosts: string[]): 
     const existing: Record<string, string[]> = existsSync(mapPath)
       ? (JSON.parse(readFileSync(mapPath, "utf8")) as Record<string, string[]>)
       : {};
-    existing[code] = [...new Set([...(existing[code] ?? []), ...hosts])];
+    // Replace rather than union so recycled container IPs from an earlier run of `code` are dropped on restart.
+    existing[code] = [...new Set(hosts)];
     const tmp = `${mapPath}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(existing, null, 2));
     renameSync(tmp, mapPath);
@@ -200,14 +241,16 @@ export function autoAdmitContainerTargets(
         /* best-effort manifest sync */
       }
     }
-    // Sync dynamically admitted target hosts via generic control-plane sidecar.
+    // Sync dynamically admitted target hosts via generic control-plane sidecar (atomic write).
     try {
       const dynPath = join(ctx.manifest.dataDir, "admitted-targets.json");
       const existing: string[] = existsSync(dynPath)
         ? (JSON.parse(readFileSync(dynPath, "utf8")) as string[])
         : [];
       const merged = [...new Set([...existing, ...parsed.map((p) => p.host)])];
-      writeFileSync(dynPath, JSON.stringify(merged, null, 2));
+      const tmp = `${dynPath}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(merged, null, 2));
+      renameSync(tmp, dynPath);
     } catch {
       /* best-effort */
     }
@@ -276,10 +319,14 @@ export async function tsecbenchTool(
       const addr = parsed.container_addr ?? (parsed.data as Record<string, unknown> | undefined)?.container_addr;
       if (addr) admitted = autoAdmitContainerTargets(ctx, code, addr);
       if (admitted.length) {
-        appendProgress(
-          ctx.manifest.workspaceDir,
-          `tsecbench start ${code} → auto-admitted ${admitted.map((a) => `${a.address}(fact=${a.factId})`).join(", ")}`,
-        );
+        try {
+          appendProgress(
+            ctx.manifest.workspaceDir,
+            `tsecbench start ${code} → auto-admitted ${admitted.map((a) => `${a.address}(fact=${a.factId})`).join(", ")}`,
+          );
+        } catch {
+          /* progress log is best-effort */
+        }
         let surfaceRotationHint: string | undefined;
         const activeId = ctx.getActiveIntentId?.() ?? null;
         if (activeId) {
