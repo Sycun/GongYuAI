@@ -266,6 +266,7 @@ export function openSkillHub(
           layer: "summary",
           title: `加载 Skill ${id}`,
           summary: `${ref ? `[${label}] ` : ""}${reason.slice(0, 380)}`,
+          tags: ["system", "skill"],
         });
         success = body.length > 0;
         const refs = !ref ? listReferences(pack.rootDir) : [];

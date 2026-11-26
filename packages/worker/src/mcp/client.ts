@@ -454,6 +454,7 @@ export async function openMcpHub(
         layer: "summary",
         title: `解锁 MCP ${id}`,
         summary: reason.slice(0, 500),
+        tags: ["system", "mcp"],
       });
       return `${msg}。理由：${reason.slice(0, 200)}`;
     },
@@ -485,6 +486,7 @@ export async function openMcpHub(
         layer: "summary",
         title: `关闭 MCP ${id}`,
         summary: reason.slice(0, 500),
+        tags: ["system", "mcp"],
       });
       return `已关闭 MCP ${id}`;
     },

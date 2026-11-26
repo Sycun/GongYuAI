@@ -95,3 +95,43 @@ test("无显式 intentId/factIds 的漏洞兜底连到所属资产，不沦为�
   assert.equal(dag.orphanIds.has("v-loose"), false);
   assert.equal(link(dag, assetNodeId("app.example"), "v-loose", "affects")?.structural, true);
 });
+
+test("系统生命周期 Fact（如「执行节点已启动」）不作为孤立节点出现，无论是否传 serverDag", () => {
+  const lifecycleFacts: DagFact[] = [
+    ...facts.filter((f) => f.id !== "f-orphan"),
+    { id: "f-boot-legacy", layer: "title", title: "执行节点已启动", createdAt: "2026-11-24T00:59:00Z" },
+    { id: "f-boot-tagged", layer: "title", title: "节点初始化", tags: ["system", "lifecycle"], createdAt: "2026-11-24T00:59:30Z" },
+    { id: "f-scope", layer: "summary", title: "授权范围更新至 v2", tags: ["scope", "scopeVersion:2"], createdAt: "2026-11-24T01:10:00Z" },
+    { id: "f-skill-linked", layer: "summary", title: "加载 Skill web-sqli", tags: ["system", "skill"], intentId: "i1", createdAt: "2026-11-24T01:40:00Z" },
+  ];
+  const clientDag = collectDag(lifecycleFacts, intents, findings, assets);
+  assert.equal(clientDag.records.has("f-boot-legacy"), false);
+  assert.equal(clientDag.records.has("f-boot-tagged"), false);
+  assert.equal(clientDag.records.has("f-scope"), false);
+  assert.equal(clientDag.records.has("f-skill-linked"), true);
+  assert.equal(clientDag.orphanIds.size, 0);
+
+  const serverEdges = [
+    { id: "e1", from: "asset:app.example", to: "fact:f-seed", kind: "asserted-by" },
+    { id: "e2", from: "fact:f-seed", to: "intent:i1", kind: "anchors", verification: "proven" as const },
+    { id: "e3", from: "intent:i1", to: "fact:f1", kind: "produces", verification: "proven" as const },
+    { id: "e4", from: "intent:i1", to: "fact:f-skill-linked", kind: "produces", verification: "proven" as const },
+    { id: "e5", from: "fact:f1", to: "finding:v1", kind: "evidences", verification: "proven" as const },
+    { id: "e6", from: "intent:i1", to: "finding:v1", kind: "yields", verification: "proven" as const },
+  ];
+  const withServer = collectDag(lifecycleFacts, intents, findings, assets, { edges: serverEdges });
+  assert.equal(withServer.records.has("f-boot-legacy"), false);
+  assert.equal(withServer.orphanIds.size, 0);
+});
+
+test("同一资产升级后的旧资产 Fact 也连回资产节点，不沦为孤立节点", () => {
+  const upgradedFacts: DagFact[] = [
+    { id: "f-seed-old", layer: "title", title: "资产 · seed · app.example", tags: ["asset", "asset.kind:seed", "asset.addr:app.example"], createdAt: "2026-11-24T00:50:00Z" },
+    { id: "f-live-new", layer: "title", title: "资产 · live · app.example", tags: ["asset", "asset.kind:live", "asset.addr:app.example"], createdAt: "2026-11-24T01:00:00Z" },
+  ];
+  const upgradedAssets: DagAsset[] = [{ address: "app.example", kind: "live", factId: "f-live-new" }];
+  const dag = collectDag(upgradedFacts, [], [], upgradedAssets);
+  assert.equal(dag.orphanIds.size, 0);
+  assert.equal(link(dag, assetNodeId("app.example"), "f-seed-old", "asserted-by")?.structural, true);
+  assert.equal(link(dag, assetNodeId("app.example"), "f-live-new", "asserted-by")?.structural, true);
+});

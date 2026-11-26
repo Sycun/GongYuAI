@@ -120,6 +120,25 @@ export type BuildDagExportInput = {
 
 const MAX_FINDING_EDGES_DEFAULT = 200;
 
+const LEGACY_LIFECYCLE_TITLES = new Set([
+  "执行节点已启动",
+  "任务已初始化",
+  "已加载任务坐标",
+]);
+
+/** 系统生命周期/运行记账类 Fact：非攻防因果节点，未挂靠任何意图或引用时不入因果图，避免形成伪孤立节点。 */
+function isSystemLifecycleFact(fact: Pick<Fact, "title" | "tags" | "evidencePath">): boolean {
+  if (fact.evidencePath) return false;
+  if (fact.tags.includes("asset") || fact.tags.some((t) => t.startsWith("asset.addr:"))) return false;
+  if (fact.tags.includes("system") || fact.tags.includes("lifecycle")) return true;
+  if (fact.tags.includes("scope") && fact.tags.some((t) => t.startsWith("scopeVersion:"))) return true;
+  if (LEGACY_LIFECYCLE_TITLES.has(fact.title)) return true;
+  if (/^加载 Skill\s+/.test(fact.title)) return true;
+  if (/^(?:解锁|关闭) MCP\s+/.test(fact.title)) return true;
+  if (/^授权范围更新至 v\d+/.test(fact.title)) return true;
+  return false;
+}
+
 const assetNodeId = (address: string): string => graphNodeId("asset", address);
 const factNodeId = (id: string): string => graphNodeId("fact", id);
 const intentNodeId = (id: string): string => graphNodeId("intent", id);
@@ -189,15 +208,30 @@ function validationSummary(
  * 纯函数构建 DAG 导出。`HistoryStore.dagExport()` 只负责取数后调用这里。
  */
 export function buildDagExport(input: BuildDagExportInput): DagExport {
-  const facts = byCreatedAt(input.facts);
+  const allFacts = byCreatedAt(input.facts);
   const intents = byCreatedAt(input.intents);
   const findings = byCreatedAt(input.findings);
   const validations = [...(input.validations ?? [])].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   );
 
-  const factById = new Map(facts.map((fact) => [fact.id, fact]));
   const intentById = new Map(intents.map((intent) => [intent.id, intent]));
+  const referencedFactIds = new Set<string>();
+  for (const asset of input.assets) referencedFactIds.add(asset.factId);
+  for (const intent of intents) {
+    for (const sourceId of intent.sourceFactIds) referencedFactIds.add(sourceId);
+  }
+  for (const finding of findings) {
+    for (const factId of finding.factIds) referencedFactIds.add(factId);
+  }
+  const facts = allFacts.filter(
+    (fact) =>
+      !isSystemLifecycleFact(fact) ||
+      Boolean(fact.intentId && intentById.has(fact.intentId)) ||
+      referencedFactIds.has(fact.id),
+  );
+
+  const factById = new Map(facts.map((fact) => [fact.id, fact]));
 
   const nodes: GraphNode[] = [];
   const nodeIds = new Set<string>();
@@ -360,12 +394,28 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
     );
   };
 
-  // 资产 → 事实：资产清单以该 Fact 为唯一凭据（结构边，不做因果校验）。
+  // 资产 → 事实：资产清单凭据（含同一资产从 seed/admitted 升级至 live 时的历史资产事实，避免升级后旧资产事实沦为孤立节点）。
+  const assetAddresses = new Set(input.assets.map((asset) => asset.address));
   for (const asset of input.assets) {
     pushEdge({
       id: `${assetNodeId(asset.address)}->${factNodeId(asset.factId)}:asserted-by`,
       from: assetNodeId(asset.address),
       to: factNodeId(asset.factId),
+      kind: "asserted-by",
+      label: "资产清单凭据",
+      broken: false,
+    });
+  }
+  for (const fact of facts) {
+    if (!fact.tags.includes("asset")) continue;
+    const addrTag = fact.tags.find((tag) => tag.startsWith("asset.addr:"));
+    if (!addrTag) continue;
+    const address = addrTag.slice("asset.addr:".length);
+    if (!assetAddresses.has(address)) continue;
+    pushEdge({
+      id: `${assetNodeId(address)}->${factNodeId(fact.id)}:asserted-by`,
+      from: assetNodeId(address),
+      to: factNodeId(fact.id),
       kind: "asserted-by",
       label: "资产清单凭据",
       broken: false,

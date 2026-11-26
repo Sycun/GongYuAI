@@ -188,12 +188,14 @@ export async function runMockLoop(manifest: WorkerManifest): Promise<void> {
           layer: "title",
           title: "任务已初始化",
           summary: `任务目标：${manifest.auth.targets.join("、")}`,
+          tags: ["system", "lifecycle"],
         });
         history.appendFact({
           taskId: manifest.taskId,
           layer: "summary",
           title: "已加载任务坐标",
           summary: (manifest.auth.authorizationNote || manifest.auth.targets.join("、")).slice(0, 500),
+          tags: ["system", "lifecycle"],
         });
         // Simulate discovery under first target pattern so 资产表 grows past seeds.
         const seed0 = manifest.auth.targets[0];

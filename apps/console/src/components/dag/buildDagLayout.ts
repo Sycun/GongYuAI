@@ -116,7 +116,7 @@ export type DagCollection = {
   topologyKey: string;
 };
 
-export const CARD_SIZE = { width: 184, height: 64 };
+export const CARD_SIZE = { width: 196, height: 68 };
 export const ORIGIN_ID = "origin";
 export const assetNodeId = (address: string) => `asset:${address}`;
 
@@ -228,6 +228,26 @@ function verifyEdge(from: NodeRef | null, to: NodeRef | null): { verification: D
 
 const MAX_FINDING_EDGES = 200;
 
+const LEGACY_LIFECYCLE_TITLES = new Set([
+  "执行节点已启动",
+  "任务已初始化",
+  "已加载任务坐标",
+]);
+
+/** 系统生命周期/运行记账类 Fact：非攻防因果节点，未挂靠任何意图或引用时不入因果图。 */
+function isSystemLifecycleFact(fact: Pick<DagFact, "title" | "tags" | "evidencePath">): boolean {
+  if (fact.evidencePath) return false;
+  const tags = fact.tags ?? [];
+  if (tags.includes("asset") || tags.some((t) => t.startsWith("asset.addr:"))) return false;
+  if (tags.includes("system") || tags.includes("lifecycle")) return true;
+  if (tags.includes("scope") && tags.some((t) => t.startsWith("scopeVersion:"))) return true;
+  if (LEGACY_LIFECYCLE_TITLES.has(fact.title)) return true;
+  if (/^加载 Skill\s+/.test(fact.title)) return true;
+  if (/^(?:解锁|关闭) MCP\s+/.test(fact.title)) return true;
+  if (/^授权范围更新至 v\d+/.test(fact.title)) return true;
+  return false;
+}
+
 /**
  * 资产 → 事实 → 意图 → 漏洞 四层因果图。结构边不做校验；因果边带 proven/proposed。
  * 孤立节点（无任何连线）默认折叠，由 showOrphans 开关释放。
@@ -242,6 +262,24 @@ export function collectDag(
   const records = new Map<string, DagRecord>();
   const links: DagLink[] = [];
   const intentIds = new Set(intents.map((intent) => intent.id));
+  const referencedFactIds = new Set<string>();
+  for (const asset of assets) referencedFactIds.add(asset.factId);
+  for (const intent of intents) {
+    for (const sourceId of intent.sourceFactIds ?? []) referencedFactIds.add(sourceId);
+  }
+  for (const finding of findings) {
+    for (const factId of finding.factIds ?? []) referencedFactIds.add(factId);
+  }
+  for (const edge of serverDag?.edges ?? []) {
+    if (edge.from.startsWith("fact:")) referencedFactIds.add(unwrapServerNodeId(edge.from));
+    if (edge.to.startsWith("fact:")) referencedFactIds.add(unwrapServerNodeId(edge.to));
+  }
+  const visibleFacts = facts.filter(
+    (fact) =>
+      !isSystemLifecycleFact(fact) ||
+      Boolean(fact.intentId && intentIds.has(fact.intentId)) ||
+      referencedFactIds.has(fact.id),
+  );
 
   const factRefs = new Map<string, NodeRef>();
   const intentRefs = new Map<string, NodeRef>();
@@ -254,7 +292,7 @@ export function collectDag(
     });
   }
 
-  for (const fact of facts) {
+  for (const fact of visibleFacts) {
     records.set(fact.id, { kind: "fact", title: fact.title, meta: fact.layer, summary: fact.summary });
     factRefs.set(fact.id, {
       id: fact.id, createdAt: fact.createdAt,
@@ -339,7 +377,7 @@ export function collectDag(
     }
 
     // 意图 → 事实（Explore 回写）
-    for (const fact of facts) {
+    for (const fact of visibleFacts) {
       if (!fact.intentId || !intentIds.has(fact.intentId)) continue;
       const verdict = verifyEdge(intentRefs.get(fact.intentId) ?? null, factRefs.get(fact.id) ?? null);
       links.push({ source: fact.intentId, target: fact.id, kind: "produces", ...verdict });
@@ -357,16 +395,31 @@ export function collectDag(
       }
     }
 
-    // 资产 → 事实（结构凭据边）
+    // 资产 → 事实（结构凭据边，含同资产升级后的历史资产事实）
+    const assetAddresses = new Set(assets.map((asset) => asset.address));
+    const assertedPairs = new Set<string>();
     for (const asset of assets) {
       if (!records.has(asset.factId)) continue;
+      const key = `${asset.address}\0${asset.factId}`;
+      assertedPairs.add(key);
       links.push({ source: assetNodeId(asset.address), target: asset.factId, kind: "asserted-by", structural: true });
+    }
+    for (const fact of visibleFacts) {
+      if (!fact.tags?.includes("asset")) continue;
+      const addrTag = fact.tags.find((tag) => tag.startsWith("asset.addr:"));
+      if (!addrTag) continue;
+      const address = addrTag.slice("asset.addr:".length);
+      if (!assetAddresses.has(address)) continue;
+      const key = `${address}\0${fact.id}`;
+      if (assertedPairs.has(key)) continue;
+      assertedPairs.add(key);
+      links.push({ source: assetNodeId(address), target: fact.id, kind: "asserted-by", structural: true });
     }
 
     // 兜底链路：缺少 intentId 与 factIds 的漏洞按共享证据文件连 Fact，否则挂所属资产节点。
     const normEv = (p: string) => p.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/^evidence\//, "");
     const factsByEvidence = new Map<string, DagFact[]>();
-    for (const fact of facts) {
+    for (const fact of visibleFacts) {
       if (!fact.evidencePath) continue;
       const key = normEv(fact.evidencePath);
       if (!key) continue;

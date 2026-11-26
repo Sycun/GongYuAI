@@ -203,42 +203,114 @@ body {
 }
 
 .gy-dag-viewport .react-flow { --xy-attribution-background-color: var(--semi-color-bg-0); }
+.gy-dag-viewport .react-flow__minimap.gy-dag-minimap {
+  width: 196px;
+  height: 128px;
+  margin: 0 12px 26px 0;
+  border: 1px solid var(--semi-color-border);
+  border-radius: 10px;
+  background: var(--semi-color-bg-1);
+  box-shadow: 0 6px 18px rgb(15 23 42 / 10%);
+  overflow: hidden;
+}
+
 .gy-dag-node {
-  --gy-kind-color: var(--semi-color-text-2);
+  --gy-kind-color: #64748b;
   box-sizing: border-box;
   height: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--semi-color-border);
+  padding: 8px 11px 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--gy-kind-color) 32%, var(--semi-color-border));
+  border-left: 5px solid var(--gy-kind-color);
   border-radius: 9px;
-  background: var(--semi-color-bg-1);
-  box-shadow: 0 2px 5px rgb(20 31 47 / 7%);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--gy-kind-color) 7%, var(--semi-color-bg-1)) 0%,
+    var(--semi-color-bg-1) 36%
+  );
+  box-shadow: 0 2px 6px rgb(15 23 42 / 6%);
   cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
 }
 
-.gy-dag-node-fact { --gy-kind-color: var(--semi-color-primary); }
-.gy-dag-node-intent { --gy-kind-color: var(--semi-color-warning); }
-.gy-dag-node-asset { --gy-kind-color: var(--semi-color-success); }
-.gy-dag-node-finding { --gy-kind-color: var(--semi-color-danger); }
-.gy-dag-node-asset .gy-dag-node-meta i { border-radius: 2px; }
-.gy-dag-node-finding .gy-dag-node-meta i { border-radius: 2px; transform: rotate(45deg); }
-.gy-dag-node-meta { gap: 6px; color: var(--semi-color-text-1); font-size: 11px; line-height: 18px; }
-.gy-dag-node-meta i { width: 7px; height: 7px; border-radius: 50%; background: var(--gy-kind-color); flex: none; }
-.gy-dag-node-intent .gy-dag-node-meta i { border-radius: 1px; transform: rotate(45deg); }
-.gy-dag-node-meta > span { margin-left: auto; color: var(--semi-color-text-2); }
-.gy-dag-node strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; line-height: 24px; }
+.gy-dag-node-asset { --gy-kind-color: #10b981; }
+.gy-dag-node-fact { --gy-kind-color: #3b82f6; }
+.gy-dag-node-intent { --gy-kind-color: #f59e0b; }
+.gy-dag-node-finding { --gy-kind-color: #ef4444; }
+.gy-dag-node-origin { --gy-kind-color: #64748b; }
+
+.gy-dag-node-dimmed { opacity: 0.36; }
+
+.gy-dag-node-meta { gap: 6px; color: var(--semi-color-text-1); font-size: 11px; line-height: 18px; margin-bottom: 4px; }
+.gy-dag-node-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  background: var(--gy-kind-color);
+  color: #fff;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  flex: none;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--gy-kind-color) 42%, transparent);
+}
+.gy-dag-node-kind {
+  font-style: normal;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--gy-kind-color) 85%, var(--semi-color-text-0));
+}
+.gy-dag-node-status {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--gy-kind-color) 11%, var(--semi-color-fill-0));
+  color: var(--semi-color-text-1);
+  font-size: 10px;
+  line-height: 16px;
+}
+.gy-dag-node strong {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: 22px;
+  color: var(--semi-color-text-0);
+}
 .gy-dag-node .react-flow__handle { visibility: hidden; }
-.gy-dag-node:hover { border-color: var(--semi-color-text-2); }
+.gy-dag-node:hover {
+  border-color: var(--gy-kind-color);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--gy-kind-color) 20%, transparent);
+}
 .gy-dag .selected .gy-dag-node, .gy-dag .react-flow__node:focus-visible .gy-dag-node {
-  outline: 2px solid var(--semi-color-primary);
+  border-color: var(--gy-kind-color);
+  outline: 2px solid var(--gy-kind-color);
   outline-offset: 2px;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--gy-kind-color) 26%, transparent);
 }
 
-.gy-dag .react-flow__edge-path { stroke: var(--semi-color-text-2); stroke-width: 1.4; stroke-linejoin: round; }
-.gy-dag-edge-proven .react-flow__edge-path { stroke: var(--semi-color-text-1); }
+.gy-dag .react-flow__edge-path {
+  stroke: #64748b;
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  opacity: 0.54;
+  transition: opacity 140ms ease, stroke-width 140ms ease;
+}
+.gy-dag-edge-kind-asserted-by .react-flow__edge-path { stroke: #10b981; }
+.gy-dag-edge-kind-anchors .react-flow__edge-path { stroke: #3b82f6; }
+.gy-dag-edge-kind-produces .react-flow__edge-path { stroke: #f59e0b; }
+.gy-dag-edge-kind-evidences .react-flow__edge-path,
+.gy-dag-edge-kind-yields .react-flow__edge-path,
+.gy-dag-edge-kind-escalates .react-flow__edge-path,
+.gy-dag-edge-kind-affects .react-flow__edge-path { stroke: #ef4444; opacity: 0.64; }
 .gy-dag-edge-proposed .react-flow__edge-path { stroke-dasharray: 5 4; }
-.gy-dag-edge-structural .react-flow__edge-path { stroke: var(--semi-color-text-3); stroke-width: 1.1; }
-.gy-dag-edge-broken .react-flow__edge-path { stroke: var(--semi-color-danger); stroke-dasharray: 3 3; }
-.gy-dag .gy-dag-edge-active .react-flow__edge-path { stroke: var(--semi-color-primary); stroke-width: 2; }
+.gy-dag-edge-structural .react-flow__edge-path { stroke-width: 1.2; opacity: 0.46; }
+.gy-dag-edge-broken .react-flow__edge-path { stroke: #dc2626; stroke-dasharray: 3 3; opacity: 0.8; }
+.gy-dag .gy-dag-edge-dimmed .react-flow__edge-path { opacity: 0.14; }
+.gy-dag .gy-dag-edge-active .react-flow__edge-path { stroke-width: 2.3; opacity: 1; }
 
 .gy-dag-toolbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .gy-dag-orphan-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--semi-color-text-2); cursor: pointer; }
@@ -250,11 +322,29 @@ body {
 .gy-dag-edge-other { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--semi-color-text-1); }
 .gy-dag-abstention { color: var(--semi-color-warning); }
 
-.gy-dag-legend { flex-wrap: wrap; gap: 6px 16px; padding: 10px 16px; border-top: 1px solid var(--semi-color-border); }
-.gy-dag-legend > span { gap: 6px; }
-.gy-dag-legend i { width: 18px; border-top: 2px solid var(--semi-color-text-2); }
-.gy-dag-legend .gy-dashed { border-top-style: dashed; }
-.gy-dag-legend .gy-structural { border-top-color: var(--semi-color-text-3); border-top-width: 1px; }
+.gy-dag-legend { flex-wrap: wrap; gap: 8px 14px; padding: 10px 16px; border-top: 1px solid var(--semi-color-border); }
+.gy-dag-legend-group { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.gy-dag-legend-group > span { display: inline-flex; align-items: center; gap: 6px; }
+.gy-dag-legend-sep { width: 1px; height: 14px; background: var(--semi-color-border); }
+.gy-dag-legend .gy-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.gy-dag-legend .gy-swatch-asset { background: #10b981; }
+.gy-dag-legend .gy-swatch-fact { background: #3b82f6; }
+.gy-dag-legend .gy-swatch-intent { background: #f59e0b; }
+.gy-dag-legend .gy-swatch-finding { background: #ef4444; }
+.gy-dag-legend i { width: 18px; border-top: 2px solid #3b82f6; }
+.gy-dag-legend .gy-dashed { border-top-style: dashed; border-top-color: #f59e0b; }
+.gy-dag-legend .gy-structural { border-top-color: #10b981; border-top-width: 1.5px; opacity: 0.7; }
 .gy-dag-hint { margin-left: auto; }
 .gy-dag-empty { padding: 36px 16px; text-align: center; }
 
@@ -298,6 +388,7 @@ body {
   .gy-shell-content { padding: 16px 12px; }
   .gy-dag-toolbar, .gy-dag-legend { padding-inline: 12px; }
   .gy-dag-controls .semi-button { height: 34px; min-width: 36px; }
+  .gy-dag-viewport .react-flow__minimap.gy-dag-minimap { width: 136px; height: 92px; }
 }
 
 /* 漏洞与报告（ARTEX 风格台账 + 专业报告视图） */

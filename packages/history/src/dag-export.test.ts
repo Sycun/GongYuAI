@@ -408,3 +408,67 @@ test("无显式 intentId/factIds 的漏洞：按共享证据连 Fact，否则兜
   assert.ok(assetEdge, "无证据匹配的漏洞应兜底连到所属资产");
   assert.equal(assetEdge.broken, false);
 });
+
+test("系统生命周期 Fact（含历史无标签「执行节点已启动」）不作为孤立节点入图；挂在活跃意图上的保留", () => {
+  const legacyBoot = fact({ id: "f-boot-legacy", title: "执行节点已启动", tags: [], intentId: null });
+  const taggedBoot = fact({ id: "f-boot-tagged", title: "自定义启动通知", tags: ["system", "lifecycle"], intentId: null });
+  const scopeUpdate = fact({
+    id: "f-scope",
+    title: "授权范围更新至 v2",
+    tags: ["scope", "scopeVersion:2"],
+    intentId: null,
+  });
+  const orphanSkill = fact({ id: "f-skill-orphan", title: "加载 Skill web-sqli", tags: ["system", "skill"], intentId: null });
+  const activeIntent = intent({ id: "i-active", sourceFactIds: [ORIGIN_FACT_ID] });
+  const linkedSkill = fact({
+    id: "f-skill-linked",
+    title: "加载 Skill cve-check",
+    tags: ["system", "skill"],
+    intentId: "i-active",
+    createdAt: T1,
+  });
+
+  const dag = buildDagExport({
+    taskId: TASK,
+    generatedAt: T2,
+    facts: [legacyBoot, taggedBoot, scopeUpdate, orphanSkill, linkedSkill],
+    intents: [activeIntent],
+    findings: [],
+    assets: [],
+  });
+
+  const nodeIds = new Set(dag.nodes.map((n) => n.id));
+  assert.equal(nodeIds.has("fact:f-boot-legacy"), false);
+  assert.equal(nodeIds.has("fact:f-boot-tagged"), false);
+  assert.equal(nodeIds.has("fact:f-scope"), false);
+  assert.equal(nodeIds.has("fact:f-skill-orphan"), false);
+  assert.equal(nodeIds.has("fact:f-skill-linked"), true);
+  assert.ok(dag.edges.some((e) => e.from === "intent:i-active" && e.to === "fact:f-skill-linked" && e.kind === "produces"));
+  assert.equal(dag.notes.some((note) => note.includes("孤立事实")), false);
+});
+
+test("同一资产由 seed 升级为 live 时，旧资产 Fact 也连到对应资产节点，不沦为孤立节点", () => {
+  const seedFact = fact({
+    id: "f-seed",
+    title: "资产 · seed · 10.0.160.242",
+    tags: ["asset", "asset.kind:seed", "asset.addr:10.0.160.242", "asset.source:auth"],
+    createdAt: T0,
+  });
+  const liveFact = fact({
+    id: "f-live",
+    title: "资产 · live · 10.0.160.242",
+    tags: ["asset", "asset.kind:live", "asset.addr:10.0.160.242", "asset.source:discover"],
+    createdAt: T1,
+  });
+  const dag = buildDagExport({
+    taskId: TASK,
+    generatedAt: T2,
+    facts: [seedFact, liveFact],
+    intents: [],
+    findings: [],
+    assets: [{ ...ASSET, address: "10.0.160.242", kind: "live", factId: liveFact.id }],
+  });
+
+  assert.ok(dag.edges.some((e) => e.from === "asset:10.0.160.242" && e.to === "fact:f-seed" && e.kind === "asserted-by"));
+  assert.ok(dag.edges.some((e) => e.from === "asset:10.0.160.242" && e.to === "fact:f-live" && e.kind === "asserted-by"));
+});

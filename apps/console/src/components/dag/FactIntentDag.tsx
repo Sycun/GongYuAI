@@ -2,7 +2,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Empty, Spin, Switch, Tag } from "@douyinfe/semi-ui";
 import { IconBranch, IconClose, IconExpand, IconMinus, IconPlus } from "@douyinfe/semi-icons";
 import {
-  Background, BaseEdge, Handle, MarkerType, Position, ReactFlow, ReactFlowProvider,
+  Background, BaseEdge, Handle, MarkerType, MiniMap, Position, ReactFlow, ReactFlowProvider,
   getViewportForBounds, useReactFlow, useViewport, type Edge, type EdgeProps, type Node, type NodeProps,
   type OnNodesChange, type ReactFlowInstance,
 } from "@xyflow/react";
@@ -23,13 +23,31 @@ type Props = {
   loading?: boolean;
   focusId?: string;
 };
-type RecordNode = Node<DagRecord, "record">;
+type RecordNodeData = DagRecord & { dimmed?: boolean };
+type RecordNode = Node<RecordNodeData, "record">;
 type RoutedEdge = Edge<{ path: string }, "routed">;
 
 const KIND: Record<string, string> = { asset: "资产", fact: "事实", intent: "意图", finding: "漏洞" };
+const KIND_GLYPH: Record<string, string> = { asset: "资", fact: "事", intent: "意", finding: "漏", origin: "起" };
+const KIND_COLOR: Record<string, string> = {
+  asset: "#10b981",
+  fact: "#3b82f6",
+  intent: "#f59e0b",
+  finding: "#ef4444",
+  origin: "#64748b",
+};
 const EDGE_KIND: Record<string, string> = {
   "asserted-by": "资产凭据", anchors: "前驱事实", produces: "Explore 回写",
-  evidences: "支撑发现", yields: "意图产出", escalates: "同证据推进",
+  evidences: "支撑发现", yields: "意图产出", escalates: "同证据推进", affects: "所属资产",
+};
+const EDGE_COLOR: Record<string, string> = {
+  "asserted-by": "#10b981",
+  anchors: "#3b82f6",
+  produces: "#f59e0b",
+  evidences: "#ef4444",
+  yields: "#ef4444",
+  escalates: "#ef4444",
+  affects: "#ef4444",
 };
 const ABSTENTION_LABEL: Record<string, string> = {
   missing_shared_artifact: "缺少共享对象指纹", timestamp_inversion: "时间倒挂",
@@ -39,6 +57,20 @@ const MIN_ZOOM = 0.01;
 const MAX_ZOOM = 2;
 const FIT = { padding: "20px" as const, minZoom: MIN_ZOOM, maxZoom: 1 };
 const ARIA = { "node.a11yDescription.keyboardDisabled": "按回车或空格查看详情，按 Esc 关闭。" };
+
+function visualKind(data: DagRecord): string {
+  if (data.kind === "fact" && (data.meta === "origin" || data.data?.synthetic === true)) return "origin";
+  return data.kind;
+}
+
+function minimapNodeColor(node: RecordNode): string {
+  return KIND_COLOR[visualKind(node.data)] ?? "#94a3b8";
+}
+
+function edgeStrokeColor(link: { kind: string; broken?: boolean }): string {
+  if (link.broken) return "#dc2626";
+  return EDGE_COLOR[link.kind] ?? "#64748b";
+}
 
 function nodeMetaLabel(data: DagRecord): string {
   if (!data.meta) return "";
@@ -50,12 +82,18 @@ function nodeMetaLabel(data: DagRecord): string {
 }
 
 function RecordCard({ data, targetPosition, sourcePosition }: NodeProps<RecordNode>) {
+  const vk = visualKind(data);
+  const label = vk === "origin" ? "起点" : KIND[data.kind];
   return (
-    <div className={`gy-dag-node gy-dag-node-${data.kind}`} title={data.title}>
+    <div
+      className={`gy-dag-node gy-dag-node-${vk}${data.dimmed ? " gy-dag-node-dimmed" : ""}`}
+      title={data.title}
+    >
       <Handle type="target" position={targetPosition ?? Position.Left} />
       <span className="gy-dag-node-meta">
-        <i aria-hidden="true" />{KIND[data.kind]}
-        {data.meta && <span>{nodeMetaLabel(data)}</span>}
+        <i className="gy-dag-node-badge" aria-hidden="true">{KIND_GLYPH[vk] ?? "•"}</i>
+        <em className="gy-dag-node-kind">{label}</em>
+        {data.meta && <span className="gy-dag-node-status">{nodeMetaLabel(data)}</span>}
       </span>
       <strong>{data.title}</strong>
       <Handle type="source" position={sourcePosition ?? Position.Right} />
@@ -86,12 +124,17 @@ function ZoomControls() {
   );
 }
 
-function edgeClass(link: { structural?: boolean; verification?: string; broken?: boolean }, active: boolean): string {
+function edgeClass(
+  link: { kind: string; structural?: boolean; verification?: string; broken?: boolean },
+  active: boolean,
+  dimmed: boolean,
+): string {
   const base = link.broken ? "gy-dag-edge-broken"
     : link.structural ? "gy-dag-edge-structural"
     : link.verification === "proposed" ? "gy-dag-edge-proposed"
     : "gy-dag-edge-proven";
-  return `${base}${active ? " gy-dag-edge-active" : ""}`;
+  const semantic = `gy-dag-edge-kind-${link.kind}`;
+  return `${base} ${semantic}${active ? " gy-dag-edge-active" : ""}${dimmed ? " gy-dag-edge-dimmed" : ""}`;
 }
 
 export default function FactIntentDag({ facts, intents, findings = [], assets = [], serverDag, height, loading, focusId }: Props) {
@@ -106,11 +149,21 @@ export default function FactIntentDag({ facts, intents, findings = [], assets = 
     () => buildDagLayout(dag, vertical, showOrphans),
     [dag.topologyKey, vertical, showOrphans],
   );
+  const flowRef = useRef<ReactFlowInstance<RecordNode, RoutedEdge> | null>(null);
   const selected = selectedId ? dag.records.get(selectedId) : undefined;
   const incidentEdges = useMemo(
     () => selectedId ? dag.links.filter((l) => l.source === selectedId || l.target === selectedId) : [],
     [dag.links, selectedId],
   );
+  const relatedNodeIds = useMemo(() => {
+    if (!selectedId) return null;
+    const set = new Set<string>([selectedId]);
+    for (const l of incidentEdges) {
+      set.add(l.source);
+      set.add(l.target);
+    }
+    return set;
+  }, [selectedId, incidentEdges]);
 
   useLayoutEffect(() => {
     const el = section.current!;
@@ -122,25 +175,29 @@ export default function FactIntentDag({ facts, intents, findings = [], assets = 
   }, []);
 
   const nodes = useMemo<RecordNode[]>(() => geometry.positions.map(({ id, position }) => {
-    const data = dag.records.get(id)!;
+    const record = dag.records.get(id)!;
+    const dimmed = relatedNodeIds ? !relatedNodeIds.has(id) : false;
+    const data: RecordNodeData = dimmed ? { ...record, dimmed: true } : record;
     return {
       id, position, data, ...CARD_SIZE, type: "record", selected: id === selectedId,
       sourcePosition: vertical ? Position.Bottom : Position.Right,
       targetPosition: vertical ? Position.Top : Position.Left,
-      ariaRole: "button", ariaLabel: `${KIND[data.kind]}，${data.title}`,
+      ariaRole: "button", ariaLabel: `${KIND[record.kind]}，${record.title}`,
       domAttributes: {
         "aria-pressed": id === selectedId,
         "aria-controls": id === selectedId ? `${flowId}-detail` : undefined,
       },
     };
-  }), [geometry, dag.records, selectedId, vertical, flowId]);
+  }), [geometry, dag.records, selectedId, relatedNodeIds, vertical, flowId]);
 
   const edges = useMemo<RoutedEdge[]>(() => geometry.edges.map((link) => {
     const active = selectedId === link.source || selectedId === link.target;
+    const dimmed = Boolean(selectedId) && !active;
+    const stroke = edgeStrokeColor(link);
     return {
       id: link.id, source: link.source, target: link.target, type: "routed", data: { path: link.path },
-      selectable: false, className: edgeClass(link, active),
-      markerEnd: { type: MarkerType.ArrowClosed, color: active ? "var(--semi-color-primary)" : "var(--semi-color-text-2)" },
+      selectable: false, className: edgeClass(link, active, dimmed), zIndex: active ? 10 : 0,
+      markerEnd: { type: MarkerType.ArrowClosed, color: stroke, width: 14, height: 14 },
     };
   }), [geometry, selectedId]);
 
@@ -153,6 +210,7 @@ export default function FactIntentDag({ facts, intents, findings = [], assets = 
   };
 
   const openCanvas = (flow: ReactFlowInstance<RecordNode, RoutedEdge>) => {
+    flowRef.current = flow;
     const focused = focusId && nodes.find((node) => node.id === focusId);
     if (focused) {
       void flow.setCenter(
@@ -217,13 +275,47 @@ export default function FactIntentDag({ facts, intents, findings = [], assets = 
                 zoomOnScroll={false} preventScrolling={false} ariaLabelConfig={ARIA}
               >
                 <Background gap={20} size={1} color="var(--semi-color-border)" />
+                <MiniMap<RecordNode>
+                  position="bottom-right"
+                  className="gy-dag-minimap"
+                  ariaLabel="意图图谱缩略图"
+                  pannable
+                  zoomable
+                  nodeColor={minimapNodeColor}
+                  nodeStrokeColor={(node) => (node.selected ? "#0f172a" : "transparent")}
+                  nodeStrokeWidth={3}
+                  nodeBorderRadius={4}
+                  maskColor="rgba(148, 163, 184, 0.24)"
+                  maskStrokeColor="rgba(71, 85, 105, 0.5)"
+                  maskStrokeWidth={1.5}
+                  onNodeClick={(_, node) => {
+                    setSelectedId(node.id);
+                    const flow = flowRef.current;
+                    if (flow) {
+                      void flow.setCenter(
+                        node.position.x + CARD_SIZE.width / 2,
+                        node.position.y + CARD_SIZE.height / 2,
+                        { zoom: Math.max(flow.getZoom(), 0.75), duration: 240 },
+                      );
+                    }
+                  }}
+                />
               </ReactFlow>
             </div>
             <footer className="gy-dag-legend">
-              <span><i />已验证因果</span>
-              <span><i className="gy-dashed" />模型提议</span>
-              <span><i className="gy-structural" />结构关联</span>
-              <span className="gy-dag-hint">拖动画布 · 选择节点查看详情</span>
+              <div className="gy-dag-legend-group">
+                <span className="gy-dag-legend-node"><b className="gy-swatch gy-swatch-asset">资</b>资产</span>
+                <span className="gy-dag-legend-node"><b className="gy-swatch gy-swatch-fact">事</b>事实</span>
+                <span className="gy-dag-legend-node"><b className="gy-swatch gy-swatch-intent">意</b>意图</span>
+                <span className="gy-dag-legend-node"><b className="gy-swatch gy-swatch-finding">漏</b>漏洞</span>
+              </div>
+              <span className="gy-dag-legend-sep" aria-hidden="true" />
+              <div className="gy-dag-legend-group">
+                <span><i />已验证因果</span>
+                <span><i className="gy-dashed" />模型提议</span>
+                <span><i className="gy-structural" />结构关联</span>
+              </div>
+              <span className="gy-dag-hint">拖动画布或右下角缩略图导航 · 点击节点高亮链路</span>
             </footer>
           </>
         ) : loading ? (

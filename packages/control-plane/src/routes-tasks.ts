@@ -295,7 +295,7 @@ export async function handleTaskRoutes(
             layer: "summary",
             title: `授权范围更新至 v${updated.scopeVersion}`,
             summary: `目标：${updated.auth.targets.join("、")}；排除：${updated.auth.outOfScope.join("、") || "未列出"}；原因：${input.data.reason}`,
-            tags: ["scope", `scopeVersion:${updated.scopeVersion}`],
+            tags: ["system", "scope", `scopeVersion:${updated.scopeVersion}`],
           });
         });
       }

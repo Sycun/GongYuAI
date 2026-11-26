@@ -107,6 +107,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
         layer: "title",
         title: "执行节点已启动",
         summary: `目标范围：${manifest.auth.targets.join("、") || "—"}；Explore 并发=${manifest.workerCount}`,
+        tags: ["system", "lifecycle"],
       });
       appendProgress(manifest.workspaceDir, `phase=bootstrap workers=${manifest.workerCount}`);
       state.phase = "bootstrap";
