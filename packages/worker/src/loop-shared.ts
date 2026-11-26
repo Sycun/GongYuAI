@@ -68,6 +68,9 @@ export function shouldWakeMultiWorkerLeader(opts: {
  * Inside a continuous submission turn, instruct a multi-worker Leader (once all Follower
  * slots are fed) or an idle Follower (with no active/proposed Intent) to reply `YIELD`
  * and end the submission so `waitForPoolTurn()` parks at zero LLM token cost.
+ * The "no new surface" Leader yield only targets fan-out tools (intent_propose /
+ * technique_transfer); surface-creating dispatch (tsecbench start, plan_set) stays
+ * allowed so the Leader can keep feeding idle Follower slots while the board is open.
  */
 export function poolTurnYieldDirective(opts: {
   toolName: string;
@@ -97,6 +100,7 @@ export function poolTurnYieldDirective(opts: {
       !opts.activeIntentId &&
       opts.openIntents.length > 0 &&
       proposedCount === 0 &&
+      (opts.toolName === "intent_propose" || opts.toolName === "technique_transfer") &&
       (opts.leaderIdleStepsSincePropose ?? 0) >= 4
     ) {
       return `当前剩余活跃 Intent（${activeCount} 条）仍在由 Follower 执行且暂无新攻击面可派发。请停止调用工具并直接简短回复 YIELD 结束本轮，进入零 Token 驻留池等待当前 Intent 结项唤醒。`;

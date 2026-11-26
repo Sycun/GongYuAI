@@ -615,7 +615,11 @@ export async function runOpenAiToolLoop(
 
         if (callName !== "relay") {
           allowedOpenAiNonRelayCalls += 1;
-          if (callName === "intent_propose" || callName === "technique_transfer") {
+          if (
+            callName === "intent_propose" ||
+            callName === "technique_transfer" ||
+            (leader && callName === "tsecbench")
+          ) {
             leaderIdleStepsSincePropose = 0;
           } else if (leader && livePoolSize > 1) {
             leaderIdleStepsSincePropose += 1;

@@ -412,7 +412,11 @@ export async function tryPiDurable(
               if (call.name !== "relay") {
                 consecutiveBlockedCalls = 0;
                 allowedNonRelayCalls += 1;
-                if (call.name === "intent_propose" || call.name === "technique_transfer") {
+                if (
+                  call.name === "intent_propose" ||
+                  call.name === "technique_transfer" ||
+                  (leader && call.name === "tsecbench")
+                ) {
                   leaderIdleStepsSincePropose = 0;
                 } else if (leader && livePoolSize > 1) {
                   leaderIdleStepsSincePropose += 1;

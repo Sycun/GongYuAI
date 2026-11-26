@@ -756,3 +756,47 @@ test("multi-worker leader stays in bootstrap/reason across 3-way fanout and wake
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("Leader 无新面 YIELD 只闸 fan-out 工具，放行 tsecbench/plan 调度（防三路退化成单路）", () => {
+  const open = [{ id: "f1-04", status: "claimed" }];
+  const base = {
+    leader: true,
+    workerCount: 4,
+    phase: "reason",
+    activeIntentId: null,
+    openIntents: open,
+    allGoalsPass: false,
+    leaderIdleStepsSincePropose: 4,
+  };
+  // 调度调用（开容器/计划）不被闸：Leader 仍能产出新攻击面喂空闲 Follower。
+  assert.equal(poolTurnYieldDirective({ ...base, toolName: "tsecbench" }), undefined);
+  assert.equal(poolTurnYieldDirective({ ...base, toolName: "plan_set" }), undefined);
+  assert.equal(poolTurnYieldDirective({ ...base, toolName: "history_overview" }), undefined);
+  // fan-out 调用在 idle≥4 且无 proposed 时仍闸（防空转 propose）。
+  assert.match(poolTurnYieldDirective({ ...base, toolName: "intent_propose" }) ?? "", /YIELD/);
+  assert.match(poolTurnYieldDirective({ ...base, toolName: "technique_transfer" }) ?? "", /YIELD/);
+  // tsecbench start 重置 idle 后，propose 放行（计数器归零语义）。
+  assert.equal(
+    poolTurnYieldDirective({ ...base, toolName: "intent_propose", leaderIdleStepsSincePropose: 0 }),
+    undefined,
+  );
+  // 槽位排满闸不受影响：任意工具都 YIELD。
+  const saturated = [
+    { id: "1", status: "claimed" },
+    { id: "2", status: "claimed" },
+    { id: "3", status: "claimed" },
+  ];
+  assert.match(
+    poolTurnYieldDirective({ ...base, toolName: "tsecbench", openIntents: saturated }) ?? "",
+    /YIELD/,
+  );
+  // 有 proposed 待认领时不闸 propose。
+  assert.equal(
+    poolTurnYieldDirective({
+      ...base,
+      toolName: "intent_propose",
+      openIntents: [...open, { id: "c-03", status: "proposed" }],
+    }),
+    undefined,
+  );
+});
