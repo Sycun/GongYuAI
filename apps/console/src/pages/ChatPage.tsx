@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Select, SideSheet, TextArea } from "@douyinfe/semi-ui";
-import { IconArrowUp, IconClose, IconFile, IconCommentStroked, IconFolder, IconList, IconRefresh } from "@douyinfe/semi-icons";
+import { IconArrowUp, IconChevronLeft, IconClose, IconFile, IconCommentStroked, IconFolder, IconList, IconRefresh } from "@douyinfe/semi-icons";
 import type { ChatCatalog, ChatSelection, TaskArchiveState } from "@gongyuai/contracts";
 import { ChatModelPicker, effortLabels } from "../components/ChatModelPicker";
 import type { AssignmentView } from "@gongyuai/contracts/chat-input";
@@ -132,7 +132,7 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
     </div>
   </form>;
   const rail = showRail ? <TaskGraphRail taskId={viewedTaskId} mode={viewMode} choices={taskChoices}
-    tasks={taskArchives} archiveBusy={archiveBusy} onArchive={onTaskArchive} onPin={onPin} onFollow={onFollow} onStage={setStage} /> : null;
+    tasks={taskArchives} archiveBusy={archiveBusy} activeView={stage} onArchive={onTaskArchive} onPin={onPin} onFollow={onFollow} onStage={setStage} /> : null;
   return <section className="gy-chat-page">
     <header className="gy-work-header">
       <div className="gy-work-path">{conversation
@@ -185,12 +185,36 @@ export function ChatPage({ catalog, selected, modelError, onSelectModel, onAppro
               setAway(false);
             }}>有新进展</Button>}
             {narrow && graphsOpen && !stage && <div className="gy-graph-drawer" role="dialog" aria-label="任务图谱">
-              <header><Button size="small" onClick={() => { setGraphsOpen(false); document.querySelector<HTMLTextAreaElement>(".gy-composer textarea")?.focus(); }}>返回输入</Button></header>
-              {rail}
+              <header className="gy-stage-header">
+                <Button size="small" theme="light" type="tertiary" icon={<IconChevronLeft />} onClick={() => { setGraphsOpen(false); document.querySelector<HTMLTextAreaElement>(".gy-composer textarea")?.focus(); }}>返回输入</Button>
+                <strong className="gy-stage-title">任务图谱</strong>
+              </header>
+              <div className="gy-stage-body">{rail}</div>
             </div>}
             {stage && <div className="gy-inline-stage" role="dialog" aria-label={viewTitle[stage]}>
-              <header><Button size="small" onClick={closeStage}>返回输入</Button><strong>{viewTitle[stage]}</strong></header>
-              {viewedTaskId ? <GraphDetail taskId={viewedTaskId} view={stage} onOpenRecord={openRecord} /> : <p role="status">等待任务回执</p>}
+              <header className="gy-stage-header">
+                <div className="gy-stage-header-left">
+                  <Button size="small" theme="light" type="tertiary" icon={<IconChevronLeft />} onClick={closeStage}>返回输入</Button>
+                  <strong className="gy-stage-title">{viewTitle[stage]}</strong>
+                </div>
+                <div className="gy-stage-tabs" role="tablist" aria-label="切换图谱视图">
+                  {(["assets", "surface", "execution"] as const).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      role="tab"
+                      aria-selected={stage === item}
+                      className={stage === item ? "is-active" : ""}
+                      onClick={() => setStage(item)}
+                    >
+                      {viewTitle[item]}
+                    </button>
+                  ))}
+                </div>
+              </header>
+              <div className="gy-stage-body">
+                {viewedTaskId ? <GraphDetail taskId={viewedTaskId} view={stage} onOpenRecord={openRecord} /> : <p className="gy-stage-status" role="status">等待任务回执</p>}
+              </div>
             </div>}
           </div>
           <div className="gy-composer-dock">{archived ? <div className="gy-archive-notice">

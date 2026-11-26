@@ -2,7 +2,14 @@ import { useSyncExternalStore } from "react";
 import type { ViewName } from "./model";
 
 export type Viewport = { x: number; y: number; k: number };
-export type GraphSlot = { selectedId: string | null; viewport: Viewport; kinds: string[] | null };
+export type GraphSlot = {
+  selectedId: string | null;
+  viewport: Viewport;
+  kinds: string[] | null;
+  fitted?: boolean;
+  hideUnknown?: boolean;
+  hideOrphans?: boolean;
+};
 
 const slots = new Map<string, GraphSlot>();
 const listeners = new Set<() => void>();
@@ -15,7 +22,14 @@ export function graphSlot(taskId: string, view: ViewName): GraphSlot {
   const key = keyOf(taskId, view);
   const existing = slots.get(key);
   if (existing) return existing;
-  const created: GraphSlot = { selectedId: null, viewport: { x: 16, y: 16, k: 1 }, kinds: null };
+  const created: GraphSlot = {
+    selectedId: null,
+    viewport: { x: 20, y: 20, k: 1 },
+    kinds: null,
+    fitted: false,
+    hideUnknown: true,
+    hideOrphans: view === "surface",
+  };
   slots.set(key, created);
   return created;
 }
