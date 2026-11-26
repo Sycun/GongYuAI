@@ -12,7 +12,9 @@ import {
   autoAdmitContainerTargets,
   captureSolveTraffic,
   parseContainerAddresses,
+  resolveChallengeHosts,
   submitCorrect,
+  tsecbenchTool,
 } from "./tsecbench-tools.js";
 
 function makeManifest(dir: string): WorkerManifest {
@@ -186,6 +188,48 @@ test("tsecbench correct submit keeps the solve traffic window under tsecbench:<c
   } finally {
     clearTrafficRing(dir);
     closeTrafficDb(dir);
+    history.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("multi-worker follower cannot start/close tsecbench containers so slot 0 leader owns the 3-slot cap", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gy-tsec-role-"));
+  const follower = makeManifest(dir);
+  follower.workerId = "w1";
+  follower.workerSlot = 1;
+  follower.workerCount = 4;
+  const history = openHistory({ dbPath: follower.historyDb, evidenceDir: follower.evidenceDir });
+  try {
+    const startRes = JSON.parse(
+      await tsecbenchTool({ manifest: follower, history, usage: { toolCalls: 0, installs: 0 } }, { action: "start", code: "a-01" }),
+    ) as { error?: string };
+    assert.equal(startRes.error, "leader_owns_container_lifecycle");
+    const closeRes = JSON.parse(
+      await tsecbenchTool({ manifest: follower, history, usage: { toolCalls: 0, installs: 0 } }, { action: "close", code: "a-01" }),
+    ) as { error?: string };
+    assert.equal(closeRes.error, "leader_owns_container_lifecycle");
+
+    // Cross-process sync: leader admits an out-of-initial-CIDR host (172.18.0.55) for WEB-999;
+    // a separate follower manifest picks up both command authorization AND challenge host mapping via sidecars.
+    const leader = makeManifest(dir);
+    leader.workerCount = 4;
+    autoAdmitContainerTargets(
+      { manifest: leader, history, usage: { toolCalls: 0, installs: 0 } },
+      "WEB-999",
+      "http://172.18.0.55:8080",
+    );
+    const freshFollower = makeManifest(dir);
+    freshFollower.workerId = "w2";
+    freshFollower.workerSlot = 2;
+    freshFollower.workerCount = 4;
+    assert.deepEqual(freshFollower.auth.targets, ["10.0.100.58"]);
+    assert.doesNotThrow(() => assertCommandAllowed(freshFollower, "curl -s http://172.18.0.55:8080/"));
+    assert.deepEqual(
+      resolveChallengeHosts({ manifest: freshFollower, history, usage: { toolCalls: 0, installs: 0 } }, "WEB-999"),
+      ["172.18.0.55"],
+    );
+  } finally {
     history.close();
     rmSync(dir, { recursive: true, force: true });
   }

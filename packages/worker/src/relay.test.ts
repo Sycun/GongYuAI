@@ -7,6 +7,8 @@ import type { WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import {
   canRelay,
+  countRelayableCalls,
+  formatGateSpinRecoveryHint,
   formatRelayInjection,
   listRelayProtocols,
   midSubmissionRelayGate,
@@ -142,6 +144,21 @@ test("writeRelayProtocol appends πn.json and injection lists foothold", () => {
     assert.match(bounded, /早期交接摘要（π0\.\.π2，共 3 代已折叠）/);
     assert.match(bounded, /### π5 · auto · gen-5/);
     assert.doesNotMatch(bounded, /### π0 · agent/);
+
+    // Multi-worker follower slots write into isolated relay-w<slot>/ directories (never clobbering slot 0).
+    const m1 = { ...m, workerId: "w1", workerSlot: 1, workerCount: 4 };
+    writeRelayProtocol(m1, history, {
+      trigger: "agent",
+      reason: "follower-1",
+      foothold: "10.0.0.99",
+      tokens: 42,
+      toolCalls: 4,
+      generation: 0,
+    });
+    assert.equal(listRelayProtocols(root, 0).length, 6);
+    assert.equal(listRelayProtocols(root, 1).length, 1);
+    assert.equal(listRelayProtocols(root, 1)[0]?.foothold, "10.0.0.99");
+    assert.equal(listRelayProtocols(root, 0)[0]?.foothold, "ssh user@10.0.0.5");
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });
@@ -185,6 +202,18 @@ test("活会话长 turn：>2 工具调用且 >30k token 不触发 beforeTool 硬
     assert.equal(
       midSubmissionRelayGate({ hardReset: true, relayPending: true, toolName: "intent_conclude" }),
       undefined,
+    );
+    assert.equal(
+      midSubmissionRelayGate({ hardReset: true, relayPending: true, toolName: "operator_consult" }),
+      undefined,
+    );
+    // Blocked calls and relay itself never inflate toolCallsSinceRelay (prevents π8→π64 empty spin).
+    assert.equal(countRelayableCalls(["intent_propose", "phase_set"], 2), 0);
+    assert.equal(countRelayableCalls(["relay", "relay"], 0), 0);
+    assert.equal(countRelayableCalls(["history_overview", "shell", "relay"], 1), 1);
+    assert.match(
+      formatGateSpinRecoveryHint({ phase: "reason", activeIntentId: null, leader: true, workerCount: 1 }),
+      /intent_propose/,
     );
     process.env.GY_RELAY_HARD_RESET = "1";
     assert.equal(relayHardResetEnabled(), true);

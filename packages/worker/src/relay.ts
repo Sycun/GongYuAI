@@ -23,16 +23,16 @@ export type RelayWriteInput = {
   generation: number;
 };
 
-export function relayDir(workspaceDir: string): string {
-  return join(workspaceDir, "relay");
+export function relayDir(workspaceDir: string, workerSlot = 0): string {
+  return join(workspaceDir, workerSlot > 0 ? `relay-w${workerSlot}` : "relay");
 }
 
-export function relayPath(workspaceDir: string, generation: number): string {
-  return join(relayDir(workspaceDir), `π${generation}.json`);
+export function relayPath(workspaceDir: string, generation: number, workerSlot = 0): string {
+  return join(relayDir(workspaceDir, workerSlot), `π${generation}.json`);
 }
 
-export function listRelayProtocols(workspaceDir: string): RelayProtocol[] {
-  const dir = relayDir(workspaceDir);
+export function listRelayProtocols(workspaceDir: string, workerSlot = 0): RelayProtocol[] {
+  const dir = relayDir(workspaceDir, workerSlot);
   if (!existsSync(dir)) return [];
   const files = readdirSync(dir)
     .filter((f) => /^π\d+\.json$/u.test(f) || /^pi\d+\.json$/i.test(f))
@@ -119,9 +119,10 @@ export function writeRelayProtocol(
     },
   });
 
-  const dir = relayDir(manifest.workspaceDir);
+  const slot = manifest.workerSlot ?? 0;
+  const dir = relayDir(manifest.workspaceDir, slot);
   mkdirSync(dir, { recursive: true });
-  const path = relayPath(manifest.workspaceDir, protocol.generation);
+  const path = relayPath(manifest.workspaceDir, protocol.generation, slot);
   writeFileSync(path, JSON.stringify(protocol, null, 2));
   return protocol;
 }
@@ -189,13 +190,46 @@ export function midSubmissionRelayGate(opts: {
   toolName: string;
 }): { block: string } | undefined {
   if (!opts.hardReset) return undefined;
-  if (opts.relayPending && opts.toolName !== "relay" && opts.toolName !== "intent_conclude") {
+  if (
+    opts.relayPending &&
+    opts.toolName !== "relay" &&
+    opts.toolName !== "intent_conclude" &&
+    opts.toolName !== "operator_consult"
+  ) {
     return {
       block:
         "Session Relay 阈值已触发（硬重置模式）：请停止调用新工具并输出简短交接摘要，系统将落盘 π。",
     };
   }
   return undefined;
+}
+
+/** Count top-level tool calls that actually executed and qualify toward Relay eligibility. */
+export function countRelayableCalls(
+  toolNames: readonly string[],
+  blockedCount = 0,
+): number {
+  const nonRelay = toolNames.filter((name) => name !== "relay").length;
+  return Math.max(0, nonRelay - Math.max(0, blockedCount));
+}
+
+/** Build an actionable recovery hint when consecutive tool calls hit phase/intent gates. */
+export function formatGateSpinRecoveryHint(opts: {
+  phase: string;
+  activeIntentId: string | null;
+  leader: boolean;
+  workerCount: number;
+}): string {
+  if (opts.leader && opts.workerCount > 1) {
+    return `连续多次工具调用被门禁拒绝：当前为多节点 Leader（phase=${opts.phase}, pool=${opts.workerCount}），负责调度而不直接执行 Explore 工具；请调用 intent_propose 为可用资产扇出独立 Intent（勿带 claim='true'），或用 tsecbench / engagement_audit / assert_goal。`;
+  }
+  if (opts.phase === "reason" || opts.phase === "bootstrap") {
+    return `连续多次工具调用被门禁拒绝：当前 phase=${opts.phase}（activeIntentId=${opts.activeIntentId ?? "null"}），禁止直接执行 shell/http_request；请先调用 intent_propose${opts.workerCount <= 1 ? "(..., claim='true')" : ""} 创建/认领攻击面 Intent，或调用 engagement_audit / tsecbench / operator_consult。`;
+  }
+  if (!opts.activeIntentId) {
+    return `连续多次工具调用被门禁拒绝：当前 phase=${opts.phase} 但 activeIntentId=null；请先 intent_claim 一个 open Intent（若无 open Intent 则 intent_propose(claim='true')），切勿空转调用 relay。`;
+  }
+  return `连续多次工具调用被门禁拒绝：请核对当前 phase=${opts.phase}（activeIntentId=${opts.activeIntentId}）允许的工具面，若缺外部条件可调用 operator_consult。`;
 }
 
 /** Default step interval between silent background π audit snapshots (not a handoff, never resets). */

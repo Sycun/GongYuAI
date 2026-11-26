@@ -12,7 +12,7 @@ import {
 } from "./tool-installer.js";
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AuthCapability, WorkerManifest } from "@gongyuai/contracts";
 import { isBudgetHit, targetAllows } from "@gongyuai/contracts";
@@ -142,8 +142,36 @@ export function extractHosts(command: string): string[] {
   return execExtractHosts(command).filter((h) => h !== "localhost" && h !== "127.0.0.1");
 }
 
+/**
+ * Merge dynamically admitted targets (`admitted-targets.json`, written by leader/tsecbench)
+ * into this worker's in-memory `manifest.auth.targets` so follower processes never false-deny
+ * targets admitted in another OS process.
+ */
+export function syncAdmittedTargets(manifest: WorkerManifest): void {
+  if (!manifest.dataDir) return;
+  const outOfScope = manifest.auth.outOfScope ?? [];
+  for (const sidecar of ["admitted-targets.json", "tsecbench-targets.json"]) {
+    const dynPath = join(manifest.dataDir, sidecar);
+    if (!existsSync(dynPath)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(dynPath, "utf8")) as unknown;
+      if (!Array.isArray(parsed)) continue;
+      for (const item of parsed) {
+        if (typeof item !== "string" || !item.trim()) continue;
+        const host = item.trim();
+        if (!targetAllows(manifest.auth.targets, host, outOfScope)) {
+          manifest.auth.targets.push(host);
+        }
+      }
+    } catch {
+      /* transient sidecar read ignored */
+    }
+  }
+}
+
 export function assertCommandAllowed(manifest: WorkerManifest, command: string): void {
   assertCapabilityAllows(manifest, "shell");
+  syncAdmittedTargets(manifest);
   const verdict = authorizeCommand(manifest.auth, command);
   if (verdict.allowed) return;
   if (verdict.klass === "host-network") {

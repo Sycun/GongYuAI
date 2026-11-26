@@ -69,12 +69,12 @@ test("reconcileWorkers scales a single-CIDR task up to admitted asset count, cap
     await runner.reconcileWorkers(task.id);
 
     const scaled = store.get(task.id)!;
-    assert.equal(scaled.workerPids?.length, 4, "min(cap=4, assets=5)");
-    assert.deepEqual(spawned, [0, 1, 2, 3]);
+    assert.equal(scaled.workerPids?.length, 5, "1 leader + min(cap=4, assets=5) explore followers");
+    assert.deepEqual(spawned, [0, 1, 2, 3, 4]);
     const manifest = JSON.parse(readFileSync(join(task.dataDir, "manifest.json"), "utf8"));
-    assert.equal(manifest.workerCount, 4, "leader manifest rewritten with new pool size");
-    const follower = JSON.parse(readFileSync(join(task.dataDir, "manifest-w3.json"), "utf8"));
-    assert.equal(follower.workerSlot, 3);
+    assert.equal(manifest.workerCount, 5, "leader manifest rewritten with new pool size");
+    const follower = JSON.parse(readFileSync(join(task.dataDir, "manifest-w4.json"), "utf8"));
+    assert.equal(follower.workerSlot, 4);
 
     const paths = taskPaths(task.dataDir);
     const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
@@ -82,7 +82,7 @@ test("reconcileWorkers scales a single-CIDR task up to admitted asset count, cap
       const events = history.listEvents(task.id).filter((e) => e.kind === "explore_scaled");
       assert.equal(events.length, 1);
       assert.equal(events[0]!.payload.from, 1);
-      assert.equal(events[0]!.payload.to, 4);
+      assert.equal(events[0]!.payload.to, 5);
       assert.equal(events[0]!.payload.assetCount, 5);
     } finally {
       history.close();
@@ -90,20 +90,20 @@ test("reconcileWorkers scales a single-CIDR task up to admitted asset count, cap
 
     // Throttled second call does nothing.
     await runner.reconcileWorkers(task.id);
-    assert.deepEqual(spawned, [0, 1, 2, 3]);
+    assert.deepEqual(spawned, [0, 1, 2, 3, 4]);
 
     // Scale-up only: clearing the throttle with fewer assets never shrinks the pool.
     (runner as unknown as { lastScaleCheck: Map<string, number> }).lastScaleCheck.delete(task.id);
     await runner.reconcileWorkers(task.id);
-    assert.equal(store.get(task.id)!.workerPids?.length, 4);
-    assert.deepEqual(spawned, [0, 1, 2, 3]);
+    assert.equal(store.get(task.id)!.workerPids?.length, 5);
+    assert.deepEqual(spawned, [0, 1, 2, 3, 4]);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("reconcileWorkers never exceeds the operator cap", { timeout: 10_000 }, async () => {
+test("reconcileWorkers never exceeds the operator cap (1 leader + cap followers) and defaults to 3 explores", { timeout: 10_000 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "gy-scale-cap-"));
   const { store, runner, spawned } = makeRunner(root);
   try {
@@ -111,8 +111,19 @@ test("reconcileWorkers never exceeds the operator cap", { timeout: 10_000 }, asy
     await runner.start(task.id);
     addAssets(store.get(task.id)!, 20);
     await runner.reconcileWorkers(task.id);
-    assert.equal(store.get(task.id)!.workerPids?.length, 2);
-    assert.deepEqual(spawned, [0, 1]);
+    assert.equal(store.get(task.id)!.workerPids?.length, 3);
+    assert.deepEqual(spawned, [0, 1, 2]);
+
+    spawned.length = 0;
+    const defaultTask = store.createTask(CreateTaskRequestSchema.parse({
+      name: "default 3 explores",
+      mock: false,
+      auth: { authorizationNote: "tsecbench board", targets: ["10.0.0.0/8"] },
+      goals: [{ id: "clear-board", title: "清板", description: "board", evidencePatterns: ["ALL.json"], boardGate: "tsecbench" }],
+    }));
+    assert.equal(defaultTask.execution.maxConcurrentExplores, 3);
+    await runner.start(defaultTask.id);
+    assert.deepEqual(spawned, [0, 1, 2, 3], "tsecbench starts immediately with 1 leader + 3 explore followers");
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -144,16 +155,16 @@ test("reconcileWorkers respawns only dead follower slot without colliding live s
     await runner.start(task.id);
     addAssets(store.get(task.id)!, 4);
     await runner.reconcileWorkers(task.id);
-    assert.deepEqual(spawned, [0, 1, 2, 3]);
+    assert.deepEqual(spawned, [0, 1, 2, 3, 4]);
 
-    // Simulate follower slot 1 crashing while slots 0, 2, 3 remain alive.
+    // Simulate follower slot 1 crashing while slots 0, 2, 3, 4 remain alive.
     const slots = (runner as unknown as { children: Map<string, Map<number, { exitCode?: number | null }>> })
       .children.get(task.id)!;
     slots.get(1)!.exitCode = 1;
     (runner as unknown as { lastScaleCheck: Map<string, number> }).lastScaleCheck.delete(task.id);
 
     await runner.reconcileWorkers(task.id);
-    assert.deepEqual(spawned, [0, 1, 2, 3, 1], "only dead slot 1 is respawned; live slots untouched");
+    assert.deepEqual(spawned, [0, 1, 2, 3, 4, 1], "only dead slot 1 is respawned; live slots untouched");
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

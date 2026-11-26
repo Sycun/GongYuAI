@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
@@ -552,5 +552,48 @@ test("upstream abort mid-body does not crash the proxy (unhandled stream 'error'
       healthy.close();
       rmSync(taskDir, { recursive: true, force: true });
     }
+  }
+});
+
+test("ensureTaskCa and leafFor survive 4 simultaneous worker processes without CA/leaf key mismatch", async () => {
+  const taskDir = tempTask();
+  const caModuleUrl = new URL("./traffic/ca.ts", import.meta.url).href;
+  try {
+    const runWorker = () =>
+      new Promise<string>((resolvePromise, rejectPromise) => {
+        const child = spawn(
+          process.execPath,
+          [
+            "--import",
+            "tsx",
+            "-e",
+            `import { ensureTaskCa, leafFor } from ${JSON.stringify(caModuleUrl)};
+             const ca = ensureTaskCa(${JSON.stringify(taskDir)});
+             const leaf = leafFor(ca, "10.0.170.144");
+             if (!leaf.cert.includes("BEGIN CERTIFICATE") || !leaf.key.includes("BEGIN")) process.exit(2);
+             process.stdout.write(ca.certPath);`,
+          ],
+          { stdio: ["ignore", "pipe", "pipe"] },
+        );
+        let out = "";
+        let err = "";
+        child.stdout.on("data", (d) => { out += String(d); });
+        child.stderr.on("data", (d) => { err += String(d); });
+        child.on("exit", (code) => {
+          if (code === 0) resolvePromise(out);
+          else rejectPromise(new Error(`child exited ${code}: ${err}`));
+        });
+      });
+
+    const outputs = await Promise.all([runWorker(), runWorker(), runWorker(), runWorker()]);
+    assert.equal(outputs.length, 4);
+    const ca = ensureTaskCa(taskDir);
+    const verify = spawnSync("openssl", ["x509", "-noout", "-pubkey", "-in", ca.certPath], { encoding: "utf8" });
+    const keyPub = spawnSync("openssl", ["pkey", "-pubout", "-in", ca.keyPath], { encoding: "utf8" });
+    assert.equal(verify.status, 0);
+    assert.equal(keyPub.status, 0);
+    assert.equal(verify.stdout.trim(), keyPub.stdout.trim(), "CA cert public key must match CA private key");
+  } finally {
+    rmSync(taskDir, { recursive: true, force: true });
   }
 });

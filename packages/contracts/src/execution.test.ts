@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CreateTaskRequestSchema,
+  DEFAULT_MAX_CONCURRENT_EXPLORES,
   ExecutionStepSchema,
   MAX_CONCURRENT_EXPLORES,
   resolveExploreWorkerCount,
+  resolveWorkerSlotCount,
 } from "./index.js";
 
 test("execution step grouping metadata is optional for existing summaries", () => {
@@ -88,7 +90,7 @@ test("resolveExploreWorkerCount scales with admitted/live assets beyond seed tar
   );
 });
 
-test("CreateTaskRequest defaults execution.maxConcurrentExplores to 1", () => {
+test("CreateTaskRequest defaults execution.maxConcurrentExplores to 3 and maps slots as 1 leader + N explores", () => {
   const parsed = CreateTaskRequestSchema.parse({
     auth: {
       authorizationNote: "written authorization note",
@@ -103,11 +105,15 @@ test("CreateTaskRequest defaults execution.maxConcurrentExplores to 1", () => {
       },
     ],
   });
-  assert.equal(parsed.execution.maxConcurrentExplores, 1);
+  assert.equal(DEFAULT_MAX_CONCURRENT_EXPLORES, 3);
+  assert.equal(parsed.execution.maxConcurrentExplores, 3);
   assert.equal(parsed.execution.maxIntentsPerReason, 4);
   assert.equal(parsed.execution.maxIntentsPerAssetRoot, 2);
   assert.equal(parsed.execution.exploreTimeoutMs, 900_000);
   assert.equal(parsed.execution.reasonLeaseMs, 120_000);
+  assert.equal(resolveWorkerSlotCount(1), 1);
+  assert.equal(resolveWorkerSlotCount(3), 4);
+  assert.equal(resolveWorkerSlotCount(MAX_CONCURRENT_EXPLORES), MAX_CONCURRENT_EXPLORES + 1);
 });
 
 test("CreateTaskRequest accepts user concurrency", () => {

@@ -128,8 +128,12 @@ export function bindEvidencePaceManifest(manifest: {
   evidenceDir?: string;
   historyDb?: string;
   goals?: EvidenceGoalLike[];
+  workerSlot?: number;
+  workerCount?: number;
 } | null): void {
-  if (!manifest?.evidenceDir) {
+  // Multi-worker followers (slot > 0) focus purely on vulnerability exploitation & structured
+  // Findings/Facts; shared Markdown deliverables are materialized by control-plane & verified by slot 0 leader.
+  if (!manifest?.evidenceDir || ((manifest.workerCount ?? 1) > 1 && (manifest.workerSlot ?? 0) > 0)) {
     evidencePaceBinding = null;
     return;
   }

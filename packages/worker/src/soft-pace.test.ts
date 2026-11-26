@@ -227,7 +227,7 @@ describe("takeSoftPaceAdvice", () => {
     }
   });
 
-  it("reads a manifest binding from the worker entry", () => {
+  it("reads a manifest binding from the worker entry and exempts multi-worker followers", () => {
     const root = mkdtempSync(join(tmpdir(), "gy-pace-bind-"));
     const evidenceDir = join(root, "evidence");
     mkdirSync(evidenceDir, { recursive: true });
@@ -239,6 +239,15 @@ describe("takeSoftPaceAdvice", () => {
       );
       assert.ok(hit);
       assert.match(hit.message, /evidence\/engagement\/report\.md/);
+
+      // Multi-worker follower (slot 1 / pool 4) must NOT receive shared report overwrite nags.
+      resetEvidencePaceRuntime();
+      bindEvidencePaceManifest({ evidenceDir, goals: ledgerGoals, workerSlot: 1, workerCount: 4 });
+      const followerHit = takeSoftPaceAdvice(
+        { toolCalls: 40, wallMs: 0, lastSoftToolMilestone: 0, lastSoftWallMilestone: 0 },
+        paceCfg(),
+      );
+      assert.equal(followerHit, null);
     } finally {
       resetEvidencePaceBinding();
       resetEvidencePaceRuntime();

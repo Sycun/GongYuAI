@@ -58,9 +58,8 @@ function parseTargets(raw: string): string[] {
     .filter(Boolean);
 }
 
-/** 靶标 ≤2 推荐靶标数；更多则推荐 3–10。运行中还会按发现资产自动扩容。 */
+/** 默认至少推荐 3 路并发，靶标更多则推荐 3–10；单 CIDR/单域名同样保底 3 以便发现资产后自动扩容。 */
 function recommendedConcurrency(targetCount: number): number {
-  if (targetCount <= 2) return Math.max(1, targetCount);
   return Math.min(10, Math.max(3, targetCount));
 }
 
@@ -151,7 +150,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
     const objective = values.objective.trim();
     const concurrency = Math.min(
       16,
-      Math.max(1, Math.floor(Number(values.maxConcurrentExplores) || 1)),
+      Math.max(1, Math.floor(Number(values.maxConcurrentExplores) || 3)),
     );
     if (!targetList.length || !objective) {
       Toast.error("请填写靶标和目标");
@@ -307,7 +306,7 @@ export function TasksPage({ tasks, onSelect, onCreated, onRefresh }: Props) {
             targets: "",
             objective: "",
             authorizationNote: "",
-            maxConcurrentExplores: 1,
+            maxConcurrentExplores: 3,
             mock: false,
             reconcileName: "asset-diff",
             baselinePath: "",

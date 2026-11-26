@@ -427,9 +427,10 @@ export function normalizeGoalSpecs(specs: GoalSpec[]): GoalSpec[] {
 
 /**
  * P4 — bounded Explore concurrency (user-set at task create).
- * Default 1 = serial single-worker (current behavior).
- * Hard ceiling 16; effective spawn count is resolved at start.
+ * Default 3 = 3 concurrent Explore workers (plus 1 coordinator slot when multi-worker).
+ * Hard ceiling 16; effective spawn count is resolved at start and dynamically scaled.
  */
+export const DEFAULT_MAX_CONCURRENT_EXPLORES = 3 as const;
 export const MAX_CONCURRENT_EXPLORES = 16 as const;
 
 export const ExecutionConfigSchema = z.object({
@@ -442,7 +443,7 @@ export const ExecutionConfigSchema = z.object({
     .int()
     .min(1)
     .max(MAX_CONCURRENT_EXPLORES)
-    .default(1),
+    .default(DEFAULT_MAX_CONCURRENT_EXPLORES),
   /**
    * Hard cap on Intents proposed during a single Reason wave
    * (open proposed+claimed+running count while phase=reason).
@@ -485,7 +486,7 @@ export const ExecutionConfigSchema = z.object({
 });
 export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
 
-/** Resolve how many Explore processes to spawn (never above configured or target count). */
+/** Resolve how many Explore workers can execute concurrently (never above configured or target/asset count). */
 export function resolveExploreWorkerCount(opts: {
   maxConcurrentExplores: number;
   targetCount: number;
@@ -499,6 +500,19 @@ export function resolveExploreWorkerCount(opts: {
   const targets = Math.max(1, Math.floor(opts.targetCount) || 1);
   const assets = Math.max(0, Math.floor(opts.assetCount ?? 0) || 0);
   return Math.min(configured, Math.max(targets, assets));
+}
+
+/**
+ * Resolve total worker process slots for `exploreCount` concurrent explores:
+ * - 1 explore → 1 solo slot (slot 0 runs Bootstrap + Explore + Reason + Report).
+ * - N ≥ 2 explores → N + 1 slots (slot 0 coordinator + slots 1..N concurrent Explore followers).
+ */
+export function resolveWorkerSlotCount(exploreCount: number): number {
+  const explores = Math.min(
+    MAX_CONCURRENT_EXPLORES,
+    Math.max(1, Math.floor(exploreCount) || 1),
+  );
+  return explores <= 1 ? 1 : explores + 1;
 }
 
 export const CreateTaskRequestSchema = z.object({
@@ -524,7 +538,7 @@ export const CreateTaskRequestSchema = z.object({
   }),
   /** Parallel Explore pool size + Reason fanout / Explore timeout (defaults filled). */
   execution: ExecutionConfigSchema.default({
-    maxConcurrentExplores: 1,
+    maxConcurrentExplores: DEFAULT_MAX_CONCURRENT_EXPLORES,
     maxIntentsPerReason: DEFAULT_MAX_INTENTS_PER_REASON,
     maxIntentsPerAssetRoot: DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
     exploreTimeoutMs: DEFAULT_EXPLORE_TIMEOUT_MS,
@@ -583,7 +597,7 @@ export const TaskRecordSchema = z.object({
   goals: z.array(GoalStateSchema),
   budget: BudgetSchema,
   execution: ExecutionConfigSchema.default({
-    maxConcurrentExplores: 1,
+    maxConcurrentExplores: DEFAULT_MAX_CONCURRENT_EXPLORES,
     maxIntentsPerReason: DEFAULT_MAX_INTENTS_PER_REASON,
     maxIntentsPerAssetRoot: DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
     exploreTimeoutMs: DEFAULT_EXPLORE_TIMEOUT_MS,
@@ -1056,7 +1070,7 @@ export const WorkerManifestSchema = z.object({
   goals: z.array(GoalStateSchema),
   budget: BudgetSchema,
   execution: ExecutionConfigSchema.default({
-    maxConcurrentExplores: 1,
+    maxConcurrentExplores: DEFAULT_MAX_CONCURRENT_EXPLORES,
     maxIntentsPerReason: DEFAULT_MAX_INTENTS_PER_REASON,
     maxIntentsPerAssetRoot: DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
     exploreTimeoutMs: DEFAULT_EXPLORE_TIMEOUT_MS,

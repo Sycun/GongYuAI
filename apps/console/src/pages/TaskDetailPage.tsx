@@ -259,7 +259,7 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
                       { key: "租约到期", value: runtime?.leaseUntil ? formatDateTime(runtime.leaseUntil, true) : "—" },
                       { key: "栅栏号", value: String(runtime?.fence ?? task.fence) },
                       { key: "检查点", value: runtime?.hasCheckpoint ? "有" : "无" },
-                      { key: "Explore 并发", value: String(runtime?.execution?.maxConcurrentExplores ?? task.execution?.maxConcurrentExplores ?? 1) },
+                      { key: "Explore 并发", value: String(runtime?.execution?.maxConcurrentExplores ?? task.execution?.maxConcurrentExplores ?? 3) },
                       { key: "Reason 扇出硬顶", value: `${runtime?.execution?.maxIntentsPerReason ?? task.execution?.maxIntentsPerReason ?? 4} / 同根 ${runtime?.execution?.maxIntentsPerAssetRoot ?? task.execution?.maxIntentsPerAssetRoot ?? 2}` },
                       { key: "工作进程", value: (runtime?.workerPids?.length ? runtime.workerPids : runtime?.workerPid ? [runtime.workerPid] : []).join(", ") || "—" },
                     ]}

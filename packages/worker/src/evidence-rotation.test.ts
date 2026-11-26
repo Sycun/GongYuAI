@@ -11,6 +11,8 @@ import {
   lastVerifiedEvidenceAt,
   maybeForceEvidenceStall,
 } from "./evidence-rotation.js";
+import { handleGraphTool } from "./graph-phase.js";
+import { consultTool } from "./ops-tools.js";
 
 function state(partial: Partial<CheckpointState> = {}): CheckpointState {
   return {
@@ -231,25 +233,25 @@ test("边界：同面只有 tentative 线索不算 traction，仍换面", () => 
   }
 });
 
-test("边界：跨面新 verified 证据按任务级牵引（已知边界，待联调验证）", () => {
+test("边界：跨面新 verified 证据不续命本面耗尽 Intent；同面 verified 证据正常续命", () => {
   const { root, dbPath, history } = setup();
   try {
-    const taskId = "t-cross-surface";
+    const taskId = "11111111-1111-4111-8111-111111111111";
     const intent = history.proposeIntent({
       taskId,
       title: "本面 exhausted",
       sourceFactIds: [ORIGIN_FACT_ID],
-      assetRoot: "10.0.0.0/8",
+      assetRoot: "10.0.170.144",
     });
     history.claimIntent(taskId, intent.id, "w0");
     backdateIntent(dbPath, intent.id, 120_000);
     assert.equal(lastVerifiedEvidenceAt(history, taskId), 0);
 
-    // 另一个资产面（不同 asset root）产生了新的 verified 证据。
+    // 另一个资产面（不同靶机 10.0.171.200）产生了新的 verified 证据。
     const lead = history.recordFinding({
       taskId,
       title: "跨面 XSS",
-      asset: "192.0.2.10",
+      asset: "10.0.171.200",
       vulnClass: "CWE-79",
       severity: "high",
       endpoint: "/search",
@@ -257,20 +259,84 @@ test("边界：跨面新 verified 证据按任务级牵引（已知边界，待�
     writeEvidenceFile(join(root, "evidence"), "findings/xss.txt", "alert(1) reflected\n");
     const verified = history.verifyFinding(taskId, lead.finding.id, {
       evidencePaths: ["findings/xss.txt"],
-      repro: "curl 'https://192.0.2.10/search?q=<script>'",
+      repro: "curl 'http://10.0.171.200/search?q=<script>'",
       verifiedBy: "w0",
     });
     assert.equal(verified.status, "verified");
     assert.ok(lastVerifiedEvidenceAt(history, taskId) > 0);
+    assert.equal(lastVerifiedEvidenceAt(history, taskId, { assetRoot: "10.0.170.144" }), 0);
 
     const ckpt = state({ activeIntentId: intent.id });
     const result = maybeForceEvidenceStall({
       history, taskId, workerId: "w0", workspaceDir: root, state: ckpt,
       stallMs: 1000, save: () => {}, nowMs: Date.now(),
     });
-    // 任务级锚点：跨面 verified 证据也算 traction，本面 Intent 继续。
-    assert.equal(result.concluded, false);
-    assert.equal(ckpt.activeIntentId, intent.id);
+    // 按资产面锚定：跨面 verified 证据不再阻止已耗尽的旧面 Intent 轮换。
+    assert.equal(result.concluded, true);
+    assert.equal(ckpt.activeIntentId, null);
+    assert.equal(ckpt.phase, "reason");
+
+    // 同一长 turn 内：force-conclude 后可立即 propose+claim 切入新攻击面，且 operator_consult 正常落库。
+    const nextRaw = handleGraphTool(
+      "intent_propose",
+      {
+        title: "切入新面 10.0.171.200",
+        sourceFactIds: ORIGIN_FACT_ID,
+        claim: "true",
+      },
+      {
+        history,
+        taskId,
+        workspaceDir: root,
+        state: ckpt,
+        workerId: "w0",
+        leader: true,
+        workerCount: 1,
+        save: () => {},
+      },
+    );
+    const nextIntent = JSON.parse(nextRaw ?? "{}") as { id: string; autoClaimed?: boolean };
+    assert.equal(nextIntent.autoClaimed, true);
+    assert.equal(ckpt.phase, "explore");
+    assert.equal(ckpt.activeIntentId, nextIntent.id);
+
+    const consultOut = JSON.parse(
+      consultTool(
+        {
+          manifest: {
+            taskId,
+            dataDir: root,
+            historyDb: dbPath,
+            durableDb: join(root, "d.sqlite"),
+            evidenceDir: join(root, "evidence"),
+            workspaceDir: root,
+            auth: { authorizationNote: "", targets: ["10.0.0.0/8"], outOfScope: [], capability: "full" },
+            scopeVersion: 1,
+            goals: [],
+            budget: { maxTokens: 0, maxWallMs: 0, maxToolCalls: 0, maxInstalls: 0, relayTokenThreshold: 30_000, relayMinToolCalls: 2 },
+            execution: { maxConcurrentExplores: 3, maxIntentsPerReason: 4, maxIntentsPerAssetRoot: 2, exploreTimeoutMs: 900_000, reasonLeaseMs: 120_000 },
+            workerId: "w0",
+            workerSlot: 0,
+            workerCount: 1,
+            commandConfirmation: "auto",
+            mock: true,
+            mcpServers: [],
+            mcpPool: [],
+            mcpCatalog: [],
+            skillPacks: [],
+            skillPool: [],
+            skillCatalog: [],
+            assetCollectors: [],
+          },
+          history,
+          workerId: "w0",
+          activeIntentId: ckpt.activeIntentId,
+        },
+        { question: "需要确认目标测试账号范围", context: "post-rotation check" },
+      ),
+    ) as { ok: boolean; consultId: string };
+    assert.equal(consultOut.ok, true);
+    assert.equal(history.ops.listConsults(taskId).length, 1);
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

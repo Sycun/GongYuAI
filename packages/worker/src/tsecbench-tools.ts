@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { targetAllows } from "@gongyuai/contracts";
+import { isExploreLeader, targetAllows } from "@gongyuai/contracts";
 import { writeEvidenceFile } from "@gongyuai/history";
 import { promoteTrafficForFinding, trafficLabelUuid } from "@gongyuai/exec";
 import type { ToolContext } from "./tools.js";
@@ -80,9 +80,46 @@ export function parseContainerAddresses(raw: unknown): Array<{ endpoint: string;
   return out;
 }
 
-/** Container hosts seen per challenge code (start/list/status), for solve-traffic capture. */
+/** Container hosts seen per challenge code (start/list/status), synced via sidecar across worker processes. */
 const challengeHosts = new Map<string, string[]>();
 let lastChallengeHost: string | null = null;
+
+function persistChallengeHosts(dataDir: string, code: string, hosts: string[]): void {
+  if (!dataDir || !code || !hosts.length) return;
+  const mapPath = join(dataDir, "tsecbench-hosts.json");
+  try {
+    const existing: Record<string, string[]> = existsSync(mapPath)
+      ? (JSON.parse(readFileSync(mapPath, "utf8")) as Record<string, string[]>)
+      : {};
+    existing[code] = [...new Set([...(existing[code] ?? []), ...hosts])];
+    const tmp = `${mapPath}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(existing, null, 2));
+    renameSync(tmp, mapPath);
+  } catch {
+    /* best-effort cross-process host sync */
+  }
+}
+
+export function resolveChallengeHosts(ctx: ToolContext, code: string): string[] {
+  const mem = challengeHosts.get(code);
+  if (mem?.length) return mem;
+  if (ctx.manifest.dataDir && code) {
+    const mapPath = join(ctx.manifest.dataDir, "tsecbench-hosts.json");
+    if (existsSync(mapPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(mapPath, "utf8")) as Record<string, string[]>;
+        const disk = parsed[code];
+        if (Array.isArray(disk) && disk.length) {
+          challengeHosts.set(code, disk);
+          return disk;
+        }
+      } catch {
+        /* ignore transient read */
+      }
+    }
+  }
+  return lastChallengeHost ? [lastChallengeHost] : [];
+}
 
 /** Platform says the flag was right (`correct: true`, top-level or under `data`). */
 export function submitCorrect(response: unknown): boolean {
@@ -103,7 +140,7 @@ export function captureSolveTraffic(
   code: string,
 ): { label: string; findingId: string; trafficIds: string[]; promoted: number } | null {
   const intentId = ctx.getActiveIntentId?.() ?? null;
-  const hosts = challengeHosts.get(code) ?? (lastChallengeHost ? [lastChallengeHost] : []);
+  const hosts = resolveChallengeHosts(ctx, code);
   if (!intentId && hosts.length === 0) return null;
   const label = `tsecbench:${code}`;
   const findingId = trafficLabelUuid(label);
@@ -137,7 +174,11 @@ export function autoAdmitContainerTargets(
 ): Array<{ address: string; factId: string }> {
   const parsed = parseContainerAddresses(addrRaw);
   if (!parsed.length) return [];
-  if (code) challengeHosts.set(code, [...new Set(parsed.map((p) => p.host))]);
+  const uniqueHosts = [...new Set(parsed.map((p) => p.host))];
+  if (code) {
+    challengeHosts.set(code, uniqueHosts);
+    persistChallengeHosts(ctx.manifest.dataDir, code, uniqueHosts);
+  }
   lastChallengeHost = parsed[0]?.host ?? lastChallengeHost;
   let scopeChanged = false;
   for (const { host } of parsed) {
@@ -199,6 +240,15 @@ export async function tsecbenchTool(
   });
   const action = (args.action ?? "list").trim();
   const code = (args.code ?? "").trim();
+  const multiWorkerFollower =
+    (ctx.manifest.workerCount ?? 1) > 1 && !isExploreLeader(ctx.manifest);
+  if (multiWorkerFollower && (action === "start" || action === "close")) {
+    return JSON.stringify({
+      error: "leader_owns_container_lifecycle",
+      message:
+        "多节点模式下靶机容器启停（start/close）由 slot 0 Leader 统一调度（防抢占 ≤3 容器上限）；Follower 请专注当前认领 Intent 的验证与 tsecbench(action='submit'|'status'|'list')，验证完成后立即 intent_conclude 唤醒 Leader 补发新题。",
+    });
+  }
   if (action === "list" || action === "status") {
     const r = await api(ctx, "GET", "/openapi/v1/challenges");
     if (r.status >= 400) return JSON.stringify({ error: r.text.slice(0, 500) });
@@ -230,7 +280,20 @@ export async function tsecbenchTool(
           ctx.manifest.workspaceDir,
           `tsecbench start ${code} → auto-admitted ${admitted.map((a) => `${a.address}(fact=${a.factId})`).join(", ")}`,
         );
-        return JSON.stringify({ ...parsed, autoAdmittedAssets: admitted });
+        let surfaceRotationHint: string | undefined;
+        const activeId = ctx.getActiveIntentId?.() ?? null;
+        if (activeId) {
+          const activeIntent = ctx.history.getIntent(ctx.manifest.taskId, activeId);
+          const root = activeIntent?.assetRoot?.trim();
+          if (root && !admitted.some((a) => targetAllows([root], a.address, []))) {
+            surfaceRotationHint = `当前仍认领旧攻击面 Intent (${activeId}, assetRoot=${root})；切换到新靶机 ${admitted[0]!.address} 前请先 intent_conclude 旧面并为此靶机 intent_propose 新 Intent（严禁多题共用同一 Intent）。`;
+          }
+        }
+        return JSON.stringify({
+          ...parsed,
+          autoAdmittedAssets: admitted,
+          ...(surfaceRotationHint ? { surfaceRotationHint } : {}),
+        });
       }
     } catch {
       /* non-JSON response falls through */
@@ -255,12 +318,27 @@ export async function tsecbenchTool(
           JSON.stringify({ code, submittedAt: new Date().toISOString(), status: r.status, response: r.text }, null, 2),
         );
         const response = JSON.parse(r.text) as unknown;
-        const traffic = submitCorrect(response) ? captureSolveTraffic(ctx, code) : null;
+        const solved = submitCorrect(response);
+        const traffic = solved ? captureSolveTraffic(ctx, code) : null;
+        let findingVerifyReminder: string | undefined;
+        if (solved) {
+          const hosts = resolveChallengeHosts(ctx, code);
+          const hasVerifiedFinding = ctx.history.listFindings(ctx.manifest.taskId).some(
+            (f) =>
+              f.status === "verified" &&
+              (hosts.length === 0 || hosts.some((h) => targetAllows([h], f.asset, []) || targetAllows([f.asset], h, []))),
+          );
+          if (!hasVerifiedFinding) {
+            findingVerifyReminder =
+              "靶机 flag 提交正确！结项（intent_conclude）前请务必将本次真实漏洞成因调用 finding_record + finding_verify 绑定证据落库，确保渗透报告与解题得分双闭环。";
+          }
+        }
         return JSON.stringify({
           status: r.status,
           evidencePath: relPath,
           response,
           ...(traffic ? { traffic } : {}),
+          ...(findingVerifyReminder ? { findingVerifyReminder } : {}),
         });
       } catch {
         /* fall through to raw text */

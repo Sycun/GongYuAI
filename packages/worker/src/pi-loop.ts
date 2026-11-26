@@ -44,6 +44,7 @@ import { openSkillHub, type SkillHub } from "./skills/runtime.js";
 import { openFingerprintKnowledgeRag, type KnowledgeRagHub } from "./knowledge-rag.js";
 import {
   canRelay,
+  formatGateSpinRecoveryHint,
   formatRelayInjection,
   listRelayProtocols,
   midSubmissionRelayGate,
@@ -107,13 +108,15 @@ function phaseToolDenial(
   name: string,
   mcpHub: McpHub,
   args?: Record<string, unknown>,
+  poolSizeOverride?: number,
 ): string | undefined {
   const taskId = ctx.manifest.taskId;
   const leader = isExploreLeader(ctx.manifest);
-  const workerCount = ctx.manifest.workerCount ?? 1;
+  const workerCount = poolSizeOverride ?? ctx.manifest.workerCount ?? 1;
   state.phase = syncGraphPhase(ctx.history, taskId, state.phase, {
     leader,
     workerCount,
+    activeIntentId: state.activeIntentId,
   });
   const phase = asGraphPhase(state.phase);
   const mcpNames = mcpHub.openaiTools.map((tool) => tool.function.name);
@@ -122,15 +125,20 @@ function phaseToolDenial(
     ctx.history.recordToolGate(taskId, { tool: name, ok: false, reason, detail: { phase } });
     return reason;
   };
+  if (name === "operator_consult") {
+    return undefined;
+  }
   if (!allowedToolNames(phase, mcpNames).has(name)) {
     if (!(isMcpToolName(name) && (phase === "explore" || phase === "relay"))) {
       return deny(`denied: tool ${name} not allowed in phase=${phase}`);
     }
   }
+  // Multi-worker leader delegates Explore execution; allow finishing a pre-scale-up activeIntentId cleanly.
   if (
     executionRequiresActiveIntent(name, args) &&
     leader &&
-    workerCount > 1
+    workerCount > 1 &&
+    !state.activeIntentId
   ) {
     return deny(`denied: leader does not execute ${name}; follower Explore owns tools`);
   }
@@ -155,9 +163,84 @@ function phaseToolDenial(
 const STALE_INTENT_MAX_AGE_MS = 20 * 60_000;
 
 /**
+ * Decide whether the multi-worker Leader should wake up to schedule Intents:
+ * - Always wake when all open Intents have drained (`openIntents.length === 0`);
+ * - Sliding-window refill: wake when `proposed === 0`, at least one Explore Follower slot
+ *   is idle (`active < workerCount - 1`), and the active Intent set changed since the last
+ *   refill attempt (prevents straggler barriers without spin-looping when surfaces run dry).
+ */
+export function shouldWakeMultiWorkerLeader(opts: {
+  openIntents: ReadonlyArray<{ id: string; status: string }>;
+  workerCount: number;
+  lastRefillActiveKey: string | null;
+}): { wake: boolean; activeKey: string } {
+  if (opts.openIntents.length === 0) {
+    return { wake: true, activeKey: "" };
+  }
+  const exploreSlots = Math.max(1, opts.workerCount - 1);
+  const proposed = opts.openIntents.filter((i) => i.status === "proposed");
+  const active = opts.openIntents.filter((i) => i.status === "claimed" || i.status === "running");
+  const activeKey = active.map((i) => i.id).sort().join(",");
+  if (
+    proposed.length === 0 &&
+    active.length < exploreSlots &&
+    activeKey !== opts.lastRefillActiveKey
+  ) {
+    return { wake: true, activeKey };
+  }
+  return { wake: false, activeKey };
+}
+
+/**
+ * Inside a continuous Pi Durable `root.submit()` turn, instruct a multi-worker Leader
+ * (once all Follower slots are fed) or an idle Follower (with no active/proposed Intent)
+ * to reply `YIELD` and end the submission so `waitForPoolTurn()` parks at zero LLM token cost.
+ */
+export function poolTurnYieldDirective(opts: {
+  toolName: string;
+  leader: boolean;
+  workerCount: number;
+  phase: string;
+  activeIntentId: string | null;
+  openIntents: ReadonlyArray<{ id: string; status: string }>;
+  allGoalsPass: boolean;
+  leaderIdleStepsSincePropose?: number;
+}): string | undefined {
+  if (opts.workerCount <= 1 || opts.allGoalsPass) return undefined;
+  if (opts.toolName === "operator_consult") return undefined;
+
+  const exploreSlots = Math.max(1, opts.workerCount - 1);
+  const proposedCount = opts.openIntents.filter((i) => i.status === "proposed").length;
+  const activeCount = opts.openIntents.filter(
+    (i) => i.status === "claimed" || i.status === "running",
+  ).length;
+
+  if (opts.leader) {
+    if (opts.phase === "bootstrap" && opts.toolName === "phase_set") return undefined;
+    if (!opts.activeIntentId && proposedCount + activeCount >= exploreSlots) {
+      return `当前 ${exploreSlots} 个并发 Follower 槽位已全部排满（open=${proposedCount + activeCount}，proposed=${proposedCount}，claimed=${activeCount}）。无需继续轮询，请停止调用任何工具并直接简短回复 YIELD 结束本轮，进入零 Token 驻留池等待槽位空闲唤醒。`;
+    }
+    if (
+      !opts.activeIntentId &&
+      opts.openIntents.length > 0 &&
+      proposedCount === 0 &&
+      (opts.leaderIdleStepsSincePropose ?? 0) >= 4
+    ) {
+      return `当前剩余活跃 Intent（${activeCount} 条）仍在由 Follower 执行且暂无新攻击面可派发。请停止调用工具并直接简短回复 YIELD 结束本轮，进入零 Token 驻留池等待当前 Intent 结项唤醒。`;
+    }
+    return undefined;
+  }
+
+  if (!opts.activeIntentId && proposedCount === 0) {
+    return "当前暂无待认领的 proposed Intent（Leader 正在补单或剩余目标已由其他槽位执行）。请停止调用任何工具并直接简短回复 YIELD 结束本轮，进入零 Token 驻留池等待新 Intent 唤醒。";
+  }
+  return undefined;
+}
+
+/**
  * Multi-worker coordination gate (zero LLM token cost):
  * - Periodically sweeps stale claimed Intents back to `proposed` (up to maxRequeues=2) on leader;
- * - Keeps multi-worker Leader parked while Followers own open Intents (prevents LLM spin-lock);
+ * - Keeps multi-worker Leader parked while Followers are saturated, waking on drain or idle slot refill;
  * - Keeps multi-worker Follower parked when no `proposed` Intent exists yet (prevents premature exit).
  */
 async function waitForPoolTurn(opts: {
@@ -167,7 +250,7 @@ async function waitForPoolTurn(opts: {
   ckpt: CheckpointStore;
   workerStartedAt: number;
   readPoolSize: () => number;
-  lastStaleSweep: { at: number };
+  lastStaleSweep: { at: number; lastRefillActiveKey?: string | null };
 }): Promise<"ready" | "exit"> {
   const { manifest, ctx, state, ckpt, workerStartedAt, readPoolSize, lastStaleSweep } = opts;
   const taskId = manifest.taskId;
@@ -195,9 +278,18 @@ async function waitForPoolTurn(opts: {
 
     const open = ctx.history.openIntents(taskId);
     if (leader) {
-      // Leader runs Bootstrap when graph has no Intents/Facts yet, and Reason once open Intents drain.
-      if (open.length === 0) {
-        state.phase = syncGraphPhase(ctx.history, taskId, state.phase, { leader: true, workerCount });
+      const decision = shouldWakeMultiWorkerLeader({
+        openIntents: open,
+        workerCount,
+        lastRefillActiveKey: lastStaleSweep.lastRefillActiveKey ?? null,
+      });
+      if (decision.wake) {
+        lastStaleSweep.lastRefillActiveKey = decision.activeKey;
+        state.phase = syncGraphPhase(ctx.history, taskId, state.phase, {
+          leader: true,
+          workerCount,
+          activeIntentId: state.activeIntentId,
+        });
         return "ready";
       }
       flushUsage(manifest, ctx, state);
@@ -316,10 +408,10 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
         maxRequeues: 2,
       });
     }
-    if (listRelayProtocols(manifest.workspaceDir).length) {
+    if (listRelayProtocols(manifest.workspaceDir, slot).length) {
       appendProgress(
         manifest.workspaceDir,
-        `注入既有 Relay ×${listRelayProtocols(manifest.workspaceDir).length}`,
+        `注入既有 Relay ×${listRelayProtocols(manifest.workspaceDir, slot).length}`,
       );
     }
 
@@ -1538,11 +1630,14 @@ async function tryPiDurable(
       "tunnel_open",
       "tunnel_close",
       "mcp_invoke",
-      "tsecbench",
     ]);
     const pruneLeaderExecTools = isExploreLeader(manifest) && readPoolSize() > 1;
     let relayPending = false;
-    let rotatePending: string | null = null;
+    let pendingRotationNotice: string | null = null;
+    let consecutiveBlockedCalls = 0;
+    let allowedNonRelayCalls = 0;
+    let leaderIdleStepsSincePropose = 0;
+    let notifiedScaleUpPool = readPoolSize();
     /**
      * Silent background π audit snapshot (step-paced). NOT a handoff and NEVER a
      * session reset: never touches relayPending, never interrupts the submission.
@@ -1649,19 +1744,68 @@ async function tryPiDurable(
           hook(ToolTask, {
             beforeTool: (call: { name: string; parent?: unknown; args?: Record<string, unknown> }) => {
               if (call.parent) return undefined;
+              const livePoolSize = readPoolSize();
+              const yieldBlock = poolTurnYieldDirective({
+                toolName: call.name,
+                leader: isExploreLeader(manifest),
+                workerCount: livePoolSize,
+                phase: asGraphPhase(state.phase),
+                activeIntentId: state.activeIntentId,
+                openIntents: livePoolSize > 1 ? ctx.history.openIntents(manifest.taskId) : [],
+                allGoalsPass: livePoolSize > 1 ? ctx.history.allGoalsPass(manifest.taskId) : false,
+                leaderIdleStepsSincePropose,
+              });
+              if (yieldBlock) {
+                appendProgress(manifest.workspaceDir, `pool yield ${call.name}: ${yieldBlock.slice(0, 120)}`);
+                return { block: yieldBlock };
+              }
               const relayBlock = midSubmissionRelayGate({
                 hardReset: relayHardResetEnabled(),
                 relayPending,
                 toolName: call.name,
               });
-              if (relayBlock) return relayBlock;
-              if (rotatePending && call.name !== "intent_conclude" && call.name !== "relay") {
-                return {
-                  block: `当前攻击面已触发证据耗尽轮换（${rotatePending}）：请停止旧面调用并简短总结，系统将立即切回 Reason 换面。`,
-                };
+              if (relayBlock) {
+                consecutiveBlockedCalls += 1;
+                ctx.history.recordToolGate(manifest.taskId, {
+                  tool: call.name,
+                  ok: false,
+                  reason: relayBlock.block,
+                  detail: { phase: asGraphPhase(state.phase) },
+                });
+                appendProgress(manifest.workspaceDir, `gate blocked ${call.name}: ${relayBlock.block.slice(0, 160)}`);
+                return relayBlock;
               }
-              const block = phaseToolDenial(ctx, state, call.name, mcpHub, call.args);
-              if (block) return { block };
+              const block = phaseToolDenial(ctx, state, call.name, mcpHub, call.args, livePoolSize);
+              if (block) {
+                consecutiveBlockedCalls += 1;
+                const extra: string[] = [];
+                if (pendingRotationNotice) {
+                  extra.push(`刚触发证据耗尽自动换面：${pendingRotationNotice}；旧 Intent 已自动结项，请直接调用 intent_propose 开启新攻击面`);
+                  pendingRotationNotice = null;
+                }
+                if (consecutiveBlockedCalls >= 6) {
+                  extra.push(
+                    formatGateSpinRecoveryHint({
+                      phase: asGraphPhase(state.phase),
+                      activeIntentId: state.activeIntentId,
+                      leader: isExploreLeader(manifest),
+                      workerCount: livePoolSize,
+                    }),
+                  );
+                }
+                const fullBlock = extra.length ? `${block}（${extra.join("；")}）` : block;
+                appendProgress(manifest.workspaceDir, `gate blocked ${call.name}: ${block.slice(0, 180)}`);
+                return { block: fullBlock };
+              }
+              if (call.name !== "relay") {
+                consecutiveBlockedCalls = 0;
+                allowedNonRelayCalls += 1;
+                if (call.name === "intent_propose" || call.name === "technique_transfer") {
+                  leaderIdleStepsSincePropose = 0;
+                } else if (isExploreLeader(manifest) && livePoolSize > 1) {
+                  leaderIdleStepsSincePropose += 1;
+                }
+              }
               // Top-level, allowed call: its result may carry pending long-turn notes.
               armedTools.set(call.name, (armedTools.get(call.name) ?? 0) + 1);
               return undefined;
@@ -1693,8 +1837,9 @@ async function tryPiDurable(
               const calls = message?.role === "assistant"
                 ? message.content.filter((part) => part.type === "toolCall")
                 : [];
-              if (calls.length > 0) {
-                state.toolCallsSinceRelay += calls.length;
+              if (allowedNonRelayCalls > 0) {
+                state.toolCallsSinceRelay += allowedNonRelayCalls;
+                allowedNonRelayCalls = 0;
               }
               const shellCalls = calls.filter((call) => call.name === "shell");
               const resultsByCall = new Map<string, { text: string; exitCode: number | null; durationMs: number | null }>();
@@ -1779,12 +1924,26 @@ async function tryPiDurable(
               ) {
                 relayPending = true;
               }
+              const livePoolSize = readPoolSize();
+              if (isExploreLeader(manifest) && livePoolSize > 1 && notifiedScaleUpPool <= 1) {
+                notifiedScaleUpPool = livePoolSize;
+                longTurn.notes.push(
+                  `[Explore 池动态扩容 1→${livePoolSize}] 系统已拉起 ${livePoolSize - 1} 个并发 Explore Follower。你是 slot 0 Leader（纯调度角色）：${state.activeIntentId ? `请尽快 intent_conclude 当前 Intent (${state.activeIntentId})，` : ""}在 Reason 相位为各可用资产/题面分别 intent_propose 独立 Intent（勿传 claim='true'），交由 Follower 并行推进。`,
+                );
+              }
               // Mid-submission evidence-exhaustion rotation check (every 5 tool steps).
+              // Note: maybeForceEvidenceStall already concludes the stale Intent and updates phase;
+              // deliver a non-blocking longTurn note instead of locking out propose/phase_set tools.
               stepsSinceRotateCheck += 1;
-              if (!rotatePending && state.phase === "explore" && state.activeIntentId && stepsSinceRotateCheck >= 5) {
+              if (state.phase === "explore" && state.activeIntentId && stepsSinceRotateCheck >= 5) {
                 stepsSinceRotateCheck = 0;
-                const rot = runExploreTimeoutGate(manifest, ctx.history, state, ckpt);
-                if (rot) rotatePending = rot;
+                const rot = runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolSize);
+                if (rot) {
+                  pendingRotationNotice = rot;
+                  longTurn.notes.push(
+                    `[证据耗尽自动换面] ${rot}。旧 Intent 已自动结项并释放（activeIntentId=null，当前 phase=${state.phase}）；无需再调用 intent_conclude，请直接按当前相位调用 intent_propose / engagement_audit / tsecbench 切入新攻击面。`,
+                  );
+                }
               }
               ckpt.save(state);
               return undefined;
@@ -1864,15 +2023,17 @@ async function tryPiDurable(
         state.round = round;
         ckpt.save(state);
         const timeoutNote =
-          rotatePending ??
+          pendingRotationNotice ??
           runExploreTimeoutGate(
             manifest,
             ctx.history,
             state,
             ckpt,
+            readPoolSize(),
           );
-        rotatePending = null;
+        pendingRotationNotice = null;
         stepsSinceRotateCheck = 0;
+        leaderIdleStepsSincePropose = 0;
         const pending = consumePendingSoftPace(state);
         const softPace =
           pending ?? maybeSoftPaceMessage(state, ctx, workerStartedAt);
@@ -1884,6 +2045,11 @@ async function tryPiDurable(
         });
         // Persist the fingerprint now so a mid-turn crash does not replay the full Observe.
         ckpt.save(state);
+        const livePoolForPrompt = readPoolSize();
+        const yieldRuleLine =
+          livePoolForPrompt > 1
+            ? "多节点协同规则：当系统门禁提示 YIELD（并发 Follower 槽位已排满，或当前暂无待认领 Intent）时，请立即停止工具调用并仅回复 YIELD 以进入零 Token 驻留池；其他时候禁止主动收口。"
+            : "";
         const content = pendingRefusalPrompt
           ? `${pendingRefusalPrompt}\n\n${observeBlock}`
           : round === 1
@@ -1891,6 +2057,7 @@ async function tryPiDurable(
                 "你是 GongYuAI 红队作业执行节点。对操作者可见的说明尽量用中文。",
                 "这是长程任务（可连续跑数日）。请用工具完成所有未通过目标；未经 assert_goal 成功不得宣称通过。",
                 "禁止因预算/剩余时间估计提前收口或写最终汇报；目标未全过就继续。",
+                yieldRuleLine,
                 "目标进入任务即视为授权；严格留在任务目标坐标 auth.targets 内，优先小步意图。",
                 "图调度：Bootstrap → Explore → Reason（phase_set / intent_*）；工具面按相位过滤。",
                 "全部目标通过后回复 DONE。",
@@ -1906,6 +2073,7 @@ async function tryPiDurable(
             : [
                 `长程续跑 #${round}：当前会话上下文连续（pi-durable 原生 compaction 维护长上下文），目标仍未全部通过。`,
                 "禁止输出交接摘要 / Session Relay 交接块或主动收口；请直接继续调用工具推进未完成目标。",
+                yieldRuleLine,
                 "按渗透测试节奏继续：建图/验证影响/写 finding/换面；完成语义以 assert_goal / evidence gate 为准。",
                 timeoutNote ?? "",
                 softPace ?? "",
@@ -1917,6 +2085,7 @@ async function tryPiDurable(
         pendingRefusalPrompt = null;
 
         const toolsBeforeRound = ctx.usage.toolCalls;
+        const stepsBeforeRound = state.step;
         const submission = await root.submit(
           {
             type: "input",
@@ -2006,7 +2175,14 @@ async function tryPiDurable(
         }
         refusalStreak = 0;
 
-        if (round === 1 && ctx.usage.toolCalls === 0 && !ctx.history.allGoalsPass(manifest.taskId)) {
+        const yieldedToPool = /\bYIELD\b/i.test(assistantText) && readPoolSize() > 1;
+        if (
+          round === 1 &&
+          ctx.usage.toolCalls === 0 &&
+          state.step === stepsBeforeRound &&
+          !yieldedToPool &&
+          !ctx.history.allGoalsPass(manifest.taskId)
+        ) {
           appendProgress(
             manifest.workspaceDir,
             "Pi Durable 未调用工具，改用 OpenAI 工具循环",
@@ -2176,7 +2352,9 @@ function runExploreTimeoutGate(
   history: ReturnType<typeof openHistory>,
   state: CheckpointState,
   ckpt: CheckpointStore,
+  poolSizeOverride?: number,
 ): string | null {
+  const workerCount = poolSizeOverride ?? manifest.workerCount ?? 1;
   const result = maybeForceEvidenceStall({
     history,
     taskId: manifest.taskId,
@@ -2186,6 +2364,14 @@ function runExploreTimeoutGate(
     leader: isExploreLeader(manifest),
     save: () => ckpt.save(state),
   });
+  if (result.concluded) {
+    state.phase = syncGraphPhase(history, manifest.taskId, state.phase, {
+      leader: isExploreLeader(manifest),
+      workerCount,
+      activeIntentId: state.activeIntentId,
+    });
+    ckpt.save(state);
+  }
   return result.message;
 }
 
@@ -2288,11 +2474,15 @@ export function buildTurnObserveBlock(
   state.phase = syncGraphPhase(history, manifest.taskId, state.phase, {
     leader: isExploreLeader(manifest),
     workerCount: manifest.workerCount ?? 1,
+    activeIntentId: state.activeIntentId,
   });
   const open = history.openIntents(manifest.taskId);
   const phaseBlock = phaseDirective(state.phase, {
     openIntentCount: open.length,
     activeIntentId: state.activeIntentId,
+    leader: isExploreLeader(manifest),
+    workerCount: manifest.workerCount ?? 1,
+    maxConcurrentExplores: manifest.execution?.maxConcurrentExplores,
   });
   const facts = skillHub || opts?.knowledgeRag ? history.listFacts(manifest.taskId) : [];
   const autoSkillBlock = skillHub
@@ -2353,7 +2543,7 @@ function systemPrompt(
 目标：${manifest.auth.targets.join("、")}
 排除项：${manifest.auth.outOfScope.join("、") || "（无）"}
 ${manifest.auth.roe ? `操作者意图（RoE）：${manifest.auth.roe}\n` : ""}${manifest.auth.authorizationNote ? `备注：${manifest.auth.authorizationNote}\n` : ""}预算：${formatBudgetLine(manifest)}
-Explore 并发：configured=${manifest.execution?.maxConcurrentExplores ?? 1} effective=${workerCount}
+Explore 并发：configured=${manifest.execution?.maxConcurrentExplores ?? 3} effective=${workerCount > 1 ? workerCount - 1 : 1} (poolSlots=${workerCount})
 
 硬规则：
 - 必须使用工具，不得虚构证据。
@@ -2396,7 +2586,9 @@ export function sessionBootstrapText(
   // π handoff blocks belong to cold-start recovery / explicit reset only. Active-session resume
   // (and on-demand overview) keep the continuous context; relays are not re-injected every round.
   if (opts?.includeRelays === false) return historyObserve;
-  const relays = formatRelayInjection(listRelayProtocols(manifest.workspaceDir));
+  const relays = formatRelayInjection(
+    listRelayProtocols(manifest.workspaceDir, manifest.workerSlot ?? 0),
+  );
   return `${historyObserve}\n\n${relays}`;
 }
 
@@ -3575,6 +3767,7 @@ async function runOpenAiToolLoop(
     refusalStreak = 0;
 
     const toolNames: string[] = [];
+    let allowedOpenAiNonRelayCalls = 0;
     const shellCalls: ShellTraceCall[] = [];
     for (const call of toolCalls) {
       const args = JSON.parse(call.function.arguments || "{}") as Record<string, string>;
@@ -3584,6 +3777,7 @@ async function runOpenAiToolLoop(
       try {
         const denied = phaseToolDenial(ctx, state, call.function.name, mcpHub, args);
         if (denied) {
+          appendProgress(manifest.workspaceDir, `gate blocked ${call.function.name}: ${denied.slice(0, 180)}`);
           result = denied;
           messages.push({
             role: "tool",
@@ -3591,6 +3785,9 @@ async function runOpenAiToolLoop(
             content: denied,
           });
           continue;
+        }
+        if (call.function.name !== "relay") {
+          allowedOpenAiNonRelayCalls += 1;
         }
         const graphResult = handleGraphTool(call.function.name, args, graphCtx());
         if (graphResult != null) {
@@ -4020,8 +4217,8 @@ async function runOpenAiToolLoop(
       });
     }
 
-    if (toolNames.length) {
-      state.toolCallsSinceRelay += toolNames.length;
+    if (allowedOpenAiNonRelayCalls > 0) {
+      state.toolCallsSinceRelay += allowedOpenAiNonRelayCalls;
     }
     state.toolCalls = ctx.usage.toolCalls;
     state.installs = ctx.usage.installs;

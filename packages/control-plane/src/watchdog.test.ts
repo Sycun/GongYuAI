@@ -9,7 +9,7 @@ import { CreateTaskRequestSchema } from "@gongyuai/contracts";
 import { WorkerRunner } from "./runner.js";
 import { SettingsStore } from "./settings.js";
 import { ControlStore } from "./store.js";
-import { Watchdog } from "./watchdog.js";
+import { Watchdog, computePoolCrashBackoffMs } from "./watchdog.js";
 
 test("leader terminal status stops a remaining worker before clearing its runtime handles", { timeout: 5000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "gy-terminal-pool-"));
@@ -54,4 +54,47 @@ test("leader terminal status stops a remaining worker before clearing its runtim
   assert.ok(finished?.finishedAt);
   assert.deepEqual(finished?.workerPids, []);
   assert.ok(store.setArchived(task.id, true)?.archivedAt);
+});
+
+test("watchdog restarts first pool crash immediately then applies exponential backoff on crash-loops", async () => {
+  assert.equal(computePoolCrashBackoffMs(1), 0);
+  assert.equal(computePoolCrashBackoffMs(2), 5_000);
+  assert.equal(computePoolCrashBackoffMs(3), 10_000);
+  assert.equal(computePoolCrashBackoffMs(10), 60_000);
+
+  const root = mkdtempSync(join(tmpdir(), "gy-crash-backoff-"));
+  const store = new ControlStore(root);
+  const settings = new SettingsStore(root, root);
+  const ownerId = "backoff-test";
+  const runner = new WorkerRunner(store, { ownerId, leaseMs: 10_000, mode: "local", workerImage: "" }, settings);
+  let starts = 0;
+  (runner as unknown as { isAlive: () => boolean }).isAlive = () => false;
+  (runner as unknown as { start: (id: string) => Promise<unknown> }).start = async (id: string) => {
+    starts += 1;
+    return store.get(id);
+  };
+  const watchdog = new Watchdog(store, runner, { ownerId, intervalMs: 100, leaseMs: 10_000 });
+  try {
+    const task = store.createTask(CreateTaskRequestSchema.parse({
+      name: "crash loop test",
+      mock: true,
+      auth: { authorizationNote: "fixture", targets: ["example.invalid"] },
+      goals: [{ id: "g", title: "g", description: "d", evidencePatterns: ["proof.txt"] }],
+    }));
+    task.status = "running";
+    store.save(task);
+
+    // 1st dead observation: immediate self-heal restart.
+    await watchdog.tick();
+    assert.equal(starts, 1);
+
+    // 2nd rapid dead observation (<5s): throttled by backoff, surfaces diagnostic error.
+    await watchdog.tick();
+    assert.equal(starts, 1);
+    assert.match(store.get(task.id)?.error ?? "", /crash-loop backoff \(#2/);
+  } finally {
+    await watchdog.stop();
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

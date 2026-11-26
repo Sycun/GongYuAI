@@ -18,9 +18,11 @@ import {
   asGraphPhase,
   executionIntentDenial,
   executionRequiresActiveIntent,
+  fanoutPolicyFromExecution,
   handleGraphTool,
   syncGraphPhase,
 } from "./graph-phase.js";
+import { poolTurnYieldDirective, shouldWakeMultiWorkerLeader } from "./pi-loop.js";
 import type { CheckpointState } from "./checkpoint.js";
 
 function tmpState(phase: CheckpointState["phase"] = "bootstrap"): CheckpointState {
@@ -623,6 +625,133 @@ test("finding_record/verify/retract persist ring traffic around the finding and 
   } finally {
     clearTrafficRing(root);
     closeTrafficDb(root);
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("multi-worker leader stays in bootstrap/reason across 3-way fanout and wakes on sliding-window refill", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-fanout-3way-"));
+  const history = openHistory({ dbPath: join(root, "h.sqlite"), evidenceDir: join(root, "evidence") });
+  const state = tmpState("bootstrap");
+  try {
+    const taskId = "t-3way";
+    const ctx = {
+      history,
+      taskId,
+      workspaceDir: root,
+      state,
+      workerId: "w0",
+      leader: true,
+      workerCount: 4, // 1 leader + 3 explore followers
+      execution: { maxConcurrentExplores: 6, maxIntentsPerReason: 4 },
+      save: () => {},
+    };
+    assert.equal(fanoutPolicyFromExecution(ctx.execution).maxIntentsPerReason, 6);
+
+    const ids: string[] = [];
+    for (let i = 1; i <= 3; i += 1) {
+      const out = JSON.parse(
+        handleGraphTool("intent_propose", { title: `chal-${i}`, sourceFactIds: ORIGIN_FACT_ID }, ctx)!,
+      ) as { id: string; status: string };
+      assert.equal(out.status, "proposed");
+      ids.push(out.id);
+      // Leader must remain in bootstrap so it can finish proposing all 3 Intents.
+      assert.equal(syncGraphPhase(history, taskId, state.phase, { leader: true, workerCount: 4 }), "bootstrap");
+    }
+
+    // Leader transitions cleanly to reason while 3 proposed Intents exist for followers.
+    const toReason = handleGraphTool("phase_set", { phase: "reason" }, ctx);
+    assert.match(toReason ?? "", /"ok":true/);
+    assert.equal(syncGraphPhase(history, taskId, state.phase, { leader: true, workerCount: 4 }), "reason");
+
+    // Followers w1, w2, w3 claim all 3 Intents → saturated (3 active == 3 explore slots), leader parks.
+    history.claimIntent(taskId, ids[0]!, "w1");
+    history.claimIntent(taskId, ids[1]!, "w2");
+    history.claimIntent(taskId, ids[2]!, "w3");
+    assert.equal(
+      shouldWakeMultiWorkerLeader({
+        openIntents: history.openIntents(taskId),
+        workerCount: 4,
+        lastRefillActiveKey: null,
+      }).wake,
+      false,
+    );
+
+    // w1 solves chal-1 fast while w2 & w3 are still busy → 1 idle follower slot, leader wakes ONCE to refill!
+    history.concludeIntent(taskId, ids[0]!, "succeeded", "solved", {
+      workerId: "w1",
+      facts: [{ layer: "title", title: "chal-1 solved" }],
+    });
+    const refill1 = shouldWakeMultiWorkerLeader({
+      openIntents: history.openIntents(taskId),
+      workerCount: 4,
+      lastRefillActiveKey: null,
+    });
+    assert.equal(refill1.wake, true);
+    // If no new surface was available, do not spin-wake while the active set is unchanged.
+    const refill2 = shouldWakeMultiWorkerLeader({
+      openIntents: history.openIntents(taskId),
+      workerCount: 4,
+      lastRefillActiveKey: refill1.activeKey,
+    });
+    assert.equal(refill2.wake, false);
+
+    // Long-turn YIELD directive: saturated leader & idle follower yield to zero-token waitForPoolTurn().
+    const saturated = [
+      { id: "1", status: "claimed" },
+      { id: "2", status: "claimed" },
+      { id: "3", status: "proposed" },
+    ];
+    assert.equal(
+      poolTurnYieldDirective({
+        toolName: "phase_set",
+        leader: true,
+        workerCount: 4,
+        phase: "bootstrap",
+        activeIntentId: null,
+        openIntents: saturated,
+        allGoalsPass: false,
+      }),
+      undefined,
+    );
+    assert.match(
+      poolTurnYieldDirective({
+        toolName: "history_overview",
+        leader: true,
+        workerCount: 4,
+        phase: "reason",
+        activeIntentId: null,
+        openIntents: saturated,
+        allGoalsPass: false,
+      }) ?? "",
+      /YIELD/,
+    );
+    assert.match(
+      poolTurnYieldDirective({
+        toolName: "history_overview",
+        leader: false,
+        workerCount: 4,
+        phase: "explore",
+        activeIntentId: null,
+        openIntents: [{ id: "1", status: "claimed" }],
+        allGoalsPass: false,
+      }) ?? "",
+      /YIELD/,
+    );
+    assert.equal(
+      poolTurnYieldDirective({
+        toolName: "intent_claim",
+        leader: false,
+        workerCount: 4,
+        phase: "explore",
+        activeIntentId: null,
+        openIntents: [{ id: "3", status: "proposed" }],
+        allGoalsPass: false,
+      }),
+      undefined,
+    );
+  } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });
   }

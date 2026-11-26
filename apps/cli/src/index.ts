@@ -5,6 +5,7 @@ import { compareCommand, snapshotCommand } from "./coverage-audit.js";
 import {
   BUDGET_UNLIMITED,
   CreateTaskRequestSchema,
+  DEFAULT_MAX_CONCURRENT_EXPLORES,
   UpdateScopeRequestSchema,
   isTerminalTaskStatus,
 } from "@gongyuai/contracts";
@@ -251,7 +252,7 @@ async function main(): Promise<void> {
     const name = flag(rest, "--name") ?? "mvp-run";
     const mock = has(rest, "--mock");
     const wait = has(rest, "--wait");
-    const concurrency = Number(flag(rest, "--concurrency") ?? 1);
+    const concurrency = Number(flag(rest, "--concurrency") ?? DEFAULT_MAX_CONCURRENT_EXPLORES);
     const capability = (flag(rest, "--capability") ?? "active-lab") as
       | "observe"
       | "scan"

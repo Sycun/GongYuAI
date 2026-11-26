@@ -8,6 +8,7 @@
  * force-conclude the active Intent and return to Reason only when a surface is
  * genuinely exhausted. Granularity is the Intent/attack-surface, never a benchmark code.
  */
+import { targetAllows } from "@gongyuai/contracts";
 import type { HistoryStore } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import { appendProgress } from "./tools.js";
@@ -24,17 +25,48 @@ function ms(iso: string | null | undefined): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-/** Freshest verified-evidence timestamp (ms) from durable History; 0 if none. */
-export function lastVerifiedEvidenceAt(history: HistoryStore, taskId: string): number {
+/**
+ * Whether a candidate asset/address belongs to the active Intent's declared `assetRoot`.
+ * Unscoped Intents (empty `assetRoot`) accept any in-scope verified evidence.
+ */
+export function matchesIntentSurface(
+  assetRoot: string | null | undefined,
+  candidate: string | null | undefined,
+): boolean {
+  const root = assetRoot?.trim();
+  if (!root) return true;
+  const cand = candidate?.trim();
+  if (!cand) return false;
+  if (cand === root) return true;
+  return targetAllows([root], cand, []);
+}
+
+/**
+ * Freshest verified-evidence timestamp (ms) from durable History; 0 if none.
+ * When `scope.assetRoot` is provided, only verified evidence matching that surface
+ * counts as traction so unrelated cross-surface solves never keep a stale Intent alive.
+ */
+export function lastVerifiedEvidenceAt(
+  history: HistoryStore,
+  taskId: string,
+  scope?: { intentId?: string | null; assetRoot?: string | null },
+): number {
   let latest = 0;
+  const root = scope?.assetRoot?.trim() || null;
   for (const f of history.listFindings(taskId)) {
-    if (f.verifiedAt) latest = Math.max(latest, ms(f.verifiedAt));
+    if (!f.verifiedAt) continue;
+    if (root && !matchesIntentSurface(root, f.asset)) continue;
+    latest = Math.max(latest, ms(f.verifiedAt));
   }
   for (const c of history.listCredentials(taskId)) {
-    if (c.verifiedAt) latest = Math.max(latest, ms(c.verifiedAt));
+    if (!c.verifiedAt) continue;
+    if (root && !matchesIntentSurface(root, c.asset)) continue;
+    latest = Math.max(latest, ms(c.verifiedAt));
   }
   for (const a of history.listAssets(taskId)) {
-    if (a.kind === "live") latest = Math.max(latest, ms(a.createdAt));
+    if (a.kind !== "live") continue;
+    if (root && !matchesIntentSurface(root, a.address)) continue;
+    latest = Math.max(latest, ms(a.createdAt));
   }
   return latest;
 }
@@ -98,7 +130,10 @@ export function maybeForceEvidenceStall(opts: {
   if (stallMs <= 0) return { concluded: false, intentId: null, message: null };
   const now = opts.nowMs ?? Date.now();
   const anchor = Math.max(
-    lastVerifiedEvidenceAt(opts.history, opts.taskId),
+    lastVerifiedEvidenceAt(opts.history, opts.taskId, {
+      intentId: intent.id,
+      assetRoot: intent.assetRoot,
+    }),
     ms(intent.createdAt),
   );
   const idle = now - anchor;

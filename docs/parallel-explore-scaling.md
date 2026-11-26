@@ -14,12 +14,13 @@ P4 已有 `execution.maxConcurrentExplores`（1–16，默认 1），但有效�
 ## 新公式（契约变更）
 
 ```text
-effective = min( maxConcurrentExplores, max( seed靶标数, admitted/live 资产数 ) )
+effectiveExplores = min( maxConcurrentExplores, max( seed靶标数, admitted/live 资产数 ) )
+totalWorkerSlots  = effectiveExplores <= 1 ? 1 : effectiveExplores + 1   # slot 0 专职调度 + slots 1..E 真并发 Explore
 ```
 
-- 资产数 = History 资产投影中 kind ∈ {admitted, live} 的去重地址数（`listAssets` 已按最高 kind 合并）；seed/oos 不计（seed 由靶标数覆盖，oos 不可利用）。
-- 硬顶仍 16；下限 1；`maxConcurrentExplores` schema 不变。
-- 启动与崩溃重启都按新公式解析（重启自然扩到当前资产规模）。
+- 默认 `DEFAULT_MAX_CONCURRENT_EXPLORES = 3`（契约 / CLI / 控制台统一默认 3，控制台按靶标数推荐 `min(10, max(3, 靶标数))`，单 CIDR 不再被压成 1）。
+- 资产数 = History 资产投影中 kind ∈ {admitted, live} 的去重地址数（`listAssets` 已按最高 kind 合并）；seed/oos 不计（seed 由靶标数覆盖，oos 不可利用）。靶场 `boardGate=tsecbench` 任务开局按 `min(configured, 3)` 直接拉起 `1 Leader + 3 Followers` 滑动流水线。
+- 硬顶仍 16；下限 1；启动与崩溃重启都按新公式解析。
 
 ## 动态扩容纪律（硬规则）
 

@@ -7,7 +7,7 @@ import {
   saveHttpSessions,
   type HttpSessionStore,
 } from "@gongyuai/exec";
-import { capabilityAtLeast } from "./tools.js";
+import { capabilityAtLeast, syncAdmittedTargets } from "./tools.js";
 import { scopeAllows } from "@gongyuai/contracts";
 import { readEvidenceBytes } from "@gongyuai/history";
 import type { ToolContext } from "./tools.js";
@@ -135,6 +135,7 @@ export async function httpRequestTool(
     headers = applySessionToHeaders(headers, sessions[sessionName]?.[targetHost]);
   }
 
+  syncAdmittedTargets(ctx.manifest);
   const follow = args.follow !== "false" && args.follow !== "0";
   const timeoutMs = Math.min(120_000, Math.max(1, Number(args.timeoutMs) || 30_000));
   const result = await performHttpRequest(

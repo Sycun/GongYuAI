@@ -11,6 +11,7 @@ import type {
   WorkerPhase,
 } from "@gongyuai/contracts";
 import {
+  DEFAULT_MAX_CONCURRENT_EXPLORES,
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
   DEFAULT_MAX_INTENTS_PER_REASON,
   DEFAULT_REASON_LEASE_MS,
@@ -31,9 +32,12 @@ import { appendProgress } from "./tools.js";
 export function fanoutPolicyFromExecution(
   execution?: Partial<ExecutionConfig> | null,
 ): FanoutPolicy {
+  const configuredExplores =
+    execution?.maxConcurrentExplores ?? DEFAULT_MAX_CONCURRENT_EXPLORES;
+  const basePerReason =
+    execution?.maxIntentsPerReason ?? DEFAULT_MAX_INTENTS_PER_REASON;
   return {
-    maxIntentsPerReason:
-      execution?.maxIntentsPerReason ?? DEFAULT_MAX_INTENTS_PER_REASON,
+    maxIntentsPerReason: Math.max(basePerReason, configuredExplores),
     maxIntentsPerAssetRoot:
       execution?.maxIntentsPerAssetRoot ?? DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
   };
@@ -144,13 +148,22 @@ export function syncGraphPhase(
   history: HistoryStore,
   taskId: string,
   phase: WorkerPhase,
-  opts?: { leader?: boolean; workerCount?: number },
+  opts?: { leader?: boolean; workerCount?: number; activeIntentId?: string | null },
 ): WorkerPhase {
   const p = asGraphPhase(phase);
   if (p === "relay" || p === "report" || p === "done") return p;
 
   if (opts?.leader === false) {
     return "explore";
+  }
+
+  const multiWorkerLeader = opts?.leader === true && (opts.workerCount ?? 1) > 1;
+  if (multiWorkerLeader) {
+    // Multi-worker leader owns Bootstrap/Reason/Report and delegates Explore to followers.
+    // Never kick leader into Explore mid-fanout just because followers' Intents exist.
+    if (p === "bootstrap" || p === "reason") return p;
+    if (p === "explore" && !opts?.activeIntentId) return "reason";
+    return p;
   }
 
   const open = history.openIntents(taskId);
@@ -160,33 +173,44 @@ export function syncGraphPhase(
 
   if (hasActive && p === "reason") return "explore";
   if (hasActive && p === "bootstrap") return "explore";
-  // Multi-worker leader delegates Explore: once all open Intents conclude, wake directly into Reason.
-  if (!hasActive && p === "explore" && opts?.leader === true && (opts.workerCount ?? 1) > 1) {
-    return "reason";
-  }
   return p;
 }
 
 export function phaseDirective(
   phase: WorkerPhase,
-  opts: { openIntentCount: number; activeIntentId: string | null },
+  opts: {
+    openIntentCount: number;
+    activeIntentId: string | null;
+    leader?: boolean;
+    workerCount?: number;
+    maxConcurrentExplores?: number;
+  },
 ): string {
   const p = asGraphPhase(phase);
+  const multiWorkerLeader = opts.leader === true && (opts.workerCount ?? 1) > 1;
+  const exploreSlots = Math.max(1, (opts.workerCount ?? 1) - 1);
   const lines = [
     `当前图相位 phase=${p}（Bootstrap → Explore → Reason；Relay 为会话边界）。`,
-    `open Intents=${opts.openIntentCount}；activeIntentId=${opts.activeIntentId ?? "—"}。`,
+    `open Intents=${opts.openIntentCount}；activeIntentId=${opts.activeIntentId ?? "—"}${multiWorkerLeader ? `；角色=Leader 调度（管理 ${exploreSlots} 路并发 Follower）` : ""}。`,
   ];
   if (p === "bootstrap") {
-    lines.push(
-      "Bootstrap（建图启动）：确认目标坐标（靶场任务先调 tsecbench list/start，系统会自动准入容器地址并建 live 资产 Fact）→ 写首批 Fact 或直接 intent_propose（单 Worker 可传 claim='true' 一步认领并直入 Explore，省去多余相位切换）。禁止 shell / assert_goal。",
-    );
+    if (multiWorkerLeader) {
+      lines.push(
+        `Bootstrap（多节点并发开局）：你是 slot 0 Leader，拥有 ${exploreSlots} 个并发 Explore Follower。先确认/开启首批目标坐标（靶场任务先调 tsecbench list，优先按 difficulty 由易到难 easy → medium → hard 挑题，避免开局全压硬题阻塞流水线；连续 start 最多 3 台未完成靶机填满并发槽位）→ 为每台存活资产分别调用 intent_propose（绑定各自 assetRoot，勿传 claim='true'，严禁多题共用同一 Intent）扇出 ${exploreSlots} 条独立 Intent 供 Follower 立即并行认领 → 随后 phase_set('reason') 进入驻留监听。禁止 shell / assert_goal。`,
+      );
+    } else {
+      const wantScale = (opts.maxConcurrentExplores ?? DEFAULT_MAX_CONCURRENT_EXPLORES) > 1;
+      lines.push(
+        `Bootstrap（建图启动）：确认目标坐标（靶场任务先调 tsecbench list，优先按 easy → medium → hard 梯队 start，系统会自动准入容器地址并建 live 资产 Fact${wantScale ? "；已开启自动并发扩容，建议一次开启 ≤3 台靶机并为每台分别 intent_propose 独立 Intent 以激活并发 Follower" : ""}）→ 写首批 Fact 或直接 intent_propose（单资产时可传 claim='true' 一步认领并直入 Explore）。禁止 shell / assert_goal。`,
+      );
+    }
   } else if (p === "explore") {
     lines.push(
-      "Explore（验证影响）：拿到 foothold 先 host_profile_record（OS/域/用户/权限/服务/共享），再按 T1046/T1069/T1087/T1135/T1021/T1550 族验证内网推进；一次只 claim 一个 Intent → 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro + 可选 pocCurl）才可进交付；独立验证由控制面在 finding_verify 后自动异步执行（不要为此发 operator_consult）。nmap/httpx/nuclei/ffuf 必须用机读输出（-oX - / -json / -jsonl / -of json），看到 [parser] mandatory 就重跑。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。有 open Explore 时禁止进入 Reason。",
+      "Explore（验证影响）：拿到 foothold 先 host_profile_record（OS/域/用户/权限/服务/共享），再按 T1046/T1069/T1087/T1135/T1021/T1550 族验证内网推进；一次只 claim 一个 Intent（严禁跨资产/跨题复用同一 Intent）→ 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro + 可选 pocCurl）才可进交付；独立验证由控制面在 finding_verify 后自动异步执行（不要为此发 operator_consult）。nmap/httpx/nuclei/ffuf 必须用机读输出（-oX - / -json / -jsonl / -of json），看到 [parser] mandatory 就重跑。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。",
     );
   } else if (p === "reason") {
     lines.push(
-      "Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 有 ready 步骤时 intent_propose 必须带 planStepId（计划≠授权）→ 扇出跨资产 Intent / technique_transfer / 更新 engagement 叙事。repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset 出现时先处理，不要继续磨。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。交付叙述只引用 verified finding；high/critical 须有独立确认。无 open Explore 时才可运行。禁止 shell / MCP 执行。",
+      `Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 有 ready 步骤时 intent_propose 必须带 planStepId（计划≠授权）→ 扇出跨资产 Intent / technique_transfer / 更新 engagement 叙事。${multiWorkerLeader ? `当前 ${exploreSlots} 路并发 Follower 在岗：靶场已解题或首探耗尽容器先 tsecbench(close) 腾槽，优先按 easy → medium → hard 梯队 start 新题（硬题首探失败先换题建打法库，后半程集中二轮攻坚），按每台容器 1 条独立 Intent 补满 ${exploreSlots} 路并发（勿传 claim='true'）。` : "单节点下 intent_propose 可传 claim='true' 直接切入 Explore。"}repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset 出现时先处理，不要继续磨。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。交付叙述只引用 verified finding；high/critical 须有独立确认。禁止 shell / MCP 执行。`,
     );
   }
   return lines.join("\n");
@@ -731,11 +755,15 @@ export function handleGraphTool(
     if (ctx.leader === false && next !== "explore") {
       return "denied: follower only Explore; leader owns Bootstrap/Reason/Report";
     }
+    const multiWorkerLeader = ctx.leader === true && (ctx.workerCount ?? 1) > 1;
     const open = ctx.history.openIntents(ctx.taskId);
+    if (next === "explore" && multiWorkerLeader) {
+      return "denied: multi-worker leader delegates Explore; propose Intents for followers in Bootstrap/Reason";
+    }
     if (next === "explore" && open.length === 0 && !ctx.state.activeIntentId) {
       return "denied: Explore requires ≥1 open Intent; intent_propose first";
     }
-    if (next === "reason" && open.length > 0) {
+    if (next === "reason" && open.length > 0 && !multiWorkerLeader) {
       return `denied: Reason 互斥 — ${open.length} open Intent(s); finish Explore first`;
     }
     if (next === "reason" && reasonLeaseMs > 0) {

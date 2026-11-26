@@ -12,11 +12,13 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import {
+  DEFAULT_MAX_CONCURRENT_EXPLORES,
   goalsFromSpecs,
   isActiveTaskStatus,
   isDrainingTaskStatus,
   isTerminalTaskStatus,
   resolveExploreWorkerCount,
+  resolveWorkerSlotCount,
   type TaskRecord,
   type TerminalTaskStatus,
   type WorkerManifest,
@@ -42,11 +44,17 @@ export type RunnerConfig = {
 };
 
 function taskWorkerCount(task: TaskRecord, assetCount?: number): number {
-  return resolveExploreWorkerCount({
-    maxConcurrentExplores: task.execution?.maxConcurrentExplores ?? 1,
-    targetCount: task.auth.targets.length,
+  const configured = task.execution?.maxConcurrentExplores ?? DEFAULT_MAX_CONCURRENT_EXPLORES;
+  const hasTsecBoard = !task.mock && task.goals.some((g) => g.boardGate === "tsecbench");
+  const effectiveTargets = hasTsecBoard
+    ? Math.max(task.auth.targets.length, Math.min(configured, 3))
+    : task.auth.targets.length;
+  const exploreCount = resolveExploreWorkerCount({
+    maxConcurrentExplores: configured,
+    targetCount: effectiveTargets,
     assetCount,
   });
+  return resolveWorkerSlotCount(exploreCount);
 }
 
 /** Distinct admitted/live assets from the History projection; 0 when no History yet. */
@@ -269,7 +277,7 @@ export class WorkerRunner {
         // 3) 授权内（坐标+能力已确认）命令程序自动放行，不调审批模型：
         //    去掉每步第二次模型往返与 reviewer 抖动/超时造成的停顿；
         //    破坏性/越界/主机网络仍由 worker 侧闸与 executorBound 拦截。
-        if (executorBound(pending.action, task.auth)) {
+        if (executorBound(pending.action, effectiveAuth)) {
           ledger.settle(pending, {
             id: pending.id, at: new Date().toISOString(), model: "",
             scope: this.settings.get().chatApproval.scope, decision: "allow", risk: "low",
