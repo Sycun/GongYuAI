@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ModelRef, WorkerManifest } from "@gongyuai/contracts";
-import type { HistoryStore } from "@gongyuai/history";
 
 /**
  * Worker-side P16 refusal detection, P13-A6/P17 provider retry & fallback cursor,
@@ -151,61 +150,4 @@ export function isLeaderStatusTerminal(dataDir: string): boolean {
   }
 }
 
-/** Synthesize a grounded Relay summary from History when auto-relay triggers without an explicit agent summary. */
-export function synthesizeGroundedRelayFields(
-  history: HistoryStore,
-  taskId: string,
-  activeIntentId: string | null,
-): {
-  current_position: string;
-  network_map: string;
-  tried: string;
-  foothold: string;
-  unexplored_surface: string;
-} {
-  const assets = history.listAssets(taskId);
-  const liveOrAdmitted = assets.filter((a) => a.kind === "live" || a.kind === "admitted");
-  const recentFacts = history.listFacts(taskId).slice(-8);
-  const intents = history.listIntents(taskId);
-  const recentDone = intents
-    .filter((i) => i.status === "succeeded" || i.status === "failed")
-    .slice(-5);
-  const open = intents.filter((i) => ["proposed", "claimed", "running"].includes(i.status));
-  const profiles = history.listHostProfiles(taskId);
-  const creds = history.listCredentials(taskId);
-
-  const current_position = activeIntentId
-    ? `activeIntent=${activeIntentId}`
-    : open.length > 0
-      ? `openIntents=${open.length}`
-      : "awaiting Reason";
-  const network_map = liveOrAdmitted
-    .slice(0, 10)
-    .map((a) => `${a.address}(${a.kind})`)
-    .join(", ") || "see History asset_list";
-  const tried = recentDone
-    .map((i) => `${i.title}:${i.status}`)
-    .join("; ") || recentFacts.map((f) => f.title).slice(-4).join("; ") || "—";
-  const footholdParts: string[] = [];
-  if (profiles.length > 0) {
-    footholdParts.push(
-      ...profiles.slice(0, 3).map((p) => `${p.asset}(${p.privileges.join("/") || p.os || "host"})`),
-    );
-  }
-  if (creds.length > 0) {
-    footholdParts.push(`creds=${creds.length}(see credential_list)`);
-  }
-  const foothold = footholdParts.join("; ") || "see History transferable/findings";
-  const unexplored_surface = open
-    .slice(0, 6)
-    .map((i) => i.title)
-    .join("; ") || "unfinished goals in History observe";
-
-  return {
-    current_position,
-    network_map,
-    tried,
-    foothold,
-    unexplored_surface,
-  };
-}
+export { synthesizeGroundedRelayFields } from "./relay-protocol.js";

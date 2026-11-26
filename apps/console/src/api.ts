@@ -1,4 +1,4 @@
-import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CommandReviewView, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, FindingValidation, FindingValidateRunResponse, HostProfile, HttpTransaction, EngagementAudit, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage, TrafficRecord } from "@gongyuai/contracts";
+import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, FindingValidation, FindingValidateRunResponse, HostProfile, HttpTransaction, EngagementAudit, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage, TrafficRecord } from "@gongyuai/contracts";
 import type { TaskArchiveState } from "@gongyuai/contracts";
 import type {
   KnowledgeEmbeddingPatch,
@@ -15,74 +15,44 @@ import type {
   KnowledgeSummary,
 } from "@gongyuai/contracts";
 
-export type TaskRecord = {
-  id: string;
-  name: string;
-  engagementId: string;
-  status: string;
-  mock: boolean;
-  scopeVersion?: number;
-  pauseRequestedAt?: string | null;
-  pausedAt?: string | null;
-  lastHeartbeatAt?: string | null;
-  fence: number;
-  leaseOwner: string | null;
-  leaseUntil: string | null;
-  workerPid: number | null;
-  workerPids?: number[];
-  containerId: string | null;
-  containerIds?: string[];
-  dataDir: string;
-  auth: {
-    authorizationNote?: string;
-    targets: string[];
-    outOfScope?: string[];
-    capability?: "observe" | "scan" | "active-lab" | "full";
-    roe?: string;
-  };
-  goals: Array<{
-    id: string;
-    title: string;
-    description: string;
-    evidencePatterns: string[];
-    passes: boolean;
-    evidencePaths?: string[];
-    assessment?: string;
-    /** 目标类型：file = 普通材料留存；business-reconcile = 业务核算。 */
-    kind?: "file" | "business-reconcile";
-    /** 业务核算配置（建档时由界面填、服务端落库，恢复后仍读这一份）。 */
-    business?: BusinessReconcileConfig;
-    /** 核算态：缺材料 / 待重算 / 结论不合格 / 可判定 / 已通过。 */
-    reconcileState?: ReconcileStateReport | null;
-    /** 目标级核算条件：声明后只挂差异文件不算完成比对。 */
-    reconcileGate?: {
-      pattern: string;
-      maxUnknown: number;
-      maxAmbiguous: number;
-      names?: string[];
-    };
-  }>;
-  budget: {
-    maxTokens: number;
-    maxWallMs: number;
-    maxToolCalls: number;
-    maxInstalls: number;
-  };
-  execution?: {
-    maxConcurrentExplores: number;
-    maxIntentsPerReason?: number;
-    maxIntentsPerAssetRoot?: number;
-    exploreTimeoutMs?: number;
-    reasonLeaseMs?: number;
-  };
-  usage: { tokens: number; toolCalls: number; installs: number };
-  error: string | null;
-  commandReview?: CommandReviewView;
-  createdAt: string;
-  updatedAt: string;
-  finishedAt?: string | null;
-  archivedAt?: string | null;
+import type {
+  AssetRecord,
+  BusinessReconcileConfig,
+  Fact,
+  FindingRecord,
+  GoalState,
+  Hint,
+  Intent,
+  PeerReview,
+  ReconcileRevision,
+  RetestRequest,
+  TaskRecord as ContractTaskRecord,
+} from "@gongyuai/contracts";
+
+export type {
+  AssetRecord,
+  BusinessReconcileConfig,
+  FindingRecord,
+  PeerReview,
+  ReconcileRevision,
+  RetestRequest,
 };
+
+/**
+ * 控制面只读投影。assessment / reconcileState 由历史接口附在目标上，
+ * 不写回任务契约。
+ */
+export type GoalView = GoalState & {
+  assessment?: string;
+  reconcileState?: ReconcileStateReport | null;
+};
+
+export type TaskRecord = Omit<ContractTaskRecord, "goals"> & {
+  goals: GoalView[];
+};
+
+export type RetestRequestRecord = RetestRequest;
+export type PeerReviewRecord = PeerReview;
 
 export type Overview = {
   total: number;
@@ -92,73 +62,14 @@ export type Overview = {
   recent: TaskRecord[];
 };
 
-export type AssetRecord = {
-  address: string;
-  kind: "seed" | "candidate" | "admitted" | "live" | "oos" | string;
-  factId: string;
-  title: string;
-  summary: string;
-  source: "auth" | "discover" | string;
-  createdAt: string;
-  intentId?: string | null;
-};
-
-export type FindingRecord = {
-  id: string;
-  title: string;
-  asset: string;
-  vulnClass: string;
-  severity: "info" | "low" | "medium" | "high" | "critical" | string;
-  cvss?: string | null;
-  confidence: string;
-  status: "tentative" | "verified" | "retested" | "accepted" | "retracted" | string;
-  endpoint?: string | null;
-  dedupKey: string;
-  intentId?: string | null;
-  factIds?: string[];
-  evidence: Array<{ path: string; sha256: string; role?: string; note?: string }>;
-  repro?: string;
-  impact?: string;
-  fix?: string;
-  rootCause?: string;
-  pocCurl?: string;
-  trafficIds?: string[];
-  qualification?: "exploited" | "confirmed" | "unconfirmed" | null;
-  createdAt: string;
-  verifiedAt?: string | null;
-  verifiedBy?: string | null;
-};
-
 export type HistoryPayload = {
   coverage?: CoverageReview[];
   overview: string;
   goals: TaskRecord["goals"];
   /** 任务的核算版本归档（版本号倒序），复核输入与结果一一对应。 */
   reconcileRevisions?: ArchivedReconcile[];
-  facts: Array<{
-    id: string;
-    layer: string;
-    title: string;
-    summary: string;
-    createdAt: string;
-    intentId?: string | null;
-    evidencePath?: string | null;
-    tags?: string[];
-  }>;
-  intents: Array<{
-    id: string;
-    title: string;
-    status: string;
-    summary?: string;
-    sourceFactIds?: string[];
-    technique?: string | null;
-    assetRoot?: string | null;
-    claimedBy?: string | null;
-    createdAt?: string;
-    updatedAt?: string;
-    concludedAt?: string | null;
-    conclusion?: string | null;
-  }>;
+  facts: Fact[];
+  intents: Intent[];
   events: Array<{
     id?: string;
     kind?: string;
@@ -183,43 +94,7 @@ export type HistoryPayload = {
   };
   retestRequests?: RetestRequestRecord[];
   peerReviews?: PeerReviewRecord[];
-  hints?: Array<{
-    id: string;
-    text: string;
-    source: string;
-    tags?: string[];
-    createdAt: string;
-  }>;
-};
-
-export type RetestRequestRecord = {
-  id: string;
-  requester: string;
-  role?: string;
-  findingIds: string[];
-  reason: string;
-  evidencePath?: string;
-  sha256?: string;
-  status: "pending" | "fulfilled";
-  fulfilledAt?: string;
-  fulfilledResult?: string;
-  createdAt: string;
-};
-
-export type PeerReviewRecord = {
-  id: string;
-  taskId: string;
-  engagementId: string;
-  reviewer: string;
-  role: string;
-  sourceTaskId: string;
-  findingId?: string;
-  factId?: string;
-  decision: "confirm" | "challenge" | "retest-requested";
-  basis: string;
-  evidencePath?: string;
-  sha256?: string;
-  createdAt: string;
+  hints?: Hint[];
 };
 
 export type ScorecardPayload = {
@@ -291,14 +166,14 @@ export type ReconcileResultPayload = {
   };
 };
 
-export type HintRecord = {
-  id: string;
-  taskId?: string;
-  text: string;
-  source: string;
-  tags?: string[];
-  createdAt: string;
+export type ArchivedReconcile = {
+  revision: ReconcileRevision;
+  evidencePath: string;
+  evidenceSha256: string;
+  counts: ReconcileResultPayload["result"]["counts"];
 };
+
+export type HintRecord = Hint;
 
 export type RuntimePayload = {
   externalState?: "running" | "pause_requested" | "stopping" | "paused" | "stopped" | "unknown";
@@ -598,38 +473,6 @@ export type UpdateJobStatus = {
   commit: string | null;
   error: string | null;
   silent: boolean;
-};
-
-/** 业务核算配置：界面填的就是这一份，服务端据此派生核算条件。 */
-export type BusinessReconcileConfig = {
-  name: string;
-  keyField: string;
-  compareFields?: string[];
-  requiredKeys?: string[];
-  maxUnknown: number;
-  maxAmbiguous: number;
-  baseline: { path: string; format?: "csv" | "json"; keyField?: string };
-  current: { path: string; format?: "csv" | "json"; keyField?: string };
-};
-
-/** 一次核算的版本身份：对应目标、两侧材料哈希、采用的核算口径。 */
-export type ReconcileRevision = {
-  id: string;
-  taskId: string;
-  goalIds: string[];
-  config: BusinessReconcileConfig;
-  configDigest: string;
-  inputDigest: string;
-  baseline: { path: string; format: "csv" | "json" | null; present: boolean; sha256: string | null; rows: number };
-  current: { path: string; format: "csv" | "json" | null; present: boolean; sha256: string | null; rows: number };
-  createdAt: string;
-};
-
-export type ArchivedReconcile = {
-  revision: ReconcileRevision;
-  evidencePath: string;
-  evidenceSha256: string;
-  counts: ReconcileResultPayload["result"]["counts"];
 };
 
 export type ReconcileStateReport = {

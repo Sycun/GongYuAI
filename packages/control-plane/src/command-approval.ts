@@ -49,6 +49,17 @@ export function executorBound(action: CommandTicket["action"], auth?: CommandAut
   return action.tool === "shell" && localProbes.some(probe => probe === action.localProbe && probe === action.summary);
 }
 
+/**
+ * 动作的副作用与目标边界是否已由纯确定性程序规则完成核验：
+ * - `shell`/`cli`/`install_*`/`stdio`/带 `hosts` 的 `mcp` 及固定 `localProbes` 均已过确定性坐标与元字符闸，`auto` 模式可直接放行；
+ * - 无声明 `hosts` 的纯本地 `mcp` 动作虽不被越界硬拒（`executorBound === true`），但其工具副作用未经坐标核验，`auto` 模式下仍须交由 `reviewCommand` 评估。
+ */
+export function isDeterministicallyVerified(action: CommandTicket["action"], auth?: CommandAuth): boolean {
+  if (!executorBound(action, auth)) return false;
+  if (auth && action.tool === "mcp" && !action.hosts?.length) return false;
+  return true;
+}
+
 /** 老的常量原因保留给没有 command 的旧提案：说清是提案缺内容，不误导成"只支持本地检查"。 */
 export const outOfScopeReason = `该调用未携带可裁决的命令内容（旧版提案），无法按任务坐标放行，已直接拦截；请让任务重新发起带完整命令的调用。`;
 

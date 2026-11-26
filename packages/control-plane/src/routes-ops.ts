@@ -42,10 +42,14 @@ import {
   writeEvidenceFile,
   type HistoryStore,
 } from "@gongyuai/history";
+import type { AssignmentService } from "./assignments.js";
+import type { KnowledgeStore } from "./knowledge.js";
+import type { SettingsStore } from "./settings.js";
 import type { ControlStore } from "./store.js";
 import type { JobRunner } from "./jobs.js";
 import type { WorkerRunner } from "./runner.js";
 import type { PlatformStore } from "./platform.js";
+import type { SilentUpdater } from "./updater.js";
 import { assembleHandoff, sweepTaskConsults, todayWork } from "./handoff.js";
 import { assetHistory } from "./asset-history.js";
 import { TunnelManager, deleteHttpSession, listHttpSessionSummaries, upsertHttpSession } from "@gongyuai/exec";
@@ -63,6 +67,15 @@ export type OpsRouteDeps = {
   jobs: JobRunner;
   platform: PlatformStore;
   runner: WorkerRunner;
+};
+
+/** 设置、任务、结论与证据路由共用的控制面依赖。 */
+export type ControlRouteDeps = OpsRouteDeps & {
+  settings: SettingsStore;
+  updater: SilentUpdater;
+  version: string;
+  knowledge: KnowledgeStore;
+  assignments: AssignmentService;
 };
 
 export function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -84,9 +97,15 @@ export function sendText(
   res.end(body);
 }
 
-export async function readJson(req: IncomingMessage): Promise<unknown> {
+export async function readJson(req: IncomingMessage, maxBytes = Infinity): Promise<unknown> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  let size = 0;
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buf.length;
+    if (size > maxBytes) throw new Error("任务材料超出大小限制");
+    chunks.push(buf);
+  }
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw) return {};
   return JSON.parse(raw);
@@ -130,6 +149,24 @@ export function checkSingleUserBoundary(task: TaskRecord, url: URL, req: Incomin
 export function openTaskHistory(task: TaskRecord, readOnly = false): HistoryStore {
   const paths = taskPaths(task.dataDir);
   return openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly });
+}
+
+/**
+ * 打开任务 History 并在 fn 返回后关闭。
+ * 只读路由必须传 `readOnly: true`，避免轮询触发建表迁移和写锁。
+ * fn 需同步完成；不要返回未等待的 Promise。
+ */
+export function withTaskHistory<T>(
+  task: TaskRecord,
+  opts: { readOnly: boolean },
+  fn: (history: HistoryStore) => T,
+): T {
+  const history = openTaskHistory(task, opts.readOnly);
+  try {
+    return fn(history);
+  } finally {
+    history.close();
+  }
 }
 
 export async function handleOpsRoute(

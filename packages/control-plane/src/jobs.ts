@@ -9,7 +9,7 @@
  * - 作业不在 HTTP 请求里跑：submit 立即返回 jobId，执行在后台推进。
  */
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import type { BackgroundJob, JobKind, SubmitJobInput } from "@gongyuai/contracts";
 import {
   detectMaterialKind,
@@ -67,6 +67,21 @@ export class JobRunner {
     const now = new Date().toISOString();
     for (const task of this.store.list() as TaskRecordLike[]) {
       if (!this.hasHistory(task)) continue;
+      let needsReconcile = false;
+      try {
+        const ro = this.open(task, true);
+        try {
+          needsReconcile = ro.ops
+            .listJobs(task.id)
+            .some((job) => job.status === "running" && job.bootId !== this.bootId);
+        } finally {
+          ro.close();
+        }
+      } catch {
+        // 旧版只读归档库可能不含 background_jobs 表：跳过，严禁读写建表破坏归档。
+        continue;
+      }
+      if (!needsReconcile) continue;
       const history = this.open(task);
       try {
         const reconciled = history.ops.reconcileJobsAfterBoot(task.id, this.bootId, now);
@@ -188,11 +203,15 @@ export class JobRunner {
   }
 
   private nextQueued(task: TaskRecordLike): BackgroundJob | null {
-    const history = this.open(task);
     try {
-      return history.ops.listJobs(task.id).find((job) => job.status === "queued") ?? null;
-    } finally {
-      history.close();
+      const history = this.open(task, true);
+      try {
+        return history.ops.listJobs(task.id).find((job) => job.status === "queued") ?? null;
+      } finally {
+        history.close();
+      }
+    } catch {
+      return null;
     }
   }
 
@@ -382,17 +401,12 @@ export class JobRunner {
   }
 
   private hasHistory(task: { dataDir: string }): boolean {
-    try {
-      readFileSync(taskPaths(task.dataDir).historyDb);
-      return true;
-    } catch {
-      return false;
-    }
+    return existsSync(taskPaths(task.dataDir).historyDb);
   }
 
-  private open(task: { dataDir: string }): HistoryStore {
+  private open(task: { dataDir: string }, readOnly = false): HistoryStore {
     const paths = taskPaths(task.dataDir);
-    return openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+    return openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly });
   }
 }
 
