@@ -134,6 +134,7 @@ body {
 .gy-log-line mark { background: var(--semi-color-warning-light-default); color: inherit; padding: 0 1px; border-radius: 2px; }
 .gy-exec-group { border: 1px solid var(--semi-color-border); border-radius: 10px; margin-bottom: 10px; padding: 6px 10px; }
 .gy-exec-group-head { display: flex; align-items: center; gap: 8px; width: 100%; background: transparent; border: none; padding: 4px 0; cursor: pointer; text-align: left; color: inherit; }
+.gy-exec-load-older { display: flex; justify-content: center; margin-top: 12px; }
 .gy-logs-plan { margin-top: 12px; border-top: 1px solid var(--semi-color-border); padding-top: 10px; }
 .gy-battlefield { display: flex; flex-direction: column; }
 .gy-graph-tab { display: flex; flex-direction: column; gap: 16px; }

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/workspace/workspace.test.ts src/components/viewedTaskControls.test.ts src/components/approvalModelConfig.test.ts src/components/useClientPagination.test.ts src/components/secretRefPreview.test.ts src/labels.test.ts src/components/ChatMarkdown.test.tsx src/components/dag/buildDagLayout.test.ts src/components/trafficFormat.test.ts src/components/reportFormat.test.ts src/components/logsFormat.test.ts",
+    "test": "node --import tsx --test src/workspace/workspace.test.ts src/components/viewedTaskControls.test.ts src/components/approvalModelConfig.test.ts src/components/useClientPagination.test.ts src/components/secretRefPreview.test.ts src/labels.test.ts src/components/ChatMarkdown.test.tsx src/components/executionTraceModel.test.ts src/components/dag/buildDagLayout.test.ts src/components/trafficFormat.test.ts src/components/reportFormat.test.ts src/components/logsFormat.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

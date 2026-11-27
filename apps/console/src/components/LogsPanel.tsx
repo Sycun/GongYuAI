@@ -23,8 +23,11 @@ export function LogsPanel({ taskId, runtime, active, intents = [], plan = [] }: 
   const [level, setLevel] = useState<LogLevel | "all">("all");
   const [slot, setSlot] = useState<string>("");
   const [autoScroll, setAutoScroll] = useState(true);
+  const [newestFirst, setNewestFirst] = useState(true);
   const [planOpen, setPlanOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const stepsScrollRef = useRef<HTMLDivElement>(null);
+  const nearTopRef = useRef(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +57,20 @@ export function LogsPanel({ taskId, runtime, active, intents = [], plan = [] }: 
     }
   }, [lines, view, autoScroll]);
 
+  useEffect(() => {
+    if (view === "steps" && newestFirst && stepsScrollRef.current && nearTopRef.current) {
+      stepsScrollRef.current.scrollTop = 0;
+    }
+  }, [runtime, view, newestFirst]);
+
+  const handleToggleNewestFirst = (checked: boolean) => {
+    setNewestFirst(checked);
+    if (checked && stepsScrollRef.current) {
+      stepsScrollRef.current.scrollTop = 0;
+      nearTopRef.current = true;
+    }
+  };
+
   return (
     <div className="gy-logs">
       <div className="gy-logs-toolbar">
@@ -65,7 +82,14 @@ export function LogsPanel({ taskId, runtime, active, intents = [], plan = [] }: 
             实时原始日志
           </Button>
         </Space>
-        {view === "raw" && (
+        {view === "steps" ? (
+          <Space wrap spacing={8}>
+            <label className="gy-logs-autoscroll">
+              <Switch size="small" checked={newestFirst} onChange={handleToggleNewestFirst} aria-label="最新步骤置顶" />
+              <span>最新在上</span>
+            </label>
+          </Space>
+        ) : (
           <Space wrap spacing={8}>
             <Input prefix={<IconSearch />} aria-label="日志关键字" placeholder="关键字高亮" value={keyword} onChange={setKeyword} style={{ width: 200 }} showClear />
             <Select aria-label="日志级别" value={level} onChange={(v) => setLevel(v as LogLevel | "all")} optionList={LOG_LEVEL_OPTIONS} style={{ width: 110 }} />
@@ -83,7 +107,13 @@ export function LogsPanel({ taskId, runtime, active, intents = [], plan = [] }: 
       </div>
 
       {view === "steps" ? (
-        <div className="gy-logs-steps">
+        <div
+          className="gy-logs-steps"
+          ref={stepsScrollRef}
+          onScroll={(e) => {
+            nearTopRef.current = e.currentTarget.scrollTop <= 60;
+          }}
+        >
           <div className="gy-logs-steps-inner">
             <ExecutionTrace
               taskId={taskId}
@@ -93,6 +123,7 @@ export function LogsPanel({ taskId, runtime, active, intents = [], plan = [] }: 
               active={active}
               groupByIntent
               intents={intents}
+              newestFirst={newestFirst}
               emptyHint={active ? "等待执行节点上报步骤…" : "暂无执行步骤"}
             />
             {plan.length > 0 && (
