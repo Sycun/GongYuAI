@@ -124,3 +124,32 @@ test("GET /tasks/:id/asset-history returns read-only cross-task leads", async (t
   assert.match(body.note, /历史接触≠本次授权/);
   void second;
 });
+
+test("GET /tasks/:id/evidence/file supports opt-in workspace fallback for credential secretRef preview", async (t) => {
+  const { paths, base } = await fixture(t, "P14 secretRef 文件读取");
+  mkdirSync(join(paths.evidenceDir, "c07"), { recursive: true });
+  writeFileSync(join(paths.evidenceDir, "c07", "telnet.txt"), "root:root123\n");
+
+  mkdirSync(join(paths.workspaceDir, "evidence", "d06"), { recursive: true });
+  writeFileSync(join(paths.workspaceDir, "evidence", "d06", "repro-chain.log"), "AWS_SECRET=xyz\n");
+
+  const evRes = await fetch(`${base}/evidence/file?path=${encodeURIComponent("c07/telnet.txt")}`);
+  assert.equal(evRes.status, 200);
+  assert.equal(evRes.headers.get("x-gy-evidence-source"), "evidence");
+  assert.equal(await evRes.text(), "root:root123\n");
+
+  const strictMiss = await fetch(`${base}/evidence/file?path=${encodeURIComponent("evidence/d06/repro-chain.log")}`);
+  assert.equal(strictMiss.status, 404);
+
+  const wsFallback = await fetch(
+    `${base}/evidence/file?path=${encodeURIComponent("evidence/d06/repro-chain.log")}&fallbackWorkspace=1`,
+  );
+  assert.equal(wsFallback.status, 200);
+  assert.equal(wsFallback.headers.get("x-gy-evidence-source"), "workspace");
+  assert.equal(await wsFallback.text(), "AWS_SECRET=xyz\n");
+
+  const traversal = await fetch(
+    `${base}/evidence/file?path=${encodeURIComponent("../manifest.json")}&fallbackWorkspace=1`,
+  );
+  assert.equal(traversal.status, 404);
+});

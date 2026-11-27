@@ -312,14 +312,29 @@ export async function handleEvidenceRoute(
       sendJson(res, 400, { error: "bad path" });
       return true;
     }
-    let content: string;
+    const allowWorkspaceFallback = url.searchParams.get("fallbackWorkspace") === "1";
+    let content: string | undefined;
+    let source: "evidence" | "workspace" = "evidence";
     try {
       content = readEvidenceFile(paths.evidenceDir, rel);
     } catch {
+      if (allowWorkspaceFallback) {
+        try {
+          content = readEvidenceFile(paths.workspaceDir, rel);
+          source = "workspace";
+        } catch {
+          /* fall through to 404 */
+        }
+      }
+    }
+    if (content === undefined) {
       sendJson(res, 404, { error: "not found" });
       return true;
     }
-    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    res.writeHead(200, {
+      "content-type": "text/plain; charset=utf-8",
+      "x-gy-evidence-source": source,
+    });
     res.end(content);
     return true;
   }

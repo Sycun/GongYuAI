@@ -689,8 +689,21 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ goalId }),
     }),
-  evidenceFile: (id: string, path: string, signal?: AbortSignal) =>
-    request<string>(`/tasks/${id}/evidence/file?path=${encodeURIComponent(path)}`, { signal }),
+  evidenceFile: (
+    id: string,
+    path: string,
+    opts?: AbortSignal | { signal?: AbortSignal; fallbackWorkspace?: boolean },
+  ) => {
+    const signal = opts instanceof AbortSignal ? opts : opts?.signal;
+    const fb =
+      opts && !(opts instanceof AbortSignal) && opts.fallbackWorkspace
+        ? "&fallbackWorkspace=1"
+        : "";
+    return request<string>(
+      `/tasks/${encodeURIComponent(id)}/evidence/file?path=${encodeURIComponent(path)}${fb}`,
+      { signal },
+    );
+  },
   corrections: (id: string) => request<{ corrections: Array<Record<string, unknown>> }>(`/tasks/${id}/corrections`),
   snapshot: (id: string) => request<Record<string, unknown>>(`/tasks/${id}/snapshot`),
   recordCoverage: (id: string, body: CoverageReviewInput) =>

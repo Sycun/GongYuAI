@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, Empty, Input, Space, Table, Tabs, Tag, Toast, Typography } from "@douyinfe/semi-ui";
+import {
+  Button, Card, Empty, Input, SideSheet, Space, Spin, Table, Tabs, Tag, Toast, Typography,
+} from "@douyinfe/semi-ui";
+import { IconCopy } from "@douyinfe/semi-icons";
 import type { Credential, HostProfile, OastHit, OastToken } from "@gongyuai/contracts";
 import { api, type AssetRecord, type AssetHistoryPayload, type TaskP14Payload, type TunnelMeta } from "../api";
 import { ASSET_KIND_LABEL, shortId, statusColor } from "../labels";
 import { formatDateTime } from "../time";
+import { ChatMarkdown } from "./ChatMarkdown";
+import {
+  copyTextWithFallback,
+  isMarkdownPath,
+  resolveSecretRefTarget,
+} from "./secretRefPreview";
 import { StatusTag } from "./StatusTag";
 import { useClientPagination } from "./useClientPagination";
 
@@ -14,6 +23,18 @@ const CREDENTIAL_KIND_LABEL: Record<string, string> = {
 const CREDENTIAL_KIND_COLOR: Record<string, "grey" | "blue" | "orange" | "green" | "red"> = {
   password: "red", hash: "orange", ticket: "blue", token: "blue", key: "red",
   session: "orange", cookie: "orange", "foothold-shell": "green",
+};
+
+type ActiveSecretPreview = {
+  secretRef: string;
+  credential?: Credential;
+  label?: string;
+};
+
+type LoadedEvidence = {
+  path: string;
+  body: string;
+  kind: "file" | "traffic";
 };
 
 type Props = {
@@ -27,6 +48,11 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
   const [payload, setPayload] = useState<TaskP14Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [activePreview, setActivePreview] = useState<ActiveSecretPreview | null>(null);
+
+  useEffect(() => {
+    setActivePreview(null);
+  }, [taskId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,13 +125,27 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
         {!payload && !error ? <Typography.Text type="tertiary">正在读取战场对象…</Typography.Text> : (
           <Tabs type="line" collapsible defaultActiveKey="hosts">
             <Tabs.TabPane itemKey="hosts" tab={`主机画像 ${hostProfiles.length}`}>
-              <HostProfileSection taskId={taskId} rows={hostProfiles} />
+              <HostProfileSection
+                taskId={taskId}
+                rows={hostProfiles}
+                onOpenEvidence={(path, asset) => setActivePreview({ secretRef: path, label: `主机画像 · ${asset}` })}
+              />
             </Tabs.TabPane>
             <Tabs.TabPane itemKey="credentials" tab={`已获凭据 ${credentials.length}`}>
-              <CredentialsSection taskId={taskId} rows={credentials} />
+              <CredentialsSection
+                taskId={taskId}
+                rows={credentials}
+                activeCredentialId={activePreview?.credential?.id}
+                onOpenPreview={(cred) => setActivePreview({ secretRef: cred.secretRef, credential: cred })}
+              />
             </Tabs.TabPane>
             <Tabs.TabPane itemKey="sessions" tab={`驻留会话 ${sessions.length}`}>
-              <SessionsSection taskId={taskId} rows={sessions} />
+              <SessionsSection
+                taskId={taskId}
+                rows={sessions}
+                activeCredentialId={activePreview?.credential?.id}
+                onOpenPreview={(cred) => setActivePreview({ secretRef: cred.secretRef, credential: cred })}
+              />
             </Tabs.TabPane>
             <Tabs.TabPane itemKey="tunnels" tab={`隧道 ${payload?.tunnels?.length ?? 0}`}>
               <TunnelsSection rows={payload?.tunnels ?? []} />
@@ -120,11 +160,25 @@ export function BattlefieldPanel({ taskId, assets, active, focusAsset }: Props) 
       <div style={{ marginTop: 16 }}>
         <HistoryContact taskId={taskId} />
       </div>
+
+      <SecretPreviewSheet
+        taskId={taskId}
+        preview={activePreview}
+        onClose={() => setActivePreview(null)}
+      />
     </div>
   );
 }
 
-function HostProfileSection({ taskId, rows }: { taskId: string; rows: HostProfile[] }) {
+function HostProfileSection({
+  taskId,
+  rows,
+  onOpenEvidence,
+}: {
+  taskId: string;
+  rows: HostProfile[];
+  onOpenEvidence: (evidencePath: string, asset: string) => void;
+}) {
   const pager = useClientPagination(rows, 20, taskId);
   if (!rows.length) return <Empty description="暂无主机画像；立足点后由执行节点回填。" style={{ padding: "24px 0" }} />;
   return (
@@ -138,7 +192,24 @@ function HostProfileSection({ taskId, rows }: { taskId: string; rows: HostProfil
           <ProfileList label="服务" items={record.services} />
           <ProfileList label="共享" items={record.shares} />
           <ProfileList label="AV/EDR 信号" items={record.av} />
-          {record.evidencePath && <Typography.Text type="tertiary" size="small">证据：{record.evidencePath}</Typography.Text>}
+          {record.evidencePath && (
+            <Space spacing={6} wrap>
+              <Typography.Text type="tertiary" size="small">证据：{record.evidencePath}</Typography.Text>
+              {resolveSecretRefTarget(record.evidencePath).kind !== "none" && (
+                <Button
+                  size="small"
+                  theme="light"
+                  type="primary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenEvidence(record.evidencePath!, record.asset);
+                  }}
+                >
+                  查看
+                </Button>
+              )}
+            </Space>
+          )}
         </div>
       ) : null}
       columns={[
@@ -162,39 +233,62 @@ function ProfileList({ label, items }: { label: string; items: string[] }) {
   );
 }
 
-async function readSecretRefEvidence(taskId: string, secretRef: string): Promise<{ path: string; body: string }> {
-  const trimmed = secretRef.trim();
-  const candidates = trimmed.startsWith("evidence/")
-    ? [trimmed.slice("evidence/".length), trimmed]
-    : [trimmed];
+async function readSecretRefEvidence(
+  taskId: string,
+  secretRef: string,
+  signal?: AbortSignal,
+): Promise<LoadedEvidence> {
+  const target = resolveSecretRefTarget(secretRef);
+  if (target.kind === "none") {
+    throw new Error("该引用为环境变量或非文件指针，不含可预览证据文件");
+  }
+  if (target.kind === "http") {
+    const [reqSlice, resSlice] = await Promise.all([
+      api.trafficBlob(taskId, target.trafficId, "req", 0, 32_768, signal).catch(() => null),
+      api.trafficBlob(taskId, target.trafficId, "res", 0, 65_536, signal),
+    ]);
+    const parts = [
+      reqSlice?.json.body ? `### Request\n${reqSlice.json.body}` : "",
+      `### Response\n${resSlice.json.body}`,
+    ].filter(Boolean);
+    return {
+      path: `http:${target.trafficId}`,
+      body: parts.join("\n\n"),
+      kind: "traffic",
+    };
+  }
+
   let lastError: unknown;
-  for (const path of candidates) {
-    if (!path) continue;
+  for (const path of target.paths) {
     try {
-      const res = await api.evidenceFile(taskId, path);
-      return { path, body: res.text };
+      const res = await api.evidenceFile(taskId, path, {
+        signal,
+        fallbackWorkspace: true,
+      });
+      return { path, body: res.text, kind: "file" };
     } catch (err) {
+      if (signal?.aborted) throw err;
       lastError = err;
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError ?? "无法读取证据文件"));
-}
-
-function isEnvVarRef(ref: string): boolean {
-  return /^[A-Z][A-Z0-9_]{2,}$/.test(ref.trim());
+  const reason = lastError instanceof Error ? lastError.message : String(lastError ?? "无法读取证据文件");
+  throw new Error(
+    reason === "not found"
+      ? `未找到对应证据文件（已尝试：${target.paths.join("、")}）`
+      : reason,
+  );
 }
 
 function SecretRefCell({
-  taskId,
   secretRef,
-  onPreview,
+  active,
+  onOpen,
 }: {
-  taskId: string;
   secretRef: string;
-  onPreview: (preview: { path: string; body: string }) => void;
+  active?: boolean;
+  onOpen: () => void;
 }) {
-  const [loading, setLoading] = useState(false);
-  const canPreview = Boolean(secretRef.trim()) && !isEnvVarRef(secretRef);
+  const canPreview = resolveSecretRefTarget(secretRef).kind !== "none";
   return (
     <Space spacing={6} wrap>
       <Typography.Text code copyable size="small" style={{ wordBreak: "break-all" }}>
@@ -203,17 +297,11 @@ function SecretRefCell({
       {canPreview && (
         <Button
           size="small"
-          theme="borderless"
-          loading={loading}
-          onClick={async () => {
-            setLoading(true);
-            try {
-              onPreview(await readSecretRefEvidence(taskId, secretRef));
-            } catch (e) {
-              Toast.error(e instanceof Error ? e.message : String(e));
-            } finally {
-              setLoading(false);
-            }
+          theme={active ? "solid" : "light"}
+          type="primary"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
           }}
         >
           查看
@@ -223,90 +311,297 @@ function SecretRefCell({
   );
 }
 
-function SecretPreviewCard({
+function SecretPreviewSheet({
+  taskId,
   preview,
   onClose,
 }: {
-  preview: { path: string; body: string } | null;
+  taskId: string;
+  preview: ActiveSecretPreview | null;
   onClose: () => void;
 }) {
-  if (!preview) return null;
+  const [loaded, setLoaded] = useState<LoadedEvidence | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [viewMode, setViewMode] = useState<"raw" | "markdown">("raw");
+
+  const secretRef = preview?.secretRef ?? "";
+  const cred = preview?.credential;
+
+  useEffect(() => {
+    if (!preview) {
+      setLoaded(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const ac = new AbortController();
+    setLoading(true);
+    setError(null);
+    setLoaded(null);
+    setViewMode("raw");
+
+    readSecretRefEvidence(taskId, preview.secretRef, ac.signal)
+      .then((res) => {
+        if (cancelled) return;
+        setLoaded(res);
+      })
+      .catch((err) => {
+        if (cancelled || ac.signal.aborted) return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [taskId, preview, reloadNonce]);
+
+  const markdownCapable = loaded ? isMarkdownPath(loaded.path) || isMarkdownPath(secretRef) : false;
+
+  const copyText = async (text: string, label: string) => {
+    try {
+      await copyTextWithFallback(text);
+      Toast.success(label);
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : "复制失败");
+    }
+  };
+
   return (
-    <Card
-      title={preview.path}
-      style={{ marginTop: 12 }}
-      headerExtraContent={
-        <Space spacing={6}>
-          <Button
-            size="small"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(preview.body);
-                Toast.success("已复制凭据内容");
-              } catch (e) {
-                Toast.error(e instanceof Error ? e.message : "复制失败");
-              }
-            }}
-          >
-            复制
-          </Button>
-          <Button size="small" onClick={onClose}>关闭</Button>
-        </Space>
-      }
+    <SideSheet
+      className="gy-finding-sheet"
+      title={cred ? `凭据证据预览 · ${cred.asset}` : (preview?.label ?? "证据文件预览")}
+      visible={Boolean(preview)}
+      width={680}
+      placement="right"
+      closeOnEsc
+      maskClosable
+      onCancel={onClose}
+      bodyStyle={{ padding: "16px 20px 28px", overflow: "auto" }}
     >
-      <pre className="gy-mono gy-finding-block" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-        {preview.body}
-      </pre>
-    </Card>
+      {preview && (
+        <div className="gy-finding-drawer">
+          <div className="gy-finding-meta-card">
+            {cred && (
+              <>
+                <div className="gy-finding-meta-item">
+                  <span className="gy-finding-meta-label">凭据类型</span>
+                  <Tag color={CREDENTIAL_KIND_COLOR[cred.kind] ?? "grey"} size="small">
+                    {CREDENTIAL_KIND_LABEL[cred.kind] ?? cred.kind}
+                  </Tag>
+                </div>
+                <div className="gy-finding-meta-item">
+                  <span className="gy-finding-meta-label">用户名</span>
+                  <span className="gy-finding-meta-value">{cred.username || "—"}</span>
+                </div>
+                <div className="gy-finding-meta-item">
+                  <span className="gy-finding-meta-label">目标资产</span>
+                  <Typography.Text code size="small" className="gy-finding-meta-value">
+                    {cred.asset}
+                  </Typography.Text>
+                </div>
+                <div className="gy-finding-meta-item">
+                  <span className="gy-finding-meta-label">验证 / 复用</span>
+                  <span className="gy-finding-meta-value">
+                    {cred.verifiedAt ? "已验证" : "已登记"} · 复用 {cred.reuseCount} 次
+                  </span>
+                </div>
+              </>
+            )}
+            <div className="gy-finding-meta-item gy-finding-meta-item-wide">
+              <span className="gy-finding-meta-label">引用指针</span>
+              <Space spacing={6} wrap>
+                <Typography.Text code size="small" className="gy-finding-meta-value">
+                  {secretRef}
+                </Typography.Text>
+                <Button
+                  size="small"
+                  theme="borderless"
+                  icon={<IconCopy />}
+                  onClick={() => void copyText(secretRef, "已复制引用路径")}
+                >
+                  复制路径
+                </Button>
+              </Space>
+            </div>
+          </div>
+
+          {loading && (
+            <div style={{ padding: "48px 0", textAlign: "center" }}>
+              <Spin size="large" tip="正在读取对应证据文件…" />
+            </div>
+          )}
+
+          {!loading && error && (
+            <Card
+              title="证据读取失败"
+              style={{ borderColor: "var(--semi-color-danger)" }}
+              headerExtraContent={
+                <Button size="small" onClick={() => setReloadNonce((n) => n + 1)}>
+                  重试
+                </Button>
+              }
+            >
+              <Typography.Paragraph type="danger" style={{ margin: 0, wordBreak: "break-all" }}>
+                {error}
+              </Typography.Paragraph>
+            </Card>
+          )}
+
+          {!loading && loaded && (
+            <>
+              <div className="gy-finding-view-tabs">
+                <Space spacing={8} wrap>
+                  <Tag color="blue" size="small">
+                    {loaded.kind === "traffic" ? "HTTP 事务载荷" : `实际路径：${loaded.path}`}
+                  </Tag>
+                  <Typography.Text type="tertiary" size="small">
+                    {loaded.body.length} 字符
+                  </Typography.Text>
+                  {markdownCapable && (
+                    <Space spacing={4}>
+                      <Button
+                        size="small"
+                        theme={viewMode === "raw" ? "solid" : "light"}
+                        type={viewMode === "raw" ? "primary" : "tertiary"}
+                        onClick={() => setViewMode("raw")}
+                      >
+                        原始文本
+                      </Button>
+                      <Button
+                        size="small"
+                        theme={viewMode === "markdown" ? "solid" : "light"}
+                        type={viewMode === "markdown" ? "primary" : "tertiary"}
+                        onClick={() => setViewMode("markdown")}
+                      >
+                        Markdown 渲染
+                      </Button>
+                    </Space>
+                  )}
+                </Space>
+                <Button
+                  size="small"
+                  theme="solid"
+                  type="primary"
+                  icon={<IconCopy />}
+                  onClick={() => void copyText(loaded.body, "已复制凭据证据内容")}
+                >
+                  复制全文
+                </Button>
+              </div>
+
+              {viewMode === "markdown" && markdownCapable ? (
+                <div className="gy-finding-prose-box">
+                  <ChatMarkdown text={loaded.body} />
+                </div>
+              ) : (
+                <pre
+                  className="gy-sheet-raw"
+                  style={{ maxHeight: "calc(100vh - 280px)", overflow: "auto" }}
+                >
+                  {loaded.body || "（文件内容为空）"}
+                </pre>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </SideSheet>
   );
 }
 
-function CredentialsSection({ taskId, rows }: { taskId: string; rows: Credential[] }) {
-  const [preview, setPreview] = useState<{ path: string; body: string } | null>(null);
+function CredentialsSection({
+  taskId,
+  rows,
+  activeCredentialId,
+  onOpenPreview,
+}: {
+  taskId: string;
+  rows: Credential[];
+  activeCredentialId?: string;
+  onOpenPreview: (cred: Credential) => void;
+}) {
   const pager = useClientPagination(rows, 20, taskId);
   return (
     <>
       <Typography.Paragraph type="tertiary" size="small" style={{ margin: "0 0 8px" }}>
-        展示完整凭据引用（secretRef），可点击“查看”直接预览对应证据文件以复现。
+        展示完整凭据引用（secretRef），可点击“查看”在右侧抽屉直接预览对应证据文件以复现。
       </Typography.Paragraph>
       {rows.length ? (
         <Table
-          size="small" rowKey="id" dataSource={pager.dataSource}
+          size="small"
+          rowKey="id"
+          dataSource={pager.dataSource}
           pagination={pager.pagination}
+          rowClassName={(record?: Credential) => record?.id === activeCredentialId ? "gy-list-active" : ""}
           columns={[
             { title: "类型", dataIndex: "kind", width: 120, render: (k: string) => <Tag color={CREDENTIAL_KIND_COLOR[k] ?? "grey"} size="small">{CREDENTIAL_KIND_LABEL[k] ?? k}</Tag> },
             { title: "资产", dataIndex: "asset", render: (v: string) => <Typography.Text style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
             { title: "用户名", dataIndex: "username", width: 140, render: (v: string | null) => v || "—" },
-            { title: "secretRef", dataIndex: "secretRef", render: (v: string) => <SecretRefCell taskId={taskId} secretRef={v} onPreview={setPreview} /> },
+            {
+              title: "secretRef",
+              dataIndex: "secretRef",
+              render: (v: string, record: Credential) => (
+                <SecretRefCell
+                  secretRef={v}
+                  active={record.id === activeCredentialId}
+                  onOpen={() => onOpenPreview(record)}
+                />
+              ),
+            },
             { title: "复用次数", dataIndex: "reuseCount", width: 100 },
           ]}
         />
       ) : <Empty description="暂无凭据记录" style={{ padding: "24px 0" }} />}
-      <SecretPreviewCard preview={preview} onClose={() => setPreview(null)} />
     </>
   );
 }
 
-function SessionsSection({ taskId, rows }: { taskId: string; rows: Credential[] }) {
-  const [preview, setPreview] = useState<{ path: string; body: string } | null>(null);
+function SessionsSection({
+  taskId,
+  rows,
+  activeCredentialId,
+  onOpenPreview,
+}: {
+  taskId: string;
+  rows: Credential[];
+  activeCredentialId?: string;
+  onOpenPreview: (cred: Credential) => void;
+}) {
   const pager = useClientPagination(rows, 20, taskId);
   if (!rows.length) return <Empty description="暂无驻留会话；获取会话或立足点 Shell 后记录在这里。" style={{ padding: "24px 0" }} />;
   return (
-    <>
-      <Table
-        size="small" rowKey="id" dataSource={pager.dataSource}
-        pagination={pager.pagination}
-        columns={[
-          { title: "类型", dataIndex: "kind", width: 130, render: (k: string) => <Tag color={CREDENTIAL_KIND_COLOR[k] ?? "grey"} size="small">{CREDENTIAL_KIND_LABEL[k] ?? k}</Tag> },
-          { title: "资产", dataIndex: "asset", render: (v: string) => <Typography.Text style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
-          { title: "用户名", dataIndex: "username", width: 140, render: (v: string | null) => v || "—" },
-          { title: "会话指针", dataIndex: "secretRef", render: (v: string) => <SecretRefCell taskId={taskId} secretRef={v} onPreview={setPreview} /> },
-          { title: "最近使用", dataIndex: "lastUsedAt", width: 170, render: (t: string | null) => t ? formatDateTime(t, true) : "—" },
-          { title: "复用", dataIndex: "reuseCount", width: 70 },
-        ]}
-      />
-      <SecretPreviewCard preview={preview} onClose={() => setPreview(null)} />
-    </>
+    <Table
+      size="small"
+      rowKey="id"
+      dataSource={pager.dataSource}
+      pagination={pager.pagination}
+      rowClassName={(record?: Credential) => record?.id === activeCredentialId ? "gy-list-active" : ""}
+      columns={[
+        { title: "类型", dataIndex: "kind", width: 130, render: (k: string) => <Tag color={CREDENTIAL_KIND_COLOR[k] ?? "grey"} size="small">{CREDENTIAL_KIND_LABEL[k] ?? k}</Tag> },
+        { title: "资产", dataIndex: "asset", render: (v: string) => <Typography.Text style={{ wordBreak: "break-all" }}>{v}</Typography.Text> },
+        { title: "用户名", dataIndex: "username", width: 140, render: (v: string | null) => v || "—" },
+        {
+          title: "会话指针",
+          dataIndex: "secretRef",
+          render: (v: string, record: Credential) => (
+            <SecretRefCell
+              secretRef={v}
+              active={record.id === activeCredentialId}
+              onOpen={() => onOpenPreview(record)}
+            />
+          ),
+        },
+        { title: "最近使用", dataIndex: "lastUsedAt", width: 170, render: (t: string | null) => t ? formatDateTime(t, true) : "—" },
+        { title: "复用", dataIndex: "reuseCount", width: 70 },
+      ]}
+    />
   );
 }
 
