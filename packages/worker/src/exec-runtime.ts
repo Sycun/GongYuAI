@@ -1,7 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  C2Manager,
   ExecRuntime,
   JobStore,
   ShellSessionManager,
@@ -82,25 +81,63 @@ export function listLiveExecResources(manifest?: Partial<WorkerManifest> | null)
   }
 
   try {
-    if (existsSync(join(execDir, "c2")) && manifest?.auth) {
-      const c2 = new C2Manager({ baseDir: execDir, auth: manifest.auth });
-      try {
-        for (const c of c2.sessionList()) {
-          if ((c.status !== "active" && c.status !== "idle") || !c.allowed) continue;
-          const who = `${c.user ? `${c.user}@` : ""}${c.host || c.peer}`;
-          entries.push({
-            key: `c2:${c.id}`,
-            line: `[c2:${c.id}] (${c.kind}) ${who} — 可用 c2(action="read"|"exec", sessionId="${c.id}") 交互`,
-          });
-        }
-      } finally {
-        c2.close();
-      }
-    }
+    entries.push(...readLiveC2Sessions(execDir));
   } catch {
     /* best-effort projection */
   }
 
+  return entries;
+}
+
+function pidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read `c2/state.json` without constructing `C2Manager` (that marks every
+ * on-disk session closed and starts a sweep timer). Show a session only when
+ * its listener is still running inside a live slot process.
+ */
+function readLiveC2Sessions(execDir: string): LiveExecResourceEntry[] {
+  const statePath = join(execDir, "c2", "state.json");
+  if (!existsSync(statePath)) return [];
+  const raw = JSON.parse(readFileSync(statePath, "utf8")) as {
+    listeners?: Array<{ id?: string; status?: string; ownerPid?: number; pid?: number }>;
+    sessions?: Array<{
+      id?: string;
+      kind?: string;
+      status?: string;
+      allowed?: boolean;
+      user?: string;
+      host?: string;
+      peer?: string;
+      listenerId?: string;
+    }>;
+  };
+  const liveListeners = new Set<string>();
+  for (const listener of raw.listeners ?? []) {
+    if (!listener?.id || listener.status !== "running") continue;
+    const pid = typeof listener.ownerPid === "number" ? listener.ownerPid : listener.pid;
+    if (typeof pid === "number" && pidAlive(pid)) liveListeners.add(listener.id);
+  }
+  if (liveListeners.size === 0) return [];
+  const entries: LiveExecResourceEntry[] = [];
+  for (const session of raw.sessions ?? []) {
+    if (!session?.id || !session.listenerId || !liveListeners.has(session.listenerId)) continue;
+    if (session.status !== "active" && session.status !== "idle") continue;
+    if (session.allowed === false) continue;
+    const who = `${session.user ? `${session.user}@` : ""}${session.host || session.peer || ""}`;
+    entries.push({
+      key: `c2:${session.id}`,
+      line: `[c2:${session.id}] (${session.kind ?? "raw"}) ${who} — 可用 c2(action="read"|"task", sessionId="${session.id}") 交互（C2 TCP 会话绑定在开启监听的槽位进程内）`,
+    });
+  }
   return entries;
 }
 

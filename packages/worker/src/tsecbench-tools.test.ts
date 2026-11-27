@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -341,7 +341,7 @@ test("OpenAPI string[] container_addr auto-admits live assets, unblocks Leader i
     assert.ok(hostsAfterRestart.includes("10.0.1.99"));
     assert.ok(!hostsAfterRestart.includes("10.0.1.5"));
 
-    // 4. Grey-box scope-brief (credentials/internal hints), recycled IP boundary Fact, and foothold-private RFC1918 pivot unlock
+    // 4. Grey-box scope-brief, recycled IP boundary Fact. start/list must NOT unlock foothold-private.
     globalThis.fetch = (async () =>
       new Response(
         JSON.stringify([
@@ -373,11 +373,14 @@ test("OpenAPI string[] container_addr auto-admits live assets, unblocks Leader i
     const boundary = facts.find((f) => f.tags.includes("instance-boundary") && f.tags.includes("challenge:a-11"));
     assert.ok(boundary, "recycled IP 10.0.1.99 must record an instance-boundary Fact");
 
-    // Follower picks up admitted-pivot.json sidecar and can pivot into internal 172.19.0.0/16 via proxychains
+    assert.equal(existsSync(join(dir, "admitted-pivot.json")), false);
     const follower = makeManifest(dir);
     follower.workerSlot = 1;
     follower.workerCount = 4;
-    assert.doesNotThrow(() => assertCommandAllowed(follower, "proxychains curl -s http://172.19.0.4:8080/"));
+    assert.throws(
+      () => assertCommandAllowed(follower, "proxychains curl -s http://172.19.0.4:8080/"),
+      /not in task targets|越界|denied/,
+    );
   } finally {
     globalThis.fetch = origFetch;
     if (prevUrl === undefined) delete process.env.BENCHMARK_BASE_URL;

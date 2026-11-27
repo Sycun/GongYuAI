@@ -214,6 +214,13 @@ export class JobStore {
     return meta;
   }
 
+  /** Kill every job still marked running, including ones started by another process. */
+  killAll(): void {
+    for (const meta of this.list()) {
+      if (meta.status === "running") this.kill(meta.id);
+    }
+  }
+
   /** 等待作业结束（可选按输出空闲判定），用于交互式命令的同步包装。 */
   async wait(
     id: string,

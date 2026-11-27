@@ -11,6 +11,7 @@ import {
   BREAKTHROUGH_RENEWAL_MS,
   TIERED_STALL_MS,
   lastVerifiedEvidenceAt,
+  latestInstanceBoundaryAt,
   maybeForceEvidenceStall,
   resolveAdaptiveStallMs,
 } from "./evidence-rotation.js";
@@ -519,7 +520,138 @@ test("tiered stall escalates 12m → 30m → 45m across attempts, renews 20m on 
     assert.equal(ckptB.factDraft, null);
     const rescued = history.listFacts(taskId).find((f) => f.tags.includes("draft-rescued"));
     assert.ok(rescued, "factDraft must be auto-rescued into History before reset");
+    assert.equal(rescued.layer, "title");
     assert.match(rescued.title, /internal_admin_token/);
+    assert.match(rescued.summary, /172\.19\.0\.4/);
+    const observed = history.observe(taskId);
+    assert.match(observed, new RegExp(rescued.id));
+    assert.match(observed, /internal_admin_token/);
+  } finally {
+    if (prevEnv === undefined) delete process.env.GY_EVIDENCE_STALL_MS;
+    else process.env.GY_EVIDENCE_STALL_MS = prevEnv;
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("intent_conclude(failed) writes factDraft onto the Observe title layer", () => {
+  const { root, history } = setup();
+  try {
+    const taskId = "t-draft-conclude";
+    const intent = history.proposeIntent({
+      taskId,
+      title: "probe login",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.1.2.3",
+      technique: "authn",
+    });
+    history.claimIntent(taskId, intent.id, "w1");
+    const ckpt = state({
+      activeIntentId: intent.id,
+      phase: "explore",
+      factDraft: {
+        title: "测过 /login",
+        summary: "POST /login 401 evidence/login.txt session=sh-9",
+        evidencePath: "evidence/login.txt",
+        updatedAt: new Date().toISOString(),
+      },
+    });
+    const out = handleGraphTool(
+      "intent_conclude",
+      { intentId: intent.id, status: "failed", conclusion: "POST /login 401，产物 evidence/login.txt，会话 sh-9" },
+      {
+        history,
+        taskId,
+        workspaceDir: root,
+        state: ckpt,
+        workerId: "w1",
+        leader: false,
+        workerCount: 2,
+        save: () => {},
+      },
+    );
+    assert.ok(out && !out.startsWith("错误") && !out.startsWith("denied"), out ?? "");
+    const fact = history.listFacts(taskId).find((item) => item.tags.includes("draft-rescued"));
+    assert.ok(fact);
+    assert.equal(fact.layer, "title");
+    assert.equal(fact.evidencePath, "evidence/login.txt");
+    const observed = history.observe(taskId);
+    assert.match(observed, new RegExp(fact.id));
+    assert.match(observed, /测过 \/login/);
+    assert.match(observed, /POST \/login 401/);
+    assert.match(observed, /authn @10\.1\.2\.3/);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("instance-boundary resets the tiered timebox to 12m and drops pre-boundary evidence", () => {
+  const { root, dbPath, history } = setup();
+  const prevEnv = process.env.GY_EVIDENCE_STALL_MS;
+  delete process.env.GY_EVIDENCE_STALL_MS;
+  try {
+    const taskId = "t-boundary";
+    const host = "10.0.160.241";
+    const seeded = history.recordAsset({ taskId, address: host, auth: AUTH, live: true });
+    const old = history.proposeIntent({
+      taskId,
+      title: "previous generation",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: host,
+    });
+    history.claimIntent(taskId, old.id, "w1");
+    history.forceConcludeExploreTimeout({ taskId, intentId: old.id, workerId: "w1", reason: "old box" });
+    const lead = history.recordFinding({
+      taskId,
+      title: "old foothold",
+      asset: host,
+      vulnClass: "CWE-200",
+      severity: "low",
+    });
+    writeEvidenceFile(join(root, "evidence"), "findings/old.txt", "old\n");
+    history.verifyFinding(taskId, lead.finding.id, {
+      evidencePaths: ["findings/old.txt"],
+      repro: "curl",
+      verifiedBy: "w1",
+    });
+    const db = new DatabaseSync(dbPath);
+    const staleAt = new Date(Date.now() - 3_600_000).toISOString();
+    db.prepare("UPDATE findings SET verified_at = ? WHERE id = ?").run(staleAt, lead.finding.id);
+    db.prepare("UPDATE facts SET created_at = ? WHERE id = ?").run(staleAt, seeded.fact.id);
+    db.close();
+    history.appendFact({
+      taskId,
+      layer: "title",
+      title: `容器实例代际切换：${host}`,
+      summary: "recycled",
+      tags: ["instance-boundary", `asset.addr:${host}`],
+    });
+    const boundary = latestInstanceBoundaryAt(history, taskId, host);
+    assert.ok(boundary > Date.now() - 60_000);
+    assert.equal(lastVerifiedEvidenceAt(history, taskId, { assetRoot: host }), 0);
+    assert.ok(lastVerifiedEvidenceAt(history, taskId) > 0);
+    const next = history.proposeIntent({
+      taskId,
+      title: "new generation",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: host,
+    });
+    assert.equal(resolveAdaptiveStallMs(history, taskId, next), TIERED_STALL_MS[0]);
+    const fresh = history.recordFinding({
+      taskId,
+      title: "new generation foothold",
+      asset: host,
+      vulnClass: "CWE-918",
+      severity: "high",
+    });
+    writeEvidenceFile(join(root, "evidence"), "findings/new.txt", "new\n");
+    history.verifyFinding(taskId, fresh.finding.id, {
+      evidencePaths: ["findings/new.txt"],
+      repro: "curl",
+      verifiedBy: "w1",
+    });
+    assert.ok(lastVerifiedEvidenceAt(history, taskId, { assetRoot: host }) >= boundary);
   } finally {
     if (prevEnv === undefined) delete process.env.GY_EVIDENCE_STALL_MS;
     else process.env.GY_EVIDENCE_STALL_MS = prevEnv;

@@ -62,20 +62,55 @@ export function lastVerifiedEvidenceAt(
 ): number {
   let latest = 0;
   const root = scope?.assetRoot?.trim() || null;
+  const boundaryMs = root ? latestInstanceBoundaryAt(history, taskId, root) : 0;
+  const fresh = (ts: number) => boundaryMs <= 0 || ts >= boundaryMs;
   for (const f of history.listFindings(taskId)) {
     if (!f.verifiedAt) continue;
     if (root && !matchesIntentSurface(root, f.asset)) continue;
-    latest = Math.max(latest, ms(f.verifiedAt));
+    const at = ms(f.verifiedAt);
+    if (!fresh(at)) continue;
+    latest = Math.max(latest, at);
   }
   for (const c of history.listCredentials(taskId)) {
     if (!c.verifiedAt) continue;
     if (root && !matchesIntentSurface(root, c.asset)) continue;
-    latest = Math.max(latest, ms(c.verifiedAt));
+    const at = ms(c.verifiedAt);
+    if (!fresh(at)) continue;
+    latest = Math.max(latest, at);
   }
   for (const a of history.listAssets(taskId)) {
     if (a.kind !== "live") continue;
     if (root && !matchesIntentSurface(root, a.address)) continue;
-    latest = Math.max(latest, ms(a.createdAt));
+    const at = ms(a.createdAt);
+    if (!fresh(at)) continue;
+    latest = Math.max(latest, at);
+  }
+  return latest;
+}
+
+/**
+ * Newest `instance-boundary` Fact for a recycled container host.
+ * Facts tagged `asset.addr:<host>` or otherwise on the same surface count.
+ * Returns 0 when this host has never been recycled.
+ */
+export function latestInstanceBoundaryAt(
+  history: HistoryStore,
+  taskId: string,
+  assetRoot: string | null | undefined,
+): number {
+  const root = assetRoot?.trim();
+  if (!root) return 0;
+  let latest = 0;
+  for (const fact of history.listFacts(taskId)) {
+    if (!fact.tags.includes("instance-boundary")) continue;
+    const addrs = fact.tags
+      .filter((tag) => tag.startsWith("asset.addr:"))
+      .map((tag) => tag.slice("asset.addr:".length));
+    const matched = addrs.some(
+      (addr) => matchesIntentSurface(root, addr) || matchesIntentSurface(addr, root),
+    );
+    if (!matched) continue;
+    latest = Math.max(latest, ms(fact.createdAt));
   }
   return latest;
 }
@@ -128,6 +163,7 @@ export function resolveAdaptiveStallMs(
   if (process.env.GY_EVIDENCE_STALL_MS) return EVIDENCE_STALL_MS;
   const root = intent.assetRoot ? normalizeHost(intent.assetRoot) : "";
   if (!root) return EVIDENCE_STALL_MS;
+  const boundaryMs = latestInstanceBoundaryAt(history, taskId, intent.assetRoot);
   const priorConcluded = history
     .listIntents(taskId)
     .filter(
@@ -135,7 +171,8 @@ export function resolveAdaptiveStallMs(
         i.id !== intent.id &&
         ["succeeded", "failed", "expired"].includes(i.status) &&
         i.assetRoot &&
-        normalizeHost(i.assetRoot) === root,
+        normalizeHost(i.assetRoot) === root &&
+        (boundaryMs <= 0 || ms(i.createdAt) >= boundaryMs),
     ).length;
   const tierIdx = Math.min(priorConcluded, TIERED_STALL_MS.length - 1);
   return TIERED_STALL_MS[tierIdx]!;
@@ -237,7 +274,7 @@ export function maybeForceEvidenceStall(opts: {
     try {
       opts.history.appendFact({
         taskId: opts.taskId,
-        layer: "summary",
+        layer: "title",
         title: opts.state.factDraft.title,
         summary: opts.state.factDraft.summary,
         ...(opts.state.factDraft.evidencePath ? { evidencePath: opts.state.factDraft.evidencePath } : {}),

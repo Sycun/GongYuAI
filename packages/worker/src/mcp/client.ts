@@ -8,12 +8,11 @@ import {
   isIpv4Cidr,
   normalizeHost,
   pivotCidrs,
-  scopeAllows,
-  targetAllows,
   type ToolCatalogEntry,
   type WorkerManifest,
   type WorkerMcpServer,
 } from "@gongyuai/contracts";
+import { hostScopeAllows } from "@gongyuai/exec";
 import type { ToolContext } from "../tools.js";
 import {
   appendProgress,
@@ -158,6 +157,8 @@ export type McpHub = {
   invoke(serverId: string, toolName: string, args: Record<string, unknown>): Promise<string>;
   /** Same call, plus the untruncated stdout for the parser lane (P15-C4). */
   invokeWithRaw(serverId: string, toolName: string, args: Record<string, unknown>): Promise<{ text: string; raw?: string }>;
+  /** Subscribe to dynamic MCP attach/enable/disable changes (including cross-slot runtime attaches). */
+  onToolsChanged(listener: () => void): () => void;
   close(): Promise<void>;
 };
 
@@ -182,6 +183,16 @@ export async function openMcpHub(
   const openaiTools: OpenAiFunctionTool[] = [];
   const promptLines: string[] = [];
   const enabled = new Set<string>();
+  const toolListeners = new Set<() => void>();
+  const notifyToolsChanged = () => {
+    for (const fn of toolListeners) {
+      try {
+        fn();
+      } catch {
+        /* listener errors must not break MCP execution */
+      }
+    }
+  };
 
   const runtime = loadToolsRuntime(manifest.dataDir);
   const initialIds = new Set<string>([
@@ -376,6 +387,17 @@ export async function openMcpHub(
         return { text: JSON.stringify({ ok: false, code: prior.code, serverId, reason: prior.message }) };
       }
       syncAdmittedTargets(manifest);
+      if (!enabled.has(serverId)) {
+        const unlocked = loadToolsRuntime(manifest.dataDir)?.mcpEnabledIds?.includes(serverId) === true;
+        if (unlocked && pool.has(serverId)) {
+          try {
+            await attach(serverId, { autoInstall: false });
+            notifyToolsChanged();
+          } catch {
+            /* another slot enabled it, but this process could not attach */
+          }
+        }
+      }
       const declaredParts = extractDeclaredMcpTargets(args);
       const session = gateTool(ctx, "mcp", () => {
         assertCapabilityAllows(manifest, mcpActionForServer(serverId, manifest));
@@ -410,7 +432,7 @@ export async function openMcpHub(
                 return trimmed === "*" || (isIpv4Cidr(trimmed) && cidrContainsCidr(trimmed, part));
               });
             }
-            return scopeAllows(manifest.auth, part);
+            return hostScopeAllows(manifest.auth, part, { dataDir: manifest.dataDir });
           });
           if (!allowed) throw new Error("denied: MCP target is outside the authorized scope");
         }
@@ -543,6 +565,12 @@ export async function openMcpHub(
     },
     invoke,
     invokeWithRaw,
+    onToolsChanged(listener) {
+      toolListeners.add(listener);
+      return () => {
+        toolListeners.delete(listener);
+      };
+    },
     async close() {
       for (const s of sessions.values()) {
         try {

@@ -158,6 +158,21 @@ export function resolveWorkerRole(opts: {
   return opts.leader !== false ? "leader" : "follower";
 }
 
+/**
+ * Tool schema published to the model.
+ * Slot 0 keeps the solo surface while it still holds a pre-scale Intent;
+ * once that Intent is gone and the pool is N, the schema becomes leader-only.
+ */
+export function piToolSurfaceRole(opts: {
+  leader?: boolean;
+  workerCount?: number;
+  activeIntentId?: string | null;
+}): WorkerRole {
+  const role = resolveWorkerRole(opts);
+  if (role === "leader" && opts.activeIntentId) return "solo";
+  return role;
+}
+
 /** Execution tools physically stripped from a multi-worker Leader ("脑手分离"). */
 export const FOLLOWER_ONLY_EXEC_TOOLS = new Set([
   "shell",
@@ -1093,12 +1108,13 @@ export function handleGraphTool(
         : ctx.state.factDraft?.title
           ? [
               {
-                layer: ctx.state.factDraft.evidencePath ? "evidence" : "summary",
+                layer: "title",
                 title: ctx.state.factDraft.title,
                 summary: ctx.state.factDraft.summary,
                 ...(ctx.state.factDraft.evidencePath
                   ? { evidencePath: ctx.state.factDraft.evidencePath }
                   : {}),
+                tags: ["partial", "draft-rescued"],
               },
             ]
           : [];

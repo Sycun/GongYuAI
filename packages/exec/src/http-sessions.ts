@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -182,7 +182,10 @@ function serializeStore(store: HttpSessionStore): Record<string, Record<string, 
 }
 
 export function saveHttpSessions(dataDir: string, store: HttpSessionStore): void {
-  writeFileSync(httpSessionStorePath(dataDir), JSON.stringify(serializeStore(store), null, 2), { mode: 0o600 });
+  const path = httpSessionStorePath(dataDir);
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(serializeStore(store), null, 2), { mode: 0o600 });
+  renameSync(tmp, path);
 }
 
 export function upsertHttpSession(dataDir: string, input: HttpSessionUpsert): HttpSessionHostState & {

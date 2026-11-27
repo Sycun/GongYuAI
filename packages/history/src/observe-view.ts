@@ -220,7 +220,8 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
     lines.push("- （无；验证手法后用 technique_transfer 广播）");
   } else {
     for (const f of transferable) {
-      lines.push(`- [${f.id}] ${f.title}${f.summary ? `: ${f.summary.slice(0, 160)}` : ""}`);
+      const summaryLimit = f.tags.includes("scope-brief") ? 600 : 160;
+      lines.push(`- [${f.id}] ${f.title}${f.summary ? `: ${f.summary.slice(0, summaryLimit)}` : ""}`);
     }
   }
   lines.push("", `## Findings 台账（${findings.length}）`);
@@ -255,6 +256,21 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
     }
     if (open.length > MAX_OPEN_INTENTS) {
       lines.push(`- … 另有 ${open.length - MAX_OPEN_INTENTS} 条进行中意图未展开。`);
+    }
+  }
+  const concluded = allIntents
+    .filter((i) => i.status === "succeeded" || i.status === "failed" || i.status === "expired")
+    .sort((a, b) => (b.concludedAt ?? b.updatedAt).localeCompare(a.concludedAt ?? a.updatedAt))
+    .slice(0, 12);
+  lines.push("", "## 近期已结项意图（最近 12 条 · 供拆单与二探继承客观增量）");
+  if (concluded.length === 0) {
+    lines.push("- （无）");
+  } else {
+    for (const i of concluded) {
+      const technique = i.technique ?? "—";
+      const root = i.assetRoot ?? "—";
+      const conclusion = (i.conclusion ?? "").slice(0, 240);
+      lines.push(`- [${i.id}] (${i.status} / ${technique} @${root}) ${i.title} — ${conclusion}`);
     }
   }
   const profiles = src.listHostProfiles(taskId);

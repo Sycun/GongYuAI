@@ -13,6 +13,7 @@ import {
   renderObserveDelta,
   sessionBootstrapText,
 } from "./pi-loop.js";
+import { systemPrompt } from "./prompt-builder.js";
 import { writeRelayProtocol } from "./relay.js";
 
 function manifest(workspaceDir: string): WorkerManifest {
@@ -190,6 +191,49 @@ test("buildObserveSnapshot：纳入最近 30 条 title 层 / transferable Fact�
     assert.ok(bounded[`fact:${mate.id}`] === undefined);
   } finally {
     ckpt.close();
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("incremental snapshot keeps concluded intents and scope-brief text; followers see the MCP catalog", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-obs-concluded-"));
+  const m = manifest(root);
+  const history = openHistory({ dbPath: m.historyDb, evidenceDir: m.evidenceDir });
+  try {
+    const intent = history.proposeIntent({
+      taskId: m.taskId,
+      title: "brother slot",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      technique: "sqli",
+      assetRoot: "10.0.0.8",
+    });
+    history.claimIntent(m.taskId, intent.id, "w1");
+    history.concludeIntent(m.taskId, intent.id, "failed", "GET /x 500 evidence/x.txt session=sh-2", { workerId: "w1" });
+    const brief = "目录/tmp/targets " + "凭".repeat(80);
+    history.appendFact({
+      taskId: m.taskId,
+      layer: "title",
+      title: "委托简报",
+      summary: brief,
+      tags: ["scope-brief", "transferable"],
+    });
+    const snap = buildObserveSnapshot(history, m.taskId, m);
+    assert.match(snap[`concluded_intent:${intent.id}`] ?? "", /failed \/ sqli @10\.0\.0\.8/);
+    assert.match(snap[`concluded_intent:${intent.id}`] ?? "", /GET \/x 500/);
+    const factLine = Object.values(snap).find((line) => line.includes("委托简报")) ?? "";
+    assert.ok(factLine.includes(brief.slice(0, 200)));
+    const delta = renderObserveDelta(snap, {});
+    assert.match(delta, /近期已结项意图/);
+    m.workerSlot = 1;
+    m.workerCount = 3;
+    const prompt = systemPrompt(m, undefined, {
+      promptLines: ["- MCP `nmap`"],
+      catalogLines: () => ["- `httpx` [scan] httpx"],
+    } as never);
+    assert.match(prompt, /MCP `nmap`/);
+    assert.match(prompt, /`httpx` \[scan\] httpx/);
+  } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });
   }

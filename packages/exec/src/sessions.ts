@@ -491,6 +491,8 @@ export class ShellSessionManager {
   }
 
   closeAll(): void {
-    for (const id of [...this.live.keys()]) this.close(id);
+    for (const meta of this.list()) {
+      if (meta.status === "open") this.close(meta.id);
+    }
   }
 }

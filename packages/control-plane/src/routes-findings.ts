@@ -190,6 +190,8 @@ export async function handleFindingsRoute(
         historyDb: paths.historyDb,
         evidenceDir: paths.evidenceDir,
         targets: task.auth.targets,
+        outOfScope: task.auth.outOfScope,
+        pivotPolicy: task.auth.pivotPolicy,
         findingId,
         ...(body.force ? { force: true } : {}),
       });
@@ -242,6 +244,8 @@ export async function handleFindingsRoute(
           historyDb: paths.historyDb,
           evidenceDir: paths.evidenceDir,
           targets: task.auth.targets,
+          outOfScope: task.auth.outOfScope,
+          pivotPolicy: task.auth.pivotPolicy,
           findingId: finding.id,
         });
         sendJson(res, 200, { finding });

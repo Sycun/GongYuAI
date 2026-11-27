@@ -4,17 +4,21 @@ import { connect as netConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type Finding,
   type FindingQualification,
   type FindingValidateRunResponse,
+  type PivotPolicy,
   type TrafficRecord,
 } from "@gongyuai/contracts";
 import {
-  linkTrafficFinding,
   MAX_COMPRESSED_BLOB_BYTES,
   decodeTrafficPreview,
   hasSupportedContentEncoding,
+  hostScopeAllows,
+  linkTrafficFinding,
+  loadHttpSessions,
   openTrafficDb,
   queryTraffic,
   readBlobBytes,
@@ -193,38 +197,209 @@ function replayUrl(packet: ValidatorPacket): URL | null {
   return null;
 }
 
-function hostAllowed(url: URL, targets: string[]): boolean {
+export type ValidatorScopeAuth = {
+  targets: string[];
+  outOfScope?: string[];
+  pivotPolicy?: PivotPolicy;
+};
+
+/** Merge static task auth with the dynamic admission sidecars under the task directory. */
+export function loadEffectiveValidatorAuth(
+  taskDir: string,
+  base: { targets: readonly string[]; outOfScope?: readonly string[]; pivotPolicy?: PivotPolicy | null },
+): ValidatorScopeAuth {
+  const targets = [...base.targets];
+  for (const name of ["admitted-targets.json", "tsecbench-targets.json"]) {
+    const path = join(taskDir, name);
+    if (!existsSync(path)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (!Array.isArray(parsed)) continue;
+      for (const item of parsed) {
+        if (typeof item === "string" && item.trim()) targets.push(item.trim());
+      }
+    } catch {
+      /* ignore unreadable sidecar */
+    }
+  }
+  const pivotPolicy = base.pivotPolicy
+    ?? (existsSync(join(taskDir, "admitted-pivot.json"))
+      ? { mode: "foothold-private" as const, cidrs: [] as string[] }
+      : undefined);
+  return {
+    targets: [...new Set(targets)],
+    ...(base.outOfScope?.length ? { outOfScope: [...base.outOfScope] } : {}),
+    ...(pivotPolicy ? { pivotPolicy } : {}),
+  };
+}
+
+export function validatorHostAllowed(url: URL, auth: ValidatorScopeAuth, taskDir?: string): boolean {
   const host = url.hostname.toLowerCase();
   if (host === "127.0.0.1" || host === "localhost" || host === "::1") return true;
-  return targets.some((target) => {
-    const bare = target.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split("/")[0]?.split(":")[0]?.toLowerCase() ?? "";
-    return bare === host || (bare.length > 0 && host.endsWith(`.${bare}`));
-  });
+  return hostScopeAllows(
+    {
+      targets: auth.targets,
+      outOfScope: auth.outOfScope ?? [],
+      ...(auth.pivotPolicy ? { pivotPolicy: auth.pivotPolicy } : {}),
+    },
+    host,
+    { dataDir: taskDir },
+  );
 }
 
 function replayMethod(packet: ValidatorPacket): string {
   return /^\s*POST\b/i.test(packet.finding.repro) ? "POST" : "GET";
 }
 
-function replayHttp(proxy: TrafficProxy, target: URL, method: string): Promise<void> {
+function tokenizeCurl(input: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  const src = input.trim();
+  while (i < src.length) {
+    while (i < src.length && /\s/.test(src[i]!)) i += 1;
+    if (i >= src.length) break;
+    const quote = src[i];
+    if (quote === "'" || quote === "\"") {
+      i += 1;
+      let buf = "";
+      while (i < src.length && src[i] !== quote) {
+        if (quote === "\"" && src[i] === "\\" && i + 1 < src.length) {
+          buf += src[i + 1];
+          i += 2;
+          continue;
+        }
+        buf += src[i];
+        i += 1;
+      }
+      if (src[i] === quote) i += 1;
+      tokens.push(buf);
+      continue;
+    }
+    let buf = "";
+    while (i < src.length && !/\s/.test(src[i]!)) {
+      buf += src[i];
+      i += 1;
+    }
+    tokens.push(buf);
+  }
+  return tokens;
+}
+
+function absorbCurlHeader(headers: Record<string, string>, raw: string): void {
+  const idx = raw.indexOf(":");
+  if (idx <= 0) return;
+  const name = raw.slice(0, idx).trim();
+  const value = raw.slice(idx + 1).trim();
+  if (!name || value === "<redacted>") return;
+  headers[name] = value;
+}
+
+/** Pull method, headers, and body out of a `pocCurl` string. Redacted headers are dropped. */
+export function parsePocCurl(pocCurl: string): { method?: string; headers: Record<string, string>; body?: string } {
+  const tokens = tokenizeCurl(pocCurl);
+  let method: string | undefined;
+  const headers: Record<string, string> = {};
+  const dataParts: string[] = [];
+  const take = (index: number) => tokens[index + 1] ?? "";
+  for (let i = 0; i < tokens.length; i += 1) {
+    const tok = tokens[i]!;
+    if (tok === "-X" || tok === "--request") {
+      method = take(i).toUpperCase();
+      i += 1;
+      continue;
+    }
+    if (tok.startsWith("--request=")) {
+      method = tok.slice("--request=".length).toUpperCase();
+      continue;
+    }
+    if (tok === "-H" || tok === "--header") {
+      absorbCurlHeader(headers, take(i));
+      i += 1;
+      continue;
+    }
+    if (tok.startsWith("--header=")) {
+      absorbCurlHeader(headers, tok.slice("--header=".length));
+      continue;
+    }
+    if (tok === "-d" || tok === "--data" || tok === "--data-raw" || tok === "--data-binary") {
+      dataParts.push(take(i));
+      i += 1;
+      continue;
+    }
+    if (tok.startsWith("--data=") || tok.startsWith("--data-raw=") || tok.startsWith("--data-binary=")) {
+      dataParts.push(tok.slice(tok.indexOf("=") + 1));
+    }
+  }
+  return {
+    ...(method ? { method } : {}),
+    headers,
+    ...(dataParts.length ? { body: dataParts.join("&") } : {}),
+  };
+}
+
+function supplementSessionCookie(taskDir: string, host: string, headers: Record<string, string>): void {
+  if (Object.keys(headers).some((name) => name.toLowerCase() === "cookie")) return;
+  try {
+    const store = loadHttpSessions(taskDir);
+    const want = host.toLowerCase();
+    const candidates: Array<{ session: string; cookies: Record<string, string> }> = [];
+    for (const [sessionName, hosts] of Object.entries(store)) {
+      for (const [name, state] of Object.entries(hosts ?? {})) {
+        if (name.toLowerCase() !== want) continue;
+        if (Object.keys(state.cookies).length > 0) {
+          candidates.push({ session: sessionName, cookies: state.cookies });
+        }
+      }
+    }
+    if (candidates.length === 0) return;
+    // Never blindly merge distinct role jars (e.g. userA + admin) onto an IDOR/BFLA replay:
+    // use the jar when unambiguous (single session) or when an explicit `default` jar exists.
+    const chosen =
+      candidates.length === 1
+        ? candidates[0]!.cookies
+        : candidates.find((c) => c.session === "default")?.cookies;
+    if (!chosen) return;
+    const pairs = Object.entries(chosen);
+    if (pairs.length) headers.Cookie = pairs.map(([name, value]) => `${name}=${value}`).join("; ");
+  } catch {
+    /* missing or unreadable jar: keep the original request */
+  }
+}
+
+export type ReplayHttpRequest = { method: string; headers: Record<string, string>; body?: string };
+
+export function buildReplayRequest(packet: ValidatorPacket, taskDir: string, target: URL): ReplayHttpRequest {
+  const parsed = parsePocCurl(packet.finding.pocCurl);
+  const method = parsed.method ?? replayMethod(packet);
+  const headers = { ...parsed.headers };
+  supplementSessionCookie(taskDir, target.hostname, headers);
+  if (parsed.body != null && !Object.keys(headers).some((name) => name.toLowerCase() === "content-length")) {
+    headers["Content-Length"] = String(Buffer.byteLength(parsed.body));
+  }
+  return { method, headers, ...(parsed.body != null ? { body: parsed.body } : {}) };
+}
+
+function replayHttp(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): Promise<void> {
+  const headers: Record<string, string> = { ...req.headers };
+  if (!Object.keys(headers).some((name) => name.toLowerCase() === "host")) headers.host = target.host;
   return new Promise((resolve, reject) => {
-    const req = httpRequest({
+    const httpReq = httpRequest({
       host: "127.0.0.1",
       port: proxy.port,
-      method,
+      method: req.method,
       path: target.href,
-      headers: { host: target.host },
+      headers,
     }, (res) => {
       res.resume();
       res.on("end", () => resolve());
     });
-    req.setTimeout(15_000, () => req.destroy(new Error("replay timeout")));
-    req.on("error", reject);
-    req.end();
+    httpReq.setTimeout(15_000, () => httpReq.destroy(new Error("replay timeout")));
+    httpReq.on("error", reject);
+    httpReq.end(req.body);
   });
 }
 
-function replayHttps(proxy: TrafficProxy, target: URL, method: string): Promise<void> {
+function replayHttps(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): Promise<void> {
   const port = Number(target.port || 443);
   return new Promise((resolve, reject) => {
     const socket = netConnect(proxy.port, "127.0.0.1");
@@ -253,7 +428,13 @@ function replayHttps(proxy: TrafficProxy, target: URL, method: string): Promise<
         });
         tls.once("error", fail);
         tls.once("secureConnect", () => {
-          tls.write(`${method} ${target.pathname}${target.search} HTTP/1.1\r\nHost: ${target.host}\r\nConnection: close\r\n\r\n`);
+          const lines = [`${req.method} ${target.pathname}${target.search} HTTP/1.1`];
+          const hasHost = Object.keys(req.headers).some((name) => name.toLowerCase() === "host");
+          const hasConn = Object.keys(req.headers).some((name) => name.toLowerCase() === "connection");
+          if (!hasHost) lines.push(`Host: ${target.host}`);
+          for (const [name, value] of Object.entries(req.headers)) lines.push(`${name}: ${value}`);
+          if (!hasConn) lines.push("Connection: close");
+          tls.write(`${lines.join("\r\n")}\r\n\r\n${req.body ?? ""}`);
         });
         tls.on("end", () => resolve());
       };
@@ -390,6 +571,8 @@ export async function runIndependentValidation(input: {
   historyDb: string;
   evidenceDir: string;
   targets: readonly string[];
+  outOfScope?: readonly string[];
+  pivotPolicy?: PivotPolicy | null;
   findingId: string;
   force?: boolean;
 }): Promise<ValidateRunResult> {
@@ -409,7 +592,12 @@ export async function runIndependentValidation(input: {
   try {
     const finding = history.getFinding(input.taskId, input.findingId);
     if (!finding) throw Object.assign(new Error("finding not found"), { status: 404 });
-    packet = buildValidatorPacket({ taskId: input.taskId, targets: input.targets, finding });
+    const effectiveAuth = loadEffectiveValidatorAuth(input.taskDir, {
+      targets: input.targets,
+      ...(input.outOfScope ? { outOfScope: input.outOfScope } : {}),
+      ...(input.pivotPolicy ? { pivotPolicy: input.pivotPolicy } : {}),
+    });
+    packet = buildValidatorPacket({ taskId: input.taskId, targets: effectiveAuth.targets, finding });
     inflight.set(key, jobId);
     saveJob(input.taskDir, {
       id: jobId,
@@ -431,10 +619,10 @@ export async function runIndependentValidation(input: {
       mode: "all",
     });
     const target = replayUrl(packet);
-    if (target && hostAllowed(target, packet.task.targets)) {
-      const method = replayMethod(packet);
-      if (target.protocol === "https:") await replayHttps(proxy, target, method);
-      else await replayHttp(proxy, target, method);
+    if (target && validatorHostAllowed(target, effectiveAuth, input.taskDir)) {
+      const replay = buildReplayRequest(packet, input.taskDir, target);
+      if (target.protocol === "https:") await replayHttps(proxy, target, replay);
+      else await replayHttp(proxy, target, replay);
     }
 
     const page = queryTraffic(input.taskDir, { taskId: input.taskId, workerId: "independent-validator", limit: 20 });
@@ -513,6 +701,8 @@ type AutoValidateItem = {
   historyDb: string;
   evidenceDir: string;
   targets: readonly string[];
+  outOfScope?: readonly string[];
+  pivotPolicy?: PivotPolicy | null;
   findingId: string;
 };
 
@@ -553,6 +743,8 @@ export function scheduleAutoValidationsForTask(input: {
   historyDb: string;
   evidenceDir: string;
   targets: readonly string[];
+  outOfScope?: readonly string[];
+  pivotPolicy?: PivotPolicy | null;
   findingId?: string;
 }): string[] {
   if (!existsSync(input.historyDb)) return [];
@@ -576,13 +768,18 @@ export function scheduleAutoValidationsForTask(input: {
         autoAttempted.add(key);
         continue;
       }
+      const effectiveAuth = loadEffectiveValidatorAuth(input.taskDir, {
+        targets: input.targets,
+        ...(input.outOfScope ? { outOfScope: input.outOfScope } : {}),
+        ...(input.pivotPolicy ? { pivotPolicy: input.pivotPolicy } : {}),
+      });
       const packet = buildValidatorPacket({
         taskId: input.taskId,
-        targets: input.targets,
+        targets: effectiveAuth.targets,
         finding,
       });
       const target = replayUrl(packet);
-      if (!target || !hostAllowed(target, packet.task.targets)) continue;
+      if (!target || !validatorHostAllowed(target, effectiveAuth, input.taskDir)) continue;
       autoAttempted.add(key);
       autoQueue.push({
         taskId: input.taskId,
@@ -590,6 +787,8 @@ export function scheduleAutoValidationsForTask(input: {
         historyDb: input.historyDb,
         evidenceDir: input.evidenceDir,
         targets: [...input.targets],
+        ...(input.outOfScope ? { outOfScope: input.outOfScope } : {}),
+        ...(input.pivotPolicy ? { pivotPolicy: input.pivotPolicy } : {}),
         findingId: finding.id,
       });
       queued.push(finding.id);

@@ -1,4 +1,89 @@
-import { pivotCidrs, targetAllows, type AuthCapability, type PivotPolicy } from "@gongyuai/contracts";
+import { existsSync, readFileSync } from "node:fs";
+import { networkInterfaces } from "node:os";
+import { dirname, join } from "node:path";
+import {
+  admitAddress,
+  operatorHostPivotBlocked,
+  pivotCidrs,
+  scopeAllows,
+  targetAllows,
+  type AssetKind,
+  type AuthCapability,
+  type HostPivotGuardOptions,
+  type PivotPolicy,
+} from "@gongyuai/contracts";
+
+let cachedOperatorNics: string[] | null = null;
+
+/** Non-loopback IPv4 addresses owned by this machine. Empty inside a `/task` container. */
+export function operatorNicIpv4s(): string[] {
+  if (process.env.GY_MANIFEST?.startsWith("/task")) return [];
+  if (cachedOperatorNics) return cachedOperatorNics;
+  const ips: string[] = [];
+  for (const list of Object.values(networkInterfaces())) {
+    for (const addr of list ?? []) {
+      const family = String(addr.family);
+      if ((family !== "IPv4" && family !== "4") || addr.internal) continue;
+      if (addr.address) ips.push(addr.address);
+    }
+  }
+  cachedOperatorNics = [...new Set(ips)];
+  return cachedOperatorNics;
+}
+
+function readTaskAdmittedHosts(dataDir?: string | null): string[] {
+  const dirs = new Set<string>();
+  if (dataDir && dataDir.trim()) dirs.add(dataDir.trim());
+  const manifestPath = process.env.GY_MANIFEST;
+  if (manifestPath && !manifestPath.startsWith("/task")) dirs.add(dirname(manifestPath));
+  const hosts: string[] = [];
+  for (const dir of dirs) {
+    for (const sidecar of ["admitted-targets.json", "tsecbench-targets.json"]) {
+      const path = join(dir, sidecar);
+      if (!existsSync(path)) continue;
+      try {
+        const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+        if (!Array.isArray(parsed)) continue;
+        for (const item of parsed) {
+          if (typeof item === "string" && item.trim()) hosts.push(item.trim());
+        }
+      } catch {
+        /* best-effort sidecar read */
+      }
+    }
+  }
+  return hosts;
+}
+
+export function resolveHostPivotGuard(opts?: {
+  dataDir?: string | null;
+  nics?: readonly string[];
+}): HostPivotGuardOptions {
+  const inContainer = Boolean(process.env.GY_MANIFEST?.startsWith("/task"));
+  if (inContainer) return { inContainer: true };
+  return {
+    nics: opts?.nics ?? operatorNicIpv4s(),
+    admittedHosts: readTaskAdmittedHosts(opts?.dataDir),
+  };
+}
+
+/** Node-side `scopeAllows` with automatic local operator NIC pivot self-protection. */
+export function hostScopeAllows(
+  auth: { targets: string[]; outOfScope?: string[]; pivotPolicy?: PivotPolicy },
+  candidate: string,
+  opts?: { dataDir?: string | null; nics?: readonly string[] },
+): boolean {
+  return scopeAllows(auth, candidate, resolveHostPivotGuard(opts));
+}
+
+/** Node-side `admitAddress` with automatic local operator NIC pivot self-protection. */
+export function hostAdmitAddress(
+  auth: { targets: string[]; outOfScope?: string[]; pivotPolicy?: PivotPolicy },
+  address: string,
+  opts?: { dataDir?: string | null; nics?: readonly string[] },
+): { kind: Extract<AssetKind, "admitted" | "oos">; matchedBy?: string; viaPivot?: boolean } {
+  return admitAddress(auth, address, resolveHostPivotGuard(opts));
+}
 
 /**
  * 执行期坐标判定（shell / 会话 / C2 共用一个闸）。
@@ -267,7 +352,7 @@ function capabilityFor(command: string, hosts: string[]): AuthCapability {
 export function authorizeCommand(
   auth: AuthSnapshot,
   command: string,
-  opts: { extraHosts?: string[] } = {},
+  opts: { extraHosts?: string[]; dataDir?: string | null; nics?: readonly string[] } = {},
 ): CommandVerdict {
   const klass = classifyCommand(command);
   const hosts = [...new Set([...extractHosts(command), ...(opts.extraHosts ?? [])])];
@@ -288,8 +373,11 @@ export function authorizeCommand(
     return { ...base, allowed: false, reason: "任务目标坐标为空：先在任务里补充目标（needs_input 澄清）" };
   }
   const pivot = pivotCidrs(auth);
+  const guard = resolveHostPivotGuard(opts);
   for (const host of hosts) {
-    if (!targetAllows(auth.targets, host, auth.outOfScope ?? [], pivot)) outOfScopeHits.push(host);
+    if (operatorHostPivotBlocked(auth, host, guard) || !targetAllows(auth.targets, host, auth.outOfScope ?? [], pivot)) {
+      outOfScopeHits.push(host);
+    }
   }
   if (outOfScopeHits.length) {
     return {
@@ -315,12 +403,19 @@ export function authorizeCommand(
 }
 
 /** C2 会话对端坐标判定：对端必须在任务坐标内（loopback 视为实验室本机）。 */
-export function authorizePeer(auth: AuthSnapshot, peer: string): { allowed: boolean; reason: string } {
+export function authorizePeer(
+  auth: AuthSnapshot,
+  peer: string,
+  opts?: { dataDir?: string | null; nics?: readonly string[] },
+): { allowed: boolean; reason: string } {
   const host = peer.trim().toLowerCase().replace(/^::ffff:/, "");
   if (host === "127.0.0.1" || host === "::1" || host === "localhost") {
     return { allowed: true, reason: "loopback（实验本机）" };
   }
   if (!auth.targets.length) return { allowed: false, reason: "任务目标坐标为空：先在任务里补充目标（needs_input 澄清）" };
+  if (operatorHostPivotBlocked(auth, host, resolveHostPivotGuard(opts))) {
+    return { allowed: false, reason: `对端 ${host} 是运行 Worker 的宿主机自身地址，跳板横移默认排除` };
+  }
   if (targetAllows(auth.targets, host, auth.outOfScope ?? [], pivotCidrs(auth))) {
     return { allowed: true, reason: `对端 ${host} 在任务坐标内` };
   }

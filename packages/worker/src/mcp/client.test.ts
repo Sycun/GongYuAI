@@ -248,6 +248,72 @@ test("stdio MCP discovery failure includes stderr and is not registered", async 
   assert.deepEqual(hub.openaiTools, []);
 });
 
+test("invoke attaches an MCP another slot already unlocked in tools-runtime.json", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "gy-mcp-cross-"));
+  mkdirSync(join(root, "workspace"), { recursive: true });
+  const history = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir: join(root, "evidence") });
+  const source = String.raw`
+    const rl = require("node:readline").createInterface({ input: process.stdin });
+    rl.on("line", (line) => {
+      const msg = JSON.parse(line);
+      if (msg.method === "notifications/initialized") return;
+      const result = msg.method === "initialize"
+        ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } }
+        : msg.method === "tools/list"
+          ? { tools: [{ name: "echo", description: "echo", inputSchema: { type: "object" } }] }
+          : { content: [{ type: "text", text: msg.params.arguments.value }] };
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result }) + "\n");
+    });
+  `;
+  const m = manifest(root);
+  m.commandFence = 1;
+  m.mcpPool = [{
+    id: "echo",
+    name: "Echo",
+    transport: "stdio",
+    command: process.execPath,
+    args: ["-e", source],
+    env: {},
+  }];
+  const ledger = new CommandLedger(root);
+  ledger.activate(m.taskId, 1);
+  const approver = setInterval(() => {
+    const pending = ledger.next(m.taskId, 1, "pending");
+    if (!pending) return;
+    ledger.settle(pending, {
+      id: pending.id,
+      at: new Date().toISOString(),
+      model: "",
+      scope: "local-validation",
+      decision: "allow",
+      risk: "low",
+      actor: "policy",
+      reason: "test fixture allow",
+    });
+  }, 10);
+  const hub = await openMcpHub(m, { manifest: m, history, usage: { toolCalls: 0, installs: 0 } });
+  t.after(async () => {
+    clearInterval(approver);
+    ledger.close();
+    await hub.close();
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  assert.deepEqual(hub.enabledIds(), []);
+  let toolsChangedCount = 0;
+  const unsub = hub.onToolsChanged(() => {
+    toolsChangedCount += 1;
+  });
+  writeFileSync(join(root, "tools-runtime.json"), JSON.stringify({
+    mcpEnabledIds: ["echo"],
+    skillEnabledIds: [],
+  }));
+  assert.equal(await hub.invoke("echo", "echo", { value: "cross-slot" }), "cross-slot");
+  assert.deepEqual(hub.enabledIds(), ["echo"]);
+  assert.equal(toolsChangedCount, 1);
+  unsub();
+});
+
 test("builtin MCP allows authorized CIDR subnets, comma-separated targets, array flags, and wordlist; rejects OOS overlap or missing target", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "gy-mcp-scope-"));
   const builtinDir = join(root, "mcp-echo");

@@ -1,7 +1,6 @@
 import { join } from "node:path";
-import { TunnelManager, type TunnelOpenInput } from "@gongyuai/exec";
+import { TunnelManager, hostScopeAllows, type TunnelOpenInput } from "@gongyuai/exec";
 import type { WorkerManifest } from "@gongyuai/contracts";
-import { scopeAllows } from "@gongyuai/contracts";
 import type { ToolContext } from "./tools.js";
 import { capabilityAtLeast, syncAdmittedTargets, unlockFootholdPivotSidecar } from "./tools.js";
 
@@ -21,7 +20,7 @@ function managerFor(ctx: ToolContext): TunnelManager {
     baseDir: join(ctx.manifest.dataDir, "exec"),
     authorizeHost: (host) => {
       syncAdmittedTargets(ctx.manifest);
-      return scopeAllows(ctx.manifest.auth, host);
+      return hostScopeAllows(ctx.manifest.auth, host, { dataDir: ctx.manifest.dataDir });
     },
   });
   managers.set(key, manager);
@@ -65,7 +64,7 @@ export async function tunnelOpenTool(ctx: ToolContext, args: Record<string, stri
   requireTunnelCapability(ctx.manifest);
   syncAdmittedTargets(ctx.manifest);
   const input = openInput(args);
-  if ("via" in input && input.via && scopeAllows(ctx.manifest.auth, input.via)) {
+  if ("via" in input && input.via && hostScopeAllows(ctx.manifest.auth, input.via, { dataDir: ctx.manifest.dataDir })) {
     unlockFootholdPivotSidecar(ctx.manifest);
   }
   const tunnel = await managerFor(ctx).open(input);

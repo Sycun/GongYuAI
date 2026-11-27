@@ -4,7 +4,7 @@ import { assetAddrTag, isExploreLeader, targetAllows } from "@gongyuai/contracts
 import { writeEvidenceFile } from "@gongyuai/history";
 import { promoteTrafficForFinding, trafficLabelUuid } from "@gongyuai/exec";
 import type { ToolContext } from "./tools.js";
-import { appendProgress, chargeToolCall, gateTool, unlockFootholdPivotSidecar } from "./tools.js";
+import { appendProgress, chargeToolCall, gateTool } from "./tools.js";
 
 /**
  * TSecBench 平台一等工具：list / start / submit / close / status。
@@ -301,7 +301,6 @@ export function autoAdmitContainerTargets(
       }
     }
   }
-  unlockFootholdPivotSidecar(ctx.manifest);
   lastChallengeHost = parsed[0]?.host ?? lastChallengeHost;
   let scopeChanged = false;
   for (const { host } of parsed) {

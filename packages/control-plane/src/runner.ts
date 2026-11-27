@@ -15,6 +15,7 @@ import {
   type TaskRecord,
   type TerminalTaskStatus,
 } from "@gongyuai/contracts";
+import { cleanupExecDir } from "@gongyuai/exec";
 import { CommandLedger, hasCommandLedger, materializeTaskDeliverables, openHistory, writeTaskReport, type CommandTicket } from "@gongyuai/history";
 import { executorBound, isDeterministicallyVerified, outOfScopeFor, outOfScopeReason, policyReceipt, reviewCommand, userReceipt } from "./command-approval.js";
 import type { ApprovalReceipt } from "@gongyuai/contracts";
@@ -408,10 +409,10 @@ export class WorkerRunner {
     };
 
     const count = taskWorkerCount(task, countScalableAssets(task));
-    // The Durable checkpoint now lives inside the per-slot durable DB itself
-    // (CheckpointStore writes table `checkpoint`); `.ckpt.sqlite` is legacy.
+    // Worker checkpoint is the sidecar `${durableDb}.ckpt.sqlite` (CheckpointStore),
+    // not the Pi Durable database itself.
     for (let slot = 0; slot < count; slot++) {
-      resetCkpt(durableDbForSlot(task.dataDir, slot));
+      resetCkpt(`${durableDbForSlot(task.dataDir, slot)}.ckpt.sqlite`);
     }
     // Legacy / stray slot checkpoints
     try {
@@ -546,6 +547,7 @@ export class WorkerRunner {
 
   finishWorkerRun(task: TaskRecord, status: TerminalTaskStatus, error: string | null): TaskRecord {
     this.stopWorkers(task);
+    void cleanupExecDir(join(task.dataDir, "exec")).catch(() => {});
     refreshTaskUsage(task);
     task.finishedAt ??= new Date().toISOString();
     const paths = taskPaths(task.dataDir);
@@ -721,6 +723,7 @@ export class WorkerRunner {
     if (isTerminalTaskStatus(task.status)) {
       if (task.workerPid || task.workerPids.length || task.containerId || task.containerIds.length) {
         this.stopWorkers(task);
+        void cleanupExecDir(join(task.dataDir, "exec")).catch(() => {});
         return this.store.finishTask(task, task.status, task.error);
       }
       return task;

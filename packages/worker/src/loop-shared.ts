@@ -294,6 +294,54 @@ export function flushUsage(
   );
 }
 
+export const EXPLORE_TIMEOUT_STEP_INTERVAL = 5;
+export const EXPLORE_TIMEOUT_MIN_INTERVAL_MS = 30_000;
+
+export type ExploreTimeoutClock = {
+  /** `state.step` already charged for this model turn. Parallel tool calls share it. */
+  accountedStep: number;
+  stepsSinceRotateCheck: number;
+  lastRotateCheckAt: number;
+};
+
+export function beginExploreTimeoutClock(now = Date.now()): ExploreTimeoutClock {
+  return { accountedStep: -1, stepsSinceRotateCheck: 0, lastRotateCheckAt: now };
+}
+
+/**
+ * Charge one model turn toward the explore timebox.
+ * Returns true only for the first tool result of a turn that is actually due
+ * (drain window with >1 steps left, 5 steps, or 30s since the last check).
+ * When `drainStepsRemaining === 1` (the model's final grace turn), inline hard-close
+ * is deferred to `afterTools` so sibling parallel calls (`write_evidence` + `intent_conclude`)
+ * in that final batch are never killed mid-flight.
+ */
+export function accountExploreTimeoutTurn(opts: {
+  clock: ExploreTimeoutClock;
+  step: number;
+  now: number;
+  phase: string;
+  activeIntentId: string | null;
+  drainIntentId: string | null;
+  drainStepsRemaining?: number | null;
+}): boolean {
+  if (opts.clock.accountedStep === opts.step) return false;
+  opts.clock.accountedStep = opts.step;
+  opts.clock.stepsSinceRotateCheck += 1;
+  const draining = Boolean(opts.drainIntentId && opts.drainIntentId === opts.activeIntentId);
+  if (draining && (opts.drainStepsRemaining ?? 0) <= 1) {
+    return false;
+  }
+  const due =
+    draining
+    || opts.clock.stepsSinceRotateCheck >= EXPLORE_TIMEOUT_STEP_INTERVAL
+    || opts.now - opts.clock.lastRotateCheckAt >= EXPLORE_TIMEOUT_MIN_INTERVAL_MS;
+  if (opts.phase !== "explore" || !opts.activeIntentId || !due) return false;
+  opts.clock.stepsSinceRotateCheck = 0;
+  opts.clock.lastRotateCheckAt = opts.now;
+  return true;
+}
+
 export function runExploreTimeoutGate(
   manifest: WorkerManifest,
   history: ReturnType<typeof openHistory>,

@@ -15,7 +15,7 @@ import {
   shouldCheckAutoSkill,
   takeLongTurnNotes,
 } from "./long-turn.js";
-import { asGraphPhase, kickoffUserMessage, resolveWorkerRole } from "./graph-phase.js";
+import { asGraphPhase, kickoffUserMessage, piToolSurfaceRole, resolveWorkerRole, type WorkerRole } from "./graph-phase.js";
 import { recordExecutionStep } from "./execution-trace.js";
 import { redactModelToolResult } from "./outbound-redact.js";
 import type { McpHub } from "./mcp/client.js";
@@ -41,6 +41,8 @@ import {
 import { formatGateSpinRecoveryHint, shouldSnapshotRelay } from "./relay.js";
 import { canRelay, synthesizeGroundedRelayFields, writeRelayProtocol } from "./relay-protocol.js";
 import {
+  accountExploreTimeoutTurn,
+  beginExploreTimeoutClock,
   consumePendingSoftPace,
   flushUsage,
   maybeSoftPaceMessage,
@@ -195,11 +197,50 @@ export async function tryPiDurable(
 
     const longTurn = createLongTurnQueue();
     const armedTools = new Map<string, number>();
+    const withFollowerTerminate = <T,>(out: T): T => {
+      if (!out || typeof out !== "object") return out;
+      const obj = out as Record<string, unknown>;
+      const prevControl =
+        obj.control && typeof obj.control === "object"
+          ? (obj.control as Record<string, unknown>)
+          : {};
+      return { ...obj, control: { ...prevControl, terminate: true } } as T;
+    };
+
+    const applyExploreTimeout = <T,>(toolName: string, out: T): T => {
+      if (toolName === "intent_conclude") return out;
+      const due = accountExploreTimeoutTurn({
+        clock: timeoutClock,
+        step: state.step,
+        now: Date.now(),
+        phase: state.phase,
+        activeIntentId: state.activeIntentId,
+        drainIntentId: state.drainIntentId ?? null,
+        drainStepsRemaining: state.drainStepsRemaining ?? null,
+      });
+      if (!due) return out;
+      const livePoolSize = readPoolSize();
+      const rot = runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolSize);
+      if (!rot) return out;
+      const role = resolveWorkerRole({ leader, workerCount: livePoolSize });
+      if (!state.activeIntentId) {
+        pendingRotationNotice = rot;
+        if (role === "follower") pendingFollowerIntentReset = true;
+        const noted = appendNoteToToolResult(
+          out,
+          `[证据耗尽自动换面] ${rot}。旧 Intent 已自动结项并释放（activeIntentId=null，当前 phase=${state.phase}）；无需再调用 intent_conclude，请直接按当前相位调用 ${role === "follower" ? "intent_claim 认领新 Intent（无待认领时回复 YIELD）" : "intent_propose / engagement_audit / tsecbench 切入新攻击面"}。`,
+        );
+        return role === "follower" ? withFollowerTerminate(noted) : noted;
+      }
+      return appendNoteToToolResult(out, rot);
+    };
+
     const attachLongTurnNotes = <T,>(toolName: string, out: T): T => {
       const armed = armedTools.get(toolName) ?? 0;
       if (armed <= 0) return out;
       if (armed === 1) armedTools.delete(toolName);
       else armedTools.set(toolName, armed - 1);
+      const timedOut = applyExploreTimeout(toolName, out);
       const { notes, consumedSoftPace } = takeLongTurnNotes(state, longTurn);
       if (consumedSoftPace) {
         try {
@@ -208,7 +249,7 @@ export async function tryPiDurable(
           /* best-effort */
         }
       }
-      return notes.length ? appendNoteToToolResult(out, renderLongTurnNote(notes)) : out;
+      return notes.length ? appendNoteToToolResult(timedOut, renderLongTurnNote(notes)) : timedOut;
     };
 
     let lastObservedPiTokens = state.tokens;
@@ -240,8 +281,10 @@ export async function tryPiDurable(
     let allowedNonRelayCalls = 0;
     let leaderIdleStepsSincePropose = 0;
     let notifiedScaleUpPool = readPoolSize();
-    let stepsSinceRotateCheck = 0;
+    const timeoutClock = beginExploreTimeoutClock();
     let pendingFollowerIntentReset = false;
+    let ranToolInCurrentSubmission = false;
+    let syncPiToolSurface: (reason: "role" | "catalog") => void = () => {};
 
     const maybeBackgroundSnapshot = (): boolean => {
       const currentRole = resolveWorkerRole({ leader, workerCount: readPoolSize() });
@@ -281,7 +324,7 @@ export async function tryPiDurable(
       }
     };
 
-    const catalog = buildWorkerToolCatalog({
+    const openCatalog = () => buildWorkerToolCatalog({
       manifest,
       ctx,
       state,
@@ -337,7 +380,9 @@ export async function tryPiDurable(
         ].join("\n");
         return { text: JSON.stringify(protocol), handoff };
       },
+      onCatalogChanged: () => syncPiToolSurface("catalog"),
     });
+    let catalog = openCatalog();
 
     const piSchema = schema as unknown as {
       obj: (props: Record<string, unknown>) => unknown;
@@ -345,26 +390,19 @@ export async function tryPiDurable(
       num: (ann?: Record<string, unknown>) => unknown;
       opt: (s: unknown) => unknown;
     };
-    const startupRole = resolveWorkerRole({ leader, workerCount: readPoolSize() });
-    const registeredPiTools = buildPiToolsFromCatalog({
-      catalog,
-      role: startupRole,
-      piSchema,
-      definePiTool: definePiTool as (spec: never) => unknown,
-      wrapExecute: (toolName, out) =>
-        attachLongTurnNotes(toolName, redactModelToolResult(out)),
-    });
-
     const registry = createRegistry();
-    registry.install(
-      defineExtension({
-        name: "gongyuai",
-        tools: registeredPiTools as never,
-        hooks: [
+    const extensionHooks = [
           hook(ToolTask, {
             beforeTool: (call: { name: string; parent?: unknown; arguments?: Record<string, unknown>; args?: Record<string, unknown> }) => {
               if (call.parent) return undefined;
               const livePoolSize = readPoolSize();
+              const currentRole = resolveWorkerRole({ leader, workerCount: livePoolSize });
+              if (currentRole === "follower" && pendingFollowerIntentReset && !state.activeIntentId) {
+                const resetYieldMsg =
+                  "当前单 Intent 会话已结项（准备重置干净上下文）：请勿在此会话继续调用工具，直接简短回复 YIELD 结束本轮，系统将立即在新会话启动下一条 Intent。";
+                appendProgress(manifest.workspaceDir, `follower reset gate ${call.name}`);
+                return { block: resetYieldMsg };
+              }
               const callArgs = call.arguments ?? call.args;
               const yieldBlock = poolTurnYieldDirective({
                 toolName: call.name,
@@ -537,18 +575,20 @@ export async function tryPiDurable(
                 );
               }
 
-              stepsSinceRotateCheck += 1;
-              const rotateInterval =
-                state.drainIntentId && state.drainIntentId === state.activeIntentId ? 1 : 5;
-              if (state.phase === "explore" && state.activeIntentId && stepsSinceRotateCheck >= rotateInterval) {
-                stepsSinceRotateCheck = 0;
+              // Deferred final Soft Drain step (`drainStepsRemaining === 1`): run after every
+              // sibling tool in the final grace batch (`write_evidence`, `finding_verify`,
+              // `intent_conclude`) has settled so an active conclude/verify is never killed mid-batch.
+              if (
+                state.phase === "explore" &&
+                state.activeIntentId &&
+                state.drainIntentId === state.activeIntentId &&
+                (state.drainStepsRemaining ?? 0) <= 1
+              ) {
                 const rot = runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolSize);
                 if (rot) {
                   if (!state.activeIntentId) {
                     pendingRotationNotice = rot;
-                    if (role === "follower") {
-                      pendingFollowerIntentReset = true;
-                    }
+                    if (role === "follower") pendingFollowerIntentReset = true;
                     longTurn.notes.push(
                       `[证据耗尽自动换面] ${rot}。旧 Intent 已自动结项并释放（activeIntentId=null，当前 phase=${state.phase}）；无需再调用 intent_conclude，请直接按当前相位调用 ${role === "follower" ? "intent_claim 认领新 Intent（无待认领时回复 YIELD）" : "intent_propose / engagement_audit / tsecbench 切入新攻击面"}。`,
                     );
@@ -557,20 +597,58 @@ export async function tryPiDurable(
                   }
                 }
               }
+
+              ranToolInCurrentSubmission = true;
+              syncPiToolSurface("role");
               ckpt.save(state);
               return undefined;
             },
           }),
-        ],
-        sections: [
-          section(
-            "gongyuai-system",
-            () => systemPrompt(manifest, undefined, mcpHub, skillHub),
-            { tag: false },
-          ),
-        ],
-      } as never),
-    );
+    ];
+    const extensionSections = [
+      section(
+        "gongyuai-system",
+        () => {
+          manifest.workerCount = readPoolSize();
+          return systemPrompt(manifest, undefined, mcpHub, skillHub);
+        },
+        { tag: false },
+      ),
+    ];
+    let publishedToolRole: WorkerRole | null = null;
+    const publishPiTools = (role: WorkerRole) => {
+      const tools = buildPiToolsFromCatalog({
+        catalog,
+        role,
+        piSchema,
+        definePiTool: definePiTool as (spec: never) => unknown,
+        wrapExecute: (toolName, out) =>
+          attachLongTurnNotes(toolName, redactModelToolResult(out)),
+      });
+      registry.install(
+        defineExtension({
+          name: "gongyuai",
+          tools: tools as never,
+          hooks: extensionHooks,
+          sections: extensionSections,
+        } as never),
+      );
+      publishedToolRole = role;
+    };
+    syncPiToolSurface = (reason) => {
+      if (reason === "catalog") catalog = openCatalog();
+      const pool = readPoolSize();
+      manifest.workerCount = pool;
+      const role = piToolSurfaceRole({
+        leader,
+        workerCount: pool,
+        activeIntentId: state.activeIntentId,
+      });
+      if (reason === "role" && role === publishedToolRole) return;
+      publishPiTools(role);
+    };
+    syncPiToolSurface("role");
+    const unsubscribeMcpTools = mcpHub.onToolsChanged(() => syncPiToolSurface("catalog"));
 
     const storage = await openNodeSqliteStorage(manifest.durableDb);
     const harness = await Harness.open(storage, { models, registry }, context);
@@ -629,18 +707,21 @@ export async function tryPiDurable(
         ckpt.save(state);
 
         const livePoolForPrompt = readPoolSize();
+        manifest.workerCount = livePoolForPrompt;
+        syncPiToolSurface("role");
         const role = resolveWorkerRole({ leader, workerCount: livePoolForPrompt });
 
         const timeoutNote =
           pendingRotationNotice ??
-          (state.drainIntentId && state.drainIntentId === state.activeIntentId
-            ? null
-            : runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolForPrompt));
+          (!ranToolInCurrentSubmission && state.activeIntentId
+            ? runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolForPrompt)
+            : null);
         if (timeoutNote && role === "follower" && !state.activeIntentId) {
           pendingFollowerIntentReset = true;
         }
         pendingRotationNotice = null;
-        stepsSinceRotateCheck = 0;
+        ranToolInCurrentSubmission = false;
+        timeoutClock.stepsSinceRotateCheck = 0;
         leaderIdleStepsSincePropose = 0;
 
         // Follower per-Intent clean session reset: start each newly scheduled Intent with a fresh transcript!
@@ -848,6 +929,7 @@ export async function tryPiDurable(
         );
       }
     } finally {
+      unsubscribeMcpTools();
       clearInterval(heartbeat);
       await harness.close(context);
     }

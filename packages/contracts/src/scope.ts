@@ -272,11 +272,58 @@ export function targetAllows(
   return pivot.length > 0 && matchTarget(pivot, candidate).ok;
 }
 
-/** Full scope predicate: targets ∪ declared pivot CIDRs, minus outOfScope. */
+function explicitHostListed(targets: readonly string[], host: string): boolean {
+  const want = normalizeHost(host);
+  if (!want) return false;
+  return targets.some((raw) => {
+    const entry = raw.trim();
+    if (!entry || entry === "*" || isIpv4Cidr(entry) || entry.startsWith("*.")) return false;
+    return normalizeHost(entry) === want;
+  });
+}
+
+export type HostPivotGuardOptions = {
+  /** Non-loopback IPv4s owned by the local operator host (empty inside isolated task containers). */
+  nics?: readonly string[];
+  /** Extra concrete hosts dynamically admitted via task sidecars (`admitted-targets.json`). */
+  admittedHosts?: readonly string[];
+  /** True when executing inside an isolated `/task` container where NIC self-exclusion does not apply. */
+  inContainer?: boolean;
+};
+
+/**
+ * Pure, isomorphic check: local (non-container) `foothold-private` pivot must not admit
+ * the operator machine's own NIC IPs unless explicitly listed as a concrete host in
+ * `auth.targets` or `admittedHosts` (a covering CIDR is not an explicit listing).
+ */
+export function operatorHostPivotBlocked(
+  auth: { targets: string[]; outOfScope?: string[]; pivotPolicy?: PivotPolicy },
+  candidate: string,
+  opts?: HostPivotGuardOptions,
+): boolean {
+  if (opts?.inContainer) return false;
+  if (auth.pivotPolicy?.mode !== "foothold-private") return false;
+  const nics = opts?.nics;
+  if (!nics?.length) return false;
+  const host = normalizeHost(candidate);
+  if (!host || !nics.includes(host)) return false;
+  if (
+    explicitHostListed(auth.targets, host) ||
+    (opts?.admittedHosts?.length ? explicitHostListed(opts.admittedHosts, host) : false)
+  ) {
+    return false;
+  }
+  const pivot = pivotCidrs(auth);
+  return pivot.length > 0 && matchTarget(pivot, candidate).ok;
+}
+
+/** Full scope predicate: targets ∪ declared pivot CIDRs, minus outOfScope (and optional host NIC guard). */
 export function scopeAllows(
   auth: { targets: string[]; outOfScope?: string[]; pivotPolicy?: PivotPolicy },
   candidate: string,
+  opts?: HostPivotGuardOptions,
 ): boolean {
+  if (operatorHostPivotBlocked(auth, candidate, opts)) return false;
   return targetAllows(
     auth.targets,
     candidate,
@@ -326,11 +373,13 @@ export function taskScopePromptBlock(auth: {
 export function admitAddress(
   auth: { targets: string[]; outOfScope?: string[]; pivotPolicy?: PivotPolicy },
   address: string,
+  opts?: HostPivotGuardOptions,
 ): { kind: Extract<AssetKind, "admitted" | "oos">; matchedBy?: string; viaPivot?: boolean } {
   const oos = auth.outOfScope ?? [];
   if (oos.length && matchTarget(oos, address).ok) {
     return { kind: "oos" };
   }
+  if (operatorHostPivotBlocked(auth, address, opts)) return { kind: "oos" };
   const hit = matchTarget(auth.targets, address);
   if (hit.ok) return { kind: "admitted", matchedBy: hit.by };
   const pivot = pivotCidrs(auth);

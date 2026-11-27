@@ -11,6 +11,7 @@ import { CheckpointStore } from "./checkpoint.js";
 import {
   FOLLOWER_EXCLUDED_TOOLS,
   FOLLOWER_ONLY_EXEC_TOOLS,
+  piToolSurfaceRole,
   resolveWorkerRole,
   roleAllowedToolNames,
 } from "./graph-phase.js";
@@ -121,6 +122,27 @@ test("一主两辅角色收敛：resolveWorkerRole 与 roleAllowedToolNames 严�
   assert.equal(followerExplore.has("shell"), true);
   assert.equal(followerExplore.has("mcp__nmap__scan"), true);
   assert.equal(followerExplore.has("assert_goal"), false, "follower must never assert_goal");
+
+  assert.equal(piToolSurfaceRole({ leader: true, workerCount: 1, activeIntentId: null }), "solo");
+  assert.equal(piToolSurfaceRole({ leader: true, workerCount: 4, activeIntentId: "still-open" }), "solo");
+  assert.equal(piToolSurfaceRole({ leader: true, workerCount: 4, activeIntentId: null }), "leader");
+  const leaderTools = buildPiToolsFromCatalog({
+    catalog: [
+      { name: "shell", description: "exec", params: {}, replay: "none", execute: async () => ({ text: "" }) },
+      { name: "intent_propose", description: "plan", params: {}, replay: "safe", execute: async () => ({ text: "" }) },
+    ],
+    role: "leader",
+    piSchema: {
+      obj: (props) => props,
+      str: () => ({ kind: "str" }),
+      num: () => ({ kind: "num" }),
+      opt: (inner) => inner,
+    },
+    definePiTool: (spec: { name: string }) => spec,
+    wrapExecute: (_name, out) => out,
+  }) as Array<{ name: string }>;
+  assert.equal(leaderTools.some((tool) => tool.name === "shell"), false);
+  assert.equal(leaderTools.some((tool) => tool.name === "intent_propose"), true);
 });
 
 test("统一工具目录：Pi 可选参数使用 opt()，Follower 结项触发单 Intent 终止与会话隔离重置", async () => {

@@ -3,10 +3,10 @@ import { test } from "node:test";
 import { connect, type Socket } from "node:net";
 import { execSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { authorizeCommand, authorizePeer, capabilityAtLeast, classifyCommand, extractHosts } from "./scope.js";
+import { authorizeCommand, authorizePeer, capabilityAtLeast, classifyCommand, extractHosts, hostAdmitAddress, hostScopeAllows } from "./scope.js";
 import { runCommand } from "./proc.js";
 import { JobStore } from "./jobs.js";
 import { ShellSessionManager } from "./sessions.js";
@@ -434,6 +434,30 @@ test("P14-B4 已声明的 pivot CIDR 才放行内网主机", () => {
   assert.equal(authorizeCommand(declared, "curl http://10.20.9.5/").allowed, false);
   const off = { ...base, pivotPolicy: { mode: "off" as const, cidrs: ["10.20.0.0/24"] } };
   assert.equal(authorizeCommand(off, "curl http://10.20.0.5/").allowed, false);
+
+  // Per-task dataDir sidecar + NIC guard without global state:
+  const dir = tempDir();
+  const prevManifest = process.env.GY_MANIFEST;
+  const nic = "192.168.77.7";
+  const fpAuth = {
+    targets: ["203.0.113.10"],
+    outOfScope: [],
+    capability: "active-lab" as const,
+    pivotPolicy: { mode: "foothold-private" as const, cidrs: [] },
+  };
+  try {
+    delete process.env.GY_MANIFEST;
+    assert.equal(hostScopeAllows(fpAuth, nic, { dataDir: dir, nics: [nic] }), false);
+    assert.equal(hostAdmitAddress(fpAuth, nic, { dataDir: dir, nics: [nic] }).kind, "oos");
+    assert.equal(authorizeCommand(fpAuth, `curl http://${nic}/`, { dataDir: dir, nics: [nic] }).allowed, false);
+    writeFileSync(join(dir, "admitted-targets.json"), JSON.stringify([nic]));
+    assert.equal(hostScopeAllows(fpAuth, nic, { dataDir: dir, nics: [nic] }), true);
+    assert.equal(authorizeCommand(fpAuth, `curl http://${nic}/`, { dataDir: dir, nics: [nic] }).allowed, true);
+  } finally {
+    if (prevManifest === undefined) delete process.env.GY_MANIFEST;
+    else process.env.GY_MANIFEST = prevManifest;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("P14-B4 陈旧会话：pid 已死 → closed 落盘，transcript 仍可读", () => {

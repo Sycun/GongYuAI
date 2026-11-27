@@ -1,4 +1,5 @@
 import { linkSync, mkdtempSync, mkdirSync, readFileSync, symlinkSync, writeFileSync, rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -255,6 +256,67 @@ test("observe is title + open Intents only; summary/evidence on demand", () => {
 
   store.close();
   rmSync(root, { recursive: true, force: true });
+});
+
+test("observe shows recent concluded intents and keeps scope-brief summaries past 160 chars", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-concluded-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  let store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
+  const taskId = "88888888-8888-4888-8888-888888888888";
+  try {
+    const origin = store.appendFact({ taskId, layer: "title", title: "origin-visible" });
+    for (let i = 0; i < 13; i += 1) {
+      const title = `结项样本-${String(i).padStart(2, "0")}`;
+      const intent = store.proposeIntent({ taskId, title, sourceFactIds: [origin.id], technique: "sqli", assetRoot: "10.1.2.3" });
+      store.claimIntent(taskId, intent.id, "worker-a");
+      store.concludeIntent(
+        taskId,
+        intent.id,
+        "failed",
+        `GET /api/${i} status=404 evidence/out-${i}.txt session=sh-${i}`,
+        { workerId: "worker-a" },
+      );
+    }
+    const brief = "预置账号工号2001密码Sys@Oa123专属目录" + "甲".repeat(220);
+    store.appendFact({
+      taskId,
+      layer: "title",
+      title: "委托简报 [a-11]",
+      summary: brief,
+      tags: ["scope-brief", "transferable", "challenge:a-11"],
+    });
+    const clipped = "Z".repeat(240);
+    store.appendFact({
+      taskId,
+      layer: "summary",
+      title: "普通可迁移",
+      summary: clipped,
+      tags: ["transferable"],
+    });
+    store.close();
+    const stamp = new DatabaseSync(join(root, "history.sqlite"));
+    for (let i = 0; i < 13; i += 1) {
+      stamp.prepare("UPDATE intents SET concluded_at = ? WHERE title = ?").run(
+        new Date(Date.UTC(2026, 0, 1, 0, i, 0)).toISOString(),
+        `结项样本-${String(i).padStart(2, "0")}`,
+      );
+    }
+    stamp.close();
+    store = openHistory({ dbPath: join(root, "history.sqlite"), evidenceDir });
+    const obs = store.observe(taskId);
+    const concluded = obs.split("## 近期已结项意图（最近 12 条 · 供拆单与二探继承客观增量）")[1]?.split("\n## ")[0] ?? "";
+    assert.match(concluded, /结项样本-12/);
+    assert.match(concluded, /failed \/ sqli @10\.1\.2\.3/);
+    assert.match(concluded, /GET \/api\/12 status=404/);
+    assert.equal(concluded.includes("结项样本-00"), false);
+    assert.ok(obs.includes(brief.slice(0, 500)), "scope-brief summary must exceed the 160-char transferable clip");
+    assert.ok(obs.includes("Z".repeat(160)));
+    assert.equal(obs.includes("Z".repeat(161)), false);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("getFactNeighborhood returns same-intent chain; no invent without intentId", () => {

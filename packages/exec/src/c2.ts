@@ -26,6 +26,8 @@ export type C2ListenerMeta = {
   bindPort: number;
   status: C2ListenerStatus;
   startedAt: string;
+  /** PID of the slot process that owns this TCP listener. Projection uses it to ignore stale state. */
+  ownerPid?: number;
   error?: string;
   tls?: { certPath: string; keyPath: string };
 };
@@ -236,6 +238,7 @@ export class C2Manager {
         : createTcpServer(handler);
     const meta: C2ListenerMeta = {
       id, kind, bindHost, bindPort, status: "running", startedAt: new Date().toISOString(),
+      ownerPid: process.pid,
       ...(options.tls ? { tls: options.tls } : {}),
     };
     await new Promise<void>((resolve, reject) => {

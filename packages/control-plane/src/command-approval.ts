@@ -1,6 +1,6 @@
-import { authorizeCommand, capabilityAtLeast } from "@gongyuai/exec";
+import { authorizeCommand, capabilityAtLeast, hostScopeAllows } from "@gongyuai/exec";
 import { localProbes, type CommandTicket } from "@gongyuai/history";
-import { selectableChatModels, scopeAllows, type ApprovalReceipt, type PivotPolicy } from "@gongyuai/contracts";
+import { selectableChatModels, type ApprovalReceipt, type PivotPolicy } from "@gongyuai/contracts";
 import { needsKey, requestCompletion, responseText } from "./chat-provider.js";
 import type { SettingsStore } from "./settings.js";
 
@@ -45,7 +45,7 @@ export function executorBound(action: CommandTicket["action"], auth?: CommandAut
   ) {
     return capabilityAtLeast(auth.capability, "scan") && !SHELL_META.test(action.command);
   }
-  if (auth && action.hosts?.length) return action.hosts.every(host => scopeAllows(auth, host));
+  if (auth && action.hosts?.length) return action.hosts.every(host => hostScopeAllows(auth, host));
   if (auth && action.tool === "mcp") return true;
   return action.tool === "shell" && localProbes.some(probe => probe === action.localProbe && probe === action.summary);
 }

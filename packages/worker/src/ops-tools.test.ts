@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -225,6 +225,24 @@ LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=1,fd=3))`,
     })) as { ok: boolean; skipped: boolean };
     assert.equal(skipped.ok, false);
     assert.equal(skipped.skipped, true);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("host profile unlocks foothold-private only after a real foothold signal", () => {
+  const { root, history, ctx } = setup("gy-host-pivot-");
+  try {
+    hostProfileRecordTool(ctx, { asset: "lab.example.com", os: "Linux" });
+    assert.equal(existsSync(join(root, "admitted-pivot.json")), false);
+    hostProfileParseTool(ctx, { asset: "lab.example.com", text: "nothing useful" });
+    assert.equal(existsSync(join(root, "admitted-pivot.json")), false);
+    hostProfileParseTool(ctx, {
+      asset: "lab.example.com",
+      text: "uid=33(www-data) gid=33(www-data) groups=33(www-data)",
+    });
+    assert.equal(existsSync(join(root, "admitted-pivot.json")), true);
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

@@ -1,5 +1,6 @@
 import {
   applySessionToHeaders,
+  hostScopeAllows,
   insertTraffic,
   loadHttpSessions,
   performHttpRequest,
@@ -8,7 +9,6 @@ import {
   type HttpSessionStore,
 } from "@gongyuai/exec";
 import { capabilityAtLeast, syncAdmittedTargets } from "./tools.js";
-import { scopeAllows } from "@gongyuai/contracts";
 import { readEvidenceBytes } from "@gongyuai/history";
 import type { ToolContext } from "./tools.js";
 
@@ -143,7 +143,7 @@ export async function httpRequestTool(
     {
       evidenceDir: ctx.manifest.evidenceDir,
       authorizeHost: (host) =>
-        scopeAllows(ctx.manifest.auth, host)
+        hostScopeAllows(ctx.manifest.auth, host, { dataDir: ctx.manifest.dataDir })
           ? { allowed: true }
           : { allowed: false, reason: `${host} not in task targets/pivot` },
     },
@@ -165,8 +165,9 @@ export async function httpRequestTool(
     try {
       const rawRes = readEvidenceBytes(ctx.manifest.evidenceDir, artifact.responsePath).toString("utf8");
       const setCookies = extractSetCookiesFromRawResponse(rawRes);
-      if (!sessions[sessionName]) sessions[sessionName] = {};
-      const hostState = sessions[sessionName]![artifact.host] ?? { cookies: {}, headers: {} };
+      const latest = loadHttpSessions(ctx.manifest.dataDir);
+      if (!latest[sessionName]) latest[sessionName] = {};
+      const hostState = latest[sessionName]![artifact.host] ?? { cookies: {}, headers: {} };
       for (const cookie of setCookies) {
         if (cookie.value === "" || /^deleted$/i.test(cookie.value)) {
           delete hostState.cookies[cookie.name];
@@ -174,8 +175,8 @@ export async function httpRequestTool(
           hostState.cookies[cookie.name] = cookie.value;
         }
       }
-      sessions[sessionName]![artifact.host] = hostState;
-      saveHttpSessions(ctx.manifest.dataDir, sessions);
+      latest[sessionName]![artifact.host] = hostState;
+      saveHttpSessions(ctx.manifest.dataDir, latest);
       sessionCookieCount = Object.keys(hostState.cookies).length;
     } catch {
       /* non-fatal cookie jar update */

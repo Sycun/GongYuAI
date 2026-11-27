@@ -8,6 +8,8 @@ import {
   matchTarget,
   normalizeHost,
   normalizeTargetPattern,
+  operatorHostPivotBlocked,
+  scopeAllows,
   targetAllows,
 } from "./scope.js";
 
@@ -62,4 +64,20 @@ test("cidrContainsCidr and cidrOverlaps handle subnets, supernets, and overlaps"
   assert.equal(cidrOverlaps("10.0.186.0/24", "10.0.187.0/24"), false);
   assert.equal(matchTarget(["10.0.0.0/8"], "10.0.186.0/24").ok, true);
   assert.equal(matchTarget(["10.0.0.0/8"], "10.0.0.0/4").ok, false);
+});
+
+test("foothold-private excludes the operator NIC unless explicitly listed or inContainer", () => {
+  const nic = "192.168.66.6";
+  const auth = {
+    targets: ["203.0.113.10", "10.0.0.0/8"],
+    outOfScope: [] as string[],
+    pivotPolicy: { mode: "foothold-private" as const, cidrs: [] as string[] },
+  };
+  assert.equal(operatorHostPivotBlocked(auth, nic, { nics: [nic] }), true);
+  assert.equal(scopeAllows(auth, nic, { nics: [nic] }), false);
+  assert.equal(admitAddress(auth, nic, { nics: [nic] }).kind, "oos");
+  assert.equal(operatorHostPivotBlocked({ ...auth, targets: [nic] }, nic, { nics: [nic] }), false);
+  assert.equal(scopeAllows(auth, "172.19.0.4", { nics: [nic] }), true);
+  assert.equal(operatorHostPivotBlocked(auth, nic, { nics: [nic], admittedHosts: [nic] }), false);
+  assert.equal(operatorHostPivotBlocked(auth, nic, { nics: [nic], inContainer: true }), false);
 });

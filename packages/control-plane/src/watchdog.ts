@@ -180,6 +180,8 @@ export class Watchdog {
           historyDb: paths.historyDb,
           evidenceDir: paths.evidenceDir,
           targets: task.auth.targets,
+          outOfScope: task.auth.outOfScope,
+          pivotPolicy: task.auth.pivotPolicy,
         });
         // Throttled periodic materialization of ledger & engagement report deliverables.
         const nowMs = Date.now();
