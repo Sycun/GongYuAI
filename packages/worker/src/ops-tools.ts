@@ -15,7 +15,7 @@ import type {
 } from "@gongyuai/contracts";
 import { admitAddress, redactSecretRef } from "@gongyuai/contracts";
 import { readEvidenceBytes, type HistoryStore } from "@gongyuai/history";
-import { capabilityAtLeast } from "./tools.js";
+import { capabilityAtLeast, syncAdmittedTargets, unlockFootholdPivotSidecar } from "./tools.js";
 import type { SkillHub } from "./skills/runtime.js";
 
 /**
@@ -181,10 +181,12 @@ export function credentialRecordTool(ctx: OpsToolContext, args: {
   if (/\s/.test(secretRef) || secretRef.length > 512) {
     throw new Error("credential_record secretRef must be a pointer (evidence path / env var), not the secret");
   }
+  syncAdmittedTargets(ctx.manifest);
   const admission = admitAddress(ctx.manifest.auth, asset);
   if (admission.kind === "oos") {
     throw new Error(`denied: credential asset ${asset} is out of scope`);
   }
+  const isVerified = args.verified === "true" || args.verified === "1";
   const { credential, created } = ctx.history.recordCredential({
     taskId: ctx.manifest.taskId,
     kind: kind as "password" | "hash" | "ticket" | "token" | "key" | "session" | "cookie" | "foothold-shell",
@@ -193,9 +195,12 @@ export function credentialRecordTool(ctx: OpsToolContext, args: {
     secretRef,
     secretHmac: args.secretHmac,
     sourceFindingId: args.sourceFindingId,
-    verified: args.verified === "true" || args.verified === "1",
+    verified: isVerified,
     expiresAt: args.expiresAt,
   });
+  if (isVerified || kind === "foothold-shell") {
+    unlockFootholdPivotSidecar(ctx.manifest);
+  }
   return JSON.stringify({
     ok: true,
     created,
@@ -247,10 +252,12 @@ export function hostProfileRecordTool(ctx: OpsToolContext, args: {
   requireCapability(ctx.manifest, "scan");
   const asset = (args.asset ?? "").trim();
   if (!asset) throw new Error("host_profile_record requires asset");
+  syncAdmittedTargets(ctx.manifest);
   const admission = admitAddress(ctx.manifest.auth, asset);
   if (admission.kind === "oos") {
     throw new Error(`denied: host profile asset ${asset} is out of scope`);
   }
+  unlockFootholdPivotSidecar(ctx.manifest);
   const profile = ctx.history.recordHostProfile(ctx.manifest.taskId, {
     asset,
     ...(args.hostname ? { hostname: args.hostname } : {}),
@@ -276,10 +283,12 @@ export function hostProfileParseTool(ctx: OpsToolContext, args: {
   requireCapability(ctx.manifest, "scan");
   const asset = (args.asset ?? "").trim();
   if (!asset) throw new Error("host_profile_parse requires asset");
+  syncAdmittedTargets(ctx.manifest);
   const admission = admitAddress(ctx.manifest.auth, asset);
   if (admission.kind === "oos") {
     throw new Error(`denied: host profile asset ${asset} is out of scope`);
   }
+  unlockFootholdPivotSidecar(ctx.manifest);
   const parsed = parseHostEnumeration(args.text ?? "");
   if (parsed.matched.length === 0) {
     return JSON.stringify({

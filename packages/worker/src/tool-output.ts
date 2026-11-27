@@ -36,11 +36,13 @@ export function parseShellOutput(
   ctx: ToolContext,
   command: string,
   stdout: string,
+  opts?: { strict?: boolean },
 ): string {
   const tool = shellParserTool(command);
   if (!tool) return "";
   const result = parseAndRecord(ctx, tool, stdout);
   if (result.skipped) {
+    if (opts?.strict === false) return "";
     return `\n[parser] mandatory: ${tool} output is not machine-readable; re-run with ${MACHINE_FLAGS[tool]}`;
   }
   return parseSummaryLine(result);

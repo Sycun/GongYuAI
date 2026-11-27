@@ -538,17 +538,23 @@ export async function tryPiDurable(
               }
 
               stepsSinceRotateCheck += 1;
-              if (state.phase === "explore" && state.activeIntentId && stepsSinceRotateCheck >= 5) {
+              const rotateInterval =
+                state.drainIntentId && state.drainIntentId === state.activeIntentId ? 1 : 5;
+              if (state.phase === "explore" && state.activeIntentId && stepsSinceRotateCheck >= rotateInterval) {
                 stepsSinceRotateCheck = 0;
                 const rot = runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolSize);
                 if (rot) {
-                  pendingRotationNotice = rot;
-                  if (role === "follower") {
-                    pendingFollowerIntentReset = true;
+                  if (!state.activeIntentId) {
+                    pendingRotationNotice = rot;
+                    if (role === "follower") {
+                      pendingFollowerIntentReset = true;
+                    }
+                    longTurn.notes.push(
+                      `[证据耗尽自动换面] ${rot}。旧 Intent 已自动结项并释放（activeIntentId=null，当前 phase=${state.phase}）；无需再调用 intent_conclude，请直接按当前相位调用 ${role === "follower" ? "intent_claim 认领新 Intent（无待认领时回复 YIELD）" : "intent_propose / engagement_audit / tsecbench 切入新攻击面"}。`,
+                    );
+                  } else {
+                    longTurn.notes.push(rot);
                   }
-                  longTurn.notes.push(
-                    `[证据耗尽自动换面] ${rot}。旧 Intent 已自动结项并释放（activeIntentId=null，当前 phase=${state.phase}）；无需再调用 intent_conclude，请直接按当前相位调用 ${role === "follower" ? "intent_claim 认领新 Intent（无待认领时回复 YIELD）" : "intent_propose / engagement_audit / tsecbench 切入新攻击面"}。`,
-                  );
                 }
               }
               ckpt.save(state);
@@ -627,7 +633,9 @@ export async function tryPiDurable(
 
         const timeoutNote =
           pendingRotationNotice ??
-          runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolForPrompt);
+          (state.drainIntentId && state.drainIntentId === state.activeIntentId
+            ? null
+            : runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolForPrompt));
         if (timeoutNote && role === "follower" && !state.activeIntentId) {
           pendingFollowerIntentReset = true;
         }

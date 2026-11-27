@@ -70,15 +70,16 @@ Explore 成功：`concludeIntent(succeeded, …, { facts })` 同事务写回 Fac
 - 创建任务即 `seedAssetsFromAuth`：每条 `auth.targets`（作业坐标）→ 一行 seed 资产（控制台立刻可见）。  
 - 发现物经 `asset_record` 写入；`admitAddress` **自动**判定 admitted / oos（IPv4 CIDR、`*.domain`、裸域后缀、`*`）。  
 - `outOfScope` 覆盖 targets。  
-- Observe 注入「资产清单」；`GET /tasks/:id/assets` 供控制台轮询。  
-- Reason / `technique_transfer` 扇出硬顶：`execution.maxIntentsPerReason`（默认 4）、`maxIntentsPerAssetRoot`（默认 2）；oos-only 前驱拒利用。  
-- Explore 墙钟：`exploreTimeoutMs`（默认 15min）超时强制 conclude + partial Fact；Reason 多 slot：`reasonLeaseMs` CAS。  
+- Observe 注入「资产清单」与「存活持久连接与后台设施」（`<dataDir>/exec` 下跨 Intent 持久化的 SOCKS5/端口转发隧道、PTY `shell_session`、后台 `shell_job` 与 `c2` 会话）；`GET /tasks/:id/assets` 供控制台轮询。  
+- Reason / `technique_transfer` 扇出硬顶：`assetRootKey` 按主机归一化（消除同 `/24` 与同 `eTLD+1` 跨主机误杀），单主机最多并发 `maxIntentsPerAssetRoot`（默认 3，支持按正交 `technique` 同目标多路并行推进，同主机重复 `technique` 拦截）；oos-only 前驱拒利用。  
+- Explore 弹性阶梯时间盒与收尾窗：按同主机历史尝试轮次动态分配 `12min → 30min → 45min`，中途产生新 `verified` 进展自动续期至少 `20min`；超时前保留 3 步 `Soft Drain` 收尾保护窗与 `factDraft` 草稿兜底抢救，未突破时严禁下绝对否定结论。  
+- 立足点跳板私网准入（`foothold-private`）：取得边界验证凭据、立足点主机画像或建立跳板隧道后自动解锁内网 RFC1918（`10/8`、`172.16/12`、`192.168/16`，严格优先扣除 `outOfScope`）受控纵深探测与 `proxychains` 隧道利用。  
 - 细则：[asset-inventory.md](./asset-inventory.md)；匹配实现：`packages/contracts/src/scope.ts`。
 
 ### Explore 并发与动态扩容
 
-- 有效并发 = `min(maxConcurrentExplores, max(seed靶标数, admitted/live 资产数))`；硬顶 16，下限 1。启动与崩溃重启均按此解析。
-- 运行中 Watchdog 存活分支调 `runner.reconcileWorkers`：**只扩不缩**、永不超用户上限、只读资产计数不读 Fact 内容（资源供给，非战术；零策略军规不破）。每任务检查节流 ≥10s。
+- 有效并发 = `min(maxConcurrentExplores, max(seed靶标数, admitted/live 资产数, open Intents 数))`；硬顶 16，下限 1。单目标重点渗透按正交 `technique` 拆出 2～3 条并发 Intent 时同样自动拉起 Follower 并行接单。
+- 运行中 Watchdog 存活分支调 `runner.reconcileWorkers`：**只扩不缩**、永不超用户上限、只读结构化计数不读 Fact 内容（资源供给，非战术；零策略军规不破）。每任务检查节流 ≥10s。
 - 新 slot 为 follower（leader 判定只看 `slot===0`）；独立 Durable checkpoint；预算口径与聚合闸不变；扩容写 `explore_scaled` 事件。
 - 细则与验收：[parallel-explore-scaling.md](./parallel-explore-scaling.md)。
 
@@ -170,7 +171,7 @@ Pi Durable 主循环与 OpenAI 回退循环共用单一工具目录（`packages/
 | 角色 / 相位 | 工具面与运行契约 |
 | --- | --- |
 | **Leader**（`slot 0, workerCount > 1`） | 纯规划/验卷角色（`bootstrap / reason / report`）：**物理剥离**全部重型执行工具（`shell`、`shell_job`、`shell_session`、`c2`、`http_request`、`tunnel_open/close`、`mcp_invoke`、`mcp__*`）；只负责开题、扇出 `Intent`、审计与 `assert_goal`。槽位排满后通过 `YIELD` 零 Token 驻留，支持滑动窗口补单。 |
-| **Follower**（`slot 1..N`） | **单 Intent 隔离短会话角色**（固定 `explore`）：物理剥离 `assert_goal`；每次 `intent_claim` 单个 `proposed` Intent 独立取证验证；调用 `intent_conclude` 时通过 `control: { terminate: true }` 立即结束当前轮，并在认领下一条 Intent 前执行 `root.reset()` 重置本地会话上下文（所有有效事实/漏洞/凭据已落入 History SQLite），彻底消除跨目标上下文污染，且免除后台 `π` 快照刷盘与全局软节奏弹窗。 |
+| **Follower**（`slot 1..N`） | **单 Intent 轻装短会话角色**（固定 `explore`）：**物理剥离** 14 项规划/验卷/接力/文书工具（`assert_goal`、`phase_set`、`engagement_audit`、`relay`、`plan_*`、`technique_transfer`、`finding_validate`、`finding_retest_*`、`enable/disable_skill`、`change_list`），静态系统提示词保 KV 缓存命中率，平时仅用 `fact_draft` 留痕、在实质突破或 3 步收尾保护窗集中入账；调用 `intent_conclude` 时通过 `control: { terminate: true }` 立即结束当前轮并执行 `root.reset()` 重置本地上下文，同时保留 `<dataDir>/exec` 下的存活隧道与 PTY 会话供后续 Intent 直接复用。 |
 | **Solo**（`workerCount = 1`） | 单进程兼任 `bootstrap → explore → reason → report`；支持 `intent_propose(claim="true")` 一步认领进入 Explore。 |
 
 **确定性三条硬门禁（`evaluateWorkerToolGate`，零动态锁套娃）**：

@@ -340,6 +340,44 @@ test("OpenAPI string[] container_addr auto-admits live assets, unblocks Leader i
     const hostsAfterRestart = resolveChallengeHosts(ctx, "web_sql_injection_01");
     assert.ok(hostsAfterRestart.includes("10.0.1.99"));
     assert.ok(!hostsAfterRestart.includes("10.0.1.5"));
+
+    // 4. Grey-box scope-brief (credentials/internal hints), recycled IP boundary Fact, and foothold-private RFC1918 pivot unlock
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify([
+          {
+            unique_code: "a-11",
+            title: "企业办公系统",
+            description: "2008年老旧OA系统。预置测试账号工号：2001，密码：Sys@Oa123",
+            difficulty: "hard",
+            total_score: 500,
+            flag_count: 1,
+            correct_flag_count: 0,
+            is_completed: false,
+            container_status: "running",
+            container_addr: ["10.0.1.99:80"],
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const listRaw = await tsecbenchTool(ctx, { action: "list" });
+    const listItems = JSON.parse(listRaw) as Array<{ code: string; description?: string; title?: string }>;
+    assert.equal(listItems[0]?.code, "a-11");
+    assert.match(listItems[0]?.description ?? "", /2001.*Sys@Oa123/);
+
+    const facts = history.listFacts(leader.taskId);
+    const brief = facts.find((f) => f.tags.includes("scope-brief") && f.tags.includes("challenge:a-11"));
+    assert.ok(brief, "scope-brief Fact must be created with preset grey-box credentials");
+    assert.match(brief.summary, /Sys@Oa123/);
+    const boundary = facts.find((f) => f.tags.includes("instance-boundary") && f.tags.includes("challenge:a-11"));
+    assert.ok(boundary, "recycled IP 10.0.1.99 must record an instance-boundary Fact");
+
+    // Follower picks up admitted-pivot.json sidecar and can pivot into internal 172.19.0.0/16 via proxychains
+    const follower = makeManifest(dir);
+    follower.workerSlot = 1;
+    follower.workerCount = 4;
+    assert.doesNotThrow(() => assertCommandAllowed(follower, "proxychains curl -s http://172.19.0.4:8080/"));
   } finally {
     globalThis.fetch = origFetch;
     if (prevUrl === undefined) delete process.env.BENCHMARK_BASE_URL;

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { CreateTaskRequestSchema } from "@gongyuai/contracts";
+import { CreateTaskRequestSchema, ORIGIN_FACT_ID } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
 import { WorkerRunner } from "./runner.js";
 import { SettingsStore } from "./settings.js";
@@ -165,6 +165,45 @@ test("reconcileWorkers respawns only dead follower slot without colliding live s
 
     await runner.reconcileWorkers(task.id);
     assert.deepEqual(spawned, [0, 1, 2, 3, 4, 1], "only dead slot 1 is respawned; live slots untouched");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reconcileWorkers scales a single-host engagement up to orthogonal open Intents, capped by operator", { timeout: 10_000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-scale-intra-"));
+  const { store, runner, spawned } = makeRunner(root);
+  try {
+    const task = store.createTask(CreateTaskRequestSchema.parse({
+      name: "single-host greybox",
+      mock: true,
+      auth: { authorizationNote: "Single corporate target", targets: ["https://oa.corp.example"] },
+      goals: [{ id: "g", title: "Audit OA", description: "fixture", evidencePatterns: ["proof.txt"] }],
+      execution: { maxConcurrentExplores: 3 },
+    }));
+    await runner.start(task.id);
+    assert.deepEqual(spawned, [0], "single seed target starts solo initially");
+
+    const paths = taskPaths(task.dataDir);
+    const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir });
+    try {
+      for (const tech of ["recon-surface", "greybox-auth-logic", "known-cve-poc"]) {
+        history.proposeIntent({
+          taskId: task.id,
+          title: `OA ${tech}`,
+          sourceFactIds: [ORIGIN_FACT_ID],
+          assetRoot: "https://oa.corp.example",
+          technique: tech,
+        });
+      }
+    } finally {
+      history.close();
+    }
+
+    await runner.reconcileWorkers(task.id);
+    assert.equal(store.get(task.id)!.workerPids?.length, 4, "1 leader + 3 followers for 3 orthogonal Intents on 1 host");
+    assert.deepEqual(spawned, [0, 1, 2, 3]);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

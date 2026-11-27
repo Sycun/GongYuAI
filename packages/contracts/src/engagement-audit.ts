@@ -306,15 +306,17 @@ export function deriveEngagementAudit(
     const highWeight = untouched.filter(
       (asset) => asset.weight >= ENGAGEMENT_AUDIT_DEFAULTS.highWeight,
     );
+    const starvedWhileGrinding = intents.length >= testableAssets.length;
     observations.push({
       code: "unexplored-asset",
       key: "untouched",
-      severity: highWeight.length > 0 ? "warn" : "info",
+      severity: highWeight.length > 0 || starvedWhileGrinding ? "warn" : "info",
       text:
-        `${untouched.length} 个在范围主机从未被经营` +
-        `${highWeight.length ? `（高权重 ${highWeight.length}）` : ""}：` +
+        `${untouched.length} 个在范围主机从未被经营（0 Intent）` +
+        `${highWeight.length ? `（高权重 ${highWeight.length}）` : ""}` +
+        `${starvedWhileGrinding ? "（已有资产被重复探索而该目标零派单）" : ""}：` +
         `${untouched.slice(0, 5).map((asset) => asset.address).join("、")}` +
-        `；先 asset_record / intent_propose 建图，别只磨已测资产。`,
+        `；优先为未触达目标 intent_propose，勿只磨已测资产。`,
       refs: untouched.slice(0, 8).map((asset) => asset.address),
     });
   }

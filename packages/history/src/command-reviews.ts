@@ -84,6 +84,10 @@ export class CommandLedger {
     return this.db.prepare("UPDATE requests SET state=?,receipt=? WHERE id=? AND task=? AND fence=? AND state IN ('pending','awaiting_user')")
       .run(receipt.decision === "allow" ? "allowed" : "held", JSON.stringify(receipt), ticket.id, ticket.task, ticket.fence).changes === 1;
   }
+  /** Consume a transient held ticket (e.g. single-slot MCP review timeout in a multi-worker pool) without pausing sibling workers. */
+  dismiss(id: string): boolean {
+    return this.db.prepare("UPDATE requests SET state='dismissed' WHERE id=? AND state='held'").run(id).changes === 1;
+  }
   outcome(id: string): CommandOutcome | undefined {
     const row = this.db.prepare("SELECT outcome FROM requests WHERE id=?").get(id) as { outcome?: string | null } | undefined;
     return row?.outcome ? JSON.parse(row.outcome) as CommandOutcome : undefined;

@@ -1,4 +1,4 @@
-import { assetRootKey } from "./fanout.js";
+import { assetGroupKey } from "./fanout.js";
 import { normalizeHost } from "./scope.js";
 
 const FAMILY_TAG_PREFIX = "family:";
@@ -86,7 +86,7 @@ export function suggestFamilyKey(input: {
   const roots = [
     ...new Set(
       (input.addresses ?? [])
-        .map((a) => assetRootKey(a))
+        .map((a) => assetGroupKey(a))
         .filter(Boolean),
     ),
   ];
@@ -130,8 +130,8 @@ export function normalizeFamilyKey(raw: string | undefined | null): string | und
 
 /** Host label used when suggesting peers that share a family root. */
 export function addressLooksRelated(a: string, b: string): boolean {
-  const ra = assetRootKey(a);
-  const rb = assetRootKey(b);
+  const ra = assetGroupKey(a);
+  const rb = assetGroupKey(b);
   if (!ra || !rb) return false;
   if (ra === rb) return true;
   const ha = normalizeHost(a);

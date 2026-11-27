@@ -5,15 +5,20 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { ORIGIN_FACT_ID, type WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { boardClearPolicyBlock } from "./board-policy.js";
 import { CheckpointStore } from "./checkpoint.js";
 import {
+  FOLLOWER_EXCLUDED_TOOLS,
   FOLLOWER_ONLY_EXEC_TOOLS,
   resolveWorkerRole,
   roleAllowedToolNames,
 } from "./graph-phase.js";
 import type { McpHub } from "./mcp/client.js";
 import { shouldResetFollowerSession } from "./pi-loop.js";
+import { buildTurnObserveBlock } from "./prompt-builder.js";
 import type { SkillHub } from "./skills/runtime.js";
+import { parseShellOutput } from "./tool-output.js";
 import {
   buildOpenAiToolsFromCatalog,
   buildPiToolsFromCatalog,
@@ -323,6 +328,121 @@ test("统一门禁 evaluateWorkerToolGate：三条硬规则无死锁且求助永
       }),
       undefined,
     );
+  } finally {
+    ckpt.close();
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Follower tool surface strips planning/validator/relay bureaucracy and suppresses parser re-run nagging", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-detax-"));
+  const followerManifest = makeManifest(root, { slot: 1, workerCount: 4 });
+  followerManifest.goals = [
+    {
+      id: "engagement-report",
+      title: "Client-style engagement report",
+      description: "report",
+      evidencePatterns: ["engagement/report.md"],
+      passes: false,
+      evidencePaths: [],
+      assertedAt: null,
+    },
+  ];
+  const history = openHistory({
+    dbPath: followerManifest.historyDb,
+    evidenceDir: followerManifest.evidenceDir,
+  });
+  const ckpt = new CheckpointStore(followerManifest.durableDb);
+  try {
+    const allowed = roleAllowedToolNames("explore", "follower", ["mcp__nmap__scan"]);
+    for (const tool of FOLLOWER_EXCLUDED_TOOLS) {
+      assert.equal(allowed.has(tool), false, `follower explore must strip ${tool}`);
+    }
+    assert.equal(allowed.has("shell"), true);
+    assert.equal(allowed.has("fact_draft"), true);
+    assert.equal(allowed.has("tunnel_open"), true);
+    assert.equal(allowed.has("tunnel_list"), true);
+
+    const ctx = {
+      manifest: followerManifest,
+      history,
+      usage: { toolCalls: 0, installs: 0 },
+    };
+    assert.equal(
+      parseShellOutput(ctx, "nmap -p 80,8080 10.0.0.5", "PORT STATE SERVICE\n80/tcp open http", {
+        strict: false,
+      }),
+      "",
+      "non-strict exploration shell runs must not nag to re-run with -oX -",
+    );
+
+    const followerPolicy = boardClearPolicyBlock(followerManifest);
+    assert.doesNotMatch(followerPolicy, /边打边写/);
+    assert.match(followerPolicy, /fact_draft/);
+  } finally {
+    ckpt.close();
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("buildTurnObserveBlock projects live tunnels and PTY sessions across Follower Intent resets", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-exec-proj-"));
+  const followerManifest = makeManifest(root, { slot: 2, workerCount: 4 });
+  const history = openHistory({
+    dbPath: followerManifest.historyDb,
+    evidenceDir: followerManifest.evidenceDir,
+  });
+  const ckpt = new CheckpointStore(followerManifest.durableDb);
+  try {
+    // Simulate a live detached SOCKS5 tunnel and open PTY foothold persisted under <dataDir>/exec
+    // using the current test runner process.pid (guaranteed alive without spawning background daemons).
+    const nowIso = new Date().toISOString();
+    const tunnelDir = join(root, "exec", "tunnels", "tn-pivot-1");
+    mkdirSync(tunnelDir, { recursive: true });
+    writeFileSync(
+      join(tunnelDir, "meta.json"),
+      JSON.stringify({
+        id: "tn-pivot-1",
+        kind: "ssh-socks",
+        targetHost: "10.0.0.5",
+        targetPort: null,
+        localPort: 10809,
+        pid: process.pid,
+        status: "running",
+        command: "ssh -N -D 127.0.0.1:10809 web@10.0.0.5",
+        logPath: join(tunnelDir, "ssh-socks.log"),
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        via: "web@10.0.0.5",
+      }),
+    );
+
+    const sessDir = join(root, "exec", "sessions", "sess-foothold-1");
+    mkdirSync(sessDir, { recursive: true });
+    writeFileSync(
+      join(sessDir, "meta.json"),
+      JSON.stringify({
+        id: "sess-foothold-1",
+        shell: "/bin/bash",
+        cwd: root,
+        pid: process.pid,
+        status: "open",
+        createdAt: nowIso,
+        lastActivityAt: nowIso,
+        bufferPath: join(sessDir, "transcript.log"),
+        exitCode: null,
+      }),
+    );
+
+    const state = ckpt.load();
+    const observeFull = buildTurnObserveBlock(followerManifest, history, state);
+    assert.match(observeFull, /存活持久连接与后台设施/);
+    assert.match(observeFull, /tn-pivot-1/);
+    assert.match(observeFull, /127\.0\.0\.1:10809/);
+    assert.match(observeFull, /sess-foothold-1/);
+    assert.match(observeFull, /\/bin\/bash/);
   } finally {
     ckpt.close();
     history.close();

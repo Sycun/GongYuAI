@@ -206,6 +206,18 @@ export function systematicDiscoveryPolicyBlock(): string {
 export function boardClearPolicyBlock(manifest: WorkerManifest): string {
   if (!isBoardClearMission(manifest)) return "";
 
+  const isFollower = (manifest.workerCount ?? 1) > 1 && (manifest.workerSlot ?? 0) > 0;
+  if (isFollower) {
+    const benchmarkLine = hasBenchmarkHarness(manifest)
+      ? "\n- 靶场生命周期（`list/start/close`）由 Leader 统一调度；你仅在验证成因并取得受测实例影响回执时调用 `tsecbench(action=\"submit\")` 核验（`409 already finished` 视为环境终态）。"
+      : "";
+    return `
+## 战术探索与延迟入账准则（Follower 零文书税）
+- **平时轻装推进**：探索期不维护全局进度台账（\`autonomous-progress.md\`）或客户报告（\`engagement/report.md\`），中间进展仅用 \`fact_draft\` 轻量留痕，同目标并行写工作区临时文件按 \`<host>-<technique>-*\` 隔离。
+- **验证阶段求真**：确认越权、认证绕过或注入成因时，用 \`http_request(compareWith="http:<baselineId>")\` 基线对照排除误报；仅在取得实质突破（可复现漏洞、凭据、立足点、内网新存活主机）或进入 3 步收尾保护窗时集中调用 \`finding_verify\` / \`credential_record\` / \`asset_record\` 入账。${benchmarkLine}
+`;
+  }
+
   const base = `
 ## 授权渗透测试与深度漏洞挖掘纪律（防异化原则）
 目标函数：在授权坐标内**系统化建图攻击面、定位真实安全缺陷成因、产出经对照验证且可独立复核的 Finding**。任何外部回执或凭证仅作为漏洞影响证明（PoC），绝不能用猜测或无证据结论替代成因验证。

@@ -8,7 +8,7 @@
  * force-conclude the active Intent and return to Reason only when a surface is
  * genuinely exhausted. Granularity is the Intent/attack-surface, never a benchmark code.
  */
-import { targetAllows } from "@gongyuai/contracts";
+import { normalizeHost, targetAllows, type Intent } from "@gongyuai/contracts";
 import type { HistoryStore } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import { appendProgress } from "./tools.js";
@@ -18,6 +18,15 @@ export const EVIDENCE_STALL_MS =
 
 export const EVIDENCE_PROGRESS_GRACE_MS =
   Number(process.env.GY_EVIDENCE_PROGRESS_GRACE_MS ?? 300_000) || 300_000;
+
+/** Tiered exploration timeboxes by prior attempt count on the same host: R1=12m, R2=30m, R3+=45m. */
+export const TIERED_STALL_MS = [12 * 60_000, 30 * 60_000, 45 * 60_000] as const;
+
+/** Minimum continuation window granted whenever verified traction (finding/credential/foothold) lands. */
+export const BREAKTHROUGH_RENEWAL_MS = 20 * 60_000;
+
+/** Default Soft Drain grace turns before hard force-conclude wipes the active Intent. */
+export const DEFAULT_DRAIN_STEPS = 3;
 
 function ms(iso: string | null | undefined): number {
   if (!iso) return 0;
@@ -98,16 +107,49 @@ export type EvidenceStallResult = {
   intentId: string | null;
   message: string | null;
   extended?: boolean;
+  draining?: boolean;
+  drainStepsRemaining?: number;
 };
 
 /**
- * Force-conclude the active Intent when verified evidence has stalled past stallMs.
+ * Resolve tiered timebox for an Intent based on prior concluded attempts against the same `assetRoot`:
+ * - Round 1 (0 prior attempts): 12 min fast reconnaissance & low-hanging exploit sweep;
+ * - Round 2 (1 prior attempt): 30 min medium-chain / async-callback / multi-hop exploitation;
+ * - Round 3+ (≥2 prior attempts): 45 min deep reverse-engineering / multi-layer APT pivot.
+ * Explicit `explicitStallMs` or `GY_EVIDENCE_STALL_MS` env overrides always win.
+ */
+export function resolveAdaptiveStallMs(
+  history: HistoryStore,
+  taskId: string,
+  intent: Pick<Intent, "id" | "assetRoot">,
+  explicitStallMs?: number,
+): number {
+  if (explicitStallMs !== undefined) return explicitStallMs;
+  if (process.env.GY_EVIDENCE_STALL_MS) return EVIDENCE_STALL_MS;
+  const root = intent.assetRoot ? normalizeHost(intent.assetRoot) : "";
+  if (!root) return EVIDENCE_STALL_MS;
+  const priorConcluded = history
+    .listIntents(taskId)
+    .filter(
+      (i) =>
+        i.id !== intent.id &&
+        ["succeeded", "failed", "expired"].includes(i.status) &&
+        i.assetRoot &&
+        normalizeHost(i.assetRoot) === root,
+    ).length;
+  const tierIdx = Math.min(priorConcluded, TIERED_STALL_MS.length - 1);
+  return TIERED_STALL_MS[tierIdx]!;
+}
+
+/**
+ * Force-conclude (or Soft-Drain) the active Intent when verified evidence has stalled past stallMs.
  * Relay-safe: the anchor derives from History (verified-evidence recency + intent
  * createdAt), never from the volatile checkpoint claim timestamp that reset() loses.
  *
- * Graded stall check: if the active Intent has recent substantive progress (new Fact
- * or tentative Finding within `progressGraceMs`) and total idle is below `hardStallMs`
- * (default 2x stallMs), extend the grace window instead of interrupting active work.
+ * - Breakthrough renewal: fresh verified evidence after Intent creation renews at least 20 min;
+ * - Graded stall check: recent substantive Fact / tentative Finding extends up to `hardStallMs`;
+ * - Soft Drain (`drainSteps > 0`): grants N final tool turns to capture in-flight RCE output,
+ *   verify findings, or commit objective incremental Facts before hard rotation.
  */
 export function maybeForceEvidenceStall(opts: {
   history: HistoryStore;
@@ -119,6 +161,7 @@ export function maybeForceEvidenceStall(opts: {
   stallMs?: number;
   progressGraceMs?: number;
   hardStallMs?: number;
+  drainSteps?: number;
   leader?: boolean;
   nowMs?: number;
 }): EvidenceStallResult {
@@ -126,18 +169,29 @@ export function maybeForceEvidenceStall(opts: {
   if (!intentId) return { concluded: false, intentId: null, message: null };
   const intent = opts.history.getIntent(opts.taskId, intentId);
   if (!intent) return { concluded: false, intentId: null, message: null };
-  const stallMs = opts.stallMs ?? EVIDENCE_STALL_MS;
-  if (stallMs <= 0) return { concluded: false, intentId: null, message: null };
+  const baseStallMs = resolveAdaptiveStallMs(opts.history, opts.taskId, intent, opts.stallMs);
+  if (baseStallMs <= 0) return { concluded: false, intentId: null, message: null };
   const now = opts.nowMs ?? Date.now();
-  const anchor = Math.max(
-    lastVerifiedEvidenceAt(opts.history, opts.taskId, {
-      intentId: intent.id,
-      assetRoot: intent.assetRoot,
-    }),
-    ms(intent.createdAt),
-  );
+  const verifiedAt = lastVerifiedEvidenceAt(opts.history, opts.taskId, {
+    intentId: intent.id,
+    assetRoot: intent.assetRoot,
+  });
+  const createdAtMs = ms(intent.createdAt);
+  const hasMidIntentBreakthrough = verifiedAt > createdAtMs;
+  const stallMs =
+    hasMidIntentBreakthrough && (opts.stallMs === undefined || baseStallMs >= 10 * 60_000)
+      ? Math.max(baseStallMs, BREAKTHROUGH_RENEWAL_MS)
+      : baseStallMs;
+  const anchor = Math.max(verifiedAt, createdAtMs);
   const idle = now - anchor;
-  if (idle < stallMs) return { concluded: false, intentId: null, message: null };
+  if (idle < stallMs) {
+    if (opts.state.drainIntentId === intent.id) {
+      opts.state.drainIntentId = null;
+      opts.state.drainStepsRemaining = null;
+      opts.save();
+    }
+    return { concluded: false, intentId: null, message: null };
+  }
 
   const progressGraceMs = opts.progressGraceMs ?? Math.min(EVIDENCE_PROGRESS_GRACE_MS, Math.floor(stallMs / 2));
   const hardStallMs = opts.hardStallMs ?? stallMs * 2;
@@ -145,7 +199,56 @@ export function maybeForceEvidenceStall(opts: {
   if (activeAt > anchor && now - activeAt < progressGraceMs && idle < hardStallMs) {
     return { concluded: false, intentId, message: null, extended: true };
   }
+
+  const maxDrain = opts.drainSteps ?? 0;
   const minutes = Math.round(idle / 60_000);
+  if (maxDrain > 0) {
+    if (opts.state.drainIntentId !== intentId || opts.state.drainStepsRemaining == null) {
+      opts.state.drainIntentId = intentId;
+      opts.state.drainStepsRemaining = maxDrain;
+      opts.save();
+      const drainMsg = `[收尾保护窗 ${maxDrain}/${maxDrain} 步] 当前攻击面探索时间盒（${minutes}min）已到，但系统为你保留最后 ${maxDrain} 步收尾权限：若刚拿到 RCE/凭据/关键回显（如落盘输出或回调日志），请立即读取验证并提交；否则请只记录客观试验输入、响应状态码、存活会话（tmux/shell_session/tunnel）与日志文件路径，调用 intent_conclude 主动收束（严禁下“无漏洞/已穷尽”绝对否定结论）。`;
+      appendProgress(opts.workspaceDir, `evidence_stall soft-drain start ${intentId} (${maxDrain} steps left)`);
+      return {
+        concluded: false,
+        draining: true,
+        drainStepsRemaining: maxDrain,
+        intentId,
+        message: drainMsg,
+      };
+    }
+    if (opts.state.drainStepsRemaining > 1) {
+      const nextLeft = opts.state.drainStepsRemaining - 1;
+      opts.state.drainStepsRemaining = nextLeft;
+      opts.save();
+      const drainMsg = `[收尾保护窗 剩余 ${nextLeft}/${maxDrain} 步] 请立即完成最终证据验证提交或调用 intent_conclude 落盘客观试验增量（逾期将强制回收会话）。`;
+      return {
+        concluded: false,
+        draining: true,
+        drainStepsRemaining: nextLeft,
+        intentId,
+        message: drainMsg,
+      };
+    }
+  }
+
+  // Rescue any uncommitted fact_draft before hard-closing the Intent so partial breakthroughs never vanish.
+  if (opts.state.factDraft?.title) {
+    try {
+      opts.history.appendFact({
+        taskId: opts.taskId,
+        layer: "summary",
+        title: opts.state.factDraft.title,
+        summary: opts.state.factDraft.summary,
+        ...(opts.state.factDraft.evidencePath ? { evidencePath: opts.state.factDraft.evidencePath } : {}),
+        tags: ["partial", "draft-rescued"],
+        intentId,
+      });
+    } catch {
+      /* best-effort draft rescue */
+    }
+  }
+
   const reason = `Evidence stall: ${minutes}min since last verified evidence on this surface; force rotate (relay-safe)`;
   const done = opts.history.forceConcludeExploreTimeout({
     taskId: opts.taskId,
@@ -157,6 +260,9 @@ export function maybeForceEvidenceStall(opts: {
   opts.state.activeIntentClaimedAt = null;
   opts.state.toolsAtIntentClaim = null;
   opts.state.lastSoftSurfaceMilestone = 0;
+  opts.state.drainIntentId = null;
+  opts.state.drainStepsRemaining = null;
+  opts.state.factDraft = null;
   const open = opts.history.openIntents(opts.taskId);
   opts.state.phase = open.length > 0 || opts.leader === false ? "explore" : "reason";
   opts.save();

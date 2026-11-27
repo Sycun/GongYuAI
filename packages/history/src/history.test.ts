@@ -982,3 +982,83 @@ test("heartbeatIntent and expireStaleIntents requeue with poison-pill cap", () =
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("same-/24 hosts fan out independently, intra-host orthogonal techniques allow up to cap, and untouched host bypasses stale plan step", () => {
+  const root = mkdtempSync(join(tmpdir(), "gy-hist-subnet-fanout-"));
+  const evidenceDir = join(root, "evidence");
+  mkdirSync(evidenceDir, { recursive: true });
+  const store = openHistory({
+    dbPath: join(root, "history.sqlite"),
+    evidenceDir,
+  });
+  const taskId = "99999999-9999-4999-8999-888888888888";
+  const auth = { targets: ["10.0.160.0/24"], outOfScope: [] as string[] };
+  try {
+    const h1 = store.recordAsset({ taskId, address: "10.0.160.144", auth, live: true });
+    const h2 = store.recordAsset({ taskId, address: "10.0.160.145", auth, live: true });
+    const h3 = store.recordAsset({ taskId, address: "10.0.160.146", auth, live: true });
+    const fanout = { maxIntentsPerReason: 6, maxIntentsPerAssetRoot: 3 };
+
+    // 1) All 3 sibling containers in 10.0.160.0/24 can be proposed concurrently without /24 lock
+    store.proposeIntent({ taskId, title: "probe .144", sourceFactIds: [h1.fact.id], assetRoot: "10.0.160.144", technique: "recon-ports", fanout });
+    store.proposeIntent({ taskId, title: "probe .145", sourceFactIds: [h2.fact.id], assetRoot: "10.0.160.145", technique: "recon-ports", fanout });
+    store.proposeIntent({ taskId, title: "probe .146", sourceFactIds: [h3.fact.id], assetRoot: "10.0.160.146", technique: "recon-ports", fanout });
+
+    // 2) Intra-host orthogonal techniques on .144 succeed, while duplicate open technique on .144 is rejected
+    assert.throws(
+      () =>
+        store.proposeIntent({
+          taskId,
+          title: "duplicate recon .144",
+          sourceFactIds: [h1.fact.id],
+          assetRoot: "10.0.160.144",
+          technique: "recon-ports",
+          fanout,
+        }),
+      /duplicate open technique/,
+    );
+    store.proposeIntent({
+      taskId,
+      title: "greybox login .144",
+      sourceFactIds: [h1.fact.id],
+      assetRoot: "10.0.160.144",
+      technique: "auth-business-logic",
+      fanout,
+    });
+    store.proposeIntent({
+      taskId,
+      title: "cve check .144",
+      sourceFactIds: [h1.fact.id],
+      assetRoot: "10.0.160.144",
+      technique: "known-cve",
+      fanout,
+    });
+    // 4th open Intent on .144 hits maxIntentsPerAssetRoot=3
+    assert.throws(
+      () =>
+        store.proposeIntent({
+          taskId,
+          title: "4th on .144",
+          sourceFactIds: [h1.fact.id],
+          assetRoot: "10.0.160.144",
+          technique: "fuzzing",
+          fanout: { maxIntentsPerReason: 10, maxIntentsPerAssetRoot: 3 },
+        }),
+      /maxIntentsPerAssetRoot|fanout cap/,
+    );
+
+    // 3) Stale ready plan step on .144 does NOT block sliding-window first dispatch on untouched .147
+    store.setPlan(taskId, [{ title: "follow-up on .144", needsFactIds: [h1.fact.id] }]);
+    const h4 = store.recordAsset({ taskId, address: "10.0.160.147", auth, live: true });
+    const freshDispatch = store.proposeIntent({
+      taskId,
+      title: "first probe on untouched .147",
+      sourceFactIds: [h4.fact.id],
+      assetRoot: "10.0.160.147",
+    });
+    assert.equal(freshDispatch.assetRoot, "10.0.160.147");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

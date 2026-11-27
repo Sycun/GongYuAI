@@ -37,6 +37,17 @@ export type CheckpointState = {
   pendingSoftPaceMessage: string | null;
   /** Fingerprint of the last Observe entities injected into the live session; enables incremental resume deltas. */
   observeFingerprint: Record<string, string>;
+  /** Active Intent currently inside the post-stall Soft Drain grace window. */
+  drainIntentId?: string | null;
+  /** Remaining tool turns in Soft Drain before hard force-conclude. */
+  drainStepsRemaining?: number | null;
+  /** Overwritable scratch draft (`fact_draft`), auto-rescued on timeout or conclude. */
+  factDraft?: {
+    title: string;
+    summary: string;
+    evidencePath?: string;
+    updatedAt: string;
+  } | null;
   lastError: string | null;
   updatedAt: string;
 };
@@ -61,6 +72,9 @@ const DEFAULT: CheckpointState = {
   lastSoftSurfaceMilestone: 0,
   pendingSoftPaceMessage: null,
   observeFingerprint: {},
+  drainIntentId: null,
+  drainStepsRemaining: null,
+  factDraft: null,
   lastError: null,
   updatedAt: new Date().toISOString(),
 };
@@ -109,6 +123,9 @@ export class CheckpointStore {
       lastSoftSurfaceMilestone: parsed.lastSoftSurfaceMilestone ?? 0,
       pendingSoftPaceMessage: parsed.pendingSoftPaceMessage ?? null,
       observeFingerprint: parsed.observeFingerprint ?? {},
+      drainIntentId: parsed.drainIntentId ?? null,
+      drainStepsRemaining: parsed.drainStepsRemaining ?? null,
+      factDraft: parsed.factDraft ?? null,
     };
   }
 

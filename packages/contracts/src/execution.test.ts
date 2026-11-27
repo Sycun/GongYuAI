@@ -108,7 +108,7 @@ test("CreateTaskRequest defaults execution.maxConcurrentExplores to 3 and maps s
   assert.equal(DEFAULT_MAX_CONCURRENT_EXPLORES, 3);
   assert.equal(parsed.execution.maxConcurrentExplores, 3);
   assert.equal(parsed.execution.maxIntentsPerReason, 4);
-  assert.equal(parsed.execution.maxIntentsPerAssetRoot, 2);
+  assert.equal(parsed.execution.maxIntentsPerAssetRoot, 3);
   assert.equal(parsed.execution.exploreTimeoutMs, 900_000);
   assert.equal(parsed.execution.reasonLeaseMs, 120_000);
   assert.equal(resolveWorkerSlotCount(1), 1);

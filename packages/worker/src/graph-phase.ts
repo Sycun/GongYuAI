@@ -51,6 +51,7 @@ const ALWAYS = new Set([
   "asset_list",
   "asset_record",
   "finding_list",
+  "tunnel_list",
   "load_skill",
   "enable_skill",
   "disable_skill",
@@ -79,6 +80,7 @@ const BOOTSTRAP = new Set([
 const EXPLORE = new Set([
   ...ALWAYS,
   "history_append_fact",
+  "fact_draft",
   "intent_propose",
   "intent_claim",
   "intent_conclude",
@@ -169,6 +171,27 @@ export const FOLLOWER_ONLY_EXEC_TOOLS = new Set([
 ]);
 
 /**
+ * Planning, campaign-audit, relay, and validator tools physically stripped from
+ * multi-worker Explore Followers ("探索期工具面减负 / 去文书税").
+ */
+export const FOLLOWER_EXCLUDED_TOOLS = new Set([
+  "assert_goal",
+  "phase_set",
+  "engagement_audit",
+  "relay",
+  "plan_list",
+  "plan_set",
+  "plan_update",
+  "technique_transfer",
+  "finding_validate",
+  "finding_retest_context",
+  "finding_retest_conclude",
+  "enable_skill",
+  "disable_skill",
+  "change_list",
+]);
+
+/**
  * Reason mutex + Explore stickiness from open Intents.
  * Does not invent π; does not override relay/report/done.
  */
@@ -224,21 +247,21 @@ export function phaseDirective(
   if (p === "bootstrap") {
     if (multiWorkerLeader) {
       lines.push(
-        `Bootstrap（多节点并发开局）：你是 slot 0 Leader，拥有 ${exploreSlots} 个并发 Explore Follower。先确认/开启首批目标坐标（靶场任务先调 tsecbench list，优先按 difficulty 由易到难 easy → medium → hard 挑题，避免开局全压硬题阻塞流水线；连续 start 最多 3 台未完成靶机填满并发槽位）→ 为每台存活资产分别调用 intent_propose（绑定各自 assetRoot，勿传 claim='true'，严禁多题共用同一 Intent）扇出 ${exploreSlots} 条独立 Intent 供 Follower 立即并行认领 → 随后 phase_set('reason') 进入驻留监听。禁止 shell / assert_goal。`,
+        `Bootstrap（多节点并发开局）：你是 slot 0 Leader，拥有 ${exploreSlots} 个并发 Explore Follower。先确认/开启首批目标坐标（靶场任务先调 tsecbench list，优先按 difficulty 由易到难 easy → medium → hard 挑题，避免开局全压硬题阻塞流水线；多目标任务连续 start 最多 3 台未完成靶机填满并发槽位）→ 扇出 ${exploreSlots} 条独立 Intent（勿传 claim='true'，严禁多目标混塞同一 Intent；若当前活跃可测主机少于 ${exploreSlots} 台——如单目标重点渗透或尾盘攻坚——直接对同一重点 assetRoot 按正交 technique 并行拆出 2～3 条独立 Intent，如 recon-surface / greybox-auth-logic / known-cve-poc 同时推进）→ 随后 phase_set('reason') 进入驻留监听。禁止 shell / assert_goal。`,
       );
     } else {
       const wantScale = (opts.maxConcurrentExplores ?? DEFAULT_MAX_CONCURRENT_EXPLORES) > 1;
       lines.push(
-        `Bootstrap（建图启动）：确认目标坐标（靶场任务先调 tsecbench list，优先按 easy → medium → hard 梯队 start，系统会自动准入容器地址并建 live 资产 Fact${wantScale ? "；已开启自动并发扩容，建议一次开启 ≤3 台靶机并为每台分别 intent_propose 独立 Intent 以激活并发 Follower" : ""}）→ 写首批 Fact 或直接 intent_propose（单资产时可传 claim='true' 一步认领并直入 Explore）。禁止 shell / assert_goal。`,
+        `Bootstrap（建图启动）：确认目标坐标（靶场任务先调 tsecbench list，优先按 easy → medium → hard 梯队 start，系统会自动准入容器地址并建 live 资产 Fact${wantScale ? "；已开启自动并发扩容：多资产时为每台资产分别 intent_propose，单重点资产时也可按正交 technique 并行拆出 2～3 条独立 Intent（兄弟单不传 claim='true'），控制面会自动拉起并发 Follower 并行接单" : ""}）→ 写首批 Fact 或直接 intent_propose（单路串行时可传 claim='true' 一步直入 Explore）。禁止 shell / assert_goal。`,
       );
     }
   } else if (p === "explore") {
     lines.push(
-      "Explore（验证影响）：拿到 foothold 先 host_profile_record（OS/域/用户/权限/服务/共享），再按 T1046/T1069/T1087/T1135/T1021/T1550 族验证内网推进；一次只 claim 一个 Intent（严禁跨资产/跨题复用同一 Intent）→ 工具验证 → intent_conclude（succeeded 须附可复核 Fact/evidencePath；禁止占位 flag）。发现主机立即 asset_record；发现漏洞线索立即 finding_record，复现后 finding_verify（附 evidence/ 文件 + repro + 可选 pocCurl）才可进交付；独立验证由控制面在 finding_verify 后自动异步执行（不要为此发 operator_consult）。nmap/httpx/nuclei/ffuf 必须用机读输出（-oX - / -json / -jsonl / -of json），看到 [parser] mandatory 就重跑。foothold/凭据写 transferable 供横向。约 25 次工具无验证进展则 failed 换面。",
+      "Explore（轻装试错 · 客观收束）：先读 Observe 中的委托简报（预置账号/内部域名/多目标数）与「存活持久连接与后台设施」（跨 Intent 直接复用已有 SOCKS 隧道、PTY shell_session 与后台监听），一次只 claim 一个 Intent → 高速验证（同目标多路并行时工作区临时文件/Cookie 按 <host>-<technique>-* 隔离命名；随时用 fact_draft 更新草稿防超时丢失；平时不写长篇台账报告）→ 仅在拿到实质突破（可复现漏洞/有效凭据/立足点/内网新主机）或进入 3 步收尾保护窗时集中入账（finding_verify / credential_record / host_profile_record / asset_record，支持 tunnel_open / proxychains 内网横移）→ intent_conclude（未完全达成时只准客观陈述测试接口、响应状态码/特征、产物路径及存活会话/隧道标识，严禁写“无漏洞/此路不通/已穷尽”绝对否定结论）。",
     );
   } else if (p === "reason") {
     lines.push(
-      `Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 有 ready 步骤时 intent_propose 必须带 planStepId（计划≠授权）→ 扇出跨资产 Intent / technique_transfer / 更新 engagement 叙事。${multiWorkerLeader ? `当前 ${exploreSlots} 路并发 Follower 在岗：靶场已解题或首探耗尽容器先 tsecbench(close) 腾槽，优先按 easy → medium → hard 梯队 start 新题（硬题首探失败先换题建打法库，后半程集中二轮攻坚），按每台容器 1 条独立 Intent 补满 ${exploreSlots} 路并发（勿传 claim='true'）。` : "单节点下 intent_propose 可传 claim='true' 直接切入 Explore。"}repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset 出现时先处理，不要继续磨。对 admitted/live 资产挂 sourceFactIds 继续测；oos 禁止作利用唯一前驱。扇出硬顶 maxIntentsPerReason / 同根 maxIntentsPerAssetRoot。交付叙述只引用 verified finding；high/critical 须有独立确认。禁止 shell / MCP 执行。`,
+      `Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + 存活隧道/会话 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 优先为 0 Intent 未触达资产补单；当活跃可测主机少于并发槽位或面对复杂重点资产/跳板内网时，主动对同一 assetRoot 按不同正交 technique 并行扇出 2～3 条短 Intent（如 recon-ports-fingerprint、greybox-auth-logic、known-cve-poc、intranet-pivot 并行推进，复用已建立的隧道与会话）→ 更新 engagement 叙事。${multiWorkerLeader ? `当前 ${exploreSlots} 路并发 Follower 在岗：靶场已解题或本轮时间盒耗尽容器先 tsecbench(close) 腾槽，优先按 easy → medium → hard 梯队 start 新题（首探 12m 快扫建图，二探 30m 攻坚长链，三探+ 45m 纵深决战，阶段突破自动续期 20m），尾盘题少时单题多路正交并进保持 ${exploreSlots} 路满槽（勿传 claim='true'）。` : "单节点下 intent_propose 可传 claim='true' 直接切入 Explore。"}repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset 出现时先处理，不要继续磨。可质疑子会话失败结论的完整性并换正交维度重测；oos 禁止作利用唯一前驱。交付叙述只引用 verified finding。禁止 shell / MCP 执行。`,
     );
   }
   return lines.join("\n");
@@ -265,7 +288,8 @@ export function allowedToolNames(
 /**
  * Effective tool surface combining graph phase + static worker role:
  * - `leader` never receives follower execution tools or dynamic `mcp__*` tools;
- * - `follower` never receives `assert_goal` (leader owns goal assertion & final report).
+ * - `follower` strips planning, campaign-audit, relay, validator, and goal-assertion tools
+ *   so tactical exploration stays lean and KV-cache-friendly.
  */
 export function roleAllowedToolNames(
   phase: WorkerPhase,
@@ -281,7 +305,9 @@ export function roleAllowedToolNames(
       out.delete(execTool);
     }
   } else if (role === "follower") {
-    out.delete("assert_goal");
+    for (const excluded of FOLLOWER_EXCLUDED_TOOLS) {
+      out.delete(excluded);
+    }
   }
   return out;
 }
@@ -418,9 +444,26 @@ export const GRAPH_PHASE_TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "fact_draft",
+      description:
+        "Save or overwrite an incremental objective discovery draft during Explore (auto-rescued on timeout or used on intent_conclude). Record tested inputs, observed status/responses, workspace file paths, and live session/listener info; never write absolute negative claims.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          summary: { type: "string" },
+          evidencePath: { type: "string" },
+        },
+        required: ["title", "summary"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "intent_conclude",
       description:
-        "Conclude claimed Intent. status=succeeded requires factsJson array (≥1 Fact with layer/title).",
+        "Conclude claimed Intent. status=succeeded requires factsJson array (≥1 Fact with layer/title, or a prior fact_draft). When status=failed, conclusion must state objective tested inputs, observed responses, and saved file/session refs — never declare a surface 'impossible' or 'exhausted'.",
       parameters: {
         type: "object",
         properties: {
@@ -993,6 +1036,20 @@ export function handleGraphTool(
     return JSON.stringify(claimed);
   }
 
+  if (name === "fact_draft") {
+    const title = (args.title ?? "").trim();
+    const summary = (args.summary ?? "").trim();
+    if (!title) return "错误: fact_draft requires non-empty title";
+    ctx.state.factDraft = {
+      title,
+      summary,
+      ...(args.evidencePath?.trim() ? { evidencePath: args.evidencePath.trim() } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    ctx.save();
+    return JSON.stringify({ ok: true, draft: ctx.state.factDraft });
+  }
+
   if (name === "intent_conclude") {
     const statusRaw = (args.status ?? "").toLowerCase();
     const status =
@@ -1006,13 +1063,31 @@ export function handleGraphTool(
     if (ctx.state.activeIntentId !== intentId) {
       return `denied: conclude only active Intent ${ctx.state.activeIntentId ?? "—"}; claim it first`;
     }
-    const facts = parseFactsJson(args.factsJson);
+    const parsedFacts = parseFactsJson(args.factsJson);
+    const facts: ConcludeFactInput[] =
+      parsedFacts.length > 0
+        ? parsedFacts
+        : ctx.state.factDraft?.title
+          ? [
+              {
+                layer: ctx.state.factDraft.evidencePath ? "evidence" : "summary",
+                title: ctx.state.factDraft.title,
+                summary: ctx.state.factDraft.summary,
+                ...(ctx.state.factDraft.evidencePath
+                  ? { evidencePath: ctx.state.factDraft.evidencePath }
+                  : {}),
+              },
+            ]
+          : [];
+    const conclusionText =
+      (args.conclusion ?? "").trim() ||
+      (ctx.state.factDraft ? `${ctx.state.factDraft.title}: ${ctx.state.factDraft.summary}` : "");
     try {
       const done = ctx.history.concludeIntent(
         ctx.taskId,
         intentId,
         status,
-        args.conclusion ?? "",
+        conclusionText,
         { facts, workerId },
       );
       if (!done) return `conclude failed: ${args.intentId ?? ""}`;
@@ -1023,6 +1098,9 @@ export function handleGraphTool(
         ctx.state.activeIntentClaimedAt = null;
         ctx.state.toolsAtIntentClaim = null;
         ctx.state.lastSoftSurfaceMilestone = 0;
+        ctx.state.drainIntentId = null;
+        ctx.state.drainStepsRemaining = null;
+        ctx.state.factDraft = null;
       }
       const open = ctx.history.openIntents(ctx.taskId);
       // Followers never enter Reason or acquire the project-level Reason lease.

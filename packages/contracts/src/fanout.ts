@@ -2,11 +2,21 @@ import { normalizeHost } from "./scope.js";
 
 /**
  * Reason / transfer fanout helpers.
- * Keeps Intent explosion bounded (same-root merge + hard caps).
+ *
+ * Concurrency root (`assetRootKey`) is keyed by concrete host so sibling hosts in
+ * the same `/24` subnet or `*.corp.com` wildcard domain never starve one another,
+ * while up to `DEFAULT_MAX_INTENTS_PER_ASSET_ROOT` orthogonal Intents can probe a
+ * single host in parallel. Coarser registrable-domain / `/24` grouping lives in
+ * `assetGroupKey` strictly for family-key suggestion (`family-key.ts`).
  */
 
-/** Grouping key for an asset address (registrable-ish domain or IPv4 /24). */
+/** Per-host fanout concurrency key (normalized concrete IPv4 or hostname). */
 export function assetRootKey(address: string): string {
+  return normalizeHost(address);
+}
+
+/** Coarse family-grouping key (registrable-ish domain or IPv4 /24) for `suggestFamilyKey`. */
+export function assetGroupKey(address: string): string {
   const host = normalizeHost(address);
   if (!host) return "";
   if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) {
@@ -15,7 +25,7 @@ export function assetRootKey(address: string): string {
   }
   const labels = host.split(".").filter(Boolean);
   if (labels.length <= 2) return host;
-  // Naive eTLD+1; good enough for fanout merge (not cookie policy).
+  // Naive eTLD+1; good enough for family suggestion (not cookie policy).
   const multi = new Set(["co.uk", "com.cn", "com.au", "com.br", "co.jp", "ne.jp"]);
   const last2 = labels.slice(-2).join(".");
   if (multi.has(last2) && labels.length >= 3) {
@@ -25,7 +35,7 @@ export function assetRootKey(address: string): string {
 }
 
 export const DEFAULT_MAX_INTENTS_PER_REASON = 4;
-export const DEFAULT_MAX_INTENTS_PER_ASSET_ROOT = 2;
+export const DEFAULT_MAX_INTENTS_PER_ASSET_ROOT = 3;
 /** 0 = disabled. Default 15 minutes. */
 export const DEFAULT_EXPLORE_TIMEOUT_MS = 900_000;
 /** Reason project lease TTL; multi-Explore CAS. */

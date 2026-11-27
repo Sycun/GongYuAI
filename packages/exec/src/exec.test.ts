@@ -65,6 +65,34 @@ test("authorizeCommand：主机网络变更与破坏命令始终拒绝；只读�
   assert.equal(authorizeCommand(AUTH, "scutil --nc list").allowed, true);
   assert.equal(authorizeCommand(AUTH, "scutil --nc status ViscosityLab").allowed, true);
   assert.equal(authorizeCommand(AUTH, "networksetup -getinfo Wi-Fi").allowed, true);
+  // 工具存在性枚举（which/command -v/for 循环列表）里的网络工具名不是主机变更，放行；
+  // 真实调用（带 flag / -restore / nft 变更子命令 / 解释器 payload）仍拒。
+  assert.notEqual(classifyCommand("for b in curl wget nc iptables ssh; do which $b; done"), "host-network");
+  assert.notEqual(classifyCommand("which iptables ip6tables nft"), "host-network");
+  assert.notEqual(classifyCommand("command -v iptables"), "host-network");
+  assert.notEqual(classifyCommand("for b in nft; do which $b; done"), "host-network");
+  assert.equal(classifyCommand("iptables-restore < rules.v4"), "host-network");
+  assert.equal(classifyCommand("ip6tables -F"), "host-network");
+  assert.equal(classifyCommand("nft add rule ip filter input drop"), "host-network");
+  assert.equal(classifyCommand("bash -c 'iptables -A INPUT -j DROP'"), "host-network");
+  // 用户态代理包装器（proxychains / tsocks）与 /tmp 工作目录清理不属宿主机破坏，支持内网横向与日常测试产物清理。
+  assert.notEqual(classifyCommand("proxychains4 -q curl -s http://172.19.0.4:8080/"), "host-network");
+  assert.notEqual(classifyCommand("proxychains nmap -sT -Pn 172.19.0.3"), "host-network");
+  assert.notEqual(classifyCommand("rm -rf /tmp/evil-node && rm -f /tmp/cj.txt"), "destructive");
+  assert.equal(classifyCommand("rm -rf /*"), "destructive");
+  assert.equal(classifyCommand("rm -rf /etc"), "destructive");
+  // 虚拟主机头（-H 'Host: oa.deeptech.com'）与短参数（sort -u / ls -t）不误报为越界直连主机；foothold-private 放行 RFC1918 私网但仍拦截排除项。
+  assert.deepEqual(extractHosts(`curl -s http://10.10.1.5/ -H "Host: oa.deeptech.com"`), ["10.10.1.5"]);
+  assert.deepEqual(extractHosts("sort -u /tmp/words.txt | head -n 20"), []);
+  const pivotAuth = {
+    targets: ["10.10.1.5"],
+    outOfScope: ["172.19.0.99"],
+    capability: "active-lab" as const,
+    pivotPolicy: { mode: "foothold-private" as const, cidrs: [] },
+  };
+  assert.equal(authorizeCommand(pivotAuth, "proxychains curl -s http://172.19.0.4:8080/").allowed, true);
+  assert.equal(authorizeCommand(pivotAuth, "proxychains curl -s http://172.19.0.99:8080/").allowed, false);
+  assert.equal(authorizeCommand(pivotAuth, "curl -s http://203.0.113.50/").allowed, false);
 });
 
 test("capabilityAtLeast 阶梯", () => {

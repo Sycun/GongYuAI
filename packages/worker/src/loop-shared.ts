@@ -9,7 +9,7 @@ import {
 } from "@gongyuai/contracts";
 import type { openHistory } from "@gongyuai/history";
 import type { CheckpointState, CheckpointStore } from "./checkpoint.js";
-import { maybeForceEvidenceStall } from "./evidence-rotation.js";
+import { DEFAULT_DRAIN_STEPS, maybeForceEvidenceStall } from "./evidence-rotation.js";
 import { syncGraphPhase, type WorkerRole } from "./graph-phase.js";
 import { isLeaderStatusTerminal, normalizeProviderId } from "./model-resilience.js";
 import { takeSoftPaceAdvice } from "./soft-pace.js";
@@ -300,6 +300,7 @@ export function runExploreTimeoutGate(
   state: CheckpointState,
   ckpt: CheckpointStore,
   poolSizeOverride?: number,
+  opts?: { drainSteps?: number },
 ): string | null {
   const workerCount = poolSizeOverride ?? manifest.workerCount ?? 1;
   const result = maybeForceEvidenceStall({
@@ -308,6 +309,7 @@ export function runExploreTimeoutGate(
     workerId: manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`,
     workspaceDir: manifest.workspaceDir,
     state,
+    drainSteps: opts?.drainSteps ?? DEFAULT_DRAIN_STEPS,
     leader: isExploreLeader(manifest),
     save: () => ckpt.save(state),
   });

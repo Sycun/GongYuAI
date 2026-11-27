@@ -24,15 +24,22 @@ export const ASSET_KIND_RANK: Record<AssetKind, number> = {
 export const AssetSourceSchema = z.enum(["auth", "discover"]);
 export type AssetSource = z.infer<typeof AssetSourceSchema>;
 
+export const RFC1918_PIVOT_CIDRS = [
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+] as const;
+
 /**
- * P14-B4 — internal pivot admission. `off` (default) keeps every non-target
- * asset oos; `declared` admits only the CIDRs a human wrote into the contract.
- * The model can never widen this: it is part of AuthScope, written only by the
- * control plane on operator edit.
+ * P14-B4 — internal pivot admission:
+ * - `off` (default): keeps every non-target asset oos;
+ * - `declared`: admits only the CIDRs explicitly listed in `cidrs`;
+ * - `foothold-private`: admits RFC1918 private subnets (`10/8`, `172.16/12`, `192.168/16`)
+ *   plus `cidrs` for internal lateral movement via an authorized foothold (minus `outOfScope`).
  */
 export const PivotPolicySchema = z.object({
-  mode: z.enum(["off", "declared"]).default("off"),
-  /** CIDRs admitted for internal testing after a foothold (declared mode only). */
+  mode: z.enum(["off", "declared", "foothold-private"]).default("off"),
+  /** CIDRs admitted for internal testing after a foothold (declared / foothold-private). */
   cidrs: z.array(z.string().min(1)).default([]),
 });
 export type PivotPolicy = z.infer<typeof PivotPolicySchema>;
@@ -53,10 +60,20 @@ export const OastConfigSchema = z.object({
 });
 export type OastConfig = z.infer<typeof OastConfigSchema>;
 
-/** CIDRs currently admitted by a declared pivot policy. */
-export function pivotCidrs(auth: { pivotPolicy?: PivotPolicy } | undefined): string[] {
+/** CIDRs currently admitted by pivot policy (or active foothold when not explicitly off). */
+export function pivotCidrs(
+  auth: { pivotPolicy?: PivotPolicy } | undefined,
+  opts?: { hasFoothold?: boolean },
+): string[] {
   const policy = auth?.pivotPolicy;
-  return policy?.mode === "declared" ? policy.cidrs : [];
+  if (policy?.mode === "declared") return policy.cidrs;
+  if (policy?.mode === "foothold-private") {
+    return [...new Set([...RFC1918_PIVOT_CIDRS, ...policy.cidrs])];
+  }
+  if (!policy && opts?.hasFoothold) {
+    return [...RFC1918_PIVOT_CIDRS];
+  }
+  return [];
 }
 
 /** P14-B3 — typed surface unit (host / service / endpoint / domain). */

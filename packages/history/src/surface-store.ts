@@ -548,7 +548,11 @@ export class SurfaceIntelStore {
     return this.listPlan(taskId).find((step) => step.status === "ready") ?? null;
   }
 
-  assertPlanAllows(taskId: string, planStepId?: string | null): void {
+  assertPlanAllows(
+    taskId: string,
+    planStepId?: string | null,
+    opts?: { sourceFactIds?: readonly string[]; untouchedAssetRoot?: boolean },
+  ): void {
     const steps = this.listPlan(taskId);
     if (!steps.length) {
       if (planStepId) throw new Error(`unknown plan step: ${planStepId}`);
@@ -562,6 +566,16 @@ export class SurfaceIntelStore {
         throw new Error(`plan step ${planStepId} is ${step.status}, not ready (deps unmet)`);
       }
       return;
+    }
+    // Sliding-window dispatch on a newly admitted, untouched host (0 prior Intents)
+    // must not be blocked by leftover plan steps belonging to an earlier host/surface,
+    // provided none of the ready steps explicitly depend on this proposal's source facts.
+    if (opts?.untouchedAssetRoot) {
+      const srcSet = new Set(opts.sourceFactIds ?? []);
+      const overlapsReadyStep = steps.some(
+        (step) => step.status === "ready" && step.needsFactIds.some((fid) => srcSet.has(fid)),
+      );
+      if (!overlapsReadyStep) return;
     }
     const ready = steps.find((step) => step.status === "ready");
     if (ready) {

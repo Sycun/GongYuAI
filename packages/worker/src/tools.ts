@@ -147,6 +147,22 @@ export function extractHosts(command: string): string[] {
  * into this worker's in-memory `manifest.auth.targets` so follower processes never false-deny
  * targets admitted in another OS process.
  */
+export function unlockFootholdPivotSidecar(manifest: WorkerManifest): void {
+  if (!manifest.dataDir) return;
+  if (manifest.auth.pivotPolicy?.mode === "off") return;
+  if (!manifest.auth.pivotPolicy) {
+    manifest.auth.pivotPolicy = { mode: "foothold-private", cidrs: [] };
+  }
+  try {
+    writeFileSync(
+      join(manifest.dataDir, "admitted-pivot.json"),
+      JSON.stringify({ mode: "foothold-private", unlockedAt: new Date().toISOString() }),
+    );
+  } catch {
+    /* best-effort sidecar */
+  }
+}
+
 export function syncAdmittedTargets(manifest: WorkerManifest): void {
   if (!manifest.dataDir) return;
   const outOfScope = manifest.auth.outOfScope ?? [];
@@ -166,6 +182,9 @@ export function syncAdmittedTargets(manifest: WorkerManifest): void {
     } catch {
       /* transient sidecar read ignored */
     }
+  }
+  if (!manifest.auth.pivotPolicy && existsSync(join(manifest.dataDir, "admitted-pivot.json"))) {
+    manifest.auth.pivotPolicy = { mode: "foothold-private", cidrs: [] };
   }
 }
 
@@ -202,15 +221,16 @@ export function gateTool<T>(
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     // Autonomous durable workers (`durableDb` present) receive localized tool_result errors
-    // so the model can self-correct typos/flags without killing the whole task; only host-network
-    // / destructive violations or unguided standalone callers escalate to supervisor pause.
-    const isCriticalHostViolation =
-      reason.includes("host network") || reason.includes("destructive");
+    // so the model can self-correct commands/flags locally without collateral-pausing sibling
+    // Explore slots; only unguided standalone callers escalate hard denials into CommandLedger.
     const isStandaloneCaller = !ctx.manifest.durableDb;
     if (
+      isStandaloneCaller &&
       ["shell", "install", "mcp"].includes(tool) &&
-      (isCriticalHostViolation ||
-        (isStandaloneCaller && (/^denied:/.test(reason) || reason.includes("not in task targets"))))
+      (reason.includes("host network") ||
+        reason.includes("destructive") ||
+        /^denied:/.test(reason) ||
+        reason.includes("not in task targets"))
     ) {
       recordHardDenial(ctx.manifest, tool, reason, deniedCommand);
     }
@@ -357,7 +377,7 @@ export async function runShell(
       `# 命令执行\n\n- 命令：\`${command}\`\n- 目录：${ctx.manifest.workspaceDir}\n- 退出码：${result.exitCode}\n- 超时：${result.timedOut}\n- 耗时：${result.durationMs}ms\n- 范围：${verdict.reason}\n`,
       result,
     );
-    const parserNote = parseShellOutput(ctx, command, result.stdout);
+    const parserNote = parseShellOutput(ctx, command, result.stdout, { strict: false });
     return {
       exitCode: result.exitCode ?? (result.timedOut ? 124 : 1),
       stdout: `${output.stdout}${parserNote}`,

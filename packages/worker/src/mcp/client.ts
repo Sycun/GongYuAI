@@ -6,6 +6,9 @@ import {
   cidrContainsCidr,
   cidrOverlaps,
   isIpv4Cidr,
+  normalizeHost,
+  pivotCidrs,
+  scopeAllows,
   targetAllows,
   type ToolCatalogEntry,
   type WorkerManifest,
@@ -20,6 +23,7 @@ import {
   gateTool,
   installTool,
   mcpActionForServer,
+  syncAdmittedTargets,
 } from "../tools.js";
 import { builtinBinaryAvailable, invalidateBinaryHealth } from "../tool-installer.js";
 import { loadToolsRuntime, saveToolsRuntime } from "../tools-runtime.js";
@@ -338,6 +342,27 @@ export async function openMcpHub(
   }
   persist();
 
+  function extractDeclaredMcpTargets(args: Record<string, unknown>): string[] {
+    const candidates: string[] = [];
+    for (const key of ["target", "url", "base_url", "baseUrl", "endpoint", "host", "domain", "ip", "address", "uri"]) {
+      const val = args[key];
+      if (typeof val === "string" && val.trim()) {
+        for (const token of val.split(",").map((s) => s.trim()).filter(Boolean)) {
+          candidates.push(token);
+        }
+      }
+    }
+    for (const arrKey of ["targets", "urls", "hosts"]) {
+      const val = args[arrKey];
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          if (typeof item === "string" && item.trim()) candidates.push(item.trim());
+        }
+      }
+    }
+    return [...new Set(candidates)];
+  }
+
   async function invokeWithRaw(
     serverId: string,
     toolName: string,
@@ -350,6 +375,8 @@ export async function openMcpHub(
       if (prior) {
         return { text: JSON.stringify({ ok: false, code: prior.code, serverId, reason: prior.message }) };
       }
+      syncAdmittedTargets(manifest);
+      const declaredParts = extractDeclaredMcpTargets(args);
       const session = gateTool(ctx, "mcp", () => {
         assertCapabilityAllows(manifest, mcpActionForServer(serverId, manifest));
         if (!enabled.has(serverId)) {
@@ -361,26 +388,29 @@ export async function openMcpHub(
           throw new Error(`未知 MCP 工具: ${serverId}/${toolName}`);
         }
         const builtin = pool.get(serverId)?.transport === "builtin";
-        if (builtin || typeof args.target === "string") {
-          const rawTarget = typeof args.target === "string" ? args.target.trim() : "";
-          if (!rawTarget) {
+        if (builtin || typeof args.target === "string" || declaredParts.length > 0) {
+          const parts =
+            typeof args.target === "string"
+              ? args.target.split(",").map((p) => p.trim()).filter(Boolean)
+              : declaredParts;
+          if (!parts.length) {
             throw new Error("invalid args: MCP call requires a non-empty string 'target' parameter");
           }
           const { targets, outOfScope } = manifest.auth;
-          const parts = rawTarget.split(",").map((p) => p.trim()).filter(Boolean);
-          const allowed = parts.length > 0 && parts.every((part) => {
+          const pivot = pivotCidrs(manifest.auth);
+          const allowed = parts.every((part) => {
             if (/\s|\*/.test(part)) return false;
             if (isIpv4Cidr(part)) {
               const blockedByOos = (outOfScope ?? []).some((o) =>
                 isIpv4Cidr(o) ? cidrOverlaps(o, part) : cidrContains(part, o),
               );
               if (blockedByOos) return false;
-              return targets.some((t) => {
+              return [...targets, ...pivot].some((t) => {
                 const trimmed = t.trim();
                 return trimmed === "*" || (isIpv4Cidr(trimmed) && cidrContainsCidr(trimmed, part));
               });
             }
-            return targetAllows(targets, part, outOfScope);
+            return scopeAllows(manifest.auth, part);
           });
           if (!allowed) throw new Error("denied: MCP target is outside the authorized scope");
         }
@@ -388,10 +418,14 @@ export async function openMcpHub(
         return active;
       }, { serverId, toolName });
       if (pool.get(serverId)?.transport !== "builtin") {
-        const declaredTarget = typeof args.target === "string" ? args.target.trim() : "";
+        const normalizedHosts = [...new Set(
+          declaredParts
+            .map((part) => (isIpv4Cidr(part) ? part : normalizeHost(part)))
+            .filter(Boolean),
+        )];
         await reviewBeforeDispatch(manifest, {
           ...commandProposal("mcp", serverId + "/" + toolName, args),
-          ...(declaredTarget ? { hosts: [declaredTarget] } : {}),
+          ...(normalizedHosts.length ? { hosts: normalizedHosts } : {}),
         });
       }
       const budget = Math.min(Math.max(pool.get(serverId)?.timeoutMs ?? 120_000, 50), 30 * 60_000);

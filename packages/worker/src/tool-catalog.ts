@@ -14,6 +14,7 @@ import { hasBenchmarkHarness } from "./board-policy.js";
 import { c2Tool, shellJob, shellSession } from "./exec-tools.js";
 import { formatShellResult } from "./execution-trace.js";
 import {
+  FOLLOWER_EXCLUDED_TOOLS,
   FOLLOWER_ONLY_EXEC_TOOLS,
   GRAPH_PHASE_TOOLS,
   asGraphPhase,
@@ -1171,7 +1172,7 @@ export function buildPiToolsFromCatalog(opts: {
     role === "leader"
       ? catalog.filter((s) => !FOLLOWER_ONLY_EXEC_TOOLS.has(s.name) && !isMcpToolName(s.name))
       : role === "follower"
-        ? catalog.filter((s) => s.name !== "assert_goal")
+        ? catalog.filter((s) => !FOLLOWER_EXCLUDED_TOOLS.has(s.name))
         : catalog;
 
   return filtered.map((spec) => {

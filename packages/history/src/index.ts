@@ -71,6 +71,7 @@ import {
   ASSET_TAG,
   ORIGIN_FACT_ID,
   TRANSFERABLE_TAG,
+  assetGroupKey,
   assetRootKey,
   attackEdgeTags,
   attackNodeTags,
@@ -575,10 +576,21 @@ export class HistoryStore {
     if (input.rejectOosOnly !== false) {
       this.assertNotOosOnlyExploit(input.taskId, sourceFactIds);
     }
+    const normalizedAssetRoot = input.assetRoot ? normalizeHost(input.assetRoot) : null;
     if (input.fanout) {
-      this.assertFanoutAllows(input.taskId, sourceFactIds, input.fanout);
+      this.assertFanoutAllows(input.taskId, sourceFactIds, input.fanout, {
+        assetRoot: normalizedAssetRoot,
+        technique: input.technique,
+      });
     }
-    this.surface.assertPlanAllows(input.taskId, input.planStepId);
+    const untouchedAssetRoot = Boolean(
+      normalizedAssetRoot &&
+        !this.listIntents(input.taskId).some((existing) => existing.assetRoot === normalizedAssetRoot),
+    );
+    this.surface.assertPlanAllows(input.taskId, input.planStepId, {
+      sourceFactIds,
+      untouchedAssetRoot,
+    });
     const now = this.now();
     const intent: Intent = {
       id: randomUUID(),
@@ -588,7 +600,7 @@ export class HistoryStore {
       status: "proposed",
       sourceFactIds,
       technique: input.technique?.trim() ? input.technique.trim() : null,
-      assetRoot: input.assetRoot ? normalizeHost(input.assetRoot) : null,
+      assetRoot: normalizedAssetRoot,
       claimedBy: null,
       createdAt: now,
       updatedAt: now,
@@ -711,6 +723,7 @@ export class HistoryStore {
     taskId: string,
     sourceFactIds: string[],
     policy: FanoutPolicy,
+    opts?: { assetRoot?: string | null; technique?: string | null },
   ): void {
     const open = this.openIntents(taskId);
     if (open.length >= policy.maxIntentsPerReason) {
@@ -718,14 +731,22 @@ export class HistoryStore {
         `fanout cap: open Intents=${open.length} ≥ maxIntentsPerReason=${policy.maxIntentsPerReason}`,
       );
     }
-    const addr = this.primaryAssetAddress(taskId, sourceFactIds);
+    const addr = opts?.assetRoot || this.primaryAssetAddress(taskId, sourceFactIds);
     if (!addr) return;
     const root = assetRootKey(addr);
     if (!root) return;
+    const normTech = opts?.technique?.trim().toLowerCase() || null;
     let sameRoot = 0;
     for (const intent of open) {
-      const peer = this.primaryAssetAddress(taskId, intent.sourceFactIds);
-      if (peer && assetRootKey(peer) === root) sameRoot += 1;
+      const peer = intent.assetRoot || this.primaryAssetAddress(taskId, intent.sourceFactIds);
+      if (peer && assetRootKey(peer) === root) {
+        sameRoot += 1;
+        if (normTech && intent.technique?.trim().toLowerCase() === normTech) {
+          throw new Error(
+            `fanout cap: duplicate open technique "${opts?.technique?.trim()}" on host=${root}`,
+          );
+        }
+      }
     }
     if (sameRoot >= policy.maxIntentsPerAssetRoot) {
       throw new Error(
@@ -1914,7 +1935,9 @@ export class HistoryStore {
 
     if (familyKey?.startsWith("root:")) {
       const root = familyKey.slice("root:".length);
-      const narrowed = peers.filter((p) => assetRootKey(p.address) === root);
+      const narrowed = peers.filter(
+        (p) => assetRootKey(p.address) === root || assetGroupKey(p.address) === root,
+      );
       if (narrowed.length) peers = narrowed;
     }
 

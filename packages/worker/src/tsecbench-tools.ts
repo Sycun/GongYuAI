@@ -1,10 +1,10 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isExploreLeader, targetAllows } from "@gongyuai/contracts";
+import { assetAddrTag, isExploreLeader, targetAllows } from "@gongyuai/contracts";
 import { writeEvidenceFile } from "@gongyuai/history";
 import { promoteTrafficForFinding, trafficLabelUuid } from "@gongyuai/exec";
 import type { ToolContext } from "./tools.js";
-import { appendProgress, chargeToolCall, gateTool } from "./tools.js";
+import { appendProgress, chargeToolCall, gateTool, unlockFootholdPivotSidecar } from "./tools.js";
 
 /**
  * TSecBench 平台一等工具：list / start / submit / close / status。
@@ -124,13 +124,21 @@ export function parseContainerAddresses(raw: unknown): Array<{ endpoint: string;
 const challengeHosts = new Map<string, string[]>();
 let lastChallengeHost: string | null = null;
 
-function persistChallengeHosts(dataDir: string, code: string, hosts: string[]): void {
-  if (!dataDir || !code || !hosts.length) return;
+function persistChallengeHosts(dataDir: string, code: string, hosts: string[]): string[] {
+  const recycledFrom: string[] = [];
+  if (!dataDir || !code || !hosts.length) return recycledFrom;
   const mapPath = join(dataDir, "tsecbench-hosts.json");
   try {
     const existing: Record<string, string[]> = existsSync(mapPath)
       ? (JSON.parse(readFileSync(mapPath, "utf8")) as Record<string, string[]>)
       : {};
+    for (const [prevCode, prevHosts] of Object.entries(existing)) {
+      if (prevCode === code || !Array.isArray(prevHosts)) continue;
+      if (hosts.some((h) => prevHosts.includes(h))) {
+        recycledFrom.push(prevCode);
+        existing[prevCode] = prevHosts.filter((h) => !hosts.includes(h));
+      }
+    }
     // Replace rather than union so recycled container IPs from an earlier run of `code` are dropped on restart.
     existing[code] = [...new Set(hosts)];
     const tmp = `${mapPath}.${process.pid}.tmp`;
@@ -138,6 +146,66 @@ function persistChallengeHosts(dataDir: string, code: string, hosts: string[]): 
     renameSync(tmp, mapPath);
   } catch {
     /* best-effort cross-process host sync */
+  }
+  return recycledFrom;
+}
+
+/**
+ * Persist the full委托简报 (`description`, preset accounts, flag count, target workspace dir)
+ * as an idempotent `scope-brief` Fact so isolated Followers never lose grey-box credentials
+ * or internal endpoint hints.
+ */
+export function ensureChallengeScopeBrief(
+  ctx: ToolContext,
+  code: string,
+  meta: Record<string, unknown>,
+  hosts: string[],
+): string | null {
+  if (!code) return null;
+  const description = typeof meta.description === "string" ? meta.description.trim() : "";
+  const titleName =
+    (typeof meta.title === "string" && meta.title.trim()) ||
+    (typeof meta.name === "string" && meta.name.trim()) ||
+    code;
+  const flagCount = meta.flag_count;
+  const difficulty = typeof meta.difficulty === "string" ? meta.difficulty : undefined;
+  const safeCode = code.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 80) || "challenge";
+  const targetWorkspace = join(ctx.manifest.workspaceDir, "targets", safeCode);
+  try {
+    mkdirSync(targetWorkspace, { recursive: true });
+  } catch {
+    /* best-effort dir creation */
+  }
+  const tagKey = `challenge:${code}`;
+  try {
+    const existing = ctx.history
+      .listFacts(ctx.manifest.taskId)
+      .find((f) => f.tags.includes("scope-brief") && f.tags.includes(tagKey));
+    const hostTags = hosts.map((h) => assetAddrTag(h));
+    if (existing) {
+      // If container restarted on a new IP, append a lightweight binding update only when IP changed.
+      const missingHost = hostTags.some((t) => !existing.tags.includes(t));
+      if (!missingHost) return existing.id;
+    }
+    if (!description && flagCount === undefined && !hosts.length) return existing?.id ?? null;
+    const summaryLines = [
+      `目标标识：${code}${titleName !== code ? `（${titleName}）` : ""}`,
+      ...(difficulty ? [`难度分级：${difficulty}`] : []),
+      ...(flagCount !== undefined ? [`目标验证项数（flag_count）：${String(flagCount)}`] : []),
+      ...(hosts.length ? [`当前实例地址：${hosts.join(", ")}`] : []),
+      ...(description ? [`委托背景与预置线索：${description}`] : []),
+      `专属产物目录：${targetWorkspace}`,
+    ];
+    const fact = ctx.history.appendFact({
+      taskId: ctx.manifest.taskId,
+      layer: "title",
+      title: `委托简报 [${code}] ${description ? description.slice(0, 96) : titleName}`,
+      summary: summaryLines.join("\n"),
+      tags: ["scope-brief", "transferable", tagKey, ...hostTags],
+    });
+    return fact.id;
+  } catch {
+    return null;
   }
 }
 
@@ -218,8 +286,22 @@ export function autoAdmitContainerTargets(
   const uniqueHosts = [...new Set(parsed.map((p) => p.host))];
   if (code) {
     challengeHosts.set(code, uniqueHosts);
-    persistChallengeHosts(ctx.manifest.dataDir, code, uniqueHosts);
+    const recycledFrom = persistChallengeHosts(ctx.manifest.dataDir, code, uniqueHosts);
+    if (recycledFrom.length) {
+      try {
+        ctx.history.appendFact({
+          taskId: ctx.manifest.taskId,
+          layer: "title",
+          title: `容器实例代际切换：${uniqueHosts.join(", ")} 现承载 ${code}（原 ${recycledFrom.join(", ")} 已下线）`,
+          summary: `动态容器 IP ${uniqueHosts.join(", ")} 已回收并分配给新目标 ${code}；规划与探索时请忽略该 IP 早于此刻的旧服务指纹与历史结论。`,
+          tags: ["instance-boundary", `challenge:${code}`, ...uniqueHosts.map((h) => assetAddrTag(h))],
+        });
+      } catch {
+        /* non-fatal */
+      }
+    }
   }
+  unlockFootholdPivotSidecar(ctx.manifest);
   lastChallengeHost = parsed[0]?.host ?? lastChallengeHost;
   let scopeChanged = false;
   for (const { host } of parsed) {
@@ -297,17 +379,25 @@ export async function tsecbenchTool(
     if (r.status >= 400) return JSON.stringify({ error: r.text.slice(0, 500) });
     const list = JSON.parse(r.text) as Array<Record<string, unknown>>;
     for (const c of list) {
+      const itemCode = String(c.unique_code ?? "");
       if (c.container_addr) {
-        autoAdmitContainerTargets(ctx, String(c.unique_code ?? ""), c.container_addr);
+        const admitted = autoAdmitContainerTargets(ctx, itemCode, c.container_addr);
+        ensureChallengeScopeBrief(ctx, itemCode, c, admitted.map((a) => a.address));
       }
     }
     if (action === "status" && code) {
       return JSON.stringify(list.find((c) => c.unique_code === code) ?? { error: "challenge_not_found" });
     }
     return JSON.stringify(list.map((c) => ({
-      code: c.unique_code, difficulty: c.difficulty, score: c.total_score,
-      flags: `${c.correct_flag_count}/${c.flag_count}`, done: c.is_completed,
-      status: c.container_status, addr: c.container_addr,
+      code: c.unique_code,
+      ...(typeof c.title === "string" && c.title ? { title: c.title } : typeof c.name === "string" && c.name ? { title: c.name } : {}),
+      ...(typeof c.description === "string" && c.description ? { description: c.description } : {}),
+      difficulty: c.difficulty,
+      score: c.total_score,
+      flags: `${c.correct_flag_count}/${c.flag_count}`,
+      done: c.is_completed,
+      status: c.container_status,
+      addr: c.container_addr,
     })));
   }
   if (!code) return JSON.stringify({ error: "code required for start/submit/close" });
@@ -316,13 +406,40 @@ export async function tsecbenchTool(
     let admitted: Array<{ address: string; factId: string }> = [];
     try {
       const parsed = JSON.parse(r.text) as Record<string, unknown>;
-      const addr = parsed.container_addr ?? (parsed.data as Record<string, unknown> | undefined)?.container_addr;
+      const dataObj = (parsed.data && typeof parsed.data === "object" ? parsed.data : parsed) as Record<string, unknown>;
+      const addr = parsed.container_addr ?? dataObj.container_addr;
       if (addr) admitted = autoAdmitContainerTargets(ctx, code, addr);
+      let scopeBriefFactId = ensureChallengeScopeBrief(
+        ctx,
+        code,
+        dataObj,
+        admitted.map((a) => a.address),
+      );
+      if (!scopeBriefFactId && admitted.length) {
+        // Fallback: if /start response omitted `description`, pull metadata once from /challenges so grey-box creds are never missed.
+        try {
+          const listRes = await api(ctx, "GET", "/openapi/v1/challenges");
+          if (listRes.status < 400) {
+            const items = JSON.parse(listRes.text) as Array<Record<string, unknown>>;
+            const matched = items.find((c) => c.unique_code === code);
+            if (matched) {
+              scopeBriefFactId = ensureChallengeScopeBrief(
+                ctx,
+                code,
+                matched,
+                admitted.map((a) => a.address),
+              );
+            }
+          }
+        } catch {
+          /* non-fatal metadata enrichment */
+        }
+      }
       if (admitted.length) {
         try {
           appendProgress(
             ctx.manifest.workspaceDir,
-            `tsecbench start ${code} → auto-admitted ${admitted.map((a) => `${a.address}(fact=${a.factId})`).join(", ")}`,
+            `tsecbench start ${code} → auto-admitted ${admitted.map((a) => `${a.address}(fact=${a.factId})`).join(", ")}${scopeBriefFactId ? ` brief=${scopeBriefFactId}` : ""}`,
           );
         } catch {
           /* progress log is best-effort */
@@ -339,6 +456,7 @@ export async function tsecbenchTool(
         return JSON.stringify({
           ...parsed,
           autoAdmittedAssets: admitted,
+          ...(scopeBriefFactId ? { scopeBriefFactId } : {}),
           ...(surfaceRotationHint ? { surfaceRotationHint } : {}),
         });
       }

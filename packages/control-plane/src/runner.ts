@@ -158,9 +158,17 @@ export class WorkerRunner {
             }
           } catch { /* ignore */ }
         }
-        const effectiveAuth = extraTargets.length
-          ? { ...task.auth, targets: [...new Set([...task.auth.targets, ...extraTargets])] }
-          : task.auth;
+        const pivotSidecarUnlocked =
+          !task.auth.pivotPolicy && existsSync(join(task.dataDir, "admitted-pivot.json"));
+        const effectiveAuth = {
+          ...task.auth,
+          ...(extraTargets.length
+            ? { targets: [...new Set([...task.auth.targets, ...extraTargets])] }
+            : {}),
+          ...(pivotSidecarUnlocked
+            ? { pivotPolicy: { mode: "foothold-private" as const, cidrs: [] } }
+            : {}),
+        };
 
         if (!executorBound(pending.action, effectiveAuth)) {
           const reason = (pending.action.tool === "shell" || pending.action.tool === "cli") && pending.action.command
@@ -230,6 +238,23 @@ export class WorkerRunner {
     const receipt = held.receipt!;
     const record = this.store.get(task.id);
     if (!record || record.fence !== task.fence) return true;
+    // Multi-worker pool fault isolation: a transient review timeout (`unavailable` / `expired`)
+    // on a single slot's hostless MCP call already threw locally to that worker; dismiss the
+    // held ticket so sibling Explore workers are not collateral-killed via `this.pause(task.id)`.
+    const isMultiWorkerPool = (record.workerPids?.length ?? 0) > 1;
+    if (
+      isMultiWorkerPool &&
+      held.action.tool === "mcp" &&
+      (receipt.decision === "unavailable" || receipt.decision === "expired")
+    ) {
+      const cleanup = new CommandLedger(task.dataDir);
+      try {
+        cleanup.dismiss(held.id);
+      } finally {
+        cleanup.close();
+      }
+      return false;
+    }
     record.commandReview = { id: receipt.id, fence: task.fence, at: receipt.at, tool: held.action.tool,
       summary: held.action.localProbe ?? held.action.summary,
       model: receipt.model, decision: WorkerRunner.reviewDecisionOf(receipt), reason: receipt.reason,

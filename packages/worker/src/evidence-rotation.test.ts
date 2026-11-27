@@ -8,8 +8,11 @@ import { ORIGIN_FACT_ID } from "@gongyuai/contracts";
 import { openHistory, writeEvidenceFile } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import {
+  BREAKTHROUGH_RENEWAL_MS,
+  TIERED_STALL_MS,
   lastVerifiedEvidenceAt,
   maybeForceEvidenceStall,
+  resolveAdaptiveStallMs,
 } from "./evidence-rotation.js";
 import { handleGraphTool } from "./graph-phase.js";
 import { consultTool } from "./ops-tools.js";
@@ -390,6 +393,136 @@ test("graded stall extends grace window when active intent has recent substantiv
     assert.equal(forced.concluded, true);
     assert.equal(ckpt.activeIntentId, null);
   } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("tiered stall escalates 12m → 30m → 45m across attempts, renews 20m on breakthrough, and grants 3-step Soft Drain rescuing factDraft", () => {
+  const { root, dbPath, history } = setup();
+  const prevEnv = process.env.GY_EVIDENCE_STALL_MS;
+  delete process.env.GY_EVIDENCE_STALL_MS;
+  try {
+    const taskId = "t-tiered-drain";
+    history.recordAsset({ taskId, address: "10.0.160.241", auth: AUTH, live: true });
+
+    // Round 1 on 10.0.160.241 -> 12 min
+    const i1 = history.proposeIntent({
+      taskId,
+      title: "round 1 sweep",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.0.160.241",
+    });
+    assert.equal(resolveAdaptiveStallMs(history, taskId, i1), TIERED_STALL_MS[0]);
+    history.claimIntent(taskId, i1.id, "w1");
+    history.forceConcludeExploreTimeout({ taskId, intentId: i1.id, workerId: "w1", reason: "r1 timeout" });
+
+    // Round 2 on 10.0.160.241 -> 30 min
+    const i2 = history.proposeIntent({
+      taskId,
+      title: "round 2 deep",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.0.160.241",
+    });
+    assert.equal(resolveAdaptiveStallMs(history, taskId, i2), TIERED_STALL_MS[1]);
+    history.claimIntent(taskId, i2.id, "w1");
+    history.forceConcludeExploreTimeout({ taskId, intentId: i2.id, workerId: "w1", reason: "r2 timeout" });
+
+    // Round 3 on 10.0.160.241 -> 45 min
+    const i3 = history.proposeIntent({
+      taskId,
+      title: "round 3 final",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.0.160.241",
+    });
+    assert.equal(resolveAdaptiveStallMs(history, taskId, i3), TIERED_STALL_MS[2]);
+
+    // Breakthrough renewal: Round 1 (12m) gets +20m renewal when verified evidence lands mid-Intent
+    const r1HostB = history.proposeIntent({
+      taskId,
+      title: "b-02 multi-stage",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.0.160.242",
+    });
+    history.claimIntent(taskId, r1HostB.id, "w2");
+    const now = Date.now();
+    backdateIntent(dbPath, r1HostB.id, 15 * 60_000);
+    // Verified breakthrough landed 14 minutes ago (> 12m base R1 stall, < 20m BREAKTHROUGH_RENEWAL_MS!)
+    const fLead = history.recordFinding({
+      taskId,
+      title: "Boundary SSRF",
+      asset: "10.0.160.242",
+      vulnClass: "CWE-918",
+      severity: "high",
+    });
+    writeEvidenceFile(join(root, "evidence"), "findings/ssrf.txt", "file:///etc/passwd\n");
+    history.verifyFinding(taskId, fLead.finding.id, {
+      evidencePaths: ["findings/ssrf.txt"],
+      repro: "curl http://10.0.160.242/proxy",
+      verifiedBy: "w2",
+    });
+    const db = new DatabaseSync(dbPath);
+    db.prepare("UPDATE findings SET verified_at = ? WHERE id = ?").run(
+      new Date(now - 14 * 60_000).toISOString(),
+      fLead.finding.id,
+    );
+    db.close();
+
+    const ckptB = state({
+      activeIntentId: r1HostB.id,
+      factDraft: {
+        title: "已拿 internal_admin_token",
+        summary: "正通过跳板探测 172.19.0.4:8080，详见 workspace/scan.log",
+        updatedAt: new Date(now).toISOString(),
+      },
+    });
+    const renewed = maybeForceEvidenceStall({
+      history, taskId, workerId: "w2", workspaceDir: root, state: ckptB,
+      drainSteps: 3, save: () => {}, nowMs: now,
+    });
+    assert.equal(BREAKTHROUGH_RENEWAL_MS, 20 * 60_000);
+    assert.equal(renewed.concluded, false);
+    assert.equal(renewed.draining, undefined);
+    assert.equal(ckptB.activeIntentId, r1HostB.id);
+
+    // Advance past 20m renewal -> Soft Drain 3/3 -> 2/3 -> 1/3 -> Hard Conclude + rescue factDraft!
+    const future = now + 7 * 60_000;
+    const d1 = maybeForceEvidenceStall({
+      history, taskId, workerId: "w2", workspaceDir: root, state: ckptB,
+      drainSteps: 3, save: () => {}, nowMs: future,
+    });
+    assert.equal(d1.concluded, false);
+    assert.equal(d1.draining, true);
+    assert.equal(d1.drainStepsRemaining, 3);
+    assert.equal(ckptB.activeIntentId, r1HostB.id);
+
+    const d2 = maybeForceEvidenceStall({
+      history, taskId, workerId: "w2", workspaceDir: root, state: ckptB,
+      drainSteps: 3, save: () => {}, nowMs: future + 1000,
+    });
+    assert.equal(d2.concluded, false);
+    assert.equal(d2.drainStepsRemaining, 2);
+
+    const d3 = maybeForceEvidenceStall({
+      history, taskId, workerId: "w2", workspaceDir: root, state: ckptB,
+      drainSteps: 3, save: () => {}, nowMs: future + 2000,
+    });
+    assert.equal(d3.concluded, false);
+    assert.equal(d3.drainStepsRemaining, 1);
+
+    const finalConclude = maybeForceEvidenceStall({
+      history, taskId, workerId: "w2", workspaceDir: root, state: ckptB,
+      drainSteps: 3, save: () => {}, nowMs: future + 3000,
+    });
+    assert.equal(finalConclude.concluded, true);
+    assert.equal(ckptB.activeIntentId, null);
+    assert.equal(ckptB.factDraft, null);
+    const rescued = history.listFacts(taskId).find((f) => f.tags.includes("draft-rescued"));
+    assert.ok(rescued, "factDraft must be auto-rescued into History before reset");
+    assert.match(rescued.title, /internal_admin_token/);
+  } finally {
+    if (prevEnv === undefined) delete process.env.GY_EVIDENCE_STALL_MS;
+    else process.env.GY_EVIDENCE_STALL_MS = prevEnv;
     history.close();
     rmSync(root, { recursive: true, force: true });
   }

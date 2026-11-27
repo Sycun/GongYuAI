@@ -3,7 +3,7 @@ import { TunnelManager, type TunnelOpenInput } from "@gongyuai/exec";
 import type { WorkerManifest } from "@gongyuai/contracts";
 import { scopeAllows } from "@gongyuai/contracts";
 import type { ToolContext } from "./tools.js";
-import { capabilityAtLeast } from "./tools.js";
+import { capabilityAtLeast, syncAdmittedTargets, unlockFootholdPivotSidecar } from "./tools.js";
 
 /**
  * P14-B4 — local-listener tunnels (pivot). The manager only binds 127.0.0.1 and
@@ -19,7 +19,10 @@ function managerFor(ctx: ToolContext): TunnelManager {
   if (existing) return existing;
   const manager = new TunnelManager({
     baseDir: join(ctx.manifest.dataDir, "exec"),
-    authorizeHost: (host) => scopeAllows(ctx.manifest.auth, host),
+    authorizeHost: (host) => {
+      syncAdmittedTargets(ctx.manifest);
+      return scopeAllows(ctx.manifest.auth, host);
+    },
   });
   managers.set(key, manager);
   return manager;
@@ -60,7 +63,11 @@ function openInput(args: Record<string, string>): TunnelOpenInput {
 
 export async function tunnelOpenTool(ctx: ToolContext, args: Record<string, string>): Promise<string> {
   requireTunnelCapability(ctx.manifest);
+  syncAdmittedTargets(ctx.manifest);
   const input = openInput(args);
+  if ("via" in input && input.via && scopeAllows(ctx.manifest.auth, input.via)) {
+    unlockFootholdPivotSidecar(ctx.manifest);
+  }
   const tunnel = await managerFor(ctx).open(input);
   try {
     ctx.history.ops.recordChange(

@@ -24,13 +24,21 @@ export function taskWorkerCount(task: TaskRecord, assetCount?: number): number {
   return resolveWorkerSlotCount(exploreCount);
 }
 
-/** Distinct admitted/live assets from the History projection; 0 when no History yet. */
+/**
+ * Distinct scalable exploration units from History (0 when no History yet):
+ * `max(admitted/live assets, open Intents)` so single-target engagements that fan out
+ * 2–3 orthogonal Intents on the same host also scale Follower slots up to operator cap.
+ */
 export function countScalableAssets(task: TaskRecord): number {
   const paths = taskPaths(task.dataDir);
   if (!existsSync(paths.historyDb)) return 0;
   const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: true });
   try {
-    return history.listAssets(task.id).filter((a) => a.kind === "admitted" || a.kind === "live").length;
+    const assetUnits = history
+      .listAssets(task.id)
+      .filter((a) => a.kind === "admitted" || a.kind === "live").length;
+    const openIntentUnits = history.openIntents(task.id).length;
+    return Math.max(assetUnits, openIntentUnits);
   } finally {
     history.close();
   }

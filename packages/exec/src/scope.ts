@@ -40,15 +40,18 @@ export function capabilityAtLeast(have: AuthCapability | undefined, need: AuthCa
   return (CAP_RANK[have ?? "observe"] ?? 0) >= (CAP_RANK[need] ?? 0);
 }
 
-/** 主机网络/代理/VPN 变更：任何能力级都拒绝（实验室线路须预先接好）；只读状态查询（scutil --nc 的 list/status/probe、networksetup 的 -get 与 -list 系列）放行。 */
+/** 主机网络/代理/VPN 变更：任何能力级都拒绝（实验室线路须预先接好）；只读状态查询（scutil --nc 的 list/status/probe、networksetup 的 -get 与 -list 系列）放行。
+ * proxychains/tsocks 属于用户态进程级 SOCKS 包装器（不修改宿主机路由/网卡/系统代理），归入 active-lab 利用工具放行；
+ * iptables/ip6tables 须带 flag 或 -restore、nft 须变更子命令才算变更：which/command -v/for 循环里枚举工具名（含靶机 webshell payload 串）不是本机网络改动，避免误判 held 后级联拦截后续命令。 */
 const HOST_NETWORK_DENY =
-  /\b(route\s+(add|delete|change|flush)|ip\s+route\s+(add|del|change|replace)|networksetup\s+-(?!get|list)\w|scutil\s+--nc\s+(?!list\b|status\b|probe\b)\w|pfctl\b|iptables\b|ip6tables\b|nft\s+|sysctl\s+.*\bnet\.|launchctl\s+(load|unload).*vpn|osascript[^\n]*Viscosity|viscosity\s+(connect|disconnect)|set\s+system\s+proxy|mitmproxy\s+--mode\s+local|proxychains|tsocks\b)/i;
+  /\b(route\s+(add|delete|change|flush)|ip\s+route\s+(add|del|change|replace)|networksetup\s+-(?!get|list)\w|scutil\s+--nc\s+(?!list\b|status\b|probe\b)\w|pfctl\b|iptables\s+-|iptables-restore\b|ip6tables\s+-|ip6tables-restore\b|nft\s+(add|delete|flush|insert|replace|create|destroy|reset)\b|sysctl\s+.*\bnet\.|launchctl\s+(load|unload).*vpn|osascript[^\n]*Viscosity|viscosity\s+(connect|disconnect)|set\s+system\s+proxy|mitmproxy\s+--mode\s+local)/i;
 
 /** 不可回滚的本机破坏动作。pkill/killall 可能误杀无关进程，属工程自保拒绝；后台作业用 shell_job kill。
+ * rm 仅拒绝针对根目录 `/`、`/*` 或核心系统目录（/etc、/usr、/bin、/sbin、/lib、/boot、/dev、/proc、/sys、/System、/Library）的递归删除，放行 /tmp 与任务工作区临时清理；
  * shutdown/reboot/halt 排除 URL 路径段（如目标 API "/api/manager/reboot"）：那是打向目标的 payload 字符串，
  * 不是本机命令；路径二进制执行（/sbin/reboot）由 classifyCommand 的 verb 兜底覆盖。 */
 const DESTRUCTIVE_DENY =
-  /\b(rm\s+-rf?\s+\/(?!\/)|mkfs\.|dd\s+if=.*of=\/dev\/|diskutil\s+erase|pkill\b|killall\b|chmod\s+-R\s+777\s+\/|:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:|\.\s+\/dev\/sd[a-z])|(?<![\/\w.-])(shutdown|reboot|halt)\b/i;
+  /\b(rm\s+(?:-[a-zA-Z]*[rf][a-zA-Z]*\s+|--[a-z-]+\s+)*\/(?:\*(?=\s|$|[;&|"'`)])|(?=\s|$|[;&|"'`)])|(?:etc|usr|bin|sbin|lib|lib64|boot|dev|proc|sys|System|Library)(?:\/|\s|$|[;&|"'`)]))|mkfs\.|dd\s+if=.*of=\/dev\/|diskutil\s+erase|pkill\b|killall\b|chmod\s+-R\s+777\s+\/(?:\s|$|[;&|"'`)]|(?:etc|usr|bin|sbin|System)\b)|:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:|\.\s+\/dev\/sd[a-z])|(?<![\/\w.-])(shutdown|reboot|halt)\b/i;
 /** 路径二进制执行兜底（lookbehind 会放过 /sbin/reboot）；只查命令起始位置，
  * 避免把 quoted URL 路径 token（/api/manager/reboot）误判为本机破坏。 */
 const DESTRUCTIVE_PATH_EXEC = /^(?:sudo\s+)?(?:\/[\w.-]+)+\/(reboot|shutdown|halt|pkill|killall)\b/i;
@@ -72,7 +75,7 @@ const EXPLOIT_VERBS = new Set([
   "smbclient", "evil-winrm", "xfreerdp", "rdesktop", "msfconsole", "msfvenom", "meterpreter",
   "searchsploit", "commix", "tplmap", "ysoserial", "jwt_tool", "hashcat", "john", "aircrack-ng",
   "reaver", "bettercap", "secretsdump", "psexec", "wmiexec", "smbexec", "atexec",
-  "dcomexec", "chisel", "ligolo", "proxychains4", "rubeus", "certipy", "bloodhound", "sharphound",
+  "dcomexec", "chisel", "ligolo", "proxychains", "proxychains4", "tsocks", "rubeus", "certipy", "bloodhound", "sharphound",
   "kerbrute", "impacket", "crackmapexec", "netexec", "nxc",
 ]);
 
@@ -130,19 +133,23 @@ export function extractHosts(command: string): string[] {
     return " __URL__ ";
   });
 
-  // 2) If command already has an explicit URL target, strip inline curl/http body flags (-d / --data*)
-  // so form/JSON payload fields (like `{"email":"admin@example.com"}`) do not trigger false OOS blocks.
-  if (hosts.size > 0) {
+  // 2) If command already has an explicit URL target, strip inline curl/http body & header flags
+  // (-d / --data* / -F / --form / -H / --header) so form/JSON payloads, SSRF inner parameters,
+  // and virtual-host headers (e.g. `-H "Host: oa.corp.internal"`) sent TO an authorized endpoint
+  // do not trigger false outbound OOS blocks.
+  const hasExplicitUrlTarget = hosts.size > 0;
+  if (hasExplicitUrlTarget) {
     scrubbed = scrubbed.replace(
-      /\s(?:-d|--data|--data-raw|--data-binary|--data-urlencode)\s+(?:'[^']*'|"[^"]*"|\S+)/g,
+      /\s(?:-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form|-H|--header)\s+(?:'[^']*'|"[^"]*"|\S+)/g,
       " ",
     );
   }
 
-  // 3) Explicit host flags (-h / --host / -u / --target / Host: header)
+  // 3) Explicit long host flags (--host / --url / --target / --domain / --ip / --address;
+  // omit ambiguous single-letter -u/-t/-h which collide with username/threads/sort/ls flags).
   const flagPatterns: RegExp[] = [
-    /\b(?:-h|--host|--url|-u|--target|-t|--domain|--ip|--address)\s+['"]?([a-z0-9.-]+(?::\d+)?)/gi,
-    /\bHost:\s*([a-z0-9.-]+(?::\d+)?)/gi,
+    /\b(?:--host|--url|--target|--domain|--ip|--address)\s+['"]?([a-z0-9.-]+(?::\d+)?)/gi,
+    ...(!hasExplicitUrlTarget ? [/\bHost:\s*([a-z0-9.-]+(?::\d+)?)/gi] : []),
   ];
   for (const re of flagPatterns) {
     re.lastIndex = 0;
