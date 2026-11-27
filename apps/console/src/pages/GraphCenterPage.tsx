@@ -3,9 +3,9 @@ import { Input } from "@douyinfe/semi-ui";
 import { api, type TaskRecord } from "../api";
 import { CoverageTable, graphStatusText, shortSourceLabel } from "../components/TaskGraphRail";
 import { GraphStage } from "../components/GraphCanvas";
-import { rememberedGraphTask, rememberGraphTask } from "../workspace/graphStore";
+import { rememberedGraphTask, rememberGraphTask, setGraphSlot } from "../workspace/graphStore";
 import { discardMemoryCache, useTaskGraph } from "../workspace/useTaskGraph";
-import type { ViewName } from "../workspace/model";
+import { resolveSurfaceDisplay, type SurfaceLayout, type ViewName } from "../workspace/model";
 
 const views: Array<{ view: ViewName; title: string }> = [
   { view: "assets", title: "资产图" },
@@ -18,6 +18,7 @@ export function GraphCenterPage({ onOpen }: { onOpen: (href: string) => void }) 
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [taskId, setTaskId] = useState(rememberedGraphTask() ?? "");
   const [view, setView] = useState<ViewName>("assets");
+  const [surfaceLayout, setSurfaceLayout] = useState<SurfaceLayout>("both");
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -70,9 +71,49 @@ export function GraphCenterPage({ onOpen }: { onOpen: (href: string) => void }) 
         <span className="gy-graph-meta-note">
           {graph?.notes[0] ?? "小图、展开视图和图谱中心共用同一份任务缓存、节点标识与选中项；Fact–Intent 因果图位于任务详情的「意图图谱」页。"}
         </span>
-        {taskId && state.kind === "ready" && (
-          <span className="gy-graph-source" title={state.source}>{shortSourceLabel(state.source)}</span>
-        )}
+        <div className="gy-graph-meta-right">
+          {Boolean(taskId) && view === "surface" && (state.kind === "ready" || state.kind === "empty") && (
+            <div className="gy-surface-mode" role="group" aria-label="攻击面展示方式">
+              <button
+                type="button"
+                aria-pressed={surfaceLayout === "both"}
+                className={surfaceLayout === "both" ? "is-active" : ""}
+                onClick={() => {
+                  if (surfaceLayout !== "both") {
+                    setSurfaceLayout("both");
+                    setGraphSlot(taskId, view, { fitted: false });
+                  }
+                }}
+              >
+                图谱 + 矩阵
+              </button>
+              <button
+                type="button"
+                aria-pressed={surfaceLayout === "graph"}
+                className={surfaceLayout === "graph" ? "is-active" : ""}
+                onClick={() => {
+                  if (surfaceLayout !== "graph") {
+                    setSurfaceLayout("graph");
+                    setGraphSlot(taskId, view, { fitted: false });
+                  }
+                }}
+              >
+                仅看图谱
+              </button>
+              <button
+                type="button"
+                aria-pressed={surfaceLayout === "table"}
+                className={surfaceLayout === "table" ? "is-active" : ""}
+                onClick={() => setSurfaceLayout("table")}
+              >
+                仅看矩阵
+              </button>
+            </div>
+          )}
+          {taskId && state.kind === "ready" && (
+            <span className="gy-graph-source" title={state.source}>{shortSourceLabel(state.source)}</span>
+          )}
+        </div>
       </div>
 
       {view === "memory" && (
@@ -83,15 +124,25 @@ export function GraphCenterPage({ onOpen }: { onOpen: (href: string) => void }) 
         </div>
       )}
 
-      {taskId && view !== "memory" && graph && graph.nodes.length > 0
-        ? <GraphStage graph={graph} taskId={taskId} view={view} onOpen={onOpen} />
-        : view === "memory"
-          ? null
-          : <p className="gy-stage-status" role="status">{taskId ? graphStatusText(state) : "先选择任务。"}</p>}
+      {(() => {
+        const cells = state.kind === "ready" || state.kind === "empty" ? (state.cells ?? []) : [];
+        const display = resolveSurfaceDisplay(view, surfaceLayout, state.kind, cells.length);
+        return (
+          <div className={`gy-graph-detail-stack is-${display.layout}`} data-surface-layout={display.layout}>
+            {display.showGraph && (
+              taskId && view !== "memory" && graph && graph.nodes.length > 0
+                ? <GraphStage graph={graph} taskId={taskId} view={view} onOpen={onOpen} />
+                : view === "memory"
+                  ? null
+                  : <p className="gy-stage-status" role="status">{taskId ? graphStatusText(state) : "先选择任务。"}</p>
+            )}
 
-      {view === "surface" && (state.kind === "ready" || state.kind === "empty") && (
-        <CoverageTable cells={state.cells ?? []} />
-      )}
+            {display.showTable && (
+              <CoverageTable cells={cells} expanded={display.layout === "table"} />
+            )}
+          </div>
+        );
+      })()}
 
       <section className="gy-graph-center-notes">
         <h2>第二批内部能力说明</h2>

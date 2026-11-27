@@ -29,6 +29,7 @@ import {
   findAttackPaths,
   freshnessOf,
   noProgressAlarm,
+  normalizeHost,
   rollbackScript,
   visibilityDenial,
   type EvidenceImport,
@@ -523,12 +524,21 @@ export async function handleOpsRoute(
           })),
           retractedEvidence,
         };
-        const endpointAssets = input.assets
-          .filter((asset) => asset.assetType === "endpoint")
-          .map((asset) => asset.address);
-        const hostAssets = input.assets
-          .filter((asset) => asset.assetType !== "endpoint")
-          .map((asset) => asset.address);
+        const endpointAssets = [
+          ...new Set(
+            input.assets
+              .filter((asset) => asset.assetType === "endpoint")
+              .map((asset) => asset.address),
+          ),
+        ];
+        const hostAssets = [
+          ...new Set(
+            input.assets
+              .filter((asset) => asset.assetType !== "endpoint")
+              .map((asset) => normalizeHost(asset.address))
+              .filter(Boolean),
+          ),
+        ];
         const cells = deriveCoverageMatrix({
           assets: hostAssets,
           endpoints: endpointAssets,

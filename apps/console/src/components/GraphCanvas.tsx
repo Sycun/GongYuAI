@@ -10,6 +10,7 @@ import {
   THUMB_W,
   bezierBetween as baseBezierBetween,
   clipText,
+  computeMiniMapMetrics,
   formatBadge,
   isUnknownSurfaceEdge,
   kindMeta,
@@ -209,11 +210,24 @@ function layoutExecutionScene(
   };
 }
 
-function layoutScene(graph: GView, options: LayoutOptions): Scene {
-  const kindFiltered = graph.nodes.filter((node) => !options.kinds?.length || options.kinds.includes(node.kind));
+export function layoutScene(graph: GView, options: LayoutOptions): Scene {
+  const seenNodeIds = new Set<string>();
+  const uniqueGraphNodes = graph.nodes.filter((node) => {
+    if (seenNodeIds.has(node.id)) return false;
+    seenNodeIds.add(node.id);
+    return true;
+  });
+  const kindFiltered = uniqueGraphNodes.filter((node) => !options.kinds?.length || options.kinds.includes(node.kind));
   const cappedNodes = options.maxNodes ? kindFiltered.slice(0, options.maxNodes) : kindFiltered;
   const candidateIds = new Set(cappedNodes.map((node) => node.id));
-  const candidateEdges = graph.edges.filter((edge) => candidateIds.has(edge.from) && candidateIds.has(edge.to));
+  const seenEdges = new Set<string>();
+  const candidateEdges = graph.edges.filter((edge) => {
+    if (!candidateIds.has(edge.from) || !candidateIds.has(edge.to)) return false;
+    const key = `${edge.from}\0${edge.to}\0${edge.kind}\0${edge.label}`;
+    if (seenEdges.has(key)) return false;
+    seenEdges.add(key);
+    return true;
+  });
 
   const unknownEdgeCount = candidateEdges.filter((edge) => isUnknownSurfaceEdge(edge, graph.view)).length;
   const hideUnknown = options.hideUnknown ?? (graph.view === "surface");
@@ -251,9 +265,6 @@ function layoutScene(graph: GView, options: LayoutOptions): Scene {
   for (const edge of visibleEdges) g.setEdge(edge.from, edge.to, {}, edge.id);
   if (connectedNodes.length) layout(g);
 
-  const outDegree = new Map<string, number>();
-  for (const edge of visibleEdges) outDegree.set(edge.from, (outDegree.get(edge.from) ?? 0) + 1);
-
   const rawPos = new Map<string, { x: number; y: number }>();
   for (const node of connectedNodes) {
     const at = g.node(node.id);
@@ -263,31 +274,63 @@ function layoutScene(graph: GView, options: LayoutOptions): Scene {
     });
   }
 
+  // 对任意高度过长（> 8 个节点）的层级列自动折成多子列，并向右平移后续层级，避免大量资产/漏洞/检查项叠成数千像素高的细长竖条导致画布与缩略图失真。
   const byRankX = new Map<number, GNode[]>();
   for (const node of connectedNodes) {
-    if ((outDegree.get(node.id) ?? 0) > 0) continue;
-    const rx = Math.round((rawPos.get(node.id)?.x ?? 0) / 10) * 10;
+    const rx = Math.round((rawPos.get(node.id)?.x ?? 0) / 20) * 20;
     const list = byRankX.get(rx) ?? [];
     list.push(node);
     byRankX.set(rx, list);
   }
+  const sortedRanks = [...byRankX.entries()].sort((a, b) => a[0] - b[0]);
   const wrappedNodeIds = new Set<string>();
-  for (const [, bucket] of byRankX) {
-    if (bucket.length <= 8) continue;
+  const wrappedRanks = new Set<number>();
+  let extraShiftX = 0;
+  let wrappedBottom = 0;
+
+  for (const [rx, bucket] of sortedRanks) {
     bucket.sort((a, b) => (rawPos.get(a.id)?.y ?? 0) - (rawPos.get(b.id)?.y ?? 0));
-    const subCols = bucket.length > 18 ? 3 : 2;
+    if (bucket.length <= 8) {
+      if (extraShiftX > 0) {
+        for (const node of bucket) {
+          const p = rawPos.get(node.id)!;
+          rawPos.set(node.id, { x: p.x + extraShiftX, y: p.y });
+        }
+      }
+      continue;
+    }
+    wrappedRanks.add(rx);
+    const subCols = bucket.length > 30 ? 4 : bucket.length > 16 ? 3 : 2;
     const rows = Math.ceil(bucket.length / subCols);
-    const baseX = rawPos.get(bucket[0]!.id)?.x ?? 280;
+    const baseX = (rawPos.get(bucket[0]!.id)?.x ?? 28) + extraShiftX;
     const baseY = 28;
     bucket.forEach((node, idx) => {
       const col = Math.floor(idx / rows);
       const row = idx % rows;
+      const y = Math.round(baseY + row * (NODE_H + 20));
       rawPos.set(node.id, {
         x: Math.round(baseX + col * (NODE_W + 38)),
-        y: Math.round(baseY + row * (NODE_H + 20)),
+        y,
       });
       wrappedNodeIds.add(node.id);
+      wrappedBottom = Math.max(wrappedBottom, y + NODE_H);
     });
+    extraShiftX += (subCols - 1) * (NODE_W + 38) + 24;
+  }
+
+  if (wrappedNodeIds.size > 0 && wrappedBottom > 0) {
+    for (const [rx, bucket] of sortedRanks) {
+      if (wrappedRanks.has(rx)) continue;
+      const maxBucketY = Math.max(...bucket.map((n) => (rawPos.get(n.id)?.y ?? 0) + NODE_H));
+      if (maxBucketY <= wrappedBottom) continue;
+      const spanH = bucket.length * NODE_H + Math.max(0, bucket.length - 1) * 24;
+      const startY = Math.max(28, Math.round((wrappedBottom + 28 - spanH) / 2));
+      bucket.forEach((node, idx) => {
+        const p = rawPos.get(node.id)!;
+        rawPos.set(node.id, { x: p.x, y: startY + idx * (NODE_H + 24) });
+        wrappedNodeIds.add(node.id);
+      });
+    }
   }
 
   let connectedBottom = 28;
@@ -424,17 +467,15 @@ function StageMiniMap({
   onNavigate: (worldX: number, worldY: number) => void;
 }) {
   if (scene.nodes.length < 2 || frameSize.width < 260) return null;
-  const viewW = Math.max(80, Math.round(frameSize.width / viewport.k));
-  const viewH = Math.max(60, Math.round(frameSize.height / viewport.k));
-  const viewX = Math.round(-viewport.x / viewport.k);
-  const viewY = Math.round(-viewport.y / viewport.k);
-
-  const boundW = Math.max(scene.maxX, viewX + viewW, 240);
-  const boundH = Math.max(scene.maxY, viewY + viewH, 160);
-  const minX = Math.min(0, viewX);
-  const minY = Math.min(0, viewY);
-  const totalW = boundW - minX;
-  const totalH = boundH - minY;
+  const compact = frameSize.height < 280;
+  const { minX, minY, totalW, totalH, nodeW, nodeH, viewRect } = computeMiniMapMetrics(
+    scene,
+    viewport,
+    frameSize,
+    compact ? { width: 124, height: 72 } : { width: 162, height: 98 },
+    { width: NODE_W, height: NODE_H },
+  );
+  const lineStep = scene.lines.length > 180 ? Math.ceil(scene.lines.length / 180) : 1;
 
   return (
     <svg
@@ -455,35 +496,60 @@ function StageMiniMap({
         onNavigate(worldX, worldY);
       }}
     >
+      <rect
+        x={minX}
+        y={minY}
+        width={totalW}
+        height={totalH}
+        rx="16"
+        fill="#f1f5f9"
+        stroke="none"
+      />
+      {scene.lines.map(({ edge, d }, index) => {
+        if (lineStep > 1 && index % lineStep !== 0) return null;
+        return (
+          <path
+            key={edge.id}
+            d={d}
+            fill="none"
+            stroke={edge.broken ? "#fca5a5" : "#94a3b8"}
+            strokeOpacity={0.5}
+            strokeWidth="0.9"
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
       {scene.nodes.map((node) => {
         const pos = scene.positions.get(node.id);
         if (!pos) return null;
         const meta = kindMeta(node.kind);
         const active = selectedId === node.id;
+        const cx = pos.x + NODE_W / 2;
+        const cy = pos.y + NODE_H / 2;
         return (
           <rect
             key={node.id}
-            x={pos.x}
-            y={pos.y}
-            width={NODE_W}
-            height={NODE_H}
-            rx="12"
+            x={Math.round(cx - nodeW / 2)}
+            y={Math.round(cy - nodeH / 2)}
+            width={nodeW}
+            height={nodeH}
+            rx={Math.round(Math.min(nodeW, nodeH) * 0.22)}
             fill={meta.color}
-            fillOpacity={active ? 1 : 0.85}
-            stroke={active ? "#0f172a" : "#ffffff"}
-            strokeWidth={active ? 2 : 1}
+            fillOpacity={active ? 1 : 0.9}
+            stroke={active ? "#0f172a" : "none"}
+            strokeWidth={active ? 1.8 : 0}
             vectorEffect="non-scaling-stroke"
           />
         );
       })}
       <rect
-        x={viewX}
-        y={viewY}
-        width={viewW}
-        height={viewH}
+        x={viewRect.x}
+        y={viewRect.y}
+        width={viewRect.width}
+        height={viewRect.height}
         rx="8"
-        fill="rgba(59, 130, 246, 0.08)"
-        stroke="#3b82f6"
+        fill="rgba(59, 130, 246, 0.12)"
+        stroke="#2563eb"
         strokeWidth="1.6"
         vectorEffect="non-scaling-stroke"
       />

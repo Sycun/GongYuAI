@@ -337,3 +337,63 @@ test("a memory body is not shown when the server omits an internal grant", async
 test("graph parser rejects a view that does not match the requested picture", () => {
   assert.equal(readGraph({ graph: { view: "surface", nodes: [], edges: [] } }, "assets"), null);
 });
+
+test("surface layout mode distinguishes split both-view, graph-only, and table-only without duplicate empty banners", async () => {
+  const { resolveSurfaceDisplay } = await import("./model");
+  assert.deepEqual(resolveSurfaceDisplay("surface", "both", "ready", 2024), {
+    layout: "both",
+    showGraph: true,
+    showTable: true,
+  });
+  assert.deepEqual(resolveSurfaceDisplay("surface", "graph", "ready", 2024), {
+    layout: "graph",
+    showGraph: true,
+    showTable: false,
+  });
+  assert.deepEqual(resolveSurfaceDisplay("surface", "table", "ready", 2024), {
+    layout: "table",
+    showGraph: false,
+    showTable: true,
+  });
+  assert.deepEqual(resolveSurfaceDisplay("assets", "both", "ready", 0), {
+    layout: "graph",
+    showGraph: true,
+    showTable: false,
+  });
+  assert.deepEqual(resolveSurfaceDisplay("surface", "both", "empty", 0), {
+    layout: "both",
+    showGraph: true,
+    showTable: false,
+  });
+  assert.deepEqual(resolveSurfaceDisplay("surface", "table", "empty", 0), {
+    layout: "table",
+    showGraph: false,
+    showTable: true,
+  });
+});
+
+test("readGraph disambiguates legacy colliding endpoint node IDs while preserving the host node ID and deduplicating identical edges", () => {
+  const parsed = readGraph(
+    {
+      graph: {
+        taskId: "task-1",
+        view: "surface",
+        nodes: [
+          { id: "asset:eng::10.0.160.128", kind: "asset", label: "10.0.160.128/admin", badge: "live", data: {} },
+          { id: "asset:eng::10.0.160.128", kind: "asset", label: "10.0.160.128", badge: "live", data: {} },
+          { id: "technique:CWE-89", kind: "technique", label: "CWE-89", badge: null, data: {} },
+        ],
+        edges: [
+          { id: "e1", from: "asset:eng::10.0.160.128", to: "technique:CWE-89", kind: "coverage", label: "verified", broken: false },
+          { id: "e1", from: "asset:eng::10.0.160.128", to: "technique:CWE-89", kind: "coverage", label: "verified", broken: false },
+        ],
+      },
+    },
+    "surface",
+  );
+  assert.ok(parsed);
+  assert.equal(parsed.nodes.length, 3);
+  assert.equal(new Set(parsed.nodes.map((n) => n.id)).size, 3);
+  assert.equal(parsed.nodes.find((n) => n.label === "10.0.160.128")?.id, "asset:eng::10.0.160.128");
+  assert.equal(parsed.edges.length, 1);
+});

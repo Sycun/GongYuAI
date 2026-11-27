@@ -3,6 +3,21 @@
 export type FocusMode = "follow" | "pinned";
 export type StoredFocus = { mode: FocusMode; taskId: string };
 export type ViewName = "assets" | "surface" | "execution" | "memory";
+export type SurfaceLayout = "both" | "graph" | "table";
+
+export function resolveSurfaceDisplay(
+  view: ViewName,
+  surfaceLayout: SurfaceLayout,
+  stateKind: GraphState["kind"],
+  cellCount: number,
+): { layout: SurfaceLayout; showGraph: boolean; showTable: boolean } {
+  const layout: SurfaceLayout = view === "surface" ? surfaceLayout : "graph";
+  const showGraph = layout !== "table";
+  const showTable = view === "surface"
+    && layout !== "graph"
+    && (stateKind === "ready" || (stateKind === "empty" && (layout === "table" || cellCount > 0)));
+  return { layout, showGraph, showTable };
+}
 
 const FOCUS_KEY = "gongyuai.chat.focus.v1";
 
@@ -156,11 +171,12 @@ export function readGraph(json: unknown, view: ViewName): GView | null {
   const graph = asRecord(root?.graph) ?? root;
   if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) return null;
   if (graph.view && graph.view !== view) return null;
-  const nodes: GNode[] = [];
+
+  const rawNodes: Array<{ id: string; kind: string; label: string; badge: string | null; data: Record<string, unknown> }> = [];
   for (const item of graph.nodes) {
     const node = asRecord(item);
     if (!node || typeof node.id !== "string" || typeof node.label !== "string") return null;
-    nodes.push({
+    rawNodes.push({
       id: node.id,
       kind: typeof node.kind === "string" ? node.kind : "unknown",
       label: node.label,
@@ -168,17 +184,68 @@ export function readGraph(json: unknown, view: ViewName): GView | null {
       data: asRecord(node.data) ?? {},
     });
   }
+
+  // 当旧版服务端把同一主机下的多个端点都投影成相同 node.id 时，优先把原 id 留给主机自身节点，其余节点追加稳定后缀避免覆盖与重复 key。
+  const canonicalIndexById = new Map<string, number>();
+  rawNodes.forEach((node, idx) => {
+    const existing = canonicalIndexById.get(node.id);
+    const matchesTail = node.id.toLowerCase().endsWith(`::${node.label.trim().toLowerCase()}`);
+    if (existing === undefined) {
+      canonicalIndexById.set(node.id, idx);
+    } else if (matchesTail) {
+      const prev = rawNodes[existing]!;
+      const prevMatches = prev.id.toLowerCase().endsWith(`::${prev.label.trim().toLowerCase()}`);
+      if (!prevMatches) canonicalIndexById.set(node.id, idx);
+    }
+  });
+
+  const nodes: GNode[] = [];
+  const usedNodeIds = new Set<string>();
+  const seenExactNode = new Set<string>();
+  rawNodes.forEach((node, idx) => {
+    const exactKey = `${node.id}\0${node.label}`;
+    if (seenExactNode.has(exactKey)) return;
+    seenExactNode.add(exactKey);
+
+    let resolvedId = idx === canonicalIndexById.get(node.id) && !usedNodeIds.has(node.id)
+      ? node.id
+      : `${node.id}#${node.label}`;
+    if (usedNodeIds.has(resolvedId)) {
+      let seq = 2;
+      while (usedNodeIds.has(`${resolvedId}#${seq}`)) seq += 1;
+      resolvedId = `${resolvedId}#${seq}`;
+    }
+    usedNodeIds.add(resolvedId);
+    nodes.push({ ...node, id: resolvedId });
+  });
+
   const edges: GEdge[] = [];
+  const seenEdgeSemantic = new Set<string>();
+  const usedEdgeIds = new Set<string>();
   for (const item of graph.edges) {
     const edge = asRecord(item);
     if (!edge || typeof edge.id !== "string" || typeof edge.from !== "string" || typeof edge.to !== "string") return null;
+    const kind = typeof edge.kind === "string" ? edge.kind : "unknown";
+    const label = typeof edge.label === "string" ? edge.label : "";
+    const broken = edge.broken === true || kind === "broken";
+    const semanticKey = `${edge.from}\0${edge.to}\0${kind}\0${label}\0${broken ? 1 : 0}`;
+    if (seenEdgeSemantic.has(semanticKey)) continue;
+    seenEdgeSemantic.add(semanticKey);
+
+    let resolvedEdgeId = edge.id;
+    if (usedEdgeIds.has(resolvedEdgeId)) {
+      let seq = 2;
+      while (usedEdgeIds.has(`${resolvedEdgeId}#${seq}`)) seq += 1;
+      resolvedEdgeId = `${resolvedEdgeId}#${seq}`;
+    }
+    usedEdgeIds.add(resolvedEdgeId);
     edges.push({
-      id: edge.id,
+      id: resolvedEdgeId,
       from: edge.from,
       to: edge.to,
-      kind: typeof edge.kind === "string" ? edge.kind : "unknown",
-      label: typeof edge.label === "string" ? edge.label : "",
-      broken: edge.broken === true || edge.kind === "broken",
+      kind,
+      label,
+      broken,
     });
   }
   return {

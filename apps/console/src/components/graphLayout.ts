@@ -115,16 +115,126 @@ export function toggleSelectedNode(current: string | null, clickedId: string): s
   return current === clickedId ? null : clickedId;
 }
 
-/** 专为侧边栏窄卡片缩略图设计的高清晰度紧凑横向拓扑，避免将大图直接缩小 8 倍导致字迹发糊。 */
-export function layoutThumbScene(graph: GView) {
-  const activeEdges = graph.edges.filter((edge) => !isUnknownSurfaceEdge(edge, graph.view));
+export function computeMiniMapMetrics(
+  scene: { maxX: number; maxY: number },
+  viewport: { x: number; y: number; k: number },
+  frameSize: { width: number; height: number },
+  mapPixelBox = { width: 152, height: 94 },
+  baseNodeSize = { width: 208, height: 62 },
+) {
+  const viewW = Math.max(80, Math.round(frameSize.width / viewport.k));
+  const viewH = Math.max(60, Math.round(frameSize.height / viewport.k));
+  const viewX = Math.round(-viewport.x / viewport.k);
+  const viewY = Math.round(-viewport.y / viewport.k);
+
+  const sceneW = Math.max(scene.maxX, 240);
+  const sceneH = Math.max(scene.maxY, 160);
+  const padX = Math.round(Math.max(120, sceneW * 0.28));
+  const padY = Math.round(Math.max(90, sceneH * 0.28));
+
+  const minX = Math.max(-padX, Math.min(0, viewX));
+  const minY = Math.max(-padY, Math.min(0, viewY));
+  const maxX = Math.min(sceneW + padX, Math.max(sceneW, viewX + viewW));
+  const maxY = Math.min(sceneH + padY, Math.max(sceneH, viewY + viewH));
+  const totalW = Math.max(240, maxX - minX);
+  const totalH = Math.max(160, maxY - minY);
+
+  const scale = Math.min(mapPixelBox.width / totalW, mapPixelBox.height / totalH);
+  // 保证缩略图中的每个节点在屏幕上至少有约 7×3.6 px 的实心色块，避免大幅缩小或白色描边后变成纯白。
+  const nodeW = Math.max(baseNodeSize.width, Math.round(7 / Math.max(scale, 0.0005)));
+  const nodeH = Math.max(baseNodeSize.height, Math.round(3.6 / Math.max(scale, 0.0005)));
+
+  const clampedViewX = Math.max(minX, Math.min(maxX - 24, viewX));
+  const clampedViewY = Math.max(minY, Math.min(maxY - 24, viewY));
+  const clampedViewW = Math.max(24, Math.min(maxX - clampedViewX, viewW));
+  const clampedViewH = Math.max(24, Math.min(maxY - clampedViewY, viewH));
+
+  return {
+    minX,
+    minY,
+    totalW,
+    totalH,
+    scale,
+    nodeW,
+    nodeH,
+    viewRect: { x: clampedViewX, y: clampedViewY, width: clampedViewW, height: clampedViewH },
+  };
+}
+
+function pickThumbNodes(nodes: GNode[], activeEdges: GEdge[], limit = 12): GNode[] {
+  const uniqueNodes: GNode[] = [];
+  const byId = new Map<string, GNode>();
+  for (const node of nodes) {
+    if (byId.has(node.id)) continue;
+    byId.set(node.id, node);
+    uniqueNodes.push(node);
+  }
+  if (uniqueNodes.length <= limit) return uniqueNodes;
+
   const degree = new Map<string, number>();
   for (const e of activeEdges) {
-    degree.set(e.from, (degree.get(e.from) ?? 0) + 1);
-    degree.set(e.to, (degree.get(e.to) ?? 0) + 1);
+    if (byId.has(e.from) && byId.has(e.to)) {
+      degree.set(e.from, (degree.get(e.from) ?? 0) + 1);
+      degree.set(e.to, (degree.get(e.to) ?? 0) + 1);
+    }
   }
-  const connected = graph.nodes.filter((n) => (degree.get(n.id) ?? 0) > 0);
-  const picked = (connected.length > 0 ? connected : graph.nodes).slice(0, 12);
+  const connected = uniqueNodes.filter((n) => (degree.get(n.id) ?? 0) > 0);
+  if (connected.length === 0) return uniqueNodes.slice(0, limit);
+  if (connected.length <= limit) return connected;
+
+  const picked: GNode[] = [];
+  const pickedIds = new Set<string>();
+  const kindCounts = new Map<string, number>();
+  const distinctKinds = new Set(connected.map((n) => n.kind)).size;
+  const softKindCap = distinctKinds >= 3 ? 4 : distinctKinds === 2 ? 6 : limit;
+
+  const tryAdd = (node: GNode | undefined, enforceCap: boolean) => {
+    if (!node || pickedIds.has(node.id) || picked.length >= limit) return false;
+    const count = kindCounts.get(node.kind) ?? 0;
+    if (enforceCap && count >= softKindCap) return false;
+    pickedIds.add(node.id);
+    picked.push(node);
+    kindCounts.set(node.kind, count + 1);
+    return true;
+  };
+
+  for (const e of activeEdges) {
+    if (picked.length >= limit) break;
+    const from = byId.get(e.from);
+    const to = byId.get(e.to);
+    if (!from || !to) continue;
+    const fromOk = pickedIds.has(from.id) || (kindCounts.get(from.kind) ?? 0) < softKindCap;
+    const toOk = pickedIds.has(to.id) || (kindCounts.get(to.kind) ?? 0) < softKindCap;
+    if (!fromOk || !toOk) continue;
+    tryAdd(from, true);
+    tryAdd(to, true);
+  }
+
+  for (const e of activeEdges) {
+    if (picked.length >= limit) break;
+    tryAdd(byId.get(e.from), false);
+    tryAdd(byId.get(e.to), false);
+  }
+
+  for (const n of connected) {
+    if (picked.length >= limit) break;
+    tryAdd(n, false);
+  }
+
+  return picked;
+}
+
+/** 专为侧边栏窄卡片缩略图设计的高清晰度紧凑横向拓扑，避免将大图直接缩小 8 倍导致字迹发糊。 */
+export function layoutThumbScene(graph: GView) {
+  const seenEdges = new Set<string>();
+  const activeEdges = graph.edges.filter((edge) => {
+    if (isUnknownSurfaceEdge(edge, graph.view)) return false;
+    const key = `${edge.from}\0${edge.to}\0${edge.kind}`;
+    if (seenEdges.has(key)) return false;
+    seenEdges.add(key);
+    return true;
+  });
+  const picked = pickThumbNodes(graph.nodes, activeEdges, 12);
   const pickedIds = new Set(picked.map((n) => n.id));
   const edges = activeEdges.filter((e) => pickedIds.has(e.from) && pickedIds.has(e.to));
 
@@ -137,9 +247,6 @@ export function layoutThumbScene(graph: GView) {
     for (const e of edges) g.setEdge(e.from, e.to, {}, e.id);
     layout(g);
 
-    const outDeg = new Map<string, number>();
-    for (const e of edges) outDeg.set(e.from, (outDeg.get(e.from) ?? 0) + 1);
-
     for (const n of picked) {
       const at = g.node(n.id);
       positions.set(n.id, {
@@ -150,26 +257,56 @@ export function layoutThumbScene(graph: GView) {
 
     const byX = new Map<number, GNode[]>();
     for (const n of picked) {
-      if ((outDeg.get(n.id) ?? 0) > 0) continue;
-      const rx = Math.round((positions.get(n.id)?.x ?? 0) / 10) * 10;
+      const rx = Math.round((positions.get(n.id)?.x ?? 0) / 14) * 14;
       const bucket = byX.get(rx) ?? [];
       bucket.push(n);
       byX.set(rx, bucket);
     }
-    for (const [, bucket] of byX) {
-      if (bucket.length <= 3) continue;
+    const sortedRanks = [...byX.entries()].sort((a, b) => a[0] - b[0]);
+    let extraShiftX = 0;
+    let wrappedAny = false;
+    let wrappedMaxBottom = 0;
+    const wrappedRanks = new Set<number>();
+
+    for (const [rx, bucket] of sortedRanks) {
       bucket.sort((a, b) => (positions.get(a.id)?.y ?? 0) - (positions.get(b.id)?.y ?? 0));
+      if (bucket.length <= 3) {
+        if (extraShiftX > 0) {
+          for (const node of bucket) {
+            const p = positions.get(node.id)!;
+            positions.set(node.id, { x: p.x + extraShiftX, y: p.y });
+          }
+        }
+        continue;
+      }
+      wrappedAny = true;
+      wrappedRanks.add(rx);
       const rows = 3;
-      const baseX = positions.get(bucket[0]!.id)?.x ?? 140;
-      const minY = Math.min(...bucket.map((item) => positions.get(item.id)?.y ?? 10));
+      const subCols = Math.ceil(bucket.length / rows);
+      const baseX = (positions.get(bucket[0]!.id)?.x ?? 10) + extraShiftX;
       bucket.forEach((node, idx) => {
         const col = Math.floor(idx / rows);
         const row = idx % rows;
+        const y = Math.round(10 + row * (THUMB_H + 10));
         positions.set(node.id, {
           x: Math.round(baseX + col * (THUMB_W + 18)),
-          y: Math.round(minY + row * (THUMB_H + 10)),
+          y,
         });
+        wrappedMaxBottom = Math.max(wrappedMaxBottom, y + THUMB_H);
       });
+      extraShiftX += (subCols - 1) * (THUMB_W + 18) + 8;
+    }
+
+    if (wrappedAny && wrappedMaxBottom > 0) {
+      for (const [rx, bucket] of sortedRanks) {
+        if (wrappedRanks.has(rx)) continue;
+        const spanH = bucket.length * THUMB_H + Math.max(0, bucket.length - 1) * 12;
+        const startY = Math.max(10, Math.round((wrappedMaxBottom + 10 - spanH) / 2));
+        bucket.forEach((node, idx) => {
+          const p = positions.get(node.id)!;
+          positions.set(node.id, { x: p.x, y: startY + idx * (THUMB_H + 12) });
+        });
+      }
     }
   } else {
     const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(picked.length * 1.8))));

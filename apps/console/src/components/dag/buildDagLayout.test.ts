@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { layoutThumbScene, toggleSelectedNode } from "../graphLayout.js";
+import { computeMiniMapMetrics, layoutThumbScene, toggleSelectedNode } from "../graphLayout.js";
 import type { GView } from "../../workspace/model.js";
 import { collectDag, buildDagLayout, assetNodeId, type DagAsset, type DagFact, type DagFinding, type DagIntent } from "./buildDagLayout.js";
 
@@ -235,4 +235,69 @@ test("缩略图紧凑拓扑在多叶子节点下自动折列保持横向宽高�
   assert.equal(thumb.nodes.length, 9);
   assert.ok(thumb.lines.every((l) => l.d.includes("C")));
   assert.ok(thumb.vbW > thumb.vbH, `缩略图应保持横向宽高比避免在窄卡片中缩成竖条（当前 ${thumb.vbW}x${thumb.vbH}）`);
+});
+
+test("攻击面缩略图跨类型均衡抽样资产/检查项/漏洞并连线，且大图缩略导航保证最小色块可见尺寸", () => {
+  const manyAssets: GView["nodes"] = Array.from({ length: 20 }, (_, idx) => ({
+    id: `asset:10.0.160.${idx + 1}`,
+    kind: "asset",
+    label: `10.0.160.${idx + 1}`,
+    badge: "live",
+    data: {},
+  }));
+  const manyTechs: GView["nodes"] = Array.from({ length: 12 }, (_, idx) => ({
+    id: `technique:CWE-${80 + idx}`,
+    kind: "technique",
+    label: `CWE-${80 + idx}`,
+    badge: null,
+    data: {},
+  }));
+  const manyFindings: GView["nodes"] = Array.from({ length: 10 }, (_, idx) => ({
+    id: `finding:f-${idx}`,
+    kind: "finding",
+    label: `漏洞 ${idx}`,
+    badge: "high:verified",
+    data: {},
+  }));
+  const surfaceGraph: GView = {
+    taskId: "t-surface",
+    view: "surface",
+    empty: false,
+    notes: [],
+    nodes: [...manyAssets, ...manyTechs, ...manyFindings],
+    edges: [
+      ...manyAssets.map((a, idx) => ({
+        id: `cov-${idx}`,
+        from: a.id,
+        to: manyTechs[idx % manyTechs.length]!.id,
+        kind: "coverage",
+        label: "verified",
+        broken: false,
+      })),
+      ...manyFindings.map((f, idx) => ({
+        id: `found-${idx}`,
+        from: manyAssets[idx]!.id,
+        to: f.id,
+        kind: "found-on",
+        label: "verified",
+        broken: false,
+      })),
+    ],
+  };
+
+  const thumb = layoutThumbScene(surfaceGraph);
+  const pickedKinds = new Set(thumb.nodes.map((n) => n.kind));
+  assert.ok(pickedKinds.size >= 2, "攻击面缩略图不应只截取前 12 个同类型资产节点");
+  assert.ok(thumb.lines.length > 0, "攻击面缩略图应保留跨层连线而非单节点孤岛");
+  assert.ok(thumb.vbW > thumb.vbH);
+
+  const metrics = computeMiniMapMetrics(
+    { maxX: 2400, maxY: 4200 },
+    { x: -600, y: -300, k: 2.4 },
+    { width: 640, height: 420 },
+    { width: 162, height: 98 },
+    { width: 208, height: 62 },
+  );
+  assert.ok(metrics.nodeW * metrics.scale >= 6.5, "大图缩小后节点色块宽度至少约 7px，避免在缩略图中消失变白");
+  assert.ok(metrics.nodeH * metrics.scale >= 3.2, "大图缩小后节点色块高度至少约 3.5px，避免在缩略图中消失变白");
 });

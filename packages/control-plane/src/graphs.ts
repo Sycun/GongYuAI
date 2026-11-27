@@ -8,7 +8,10 @@ import {
   assetRootKey,
   deriveCoverageMatrix,
   graphNodeId,
+  isIpv4Cidr,
+  normalizeEndpointAddress,
   normalizeHost,
+  normalizeServiceAddress,
   targetAllows,
   type AssetRecord,
   type BackgroundJob,
@@ -35,8 +38,24 @@ export type AssetGraphInput = {
   intents: readonly Intent[];
 };
 
-function assetNodeId(engagementId: string, address: string): string {
-  return graphNodeId("asset", `${engagementId}::${normalizeHost(address)}`);
+function isEndpointLike(address: string, assetType?: string | null): boolean {
+  const trimmed = address.trim();
+  return assetType === "endpoint" || (!isIpv4Cidr(trimmed) && trimmed.includes("/"));
+}
+
+function assetAddressIdentity(address: string, assetType?: string | null): string {
+  const trimmed = address.trim();
+  if (isEndpointLike(trimmed, assetType)) {
+    return normalizeEndpointAddress(trimmed);
+  }
+  if (assetType === "service") {
+    return normalizeServiceAddress(trimmed);
+  }
+  return isIpv4Cidr(trimmed) ? trimmed.toLowerCase() : normalizeHost(trimmed);
+}
+
+function assetNodeId(engagementId: string, address: string, assetType?: string | null): string {
+  return graphNodeId("asset", `${engagementId}::${assetAddressIdentity(address, assetType)}`);
 }
 
 function findingNodeId(id: string): string {
@@ -54,59 +73,72 @@ function edge(from: string, to: string, kind: string, label = "", broken = false
 export function buildAssetGraph(input: AssetGraphInput): GraphView {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
+  const seenNodeIds = new Set<string>();
+  const seenEdgeIds = new Set<string>();
+  const pushNode = (node: GraphNode) => {
+    if (seenNodeIds.has(node.id)) return;
+    seenNodeIds.add(node.id);
+    nodes.push(node);
+  };
+  const pushEdge = (item: GraphEdge) => {
+    if (seenEdgeIds.has(item.id)) return;
+    seenEdgeIds.add(item.id);
+    edges.push(item);
+  };
   const factById = new Map(input.facts.map((fact) => [fact.id, fact]));
   const intentById = new Map(input.intents.map((intent) => [intent.id, intent]));
-  const addressByFact = new Map<string, string>();
+  const assetByFact = new Map<string, AssetRecord>();
 
   for (const asset of input.assets) {
-    const id = assetNodeId(input.engagementId, asset.address);
-    nodes.push({
+    const id = assetNodeId(input.engagementId, asset.address, asset.assetType);
+    pushNode({
       id,
       kind: "asset",
       label: asset.address,
       badge: asset.kind,
       data: { factId: asset.factId, source: asset.source, createdAt: asset.createdAt },
     });
-    addressByFact.set(asset.factId, normalizeHost(asset.address));
+    assetByFact.set(asset.factId, asset);
   }
 
   for (const pattern of input.targets) {
     const id = graphNodeId("scope", pattern);
-    nodes.push({ id, kind: "scope", label: pattern, badge: "authorized", data: {} });
+    pushNode({ id, kind: "scope", label: pattern, badge: "authorized", data: {} });
     for (const asset of input.assets) {
       if (!targetAllows([pattern], asset.address)) continue;
-      edges.push(edge(id, assetNodeId(input.engagementId, asset.address), "authorizes", "范围内"));
+      pushEdge(edge(id, assetNodeId(input.engagementId, asset.address, asset.assetType), "authorizes", "范围内"));
     }
   }
   for (const pattern of input.outOfScope) {
     const id = graphNodeId("scope", `oos:${pattern}`);
-    nodes.push({ id, kind: "scope", label: pattern, badge: "out-of-scope", data: { outOfScope: true } });
+    pushNode({ id, kind: "scope", label: pattern, badge: "out-of-scope", data: { outOfScope: true } });
   }
 
   // 发现血缘：asset_record Fact 的 intentId + 该 Intent 的 sourceFactIds。
   for (const asset of input.assets) {
     if (!asset.intentId) {
-      edges.push(edge(graphNodeId("scope", "seed"), assetNodeId(input.engagementId, asset.address), "seeded", "初始目标/发现"));
+      pushEdge(edge(graphNodeId("scope", "seed"), assetNodeId(input.engagementId, asset.address, asset.assetType), "seeded", "初始目标/发现"));
       continue;
     }
     const intent = intentById.get(asset.intentId);
-    const target = assetNodeId(input.engagementId, asset.address);
+    const target = assetNodeId(input.engagementId, asset.address, asset.assetType);
     if (!intent) {
-      edges.push(edge(target, intentNodeId(asset.intentId), "discovered-by", "发现意图缺失", true));
+      pushEdge(edge(target, intentNodeId(asset.intentId), "discovered-by", "发现意图缺失", true));
       continue;
     }
     const iNode = intentNodeId(intent.id);
-    if (!nodes.some((node) => node.id === iNode)) {
-      nodes.push({ id: iNode, kind: "intent", label: intent.title, badge: intent.status, data: { technique: intent.technique } });
-    }
-    edges.push(edge(iNode, target, "discovered", "发现"));
+    pushNode({ id: iNode, kind: "intent", label: intent.title, badge: intent.status, data: { technique: intent.technique } });
+    pushEdge(edge(iNode, target, "discovered", "发现"));
     for (const factId of intent.sourceFactIds) {
-      const sourceAddress = addressByFact.get(factId);
+      const sourceAsset = assetByFact.get(factId);
       const sourceFact = factById.get(factId);
-      if (sourceAddress) {
-        edges.push(edge(assetNodeId(input.engagementId, sourceAddress), target, "lineage", "前驱资产"));
+      if (sourceAsset) {
+        const sourceId = assetNodeId(input.engagementId, sourceAsset.address, sourceAsset.assetType);
+        if (sourceId !== target) {
+          pushEdge(edge(sourceId, target, "lineage", "前驱资产"));
+        }
       } else if (!sourceFact) {
-        edges.push(edge(iNode, target, "lineage", "缺少前驱事实", true));
+        pushEdge(edge(iNode, target, "lineage", "缺少前驱事实", true));
       }
     }
   }
@@ -115,13 +147,14 @@ export function buildAssetGraph(input: AssetGraphInput): GraphView {
   const byRoot = new Map<string, string[]>();
   for (const asset of input.assets) {
     const root = assetRootKey(asset.address);
+    const id = assetNodeId(input.engagementId, asset.address, asset.assetType);
     const list = byRoot.get(root) ?? [];
-    list.push(assetNodeId(input.engagementId, asset.address));
+    if (!list.includes(id)) list.push(id);
     byRoot.set(root, list);
   }
   for (const [root, ids] of byRoot) {
     for (let i = 1; i < ids.length; i += 1) {
-      edges.push(edge(ids[0]!, ids[i]!, "same-family", root));
+      pushEdge(edge(ids[0]!, ids[i]!, "same-family", root));
     }
   }
 
@@ -159,7 +192,22 @@ export type SurfaceGraphInput = {
 };
 
 export function buildSurfaceGraph(input: SurfaceGraphInput): GraphView {
-  const assets = input.assets.map((asset) => normalizeHost(asset.address));
+  const endpointAssets = [
+    ...new Set(
+      input.assets
+        .filter((asset) => isEndpointLike(asset.address, asset.assetType))
+        .map((asset) => normalizeEndpointAddress(asset.address))
+        .filter(Boolean),
+    ),
+  ];
+  const hostAssets = [
+    ...new Set(
+      input.assets
+        .filter((asset) => !isEndpointLike(asset.address, asset.assetType))
+        .map((asset) => normalizeHost(asset.address))
+        .filter(Boolean),
+    ),
+  ];
   const techniques = new Set<string>();
   for (const finding of input.findings) techniques.add(finding.vulnClass);
   for (const intent of input.intents) if (intent.technique) techniques.add(intent.technique);
@@ -169,7 +217,8 @@ export function buildSurfaceGraph(input: SurfaceGraphInput): GraphView {
     if (locator?.[1]) techniques.add(locator[1]);
   }
   const cells: CoverageCell[] = deriveCoverageMatrix({
-    assets,
+    assets: hostAssets,
+    endpoints: endpointAssets,
     techniques: [...techniques],
     materials: input.materials.map((material) => ({
       asset: material.asset,
@@ -184,6 +233,7 @@ export function buildSurfaceGraph(input: SurfaceGraphInput): GraphView {
       vulnClass: finding.vulnClass,
       status: finding.status,
       evidence: finding.evidence,
+      endpoint: finding.endpoint,
     })),
     intents: input.intents.map((intent) => ({ technique: intent.technique, asset: intent.assetRoot, status: intent.status })),
     manual: input.manual,
@@ -192,21 +242,51 @@ export function buildSurfaceGraph(input: SurfaceGraphInput): GraphView {
 
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
+  const seenNodeIds = new Set<string>();
+  const seenEdgeIds = new Set<string>();
+  const pushNode = (node: GraphNode) => {
+    if (seenNodeIds.has(node.id)) return;
+    seenNodeIds.add(node.id);
+    nodes.push(node);
+  };
+  const pushEdge = (item: GraphEdge) => {
+    if (seenEdgeIds.has(item.id)) return;
+    seenEdgeIds.add(item.id);
+    edges.push(item);
+  };
+
+  const endpointNodeSet = new Set<string>();
+  const hostNodeIdByHost = new Map<string, string>();
   for (const asset of input.assets) {
-    nodes.push({
-      id: assetNodeId(input.engagementId, asset.address),
+    const id = assetNodeId(input.engagementId, asset.address, asset.assetType);
+    if (isEndpointLike(asset.address, asset.assetType)) {
+      endpointNodeSet.add(normalizeEndpointAddress(asset.address));
+    } else {
+      const hostKey = normalizeHost(asset.address);
+      if (hostKey && (!hostNodeIdByHost.has(hostKey) || asset.address.trim().toLowerCase() === hostKey)) {
+        hostNodeIdByHost.set(hostKey, id);
+      }
+    }
+    pushNode({
+      id,
       kind: "asset",
       label: asset.address,
       badge: asset.kind,
       data: { factId: asset.factId },
     });
   }
+  const resolveHostAssetNodeId = (address: string): string => {
+    if (isEndpointLike(address) && endpointNodeSet.has(normalizeEndpointAddress(address))) {
+      return assetNodeId(input.engagementId, address, "endpoint");
+    }
+    return hostNodeIdByHost.get(normalizeHost(address)) ?? assetNodeId(input.engagementId, address);
+  };
   for (const technique of techniques) {
-    nodes.push({ id: graphNodeId("technique", technique), kind: "technique", label: technique, badge: null, data: {} });
+    pushNode({ id: graphNodeId("technique", technique), kind: "technique", label: technique, badge: null, data: {} });
   }
   for (const material of input.materials) {
     const id = graphNodeId("material", material.sha256);
-    nodes.push({
+    pushNode({
       id,
       kind: "material",
       label: material.materialPath,
@@ -214,24 +294,31 @@ export function buildSurfaceGraph(input: SurfaceGraphInput): GraphView {
       data: { sha256: material.sha256, locator: material.locator, parser: material.parser, reason: material.reason },
     });
     if (material.asset) {
-      edges.push(edge(assetNodeId(input.engagementId, material.asset), id, "material", material.kind ?? "unknown"));
+      pushEdge(edge(resolveHostAssetNodeId(material.asset), id, "material", material.kind ?? "unknown"));
     }
   }
   for (const finding of input.findings) {
-    nodes.push({
+    pushNode({
       id: findingNodeId(finding.id),
       kind: "finding",
       label: finding.title,
       badge: `${finding.severity}:${finding.status}`,
       data: { asset: finding.asset, vulnClass: finding.vulnClass, evidence: finding.evidence },
     });
-    edges.push(edge(findingNodeId(finding.id), graphNodeId("technique", finding.vulnClass), "classified-as", finding.vulnClass));
-    edges.push(edge(assetNodeId(input.engagementId, finding.asset), findingNodeId(finding.id), "found-on", finding.status));
+    pushEdge(edge(findingNodeId(finding.id), graphNodeId("technique", finding.vulnClass), "classified-as", finding.vulnClass));
+    const hasEndpointNode = Boolean(finding.endpoint && endpointNodeSet.has(normalizeEndpointAddress(finding.endpoint)));
+    const sourceAssetId = hasEndpointNode && finding.endpoint
+      ? assetNodeId(input.engagementId, finding.endpoint, "endpoint")
+      : resolveHostAssetNodeId(finding.asset);
+    pushEdge(edge(sourceAssetId, findingNodeId(finding.id), "found-on", finding.status));
   }
   for (const cell of cells) {
-    const assetId = assetNodeId(input.engagementId, cell.asset);
+    const cellIsEndpoint = endpointNodeSet.has(cell.asset) || isEndpointLike(cell.asset);
+    const assetId = cellIsEndpoint
+      ? assetNodeId(input.engagementId, cell.asset, "endpoint")
+      : resolveHostAssetNodeId(cell.asset);
     const techniqueId = graphNodeId("technique", cell.technique);
-    edges.push(
+    pushEdge(
       edge(assetId, techniqueId, "coverage", `${cell.state}${cell.retractedOnly ? "（依据已撤回）" : ""}`, cell.retractedOnly),
     );
   }
@@ -247,8 +334,8 @@ export function buildSurfaceGraph(input: SurfaceGraphInput): GraphView {
     engagementId: input.engagementId,
     view: "surface",
     generatedAt: input.generatedAt,
-    empty: assets.length === 0,
-    emptyReason: assets.length === 0 ? "no-assets-recorded" : null,
+    empty: input.assets.length === 0,
+    emptyReason: input.assets.length === 0 ? "no-assets-recorded" : null,
     nodes,
     edges,
     notes,

@@ -4,9 +4,14 @@ import { IconArchive, IconSearch, IconUndo } from "@douyinfe/semi-icons";
 import type { TaskArchiveState } from "@gongyuai/contracts";
 import { isArchivableStatus, STATUS_LABEL } from "../labels";
 import { GraphStage, GraphThumb } from "./GraphCanvas";
-import { rememberGraphTask } from "../workspace/graphStore";
+import { rememberGraphTask, setGraphSlot } from "../workspace/graphStore";
 import { useTaskGraph } from "../workspace/useTaskGraph";
-import { type GraphState, type ViewName } from "../workspace/model";
+import {
+  resolveSurfaceDisplay,
+  type GraphState,
+  type SurfaceLayout,
+  type ViewName,
+} from "../workspace/model";
 import {
   controlFace,
   ViewedTaskControlsController,
@@ -247,27 +252,64 @@ export function TaskGraphRail({
   );
 }
 
+export type { SurfaceLayout };
+
 export function GraphDetail({ taskId, view, onOpenRecord }: { taskId: string; view: ViewName; onOpenRecord: (href: string) => void }) {
   const state = useTaskGraph(taskId, view, view !== "memory", 8000);
-  const [surfaceLayout, setSurfaceLayout] = useState<"both" | "graph" | "table">("both");
+  const [surfaceLayout, setSurfaceLayout] = useState<SurfaceLayout>("both");
 
   if (view === "memory") {
     return <p className="gy-stage-status" role="status">普通会话不读取记忆，也不展示缓存里的记忆内容。</p>;
   }
   const graph = state.kind === "ready" ? state.graph : state.kind === "empty" ? state.graph : undefined;
   const cells = state.kind === "ready" || state.kind === "empty" ? (state.cells ?? []) : [];
+  const { layout: effectiveLayout, showGraph, showTable } = resolveSurfaceDisplay(
+    view,
+    surfaceLayout,
+    state.kind,
+    cells.length,
+  );
+
+  const switchSurfaceLayout = (next: SurfaceLayout) => {
+    if (next === surfaceLayout) return;
+    setSurfaceLayout(next);
+    if (next !== "table") {
+      setGraphSlot(taskId, view, { fitted: false });
+    }
+  };
 
   return (
-    <div className="gy-graph-detail-stack">
+    <div className={`gy-graph-detail-stack is-${effectiveLayout}`} data-surface-layout={effectiveLayout}>
       {(state.kind === "ready" || graph?.notes.length) && (
         <div className="gy-graph-meta-bar">
           {graph?.notes[0] && <span className="gy-graph-meta-note">{graph.notes[0]}</span>}
           <div className="gy-graph-meta-right">
             {view === "surface" && (state.kind === "ready" || state.kind === "empty") && (
               <div className="gy-surface-mode" role="group" aria-label="攻击面展示方式">
-                <button type="button" className={surfaceLayout === "both" ? "is-active" : ""} onClick={() => setSurfaceLayout("both")}>图谱 + 矩阵</button>
-                <button type="button" className={surfaceLayout === "graph" ? "is-active" : ""} onClick={() => setSurfaceLayout("graph")}>仅看图谱</button>
-                <button type="button" className={surfaceLayout === "table" ? "is-active" : ""} onClick={() => setSurfaceLayout("table")}>仅看矩阵</button>
+                <button
+                  type="button"
+                  aria-pressed={surfaceLayout === "both"}
+                  className={surfaceLayout === "both" ? "is-active" : ""}
+                  onClick={() => switchSurfaceLayout("both")}
+                >
+                  图谱 + 矩阵
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={surfaceLayout === "graph"}
+                  className={surfaceLayout === "graph" ? "is-active" : ""}
+                  onClick={() => switchSurfaceLayout("graph")}
+                >
+                  仅看图谱
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={surfaceLayout === "table"}
+                  className={surfaceLayout === "table" ? "is-active" : ""}
+                  onClick={() => switchSurfaceLayout("table")}
+                >
+                  仅看矩阵
+                </button>
               </div>
             )}
             {state.kind === "ready" && (
@@ -276,13 +318,13 @@ export function GraphDetail({ taskId, view, onOpenRecord }: { taskId: string; vi
           </div>
         </div>
       )}
-      {(view !== "surface" || surfaceLayout !== "table") && (
+      {showGraph && (
         graph && graph.nodes.length > 0
           ? <GraphStage graph={graph} taskId={taskId} view={view} onOpen={onOpenRecord} />
           : <p className="gy-stage-status" role="status">{statusText(state)}</p>
       )}
-      {view === "surface" && (state.kind === "ready" || state.kind === "empty") && surfaceLayout !== "graph" && (
-        <CoverageTable cells={cells} expanded={surfaceLayout === "table"} />
+      {showTable && (
+        <CoverageTable cells={cells} expanded={effectiveLayout === "table"} />
       )}
     </div>
   );
@@ -301,6 +343,8 @@ function covMeta(state: string) {
   return COV_STATE_META[state] ?? { label: state, rank: 4, cls: "is-other" };
 }
 
+const COVERAGE_BATCH = 200;
+
 export function CoverageTable({
   cells,
   expanded = false,
@@ -310,6 +354,18 @@ export function CoverageTable({
 }) {
   const [filter, setFilter] = useState<string>("all");
   const [query, setQuery] = useState("");
+  const resetKey = `${filter}\0${query}`;
+  const [batchState, setBatchState] = useState<{ key: string; limit: number }>({
+    key: resetKey,
+    limit: COVERAGE_BATCH,
+  });
+  const visibleLimit = batchState.key === resetKey ? batchState.limit : COVERAGE_BATCH;
+  const loadMore = () => {
+    setBatchState((prev) => ({
+      key: resetKey,
+      limit: (prev.key === resetKey ? prev.limit : COVERAGE_BATCH) + COVERAGE_BATCH,
+    }));
+  };
 
   const stats = useMemo(() => {
     const counts = { all: cells.length, active: 0, verified: 0, attempted: 0, manual: 0, material: 0, retracted: 0, unknown: 0 };
@@ -343,6 +399,9 @@ export function CoverageTable({
   }, [cells, filter, query]);
 
   if (!cells.length) return <p className="gy-stage-status" role="status">已有任务，暂无覆盖数据。</p>;
+
+  const visibleRows = rows.length > visibleLimit ? rows.slice(0, visibleLimit) : rows;
+  const hasMore = visibleRows.length < rows.length;
 
   const filterChips: Array<{ key: string; label: string; count: number }> = [
     { key: "all", label: "全部", count: stats.all },
@@ -384,7 +443,16 @@ export function CoverageTable({
           aria-label="筛选覆盖矩阵"
         />
       </header>
-      <div className={`gy-coverage-scroll${expanded ? " is-expanded" : ""}`}>
+      <div
+        className={`gy-coverage-scroll${expanded ? " is-expanded" : ""}`}
+        onScroll={(event) => {
+          if (!hasMore) return;
+          const el = event.currentTarget;
+          if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) {
+            loadMore();
+          }
+        }}
+      >
         <table className="gy-coverage-table">
           <thead>
             <tr>
@@ -394,19 +462,32 @@ export function CoverageTable({
             </tr>
           </thead>
           <tbody>
-            {rows.length > 0 ? rows.map((cell) => {
-              const meta = covMeta(cell.state);
-              return (
-                <tr key={`${cell.asset}:${cell.technique}`}>
-                  <td className="gy-cov-asset"><code>{cell.asset}</code></td>
-                  <td className="gy-cov-tech">{cell.technique}</td>
-                  <td className="gy-cov-state">
-                    <span className={`gy-cov-badge ${meta.cls}`} title={cell.state}>{meta.label}</span>
-                    {cell.notes?.length ? <span className="gy-cov-notes">{cell.notes.join("；")}</span> : null}
-                  </td>
-                </tr>
-              );
-            }) : (
+            {visibleRows.length > 0 ? (
+              <>
+                {visibleRows.map((cell) => {
+                  const meta = covMeta(cell.state);
+                  return (
+                    <tr key={`${cell.asset}:${cell.technique}`}>
+                      <td className="gy-cov-asset"><code>{cell.asset}</code></td>
+                      <td className="gy-cov-tech">{cell.technique}</td>
+                      <td className="gy-cov-state">
+                        <span className={`gy-cov-badge ${meta.cls}`} title={cell.state}>{meta.label}</span>
+                        {cell.notes?.length ? <span className="gy-cov-notes">{cell.notes.join("；")}</span> : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {hasMore && (
+                  <tr>
+                    <td colSpan={3} className="gy-cov-more">
+                      <button type="button" onClick={loadMore}>
+                        已显示 {visibleRows.length} / {rows.length} 条，点击或继续滚动加载更多
+                      </button>
+                    </td>
+                  </tr>
+                )}
+              </>
+            ) : (
               <tr>
                 <td colSpan={3} className="gy-cov-empty">当前筛选条件下无匹配项</td>
               </tr>
