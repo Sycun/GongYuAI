@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Reac
 import { Button, Empty, SideSheet, Spin, Switch, Tag, Toast } from "@douyinfe/semi-ui";
 import { IconBranch, IconExpand, IconMinus, IconPlus } from "@douyinfe/semi-icons";
 import {
-  Background, BackgroundVariant, BaseEdge, Handle, MarkerType, MiniMap, Panel, Position,
+  Background, BackgroundVariant, BaseEdge, Handle, MarkerType, MiniMap, Position,
   ReactFlow, ReactFlowProvider, getViewportForBounds, useReactFlow, useViewport,
   type Edge, type EdgeProps, type Node, type NodeProps, type ReactFlowInstance,
 } from "@xyflow/react";
@@ -888,28 +888,6 @@ export default function FactIntentDag({
                 ariaLabelConfig={ARIA}
               >
                 <Background variant={BackgroundVariant.Dots} gap={16} size={1.2} color="#cbd5e1" />
-                <Panel position="top-left">
-                  <div className="gy-dag-panel-legend" aria-label="图例">
-                    <div className="gy-dag-panel-row">
-                      {(["origin", "asset", "intent", "fact", "finding"] as VisualKind[]).map((k) => {
-                        const m = KIND_META[k];
-                        return (
-                          <span key={k} className="gy-dag-panel-item">
-                            <span className="gy-dag-panel-icon" style={{ background: m.hex }}>{m.icon}</span>
-                            {m.label}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <div className="gy-dag-panel-row is-edges">
-                      <span><i style={{ background: "#10b981" }} />资产凭据</span>
-                      <span><i style={{ background: "#6366f1" }} />前驱事实</span>
-                      <span><i style={{ background: "#f59e0b" }} />Explore 回写</span>
-                      <span><i style={{ background: "#f43f5e" }} />产出 / 发现</span>
-                      <span><i className="is-dashed" />模型提议</span>
-                    </div>
-                  </div>
-                </Panel>
                 <MiniMap<RecordNode>
                   position="bottom-right"
                   className="gy-dag-minimap"
@@ -929,8 +907,29 @@ export default function FactIntentDag({
                 />
               </ReactFlow>
             </div>
-            <footer className="gy-dag-legend">
-              <span>滚轮缩放 · 拖动画布或右下角缩略图导航 · 点击任意节点展开右侧详细说明与原始数据</span>
+            <footer className="gy-dag-legend" aria-label="图例与操作说明">
+              <div className="gy-dag-legend-items">
+                <div className="gy-dag-legend-group">
+                  {(["origin", "asset", "intent", "fact", "finding"] as VisualKind[]).map((k) => {
+                    const m = KIND_META[k];
+                    return (
+                      <span key={k} className="gy-dag-legend-node">
+                        <span className="gy-dag-panel-icon" style={{ background: m.hex }}>{m.icon}</span>
+                        {m.label}
+                      </span>
+                    );
+                  })}
+                </div>
+                <span className="gy-dag-legend-sep" aria-hidden="true" />
+                <div className="gy-dag-legend-group is-edges">
+                  <span><i style={{ background: "#10b981" }} />资产凭据</span>
+                  <span><i style={{ background: "#6366f1" }} />前驱事实</span>
+                  <span><i style={{ background: "#f59e0b" }} />Explore 回写</span>
+                  <span><i style={{ background: "#f43f5e" }} />产出 / 发现</span>
+                  <span><i className="is-dashed" />模型提议</span>
+                </div>
+              </div>
+              <span className="gy-dag-legend-hint">滚轮缩放 · 点击节点查看详情</span>
             </footer>
           </>
         ) : loading ? (
