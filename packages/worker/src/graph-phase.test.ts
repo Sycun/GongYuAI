@@ -697,6 +697,30 @@ test("multi-worker leader stays in bootstrap/reason across 3-way fanout and wake
     });
     assert.equal(refill2.wake, false);
 
+    // A later drain that returns the active set to the SAME ids must still wake:
+    // the concluded count moved, so an idle Follower slot gets refilled instead of
+    // the Leader parking forever on a stale active-set key.
+    const drained = shouldWakeMultiWorkerLeader({
+      openIntents: [
+        { id: "2", status: "claimed" },
+        { id: "3", status: "claimed" },
+      ],
+      workerCount: 4,
+      lastRefillActiveKey: "2,3#1",
+      concludedCount: 2,
+    });
+    assert.equal(drained.wake, true);
+    const parkedAgain = shouldWakeMultiWorkerLeader({
+      openIntents: [
+        { id: "2", status: "claimed" },
+        { id: "3", status: "claimed" },
+      ],
+      workerCount: 4,
+      lastRefillActiveKey: drained.activeKey,
+      concludedCount: 2,
+    });
+    assert.equal(parkedAgain.wake, false);
+
     // Long-turn YIELD directive: saturated leader & idle follower yield to zero-token waitForPoolTurn().
     const saturated = [
       { id: "1", status: "claimed" },

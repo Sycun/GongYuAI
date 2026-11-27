@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { request as httpRequest } from "node:http";
-import { connect as netConnect } from "node:net";
+import { connect as netConnect, isIP } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, readFileSync } from "node:fs";
@@ -399,6 +399,11 @@ function replayHttp(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): P
   });
 }
 
+/** Node forbids SNI servername for IP literals; passing one throws synchronously. */
+export function replayTlsOptions(hostname: string): { host?: string; servername?: string } {
+  return isIP(hostname) ? { host: hostname } : { servername: hostname };
+}
+
 function replayHttps(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): Promise<void> {
   const port = Number(target.port || 443);
   return new Promise((resolve, reject) => {
@@ -418,14 +423,20 @@ function replayHttps(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): 
         socket.off("data", onData);
         const rest = buf.subarray(split + 4);
         if (rest.length) socket.unshift(rest);
-        const tls = tlsConnect({
-          socket,
-          ca: readFileSync(proxy.caPath),
-          rejectUnauthorized: true,
-          ...(target.hostname === "127.0.0.1" || target.hostname === "::1"
-            ? { host: target.hostname }
-            : { servername: target.hostname }),
-        });
+        // Node forbids SNI servername for IP literals; a synchronous throw here
+        // escapes the socket data handler and kills the whole control plane.
+        let tls: ReturnType<typeof tlsConnect>;
+        try {
+          tls = tlsConnect({
+            socket,
+            ca: readFileSync(proxy.caPath),
+            rejectUnauthorized: true,
+            ...replayTlsOptions(target.hostname),
+          });
+        } catch (err) {
+          fail(err instanceof Error ? err : new Error(String(err)));
+          return;
+        }
         tls.once("error", fail);
         tls.once("secureConnect", () => {
           const lines = [`${req.method} ${target.pathname}${target.search} HTTP/1.1`];

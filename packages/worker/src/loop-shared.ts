@@ -39,13 +39,16 @@ export function shouldResetFollowerSession(opts: {
  * Decide whether the multi-worker Leader should wake up to schedule Intents:
  * - Always wake when all open Intents have drained (`openIntents.length === 0`);
  * - Sliding-window refill: wake when `proposed === 0`, at least one Explore Follower slot
- *   is idle (`active < workerCount - 1`), and the active Intent set changed since the last
- *   refill attempt (prevents straggler barriers without spin-looping when surfaces run dry).
+ *   is idle (`active < workerCount - 1`), and the refill signature changed since the last
+ *   refill attempt. The signature includes the concluded-Intent count: a drain that returns
+ *   the active set to a previously seen key must still wake (idle slot refilled), while a
+ *   dry surface with no new conclusions keeps the Leader parked without spin-looping.
  */
 export function shouldWakeMultiWorkerLeader(opts: {
   openIntents: ReadonlyArray<{ id: string; status: string }>;
   workerCount: number;
   lastRefillActiveKey: string | null;
+  concludedCount?: number;
 }): { wake: boolean; activeKey: string } {
   if (opts.openIntents.length === 0) {
     return { wake: true, activeKey: "" };
@@ -53,7 +56,7 @@ export function shouldWakeMultiWorkerLeader(opts: {
   const exploreSlots = Math.max(1, opts.workerCount - 1);
   const proposed = opts.openIntents.filter((i) => i.status === "proposed");
   const active = opts.openIntents.filter((i) => i.status === "claimed" || i.status === "running");
-  const activeKey = active.map((i) => i.id).sort().join(",");
+  const activeKey = `${active.map((i) => i.id).sort().join(",")}#${opts.concludedCount ?? 0}`;
   if (
     proposed.length === 0 &&
     active.length < exploreSlots &&
@@ -152,12 +155,16 @@ export async function waitForPoolTurn(opts: {
     }
     if (workerCount <= 1) return "ready";
 
-    const open = ctx.history.openIntents(taskId);
+    const allIntents = ctx.history.listIntents(taskId);
+    const open = allIntents.filter((i) =>
+      ["proposed", "claimed", "running"].includes(i.status),
+    );
     if (leader) {
       const decision = shouldWakeMultiWorkerLeader({
         openIntents: open,
         workerCount,
         lastRefillActiveKey: lastStaleSweep.lastRefillActiveKey ?? null,
+        concludedCount: allIntents.filter((i) => i.concludedAt).length,
       });
       if (decision.wake) {
         lastStaleSweep.lastRefillActiveKey = decision.activeKey;

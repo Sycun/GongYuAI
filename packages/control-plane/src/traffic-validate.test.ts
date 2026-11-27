@@ -11,6 +11,7 @@ import { bootControlPlane, taskPaths } from "./index.js";
 import {
   buildValidatorPacket,
   gradeDarkMoon,
+  replayTlsOptions,
   resetAutoValidationState,
   scheduleAutoValidationsForTask,
 } from "./validate-runner.js";
@@ -286,6 +287,15 @@ test("scheduleAutoValidationsForTask enqueues verified findings asynchronously a
   assert.ok(validations.length >= 1, "expected independent validation to complete asynchronously");
   assert.equal(validations[0]!.independent, true);
   assert.equal(validations[0]!.verdict, "confirmed");
+});
+
+test("replay TLS options never set SNI servername to an IP literal", () => {
+  // A servername IP throws ERR_INVALID_ARG_VALUE synchronously inside the CONNECT
+  // data handler, which previously killed the whole control plane mid-run.
+  assert.deepEqual(replayTlsOptions("10.0.160.128"), { host: "10.0.160.128" });
+  assert.deepEqual(replayTlsOptions("127.0.0.1"), { host: "127.0.0.1" });
+  assert.deepEqual(replayTlsOptions("::1"), { host: "::1" });
+  assert.deepEqual(replayTlsOptions("lab.example.com"), { servername: "lab.example.com" });
 });
 
 async function call(method: string, url: string, body?: unknown): Promise<{ status: number; text: string; json: any }> {
