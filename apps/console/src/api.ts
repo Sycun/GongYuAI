@@ -1,4 +1,4 @@
-import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingRetest, FindingValidation, FindingValidateRunResponse, HostProfile, HttpTransaction, EngagementAudit, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage, TrafficRecord } from "@gongyuai/contracts";
+import type { ChatApproval, ChatCatalog, ChatConnection, ChatProfile, CoverageReview, CoverageReviewInput, Credential, ExecutionTracePage, FindingReportContext, FindingRetest, FindingValidation, FindingValidateRunResponse, HostProfile, HttpTransaction, EngagementAudit, OastHit, OastToken, PlanStep, ShellTraceCall, TaskIntegrationUsage, ProjectIntegrationUsage, TrafficRecord } from "@gongyuai/contracts";
 import type { TaskArchiveState } from "@gongyuai/contracts";
 import type {
   KnowledgeEmbeddingPatch,
@@ -603,6 +603,34 @@ export const api = {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ findingId, ...(force ? { force: true } : {}) }),
       },
+    ),
+  /** 读取单条漏洞的关联事实、意图结论、封存证据摘要与结构化报告 Markdown。 */
+  findingReportContext: (id: string, findingId: string, signal?: AbortSignal) =>
+    request<{ finding: FindingRecord; context: FindingReportContext; markdown: string }>(
+      `/tasks/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}/report-context`,
+      { signal },
+    ),
+  /** 触发 AI 报告专家（无模型配置时回退确定性模板）生成并持久化单条漏洞详细报告。 */
+  generateFindingReport: (id: string, findingId: string) =>
+    request<{
+      finding: FindingRecord;
+      markdown: string;
+      context: FindingReportContext;
+      source: "llm" | "synthesized";
+      model?: string;
+      warning?: string;
+    }>(
+      `/tasks/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}/generate-report`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    ),
+  /** 获取任务级 ARTEX 风格漏洞发现汇总报告（Markdown）。 */
+  findingsReport: (id: string, includeTentative = false) =>
+    request<{ markdown: string }>(
+      `/tasks/${encodeURIComponent(id)}/findings-report${includeTentative ? "?includeTentative=1" : ""}`,
     ),
   getAssetHistory: (id: string, address: string, signal?: AbortSignal) =>
     request<AssetHistoryPayload>(

@@ -296,8 +296,11 @@ export function migrateHistorySchema(db: DatabaseSync): void {
       verified_by TEXT,
       qualification TEXT,
       traffic_ids_json TEXT,
+      summary TEXT,
+      affected_scope TEXT,
       root_cause TEXT,
       poc_curl TEXT,
+      report_md TEXT,
       UNIQUE(task_id, dedup_key)
     );
     CREATE INDEX IF NOT EXISTS idx_findings_task ON findings(task_id, status);
@@ -486,8 +489,11 @@ function migrateColumns(db: DatabaseSync): void {
   if (!findingCols.has("verified_by")) db.exec("ALTER TABLE findings ADD COLUMN verified_by TEXT");
   if (!findingCols.has("qualification")) db.exec("ALTER TABLE findings ADD COLUMN qualification TEXT");
   if (!findingCols.has("traffic_ids_json")) db.exec("ALTER TABLE findings ADD COLUMN traffic_ids_json TEXT");
+  if (!findingCols.has("summary")) db.exec("ALTER TABLE findings ADD COLUMN summary TEXT");
+  if (!findingCols.has("affected_scope")) db.exec("ALTER TABLE findings ADD COLUMN affected_scope TEXT");
   if (!findingCols.has("root_cause")) db.exec("ALTER TABLE findings ADD COLUMN root_cause TEXT");
   if (!findingCols.has("poc_curl")) db.exec("ALTER TABLE findings ADD COLUMN poc_curl TEXT");
+  if (!findingCols.has("report_md")) db.exec("ALTER TABLE findings ADD COLUMN report_md TEXT");
   ensureEventHashChain(db);
 }
 

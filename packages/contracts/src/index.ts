@@ -82,6 +82,7 @@ export {
   type ShellTraceCall,
 } from "./execution-trace.js";
 export * from "./integration-usage.js";
+export * from "./finding-report.js";
 import {
   DEFAULT_EXPLORE_TIMEOUT_MS,
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,

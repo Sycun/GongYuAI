@@ -1,7 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { coverageLabels, knowledgeSourceKindLabels, type TaskStatus, type TaskRecord, type WorkerManifest, type Fact, type KnowledgeVersionStatus } from "@gongyuai/contracts";
+import {
+  coverageLabels,
+  deriveFindingSections,
+  describeVulnClass,
+  knowledgeSourceKindLabels,
+  type Fact,
+  type FindingReportContext,
+  type KnowledgeVersionStatus,
+  type TaskRecord,
+  type TaskStatus,
+  type WorkerManifest,
+} from "@gongyuai/contracts";
 import type { HistoryStore, FactReview } from "./index.js";
 import { describeGoalEvidence, formatAccounting } from "./delivery.js";
 import { findAttackPaths, integrationSuccessRate, totalIntegrationCalls } from "@gongyuai/contracts";
@@ -85,6 +96,14 @@ export function writeTaskReport(
       return `[${label(path)}](report-evidence/${digest}) · SHA-256 ` + digest;
     }
 
+    function safeLink(path: string, digest: string): string {
+      try {
+        return link(path, digest);
+      } catch (err) {
+        return `\`${label(path)}\` · **无法复验**（${label(err instanceof Error ? err.message : String(err))}）· 期望 SHA-256 ${digest}`;
+      }
+    }
+
     const lines = ["# GongYuAI Report", "", `Task: ${id}`, `Status: ${opts.status}`];
     if (opts.reason) lines.push(`Reason: ${label(opts.reason)}`);
     lines.push(`Targets: ${task.auth.targets.map(label).join(", ")}`, `Authorization: ${label(task.auth.authorizationNote)}`,
@@ -117,23 +136,79 @@ export function writeTaskReport(
       retested: "修复后复测",
       accepted: "客户接受风险",
     };
+    const allIntents = new Map(history.listIntents(id).map((intent) => [intent.id, intent]));
     lines.push("", "## Findings", "");
     if (!deliverable.length) {
       lines.push("- （无已验证 finding；tentative 线索不进交付）", "");
     }
     for (const f of deliverable) {
+      const kb = describeVulnClass(f.vulnClass);
+      const relatedFacts = f.factIds
+        .map((fid) => byId.get(fid))
+        .filter((item): item is Fact => Boolean(item))
+        .map((item) => ({ id: item.id, title: item.title, summary: item.summary, evidencePath: item.evidencePath }));
+      const relatedIntent = f.intentId ? allIntents.get(f.intentId) ?? null : null;
+      const reportCtx: FindingReportContext = {
+        facts: relatedFacts,
+        intent: relatedIntent
+          ? { id: relatedIntent.id, title: relatedIntent.title, summary: relatedIntent.summary, conclusion: relatedIntent.conclusion }
+          : null,
+      };
+      const sections = deriveFindingSections(f, reportCtx);
       lines.push(
         `### [${f.severity.toUpperCase()}] ${label(f.title)}（${f.id}）· ${findingStatusLabel[f.status] ?? f.status}`,
         "",
-        `- 资产：${label(f.asset)}${f.endpoint ? ` · 端点：${label(f.endpoint)}` : ""} · 类别：${label(f.vulnClass)}`,
+        `- 资产：${label(f.asset)}${f.endpoint ? ` · 端点：${label(f.endpoint)}` : ""} · 类别：${label(f.vulnClass)}（${label(kb.label)}）`,
       );
       if (f.cvss) lines.push(`- CVSS vector：${label(f.cvss)}`);
-      if (f.repro) lines.push(`- 复现：${label(f.repro)}`);
-      if (f.impact) lines.push(`- 影响：${label(f.impact)}`);
-      if (f.fix) lines.push(`- 修复建议：${label(f.fix)}`);
-      for (const e of f.evidence) lines.push(`- 证据：${link(e.path, e.sha256)}`);
       if (f.verifiedAt) lines.push(`- 验证时间：${f.verifiedAt}`);
       if (f.verifiedBy) lines.push(`- 验证者：${label(f.verifiedBy)}`);
+      lines.push(
+        "",
+        "#### 概述",
+        "",
+        sections.summary,
+        "",
+        "#### 影响与危害",
+        "",
+        sections.impact,
+        "",
+        "#### 受影响范围",
+        "",
+        sections.affectedScope,
+        "",
+        "#### 复现步骤",
+        "",
+      );
+      if (sections.steps.length === 0) {
+        lines.push("- （未记录分步复现）", "");
+      } else {
+        for (const step of sections.steps) {
+          lines.push(`##### 步骤 ${step.number}：${label(step.title)}`, "");
+          if (step.body) {
+            if (step.body.includes("```")) lines.push(step.body, "");
+            else lines.push("```text", step.body, "```", "");
+          }
+        }
+      }
+      if (sections.poc) {
+        lines.push("#### PoC", "");
+        if (sections.poc.includes("```")) lines.push(sections.poc, "");
+        else lines.push("```bash", sections.poc, "```", "");
+      }
+      lines.push(
+        "#### 根因分析",
+        "",
+        sections.rootCause,
+        "",
+        "#### 修复建议",
+        "",
+        sections.fix,
+        "",
+        "#### 封存证据与复核",
+        "",
+      );
+      for (const e of f.evidence) lines.push(`- 证据：${safeLink(e.path, e.sha256)}`);
       // P15-C1 — independence is a separate axis from "verified".
       const validations = history
         .listFindingValidations(id, f.id)
@@ -148,7 +223,7 @@ export function writeTaskReport(
         );
         if (latestValidation.note) lines.push(`  - 说明：${label(latestValidation.note)}`);
         for (const e of latestValidation.evidence) {
-          lines.push(`  - 复核证据：${link(e.path, e.sha256)}`);
+          lines.push(`  - 复核证据：${safeLink(e.path, e.sha256)}`);
         }
       }
       lines.push("");
@@ -185,7 +260,7 @@ export function writeTaskReport(
         );
         if (retest.repro) lines.push(`  - 复测步骤：${label(retest.repro)}`);
         if (retest.note) lines.push(`  - 说明：${label(retest.note)}`);
-        for (const e of retest.evidence) lines.push(`  - 证据：${link(e.path, e.sha256)}`);
+        for (const e of retest.evidence) lines.push(`  - 证据：${safeLink(e.path, e.sha256)}`);
       }
     }
 

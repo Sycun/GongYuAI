@@ -45,10 +45,14 @@ export class FindingLedgerStore {
     dedupKey?: string;
     intentId?: string | null;
     factIds?: string[];
+    summary?: string;
+    affectedScope?: string;
+    rootCause?: string;
     repro?: string;
     impact?: string;
     fix?: string;
     pocCurl?: string | null;
+    report?: string;
     qualification?: FindingQualification | null;
   }): { finding: Finding; created: boolean } {
     const title = input.title.trim();
@@ -71,27 +75,55 @@ export class FindingLedgerStore {
     if (intentId && !this.deps.getIntent(input.taskId, intentId)) {
       throw new Error(`unknown finding intent: ${intentId}`);
     }
+    const summary = input.summary?.trim() || null;
+    const affectedScope = input.affectedScope?.trim() || null;
+    const rootCause = input.rootCause?.trim() || null;
     const pocCurl = input.pocCurl?.trim() || null;
+    const report = input.report?.trim() || null;
     const qualification = input.qualification ?? null;
     if (existing) {
       const mergedFactIds = [...new Set([...existing.factIds, ...factIds])];
       const nextIntentId = existing.intentId ?? intentId;
+      const nextSummary = existing.summary ?? summary;
+      const nextAffectedScope = existing.affectedScope ?? affectedScope;
+      const nextRootCause = existing.rootCause ?? rootCause;
+      const nextImpact = existing.impact || (input.impact?.trim() ?? "");
+      const nextFix = existing.fix || (input.fix?.trim() ?? "");
+      const nextRepro = existing.repro || (input.repro?.trim() ?? "");
       const nextPocCurl = existing.pocCurl ?? pocCurl;
+      const nextReport = existing.report ?? report;
       const nextQualification = existing.qualification ?? qualification;
       const changed =
         nextIntentId !== existing.intentId ||
         mergedFactIds.length !== existing.factIds.length ||
+        nextSummary !== (existing.summary ?? null) ||
+        nextAffectedScope !== (existing.affectedScope ?? null) ||
+        nextRootCause !== (existing.rootCause ?? null) ||
+        nextImpact !== existing.impact ||
+        nextFix !== existing.fix ||
+        nextRepro !== existing.repro ||
         nextPocCurl !== (existing.pocCurl ?? null) ||
+        nextReport !== (existing.report ?? null) ||
         nextQualification !== (existing.qualification ?? null);
       if (changed) {
         this.deps.db
           .prepare(
-            `UPDATE findings SET intent_id = ?, fact_ids_json = ?, poc_curl = ?, qualification = ? WHERE task_id = ? AND id = ?`,
+            `UPDATE findings
+             SET intent_id = ?, fact_ids_json = ?, summary = ?, affected_scope = ?, root_cause = ?,
+                 repro = ?, impact = ?, fix = ?, poc_curl = ?, report_md = ?, qualification = ?
+             WHERE task_id = ? AND id = ?`,
           )
           .run(
             nextIntentId,
             JSON.stringify(mergedFactIds),
+            nextSummary,
+            nextAffectedScope,
+            nextRootCause,
+            nextRepro,
+            nextImpact,
+            nextFix,
             nextPocCurl,
+            nextReport,
             nextQualification,
             input.taskId,
             existing.id,
@@ -116,22 +148,26 @@ export class FindingLedgerStore {
       intentId,
       factIds,
       evidence: [],
-      repro: input.repro ?? "",
-      impact: input.impact ?? "",
-      fix: input.fix ?? "",
+      repro: input.repro?.trim() ?? "",
+      impact: input.impact?.trim() ?? "",
+      fix: input.fix?.trim() ?? "",
       createdAt: this.deps.now(),
       verifiedAt: null,
       verifiedBy: null,
+      ...(summary ? { summary } : {}),
+      ...(affectedScope ? { affectedScope } : {}),
+      ...(rootCause ? { rootCause } : {}),
       ...(qualification ? { qualification } : {}),
       ...(pocCurl ? { pocCurl } : {}),
+      ...(report ? { report } : {}),
     };
     this.deps.db
       .prepare(
         `INSERT INTO findings
           (id, task_id, title, asset, vuln_class, severity, cvss, confidence, status,
            endpoint, dedup_key, intent_id, fact_ids_json, evidence_json, repro, impact, fix,
-           created_at, verified_at, qualification, poc_curl)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           created_at, verified_at, qualification, summary, affected_scope, root_cause, poc_curl, report_md)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         finding.id,
@@ -154,7 +190,11 @@ export class FindingLedgerStore {
         finding.createdAt,
         finding.verifiedAt,
         qualification,
+        summary,
+        affectedScope,
+        rootCause,
         pocCurl,
+        report,
       );
     this.deps.emit(input.taskId, "finding_recorded", {
       findingId: finding.id,
@@ -172,12 +212,16 @@ export class FindingLedgerStore {
     input: {
       evidencePaths: string[];
       repro: string;
+      summary?: string;
+      affectedScope?: string;
+      rootCause?: string;
       impact?: string;
       fix?: string;
       cvss?: string | null;
       verifiedBy?: string;
       intentId?: string | null;
       pocCurl?: string | null;
+      report?: string;
       qualification?: FindingQualification | null;
     },
   ): Finding {
@@ -237,21 +281,29 @@ export class FindingLedgerStore {
         }
       }
       const now = this.deps.now();
+      const nextSummary = input.summary?.trim() || finding.summary || null;
+      const nextAffectedScope = input.affectedScope?.trim() || finding.affectedScope || null;
+      const nextRootCause = input.rootCause?.trim() || finding.rootCause || null;
       const nextPocCurl = input.pocCurl?.trim() || finding.pocCurl || null;
+      const nextReport = input.report?.trim() || finding.report || null;
       const nextQualification = input.qualification ?? finding.qualification ?? null;
       this.deps.db
         .prepare(
           `UPDATE findings
            SET status = 'verified', confidence = 'firm', evidence_json = ?,
                intent_id = ?, fact_ids_json = ?,
+               summary = ?, affected_scope = ?, root_cause = ?,
                repro = ?, impact = ?, fix = ?, cvss = ?, verified_at = ?, verified_by = ?,
-               poc_curl = ?, qualification = ?
+               poc_curl = ?, report_md = ?, qualification = ?
            WHERE task_id = ? AND id = ? AND status = 'tentative'`,
         )
         .run(
           JSON.stringify(evidence),
           nextIntentId,
           JSON.stringify(nextFactIds),
+          nextSummary,
+          nextAffectedScope,
+          nextRootCause,
           repro,
           input.impact?.trim() || finding.impact,
           input.fix?.trim() || finding.fix,
@@ -259,6 +311,7 @@ export class FindingLedgerStore {
           now,
           input.verifiedBy?.trim() || finding.verifiedBy,
           nextPocCurl,
+          nextReport,
           nextQualification,
           taskId,
           findingId,
@@ -274,6 +327,49 @@ export class FindingLedgerStore {
       throw err;
     }
     return this.getFinding(taskId, findingId)!;
+  }
+
+  updateFindingReport(
+    taskId: string,
+    findingId: string,
+    patch: {
+      summary?: string;
+      affectedScope?: string;
+      rootCause?: string;
+      impact?: string;
+      fix?: string;
+      pocCurl?: string;
+      report?: string;
+    },
+  ): Finding | null {
+    const existing = this.getFinding(taskId, findingId);
+    if (!existing) return null;
+    const nextSummary = patch.summary !== undefined ? (patch.summary.trim() || null) : (existing.summary ?? null);
+    const nextAffectedScope =
+      patch.affectedScope !== undefined ? (patch.affectedScope.trim() || null) : (existing.affectedScope ?? null);
+    const nextRootCause = patch.rootCause !== undefined ? (patch.rootCause.trim() || null) : (existing.rootCause ?? null);
+    const nextImpact = patch.impact !== undefined ? patch.impact.trim() : existing.impact;
+    const nextFix = patch.fix !== undefined ? patch.fix.trim() : existing.fix;
+    const nextPocCurl = patch.pocCurl !== undefined ? (patch.pocCurl.trim() || null) : (existing.pocCurl ?? null);
+    const nextReport = patch.report !== undefined ? (patch.report.trim() || null) : (existing.report ?? null);
+    this.deps.db
+      .prepare(
+        `UPDATE findings
+         SET summary = ?, affected_scope = ?, root_cause = ?, impact = ?, fix = ?, poc_curl = ?, report_md = ?
+         WHERE task_id = ? AND id = ?`,
+      )
+      .run(
+        nextSummary,
+        nextAffectedScope,
+        nextRootCause,
+        nextImpact,
+        nextFix,
+        nextPocCurl,
+        nextReport,
+        taskId,
+        findingId,
+      );
+    return this.getFinding(taskId, findingId);
   }
 
   updateFindingPocCurl(taskId: string, findingId: string, pocCurl: string): Finding | null {
@@ -752,10 +848,16 @@ export class FindingLedgerStore {
         /* ignore malformed legacy json */
       }
     }
+    const summary =
+      typeof r.summary === "string" && r.summary.length > 0 ? r.summary : undefined;
+    const affectedScope =
+      typeof r.affected_scope === "string" && r.affected_scope.length > 0 ? r.affected_scope : undefined;
     const rootCause =
       typeof r.root_cause === "string" && r.root_cause.length > 0 ? r.root_cause : undefined;
     const pocCurl =
       typeof r.poc_curl === "string" && r.poc_curl.length > 0 ? r.poc_curl : undefined;
+    const report =
+      typeof r.report_md === "string" && r.report_md.length > 0 ? r.report_md : undefined;
     return {
       id: String(r.id),
       taskId: String(r.task_id),
@@ -779,8 +881,11 @@ export class FindingLedgerStore {
       verifiedBy: (r.verified_by as string | null) ?? null,
       ...(qualification ? { qualification } : {}),
       ...(trafficIds ? { trafficIds } : {}),
+      ...(summary ? { summary } : {}),
+      ...(affectedScope ? { affectedScope } : {}),
       ...(rootCause ? { rootCause } : {}),
       ...(pocCurl ? { pocCurl } : {}),
+      ...(report ? { report } : {}),
     };
   }
 }

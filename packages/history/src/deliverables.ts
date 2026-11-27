@@ -9,7 +9,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { WorkerManifest } from "@gongyuai/contracts";
+import { deriveFindingSections, describeVulnClass, type WorkerManifest } from "@gongyuai/contracts";
 import type { HistoryStore } from "./index.js";
 
 const AUTO_START = "<!-- gongyuai:auto-deliverable:start -->";
@@ -154,21 +154,59 @@ function renderEngagementReport(
   if (!verified.length) {
     lines.push("- （暂无已验证 Finding）");
   } else {
+    const factsById = new Map(history.listFacts(id).map((fact) => [fact.id, fact]));
+    const intentsById = new Map(history.listIntents(id).map((intent) => [intent.id, intent]));
     for (const f of verified) {
+      const kb = describeVulnClass(f.vulnClass);
       const validations = history.listFindingValidations(id, f.id).filter((v) => v.independent);
+      const relatedFacts = f.factIds
+        .map((fid) => factsById.get(fid))
+        .filter((fact): fact is NonNullable<typeof fact> => Boolean(fact))
+        .map((fact) => ({ id: fact.id, title: fact.title, summary: fact.summary, evidencePath: fact.evidencePath }));
+      const intent = f.intentId ? intentsById.get(f.intentId) ?? null : null;
+      const sections = deriveFindingSections(f, {
+        facts: relatedFacts,
+        intent: intent ? { id: intent.id, title: intent.title, summary: intent.summary, conclusion: intent.conclusion } : null,
+      });
       lines.push(
         "",
         `### [${f.severity.toUpperCase()}] ${cleanLine(f.title)}`,
-        `- Asset: \`${f.asset}\`${f.endpoint ? ` · Endpoint: \`${cleanLine(f.endpoint, 120)}\`` : ""} · Class: \`${f.vulnClass}\``,
+        `- Asset: \`${f.asset}\`${f.endpoint ? ` · Endpoint: \`${cleanLine(f.endpoint, 160)}\`` : ""} · Class: \`${f.vulnClass}\` (${kb.label})`,
         `- Status: \`${f.status}\`${f.qualification ? ` · Qualification: \`${f.qualification}\`` : ""}${validations.length ? ` · Independent Validations: ${validations.map((v) => v.verdict).join(", ")}` : ""}`,
       );
       if (f.cvss) lines.push(`- CVSS: \`${f.cvss}\``);
-      if (f.repro) lines.push(`- Reproduction: ${cleanLine(f.repro, 400)}`);
-      if (f.pocCurl) lines.push(`- PoC: \`${cleanLine(f.pocCurl, 400)}\``);
-      if (f.impact) lines.push(`- Impact: ${cleanLine(f.impact, 300)}`);
-      if (f.fix) lines.push(`- Remediation: ${cleanLine(f.fix, 300)}`);
+      lines.push(
+        "",
+        "#### 概述",
+        sections.summary,
+        "",
+        "#### 影响与危害",
+        sections.impact,
+        "",
+        "#### 受影响范围",
+        sections.affectedScope,
+        "",
+        "#### 复现步骤",
+      );
+      for (const step of sections.steps) {
+        lines.push(`##### 步骤 ${step.number}：${cleanLine(step.title, 120)}`);
+        if (step.body) {
+          lines.push(step.body.includes("```") ? step.body : `\`\`\`text\n${step.body}\n\`\`\``);
+        }
+      }
+      if (sections.poc) {
+        lines.push("", "#### PoC", sections.poc.includes("```") ? sections.poc : `\`\`\`bash\n${sections.poc}\n\`\`\``);
+      }
+      lines.push(
+        "",
+        "#### 根因分析",
+        sections.rootCause,
+        "",
+        "#### 修复建议",
+        sections.fix,
+      );
       if (f.evidence.length) {
-        lines.push(`- Evidence: ${f.evidence.map((e) => `\`${e.path}\` (${e.sha256.slice(0, 12)})`).join(", ")}`);
+        lines.push("", `- Evidence: ${f.evidence.map((e) => `\`${e.path}\` (${e.sha256.slice(0, 12)})`).join(", ")}`);
       }
     }
   }

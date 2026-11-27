@@ -230,7 +230,7 @@ export function boardClearPolicyBlock(manifest: WorkerManifest): string {
    - 涉及越权、状态机绕过或多步业务逻辑缺陷时，使用 \`http_request\` 的命名 \`session\`（如 \`admin\` / \`user_a\` / \`anon\`）隔离维持各身份态；
    - 验证输入边界、访问控制或盲态差异时，用 \`http_request\` 的 \`compareWith="http:<baselineId>"\` 与正常基线事务做确定性响应差分，用对照组说话，禁止靠盲目字典爆破碰运气。
 3. **证据闭环与同源横向迁移**：
-   - 发现可疑线索先 \`finding_record\`（tentative）；完成复现后必须调用 \`finding_verify\` 绑定封存事务 \`http:<id>\`、带外命中 \`oast:<token>\` 或 \`evidence/\` 原件及精确复现步骤；
+   - 发现可疑线索先 \`finding_record\`（tentative）；完成复现后必须调用 \`finding_verify\` 绑定封存事务 \`http:<id>\`、带外命中 \`oast:<token>\` 或 \`evidence/\` 原件，并完整填写结构化报告要素（\`summary\` 一句话概述、\`affectedScope\` 受影响范围与前置条件、按 \`### 步骤 1：...\` 编号展开的 \`repro\` 分步复现与实际回显、\`pocCurl\` 可复用利用命令、\`rootCause\` 根因机理分析、\`impact\` 业务危害与定级依据、\`fix\` 可落地修复建议）；
    - 确认有效成因、凭据或立足点后，提炼组件/架构特征通过 \`technique_transfer\` 对同族资产扇出验证；
    - 同一攻击面连续约 25 次工具调用无实质证据进展时，须 \`intent_conclude(status="failed", conclusion="已验证排除的假设与边界约束")\` 止损换面；交付报告（如 \`engagement/report.md\`）只纳入 \`verified\` 结论。
 4. **过程材料落盘（不阻断攻击链）**：

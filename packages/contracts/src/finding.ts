@@ -98,9 +98,15 @@ export const FindingSchema = z.object({
   verifiedAt: z.string().datetime().nullable().default(null),
   /** P15-C1 — worker/operator that moved tentative → verified. */
   verifiedBy: z.string().nullable().default(null),
+  /** One-sentence vulnerability overview (what, where, impact). */
+  summary: z.string().optional(),
+  /** Affected scope & exploitation prerequisites (asset/endpoint/param/version/auth). */
+  affectedScope: z.string().optional(),
   rootCause: z.string().optional(),
   /** Existing evidence excerpt for human readers of the report. */
   pocCurl: z.string().optional(),
+  /** ARTEX-style structured Markdown vulnerability report for this single finding. */
+  report: z.string().optional(),
   trafficIds: z.array(z.string().uuid()).optional(),
   qualification: FindingQualificationSchema.optional(),
 });

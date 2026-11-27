@@ -24,6 +24,10 @@
     "./integration-usage": {
       "types": "./dist/integration-usage.d.ts",
       "import": "./dist/integration-usage.js"
+    },
+    "./finding-report": {
+      "types": "./dist/finding-report.d.ts",
+      "import": "./dist/finding-report.js"
     }
   },
   "scripts": {

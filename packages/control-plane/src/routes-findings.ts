@@ -9,9 +9,15 @@ import {
   PeerReviewSchema,
   RetestRequestSchema,
   isTerminalTaskStatus,
+  renderSingleFindingMarkdown,
   type TaskRecord,
 } from "@gongyuai/contracts";
-import { computeScorecard, writeTaskReport, type HistoryStore } from "@gongyuai/history";
+import { computeScorecard, openHistory, writeTaskReport, type HistoryStore } from "@gongyuai/history";
+import {
+  buildFindingReportContext,
+  buildTaskFindingsSummaryMarkdown,
+  generateFindingDetailedReport,
+} from "./finding-reporter.js";
 import { scopeFromTask } from "./knowledge-api.js";
 import type { KnowledgeStore } from "./knowledge.js";
 import { taskPaths } from "./paths.js";
@@ -53,7 +59,7 @@ export async function handleFindingsRoute(
   task: TaskRecord,
   rest: string,
 ): Promise<boolean> {
-  const { store, knowledge } = deps;
+  const { store, knowledge, settings } = deps;
   const paths = taskPaths(task.dataDir);
 
   if (method === "GET" && rest === "/findings") {
@@ -68,6 +74,98 @@ export async function handleFindingsRoute(
         goalFindings: history.listGoalFindings(task.id),
       });
     });
+    return true;
+  }
+
+  if (method === "GET" && rest === "/findings-report") {
+    const includeTentative = url.searchParams.get("includeTentative") === "1";
+    if (!existsSync(paths.historyDb)) {
+      sendJson(res, 200, { markdown: "" });
+      return true;
+    }
+    withTaskHistory(task, { readOnly: true }, (history) => {
+      sendJson(res, 200, {
+        markdown: buildTaskFindingsSummaryMarkdown(task, history, includeTentative),
+      });
+    });
+    return true;
+  }
+
+  const reportContextMatch = /^\/findings\/([^/]+)\/report-context$/.exec(rest);
+  if (method === "GET" && reportContextMatch) {
+    const findingId = decodeURIComponent(reportContextMatch[1]!);
+    if (!existsSync(paths.historyDb)) return historyMissing(res);
+    withTaskHistory(task, { readOnly: true }, (history) => {
+      const finding = history.getFinding(task.id, findingId);
+      if (!finding) {
+        sendJson(res, 404, { error: "finding not found" });
+        return;
+      }
+      const context = buildFindingReportContext(task, history, finding);
+      const markdown = renderSingleFindingMarkdown(finding, context);
+      sendJson(res, 200, { finding, context, markdown });
+    });
+    return true;
+  }
+
+  const reportPatchMatch = /^\/findings\/([^/]+)\/report$/.exec(rest);
+  if (method === "PATCH" && reportPatchMatch) {
+    const findingId = decodeURIComponent(reportPatchMatch[1]!);
+    if (!existsSync(paths.historyDb)) return historyMissing(res);
+    const body = (await readJson(req)) as Record<string, unknown>;
+    try {
+      withTaskHistory(task, { readOnly: false }, (history) => {
+        const updated = history.updateFindingReport(task.id, findingId, {
+          ...(typeof body.summary === "string" ? { summary: body.summary } : {}),
+          ...(typeof body.affectedScope === "string" ? { affectedScope: body.affectedScope } : {}),
+          ...(typeof body.rootCause === "string" ? { rootCause: body.rootCause } : {}),
+          ...(typeof body.impact === "string" ? { impact: body.impact } : {}),
+          ...(typeof body.fix === "string" ? { fix: body.fix } : {}),
+          ...(typeof body.pocCurl === "string" ? { pocCurl: body.pocCurl } : {}),
+          ...(typeof body.report === "string" ? { report: body.report } : {}),
+        });
+        if (!updated) {
+          sendJson(res, 404, { error: "finding not found" });
+          return;
+        }
+        refreshTerminalReport(task, history, knowledge);
+        const context = buildFindingReportContext(task, history, updated);
+        sendJson(res, 200, {
+          finding: updated,
+          context,
+          markdown: renderSingleFindingMarkdown(updated, context),
+        });
+      });
+    } catch (err) {
+      sendJson(res, 409, { error: errorMessage(err) });
+    }
+    return true;
+  }
+
+  const generateReportMatch = /^\/findings\/([^/]+)\/generate-report$/.exec(rest);
+  if (method === "POST" && generateReportMatch) {
+    const findingId = decodeURIComponent(generateReportMatch[1]!);
+    if (!existsSync(paths.historyDb)) return historyMissing(res);
+    const history = openHistory({ dbPath: paths.historyDb, evidenceDir: paths.evidenceDir, readOnly: false });
+    try {
+      const finding = history.getFinding(task.id, findingId);
+      if (!finding) {
+        sendJson(res, 404, { error: "finding not found" });
+        return true;
+      }
+      const generated = await generateFindingDetailedReport({
+        settings,
+        task,
+        history,
+        finding,
+      });
+      refreshTerminalReport(task, history, knowledge);
+      sendJson(res, 200, generated);
+    } catch (err) {
+      sendJson(res, 409, { error: errorMessage(err) });
+    } finally {
+      history.close();
+    }
     return true;
   }
 
@@ -128,9 +226,13 @@ export async function handleFindingsRoute(
         const finding = history.verifyFinding(task.id, findingId, {
           evidencePaths,
           repro: typeof body.repro === "string" ? body.repro : "",
+          summary: typeof body.summary === "string" ? body.summary : undefined,
+          affectedScope: typeof body.affectedScope === "string" ? body.affectedScope : undefined,
+          rootCause: typeof body.rootCause === "string" ? body.rootCause : undefined,
           impact: typeof body.impact === "string" ? body.impact : undefined,
           fix: typeof body.fix === "string" ? body.fix : undefined,
           pocCurl: typeof body.pocCurl === "string" ? body.pocCurl : undefined,
+          report: typeof body.report === "string" ? body.report : undefined,
           verifiedBy: typeof body.verifiedBy === "string" ? body.verifiedBy : "operator:api",
         });
         refreshTerminalReport(task, history, knowledge);

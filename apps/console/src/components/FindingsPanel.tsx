@@ -2,14 +2,29 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button, Card, Collapsible, Empty, Input, SideSheet, Space, Spin, Table, Tag, TextArea, Toast, Typography,
 } from "@douyinfe/semi-ui";
-import { IconCopy, IconDownload, IconRefresh, IconShield } from "@douyinfe/semi-icons";
-import type { EngagementAudit, FindingRetest, FindingValidation, TrafficRecord } from "@gongyuai/contracts";
+import { IconCopy, IconDownload, IconFile, IconRefresh, IconShield } from "@douyinfe/semi-icons";
+import {
+  deriveFindingSections,
+  describeVulnClass,
+  findingSafeFilename,
+  findingsToCsv,
+  renderFindingsSummaryMarkdown,
+  renderSingleFindingMarkdown,
+  type FindingReportContext,
+} from "@gongyuai/contracts/finding-report";
+import type {
+  EngagementAudit,
+  FindingRetest,
+  FindingValidation,
+  TrafficRecord,
+} from "@gongyuai/contracts";
 import { api, probe, type FindingRecord, type TaskRecord } from "../api";
 import {
   FINDING_SEVERITY_LABEL, FINDING_STATUS_LABEL, FINDING_QUALIFICATION_LABEL,
   effectiveQualification, findingQualificationColor, findingSeverityColor, findingStatusColor, shortId,
 } from "../labels";
 import { formatDateTime } from "../time";
+import { ChatMarkdown } from "./ChatMarkdown";
 import { DeliveryScorecard } from "./DeliveryScorecard";
 import { ReconcilePanel } from "./ReconcilePanel";
 import { ReportMarkdown } from "./ReportMarkdown";
@@ -27,6 +42,12 @@ const VERDICT_COLOR: Record<string, "green" | "red" | "grey" | "orange"> = {
 const METHOD_LABEL: Record<string, string> = {
   "evidence-only": "证据核验", replay: "重放", "control-compare": "对照比较", manual: "人工",
 };
+const ROOT_CAUSE_SOURCE_LABEL: Record<string, string> = {
+  recorded: "实测记录",
+  report: "详细报告",
+  context: "关联取证推导",
+  "class-baseline": "CWE 机理基线",
+};
 
 type Props = {
   taskId: string;
@@ -39,14 +60,27 @@ type Props = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function triggerDownload(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKey = 0, onRefresh }: Props) {
   const [mode, setMode] = useState<"ledger" | "report">("ledger");
+  const [reportSubMode, setReportSubMode] = useState<"vuln" | "delivery">("vuln");
   const [audit, setAudit] = useState<EngagementAudit | null>(null);
   const [validations, setValidations] = useState<FindingValidation[]>([]);
   const [retests, setRetests] = useState<FindingRetest[]>([]);
-  const [reportText, setReportText] = useState("");
+  const [deliveryReportText, setDeliveryReportText] = useState("");
+  const [findingsReportText, setFindingsReportText] = useState("");
   const [evidenceFiles, setEvidenceFiles] = useState<Array<{ path: string; size: number; mtime: string }>>([]);
   const [selectedId, setSelectedId] = useState<string | null>(focusFinding ?? null);
+  const [localPatchById, setLocalPatchById] = useState<Record<string, FindingRecord>>({});
   const [busyValidation, setBusyValidation] = useState<string | null>(null);
   const [batchBusy, setBatchBusy] = useState(false);
   const [observationsOpen, setObservationsOpen] = useState(false);
@@ -56,11 +90,17 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
     if (focusFinding) setSelectedId(focusFinding);
   }, [focusFinding]);
 
+  const mergedFindings = useMemo(
+    () => findings.map((f) => localPatchById[f.id] ?? f),
+    [findings, localPatchById],
+  );
+
   const loadSide = useCallback(async () => {
-    const [auditRes, valRes, deliveryRes, evRes, p14Res] = await Promise.allSettled([
+    const [auditRes, valRes, deliveryRes, findingsRepRes, evRes, p14Res] = await Promise.allSettled([
       api.getAudit(taskId),
       api.getValidations(taskId),
       api.delivery(taskId),
+      api.findingsReport(taskId, false),
       api.evidence(taskId),
       api.getTaskP14(taskId),
     ]);
@@ -68,19 +108,22 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
     if (valRes.status === "fulfilled") setValidations(valRes.value.json.validations ?? []);
     if (evRes.status === "fulfilled") setEvidenceFiles(evRes.value.json.files ?? []);
     if (p14Res.status === "fulfilled") setRetests(p14Res.value.json.retests ?? []);
+    if (findingsRepRes.status === "fulfilled") {
+      setFindingsReportText(findingsRepRes.value.json.markdown ?? "");
+    }
     if (deliveryRes.status === "fulfilled") {
       const summary = deliveryRes.value.json.summary ?? "";
       let original = "";
       if (deliveryRes.value.json.hasReport) {
         try { original = (await api.report(taskId)).text; } catch { /* 报告缺失时只展示摘要 */ }
       }
-      setReportText(original ? `${summary}\n\n## 留存报告\n\n${original}` : summary);
+      setDeliveryReportText(original ? `${summary}\n\n## 留存报告\n\n${original}` : summary);
     }
   }, [taskId]);
 
   useEffect(() => { void loadSide(); }, [loadSide, refreshKey]);
 
-  const active = useMemo(() => findings.filter((f) => f.status !== "retracted"), [findings]);
+  const active = useMemo(() => mergedFindings.filter((f) => f.status !== "retracted"), [mergedFindings]);
   const sorted = useMemo(
     () => [...active].sort((a, b) => (SEVERITY_ORDER[b.severity] ?? 0) - (SEVERITY_ORDER[a.severity] ?? 0) || b.createdAt.localeCompare(a.createdAt)),
     [active],
@@ -91,6 +134,13 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
     for (const f of active) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
     return counts;
   }, [active]);
+
+  const clientFallbackSummaryReport = useMemo(
+    () => renderFindingsSummaryMarkdown(mergedFindings, { taskId }),
+    [mergedFindings, taskId],
+  );
+  const effectiveVulnReport = findingsReportText.trim() || clientFallbackSummaryReport;
+  const activeReportText = reportSubMode === "vuln" ? effectiveVulnReport : deliveryReportText;
 
   const independentConfirmed = useCallback(
     (fid: string) => validations.some((v) => v.findingId === fid && v.independent && v.verdict === "confirmed"),
@@ -104,7 +154,7 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
   const observations = audit?.observations ?? [];
   const warnCount = observations.filter((o) => o.severity === "warn").length;
   const hasBusinessGoal = goals.some((g) => g.kind === "business-reconcile" || Boolean(g.business));
-  const selected = findings.find((f) => f.id === selectedId) ?? null;
+  const selected = mergedFindings.find((f) => f.id === selectedId) ?? null;
 
   const runValidation = useCallback(async (fid: string, force = false) => {
     setBusyValidation(fid);
@@ -146,20 +196,31 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
     }
   }, [sorted, independentConfirmed, runValidation]);
 
-  const exportReport = () => {
-    const blob = new Blob([reportText], { type: "text/markdown;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `report-${shortId(taskId)}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const exportSummaryMarkdown = () => {
+    triggerDownload(effectiveVulnReport, `findings-report-${shortId(taskId)}.md`, "text/markdown;charset=utf-8");
+  };
+
+  const exportCsv = () => {
+    triggerDownload(findingsToCsv(mergedFindings), `findings-${shortId(taskId)}.csv`, "text/csv;charset=utf-8");
+  };
+
+  const exportActiveReport = () => {
+    const filename = reportSubMode === "vuln"
+      ? `findings-report-${shortId(taskId)}.md`
+      : `delivery-report-${shortId(taskId)}.md`;
+    triggerDownload(activeReportText, filename, "text/markdown;charset=utf-8");
   };
 
   const reloadEvidence = async () => {
     const ev = await api.evidence(taskId);
     setEvidenceFiles(ev.json.files ?? []);
   };
+
+  const handleFindingUpdated = useCallback((updated: FindingRecord) => {
+    setLocalPatchById((prev) => ({ ...prev, [updated.id]: updated }));
+    onRefresh();
+    void loadSide();
+  }, [onRefresh, loadSide]);
 
   return (
     <div className="gy-findings">
@@ -178,7 +239,7 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
               {coverage.rate != null ? `（${Math.round(coverage.rate * 100)}%）` : ""}
             </Tag>
           </Space>
-          <Space spacing={8}>
+          <Space wrap spacing={8}>
             <Button size="small" theme={mode === "ledger" ? "solid" : "light"} type={mode === "ledger" ? "primary" : "tertiary"} onClick={() => setMode("ledger")}>
               漏洞台账
             </Button>
@@ -186,7 +247,9 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
               报告预览
             </Button>
             {mode === "report" && (
-              <Button size="small" icon={<IconDownload />} onClick={exportReport} disabled={!reportText.trim()}>导出</Button>
+              <Button size="small" icon={<IconDownload />} onClick={exportActiveReport} disabled={!activeReportText.trim()}>
+                导出 Markdown
+              </Button>
             )}
           </Space>
         </div>
@@ -216,7 +279,42 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
           <DeliveryScorecard taskId={taskId} refreshKey={refreshKey} />
           {hasBusinessGoal && <ReconcilePanel taskId={taskId} onDone={onRefresh} />}
           <Card style={{ background: "var(--semi-color-bg-1)" }}>
-            {reportText ? <ReportMarkdown text={reportText} /> : <Empty title="暂无报告" description="任务收口后生成交付报告。" />}
+            <div className="gy-findings-report-toolbar">
+              <Space wrap spacing={8}>
+                <Button
+                  size="small"
+                  theme={reportSubMode === "vuln" ? "solid" : "light"}
+                  type={reportSubMode === "vuln" ? "primary" : "tertiary"}
+                  onClick={() => setReportSubMode("vuln")}
+                >
+                  漏洞详细报告
+                </Button>
+                <Button
+                  size="small"
+                  theme={reportSubMode === "delivery" ? "solid" : "light"}
+                  type={reportSubMode === "delivery" ? "primary" : "tertiary"}
+                  onClick={() => setReportSubMode("delivery")}
+                >
+                  交付核对与留存报告
+                </Button>
+              </Space>
+              <Space wrap spacing={8}>
+                <Button size="small" icon={<IconCopy />} disabled={!activeReportText.trim()} onClick={async () => {
+                  try { await navigator.clipboard.writeText(activeReportText); Toast.success("已复制报告全文"); }
+                  catch (e) { Toast.error(e instanceof Error ? e.message : "复制失败"); }
+                }}>
+                  复制全文
+                </Button>
+                <Button size="small" icon={<IconDownload />} onClick={exportCsv} disabled={active.length === 0}>
+                  导出 CSV
+                </Button>
+              </Space>
+            </div>
+            {activeReportText.trim() ? (
+              <ReportMarkdown text={activeReportText} />
+            ) : (
+              <Empty title="暂无报告" description="发现并验证漏洞或任务收口后自动生成报告。" />
+            )}
           </Card>
         </div>
       ) : (
@@ -224,9 +322,17 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
           title={`漏洞台账 · ${active.length} 条`}
           style={{ background: "var(--semi-color-bg-1)" }}
           headerExtraContent={
-            <Button size="small" icon={<IconRefresh />} loading={batchBusy} disabled={Boolean(busyValidation)} onClick={() => void batchValidate()}>
-              批量复核高危/严重
-            </Button>
+            <Space wrap spacing={8}>
+              <Button size="small" icon={<IconDownload />} disabled={active.length === 0} onClick={exportSummaryMarkdown}>
+                导出漏洞报告
+              </Button>
+              <Button size="small" icon={<IconDownload />} disabled={active.length === 0} onClick={exportCsv}>
+                导出 CSV
+              </Button>
+              <Button size="small" icon={<IconRefresh />} loading={batchBusy} disabled={Boolean(busyValidation)} onClick={() => void batchValidate()}>
+                批量复核高危/严重
+              </Button>
+            </Space>
           }
         >
           {sorted.length === 0 ? (
@@ -239,14 +345,44 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
               dataSource={findingsPager.dataSource}
               onRow={(record) => ({ onClick: () => setSelectedId((record as FindingRecord).id), style: { cursor: "pointer" } })}
               columns={[
-                { title: "严重性", dataIndex: "severity", width: 90, render: (s: string) => <Tag color={findingSeverityColor(s)} size="small">{FINDING_SEVERITY_LABEL[s] ?? s}</Tag> },
-                { title: "标题", dataIndex: "title", ellipsis: true },
-                { title: "资产 / 端点", dataIndex: "asset", width: 260, render: (v: string, r: FindingRecord) => <Typography.Text style={{ fontFamily: "ui-monospace, Menlo, monospace", wordBreak: "break-all" }}>{v}{r.endpoint ? ` · ${r.endpoint}` : ""}</Typography.Text> },
-                { title: "类别", dataIndex: "vulnClass", width: 120 },
-                { title: "定级", dataIndex: "qualification", width: 120, render: (_: unknown, r: FindingRecord) => { const q = effectiveQualification(r); return <Tag color={findingQualificationColor(q)} size="small">{FINDING_QUALIFICATION_LABEL[q]}</Tag>; } },
-                { title: "状态", dataIndex: "status", width: 100, render: (s: string) => <Tag color={findingStatusColor(s)} size="small">{FINDING_STATUS_LABEL[s] ?? s}</Tag> },
+                { title: "严重性", dataIndex: "severity", width: 84, render: (s: string) => <Tag color={findingSeverityColor(s)} size="small">{FINDING_SEVERITY_LABEL[s] ?? s}</Tag> },
+                {
+                  title: "标题",
+                  dataIndex: "title",
+                  ellipsis: true,
+                  render: (t: string) => <span title={t}>{t}</span>,
+                },
+                {
+                  title: "资产 / 端点",
+                  dataIndex: "asset",
+                  width: 260,
+                  render: (v: string, r: FindingRecord) => {
+                    const text = `${v}${r.endpoint ? ` · ${r.endpoint}` : ""}`;
+                    return (
+                      <Typography.Text
+                        title={text}
+                        ellipsis={{ showTooltip: false }}
+                        style={{ fontFamily: "ui-monospace, Menlo, monospace", maxWidth: 244, display: "inline-block" }}
+                      >
+                        {text}
+                      </Typography.Text>
+                    );
+                  },
+                },
+                {
+                  title: "类别",
+                  dataIndex: "vulnClass",
+                  width: 140,
+                  render: (vc: string) => {
+                    const kb = describeVulnClass(vc);
+                    return <span title={`${kb.code} · ${kb.label}`}>{vc}</span>;
+                  },
+                },
+                { title: "定级", dataIndex: "qualification", width: 112, render: (_: unknown, r: FindingRecord) => { const q = effectiveQualification(r); return <Tag color={findingQualificationColor(q)} size="small">{FINDING_QUALIFICATION_LABEL[q]}</Tag>; } },
+                { title: "状态", dataIndex: "status", width: 96, render: (s: string) => <Tag color={findingStatusColor(s)} size="small">{FINDING_STATUS_LABEL[s] ?? s}</Tag> },
                 { title: "复核", dataIndex: "id", width: 80, render: (id: string) => independentConfirmed(id) ? <Tag color="green" size="small">已确认</Tag> : <Tag color="grey" size="small">待复核</Tag> },
-                { title: "证据", dataIndex: "evidence", width: 60, render: (e: FindingRecord["evidence"]) => e.length },
+                { title: "报告", dataIndex: "report", width: 76, render: (rep: string | undefined) => rep ? <Tag color="blue" size="small">已生成</Tag> : <Tag color="grey" size="small">自动结构</Tag> },
+                { title: "证据", dataIndex: "evidence", width: 58, render: (e: FindingRecord["evidence"]) => e.length },
               ]}
             />
           )}
@@ -259,17 +395,18 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
           <span className="gy-findings-observations-chevron">{looseOpen ? "收起" : "展开"}</span>
         </button>
         <Collapsible isOpen={looseOpen}>
-          <LooseEvidence taskId={taskId} files={evidenceFiles} findings={findings} onReload={reloadEvidence} onRefresh={onRefresh} />
+          <LooseEvidence taskId={taskId} files={evidenceFiles} findings={mergedFindings} onReload={reloadEvidence} onRefresh={onRefresh} />
         </Collapsible>
       </Card>
 
       <SideSheet
+        className="gy-finding-sheet"
         title={selected ? selected.title : "漏洞详情"}
         visible={Boolean(selected)}
-        width={760}
+        width={860}
         placement="right"
         onCancel={() => setSelectedId(null)}
-        bodyStyle={{ padding: "16px 20px", overflow: "auto" }}
+        bodyStyle={{ padding: "16px 20px 28px", overflow: "auto" }}
       >
         {selected && (
           <FindingDrawer
@@ -279,6 +416,7 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
             retests={retests.filter((r) => r.findingId === selected.id)}
             busy={busyValidation === selected.id || batchBusy}
             onValidate={(force) => void runValidation(selected.id, force)}
+            onFindingUpdated={handleFindingUpdated}
           />
         )}
       </SideSheet>
@@ -286,35 +424,73 @@ export function FindingsPanel({ taskId, findings, goals, focusFinding, refreshKe
   );
 }
 
-function FindingDrawer({ taskId, finding, validations, retests, busy, onValidate }: {
+function FindingDrawer({ taskId, finding, validations, retests, busy, onValidate, onFindingUpdated }: {
   taskId: string;
   finding: FindingRecord;
   validations: FindingValidation[];
   retests: FindingRetest[];
   busy: boolean;
   onValidate: (force: boolean) => void;
+  onFindingUpdated: (updated: FindingRecord) => void;
 }) {
+  const [drawerTab, setDrawerTab] = useState<"structured" | "markdown">("structured");
   const [traffic, setTraffic] = useState<TrafficRecord[] | null>(null);
   const [evidenceBodies, setEvidenceBodies] = useState<Record<string, string>>({});
+  const [reportContext, setReportContext] = useState<FindingReportContext | null>(null);
+  const [serverMarkdown, setServerMarkdown] = useState<string>("");
+  const [generatingReport, setGeneratingReport] = useState(false);
   const q = effectiveQualification(finding);
+  const kb = useMemo(() => describeVulnClass(finding.vulnClass), [finding.vulnClass]);
 
   useEffect(() => {
     let cancelled = false;
+    const ac = new AbortController();
     setTraffic(null);
     setEvidenceBodies({});
-    if (finding.trafficIds?.length || finding.id) {
-      api.traffic(taskId, { findingId: finding.id, limit: 20 })
-        .then(({ json }) => { if (!cancelled) setTraffic(json.traffic ?? []); })
-        .catch(() => { if (!cancelled) setTraffic([]); });
-    }
+    setReportContext(null);
+    setServerMarkdown("");
+
+    api.traffic(taskId, { findingId: finding.id, limit: 20 }, ac.signal)
+      .then(({ json }) => { if (!cancelled) setTraffic(json.traffic ?? []); })
+      .catch(() => { if (!cancelled) setTraffic([]); });
+
+    api.findingReportContext(taskId, finding.id, ac.signal)
+      .then(({ json }) => {
+        if (cancelled) return;
+        setReportContext(json.context);
+        setServerMarkdown(json.markdown ?? "");
+      })
+      .catch(() => { /* 旧控制面或离线时自动退回前端本地推导 */ });
+
     for (const entry of finding.evidence) {
       if (/^(http|oast|tool):/.test(entry.path)) continue;
-      api.evidenceFile(taskId, entry.path)
+      api.evidenceFile(taskId, entry.path, ac.signal)
         .then((r) => { if (!cancelled) setEvidenceBodies((prev) => ({ ...prev, [entry.path]: r.text })); })
         .catch((e) => { if (!cancelled) setEvidenceBodies((prev) => ({ ...prev, [entry.path]: `读取失败：${e instanceof Error ? e.message : String(e)}` })); });
     }
-    return () => { cancelled = true; };
-  }, [taskId, finding.id]);
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [taskId, finding.id, finding.report]);
+
+  const effectiveContext = useMemo<FindingReportContext>(
+    () => ({
+      ...reportContext,
+      validations,
+    }),
+    [reportContext, validations],
+  );
+
+  const sections = useMemo(
+    () => deriveFindingSections(finding, effectiveContext),
+    [finding, effectiveContext],
+  );
+
+  const fullMarkdownReport = useMemo(
+    () => serverMarkdown.trim() || renderSingleFindingMarkdown(finding, effectiveContext),
+    [serverMarkdown, finding, effectiveContext],
+  );
 
   const copyPoc = async () => {
     const poc = finding.pocCurl || finding.repro || "";
@@ -323,92 +499,286 @@ function FindingDrawer({ taskId, finding, validations, retests, busy, onValidate
     catch (e) { Toast.error(e instanceof Error ? e.message : "复制失败"); }
   };
 
+  const copyFullReport = async () => {
+    try { await navigator.clipboard.writeText(fullMarkdownReport); Toast.success("已复制完整漏洞报告"); }
+    catch (e) { Toast.error(e instanceof Error ? e.message : "复制失败"); }
+  };
+
+  const downloadSingleReport = () => {
+    triggerDownload(fullMarkdownReport, findingSafeFilename(finding), "text/markdown;charset=utf-8");
+  };
+
+  const handleGenerateReport = async () => {
+    setGeneratingReport(true);
+    try {
+      const { json } = await api.generateFindingReport(taskId, finding.id);
+      setReportContext(json.context);
+      setServerMarkdown(json.markdown);
+      onFindingUpdated(json.finding);
+      if (json.warning) {
+        Toast.info(json.warning);
+      } else {
+        Toast.success(`已生成并保存详细漏洞报告${json.model ? `（${json.model}）` : ""}`);
+      }
+      setDrawerTab("markdown");
+    } catch (e) {
+      Toast.error(e instanceof Error ? e.message : "生成详细报告失败");
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const hasIndependentConfirm = validations.some((v) => v.independent && v.verdict === "confirmed");
+
   return (
     <div className="gy-finding-drawer">
-      <Space wrap spacing={8} style={{ marginBottom: 12 }}>
-        <Tag color={findingSeverityColor(finding.severity)}>{FINDING_SEVERITY_LABEL[finding.severity] ?? finding.severity}</Tag>
-        <Tag color={findingQualificationColor(q)}>{FINDING_QUALIFICATION_LABEL[q]}</Tag>
-        <Tag color={findingStatusColor(finding.status)}>{FINDING_STATUS_LABEL[finding.status] ?? finding.status}</Tag>
-        <Tag color="grey">{finding.vulnClass}</Tag>
-      </Space>
-      <Typography.Paragraph type="tertiary" size="small" style={{ margin: "0 0 12px", wordBreak: "break-all" }}>
-        {finding.asset}{finding.endpoint ? ` · ${finding.endpoint}` : ""}
-        {finding.cvss ? ` · CVSS ${finding.cvss}` : ""}
-        {finding.verifiedAt ? ` · 复现于 ${formatDateTime(finding.verifiedAt, true)}` : ""}
-        {finding.verifiedBy ? ` · ${finding.verifiedBy}` : ""}
-      </Typography.Paragraph>
-
-      <Section title="成因与技术细节">
-        {finding.rootCause ? <Typography.Paragraph style={{ margin: 0, whiteSpace: "pre-wrap" }}>{finding.rootCause}</Typography.Paragraph>
-          : <Typography.Text type="tertiary" size="small">未记录成因分析。</Typography.Text>}
-      </Section>
-
-      <Section title="分步复现与 PoC" extra={<Button size="small" icon={<IconCopy />} onClick={() => void copyPoc()}>一键复制 PoC</Button>}>
-        {finding.repro ? <pre className="gy-mono gy-finding-block">{finding.repro}</pre>
-          : <Typography.Text type="tertiary" size="small">未记录复现步骤。</Typography.Text>}
-        {finding.pocCurl && <pre className="gy-mono gy-finding-block">{finding.pocCurl}</pre>}
-      </Section>
-
-      <Section title={`关联 HTTP 流量${traffic ? ` · ${traffic.length}` : ""}`}>
-        {traffic == null ? <Spin size="small" /> : traffic.length === 0 ? (
-          <Typography.Text type="tertiary" size="small">暂无关联流量。</Typography.Text>
-        ) : (
-          <div className="gy-finding-traffic">
-            {traffic.map((row) => <TrafficPreview key={row.id} taskId={taskId} row={row} />)}
-          </div>
-        )}
-      </Section>
-
-      <Section title={`证据原件 · ${finding.evidence.length}`}>
-        {finding.evidence.length === 0 ? (
-          <Typography.Text type="tertiary" size="small">暂无封存证据（线索阶段）。</Typography.Text>
-        ) : finding.evidence.map((entry) => (
-          <div key={entry.path} className="gy-finding-evidence">
-            <Typography.Text code size="small" style={{ wordBreak: "break-all" }}>{entry.path}</Typography.Text>
-            <Typography.Text type="tertiary" size="small"> SHA-256 {entry.sha256.slice(0, 16)}…{entry.role ? ` · ${entry.role}` : ""}</Typography.Text>
-            {/^(http|oast|tool):/.test(entry.path) ? null : evidenceBodies[entry.path] != null ? (
-              entry.path.endsWith(".md")
-                ? <div className="gy-finding-evidence-md"><ReportMarkdown text={evidenceBodies[entry.path]} /></div>
-                : <pre className="gy-mono gy-finding-block">{evidenceBodies[entry.path]}</pre>
-            ) : <Typography.Text type="tertiary" size="small"> 正在读取原件…</Typography.Text>}
-          </div>
-        ))}
-      </Section>
-
-      <Section title="影响与修复建议">
-        {finding.impact ? <Typography.Paragraph style={{ margin: "0 0 8px", whiteSpace: "pre-wrap" }}><strong>影响：</strong>{finding.impact}</Typography.Paragraph> : null}
-        {finding.fix ? <Typography.Paragraph style={{ margin: 0, whiteSpace: "pre-wrap" }}><strong>修复：</strong>{finding.fix}</Typography.Paragraph> : null}
-        {!finding.impact && !finding.fix && <Typography.Text type="tertiary" size="small">未记录影响与修复建议。</Typography.Text>}
-      </Section>
-
-      {retests.length > 0 && (
-        <Section title={`修复后复测 · ${retests.length}`}>
-          <RetestsSection rows={retests} />
-        </Section>
-      )}
-
-      <Section title="独立复核" extra={
-        <Space spacing={8}>
-          <Button size="small" theme="solid" type="primary" loading={busy} onClick={() => onValidate(false)}>一键复核</Button>
-          <Button size="small" loading={busy} onClick={() => onValidate(true)}>强制重核</Button>
+      <div className="gy-finding-topbar">
+        <Space wrap spacing={6}>
+          <Tag color={findingSeverityColor(finding.severity)}>{FINDING_SEVERITY_LABEL[finding.severity] ?? finding.severity}</Tag>
+          <Tag color={findingQualificationColor(q)}>{FINDING_QUALIFICATION_LABEL[q]}</Tag>
+          <Tag color={findingStatusColor(finding.status)}>{FINDING_STATUS_LABEL[finding.status] ?? finding.status}</Tag>
+          <Tag color="grey">{kb.code}{kb.label && kb.label !== kb.code ? ` · ${kb.label}` : ""}</Tag>
+          <Tag color={hasIndependentConfirm ? "green" : "orange"}>{hasIndependentConfirm ? "独立复核已确认" : "待独立复核"}</Tag>
         </Space>
-      }>
-        {validations.length === 0 ? (
-          <Typography.Text type="tertiary" size="small">尚无独立复核；高危/严重交付前应由另一执行节点或操作员确认。</Typography.Text>
-        ) : (
-          <Table
-            size="small" rowKey="id" pagination={false} dataSource={validations}
-            columns={[
-              { title: "结论", dataIndex: "verdict", width: 100, render: (v: string) => <Tag color={VERDICT_COLOR[v] ?? "grey"} size="small">{VERDICT_LABEL[v] ?? v}</Tag> },
-              { title: "方法", dataIndex: "method", width: 100, render: (v: string) => METHOD_LABEL[v] ?? v },
-              { title: "复核者", dataIndex: "validator", width: 140 },
-              { title: "独立", dataIndex: "independent", width: 60, render: (v: boolean) => v ? "是" : "否" },
-              { title: "时间", dataIndex: "createdAt", width: 160, render: (v: string) => formatDateTime(v, true) },
-              { title: "说明", dataIndex: "note", ellipsis: true },
-            ]}
-          />
+        <Space wrap spacing={6}>
+          <Button
+            size="small"
+            theme="solid"
+            type="primary"
+            icon={<IconFile />}
+            loading={generatingReport}
+            onClick={() => void handleGenerateReport()}
+          >
+            {finding.report ? "重新生成报告" : "AI 生成详细报告"}
+          </Button>
+          <Button size="small" icon={<IconCopy />} onClick={() => void copyFullReport()}>复制报告</Button>
+          <Button size="small" icon={<IconDownload />} onClick={downloadSingleReport}>导出 .md</Button>
+        </Space>
+      </div>
+
+      <div className="gy-finding-meta-card">
+        <div className="gy-finding-meta-item">
+          <span className="gy-finding-meta-label">漏洞 ID</span>
+          <Typography.Text code size="small" className="gy-finding-meta-value" title={finding.id}>
+            #{shortId(finding.id)}
+          </Typography.Text>
+        </div>
+        <div className="gy-finding-meta-item">
+          <span className="gy-finding-meta-label">CVSS 评估</span>
+          <span className="gy-finding-meta-value">{finding.cvss || "未标注"}</span>
+        </div>
+        <div className="gy-finding-meta-item">
+          <span className="gy-finding-meta-label">目标资产</span>
+          <Typography.Text code size="small" className="gy-finding-meta-value">{finding.asset}</Typography.Text>
+        </div>
+        <div className="gy-finding-meta-item">
+          <span className="gy-finding-meta-label">验证记录</span>
+          <span className="gy-finding-meta-value">
+            {finding.verifiedAt ? formatDateTime(finding.verifiedAt, true) : formatDateTime(finding.createdAt, true)}
+            {finding.verifiedBy ? ` · ${finding.verifiedBy}` : ""}
+          </span>
+        </div>
+        {finding.endpoint && (
+          <div className="gy-finding-meta-item gy-finding-meta-item-wide">
+            <span className="gy-finding-meta-label">受影响端点</span>
+            <Typography.Text code size="small" className="gy-finding-meta-value">{finding.endpoint}</Typography.Text>
+          </div>
         )}
-      </Section>
+        {(effectiveContext.intent || (effectiveContext.facts?.length ?? 0) > 0) && (
+          <div className="gy-finding-meta-item gy-finding-meta-item-wide">
+            <span className="gy-finding-meta-label">关联线索</span>
+            <span className="gy-finding-meta-value">
+              {effectiveContext.intent ? `意图「${effectiveContext.intent.title}」` : ""}
+              {effectiveContext.intent && (effectiveContext.facts?.length ?? 0) > 0 ? " · " : ""}
+              {(effectiveContext.facts?.length ?? 0) > 0 ? `关联取证事实 ${effectiveContext.facts!.length} 条` : ""}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className="gy-finding-view-tabs">
+        <Space spacing={8}>
+          <Button
+            size="small"
+            theme={drawerTab === "structured" ? "solid" : "light"}
+            type={drawerTab === "structured" ? "primary" : "tertiary"}
+            onClick={() => setDrawerTab("structured")}
+          >
+            分步复现与技术剖析
+          </Button>
+          <Button
+            size="small"
+            theme={drawerTab === "markdown" ? "solid" : "light"}
+            type={drawerTab === "markdown" ? "primary" : "tertiary"}
+            onClick={() => setDrawerTab("markdown")}
+          >
+            完整详细报告（Markdown）
+          </Button>
+        </Space>
+        <Button size="small" icon={<IconCopy />} onClick={() => void copyPoc()}>一键复制 PoC</Button>
+      </div>
+
+      {drawerTab === "markdown" ? (
+        <div className="gy-finding-drawer-report">
+          <ReportMarkdown text={fullMarkdownReport} />
+        </div>
+      ) : (
+        <>
+          <div className="gy-finding-overview-grid">
+            <div className="gy-finding-prose-box">
+              <div className="gy-finding-prose-box-head">
+                <Typography.Text strong size="small">漏洞概述</Typography.Text>
+              </div>
+              <ChatMarkdown text={sections.summary} />
+            </div>
+            <div className="gy-finding-prose-box">
+              <div className="gy-finding-prose-box-head">
+                <Typography.Text strong size="small">影响与危害</Typography.Text>
+              </div>
+              <ChatMarkdown text={sections.impact} />
+            </div>
+            <div className="gy-finding-prose-box">
+              <div className="gy-finding-prose-box-head">
+                <Typography.Text strong size="small">受影响范围与前置条件</Typography.Text>
+              </div>
+              <ChatMarkdown text={sections.affectedScope} />
+            </div>
+          </div>
+
+          <Section
+            title="分步复现过程"
+            extra={
+              <Space spacing={6}>
+                <Tag size="small" color="blue">{sections.steps.length} 个步骤</Tag>
+                {traffic != null && <Tag size="small" color="grey">{traffic.length} 条流量</Tag>}
+              </Space>
+            }
+          >
+            {sections.steps.length === 0 ? (
+              <Typography.Text type="tertiary" size="small">未记录复现步骤。</Typography.Text>
+            ) : (
+              <div className="gy-finding-steps">
+                {sections.steps.map((step, index) => {
+                  const inlineRow =
+                    traffic && traffic.length > 0 && sections.steps.length <= traffic.length
+                      ? traffic[index]
+                      : undefined;
+                  return (
+                    <div key={`${step.number}-${index}`} className="gy-finding-step-card">
+                      <div className="gy-finding-step-head">
+                        <Tag size="small" color="blue">步骤 {step.number}</Tag>
+                        <h4 className="gy-finding-step-title">{step.title}</h4>
+                      </div>
+                      {step.body ? (
+                        step.body.includes("```")
+                          ? <ChatMarkdown text={step.body} />
+                          : <pre className="gy-mono gy-finding-block">{step.body}</pre>
+                      ) : null}
+                      {inlineRow && (
+                        <div className="gy-finding-step-packet">
+                          <TrafficPreview taskId={taskId} row={inlineRow} labelPrefix="关联数据包" />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {sections.poc && (
+              <div style={{ marginTop: 10 }}>
+                <div className="gy-finding-section-head" style={{ marginBottom: 4 }}>
+                  <Typography.Text strong size="small">可复用 PoC / 利用命令</Typography.Text>
+                  <Button size="small" theme="borderless" icon={<IconCopy />} onClick={() => void copyPoc()}>复制命令</Button>
+                </div>
+                {sections.poc.includes("```")
+                  ? <ChatMarkdown text={sections.poc} />
+                  : <pre className="gy-mono gy-finding-block">{sections.poc}</pre>}
+              </div>
+            )}
+          </Section>
+
+          <Section
+            title="根因分析与技术细节"
+            extra={
+              <Tag size="small" color={sections.rootCauseSource === "recorded" || sections.rootCauseSource === "report" ? "green" : "grey"}>
+                {ROOT_CAUSE_SOURCE_LABEL[sections.rootCauseSource] ?? "机理分析"}
+              </Tag>
+            }
+          >
+            <div className="gy-finding-prose-box">
+              <ChatMarkdown text={sections.rootCause} />
+            </div>
+          </Section>
+
+          <Section
+            title="修复与加固建议"
+            extra={
+              <Tag size="small" color={sections.fixSource === "recorded" || sections.fixSource === "report" ? "green" : "grey"}>
+                {sections.fixSource === "class-baseline" ? "标准加固建议" : "定制整改建议"}
+              </Tag>
+            }
+          >
+            <div className="gy-finding-prose-box">
+              <ChatMarkdown text={sections.fix} />
+            </div>
+          </Section>
+
+          <Section title={`关联 HTTP 流量${traffic ? ` · ${traffic.length}` : ""}`}>
+            {traffic == null ? <Spin size="small" /> : traffic.length === 0 ? (
+              <Typography.Text type="tertiary" size="small">暂无关联 HTTP 流量（TCP/非 HTTP 协议或未经过代理采集时以命令与证据原件为准）。</Typography.Text>
+            ) : (
+              <div className="gy-finding-traffic">
+                {traffic.map((row) => <TrafficPreview key={row.id} taskId={taskId} row={row} />)}
+              </div>
+            )}
+          </Section>
+
+          <Section title={`封存证据原件 · ${finding.evidence.length}`}>
+            {finding.evidence.length === 0 ? (
+              <Typography.Text type="tertiary" size="small">暂无封存证据（线索阶段）。</Typography.Text>
+            ) : finding.evidence.map((entry) => (
+              <div key={entry.path} className="gy-finding-evidence">
+                <Typography.Text code size="small" style={{ wordBreak: "break-all" }}>{entry.path}</Typography.Text>
+                <Typography.Text type="tertiary" size="small"> SHA-256 {entry.sha256.slice(0, 16)}…{entry.role ? ` · ${entry.role}` : ""}</Typography.Text>
+                {/^(http|oast|tool):/.test(entry.path) ? null : evidenceBodies[entry.path] != null ? (
+                  entry.path.endsWith(".md")
+                    ? <div className="gy-finding-evidence-md"><ChatMarkdown text={evidenceBodies[entry.path]} /></div>
+                    : <pre className="gy-mono gy-finding-block">{evidenceBodies[entry.path]}</pre>
+                ) : <Typography.Text type="tertiary" size="small"> 正在读取原件…</Typography.Text>}
+              </div>
+            ))}
+          </Section>
+
+          {retests.length > 0 && (
+            <Section title={`修复后复测 · ${retests.length}`}>
+              <RetestsSection rows={retests} />
+            </Section>
+          )}
+
+          <Section title="独立复核" extra={
+            <Space spacing={8}>
+              <Button size="small" theme="solid" type="primary" loading={busy} onClick={() => onValidate(false)}>一键复核</Button>
+              <Button size="small" loading={busy} onClick={() => onValidate(true)}>强制重核</Button>
+            </Space>
+          }>
+            {validations.length === 0 ? (
+              <Typography.Text type="tertiary" size="small">尚无独立复核；高危/严重交付前应由另一执行节点或操作员确认。</Typography.Text>
+            ) : (
+              <Table
+                size="small" rowKey="id" pagination={false} dataSource={validations}
+                columns={[
+                  { title: "结论", dataIndex: "verdict", width: 100, render: (v: string) => <Tag color={VERDICT_COLOR[v] ?? "grey"} size="small">{VERDICT_LABEL[v] ?? v}</Tag> },
+                  { title: "方法", dataIndex: "method", width: 100, render: (v: string) => METHOD_LABEL[v] ?? v },
+                  { title: "复核者", dataIndex: "validator", width: 140 },
+                  { title: "独立", dataIndex: "independent", width: 60, render: (v: boolean) => v ? "是" : "否" },
+                  { title: "时间", dataIndex: "createdAt", width: 160, render: (v: string) => formatDateTime(v, true) },
+                  { title: "说明", dataIndex: "note", ellipsis: true },
+                ]}
+              />
+            )}
+          </Section>
+        </>
+      )}
     </div>
   );
 }
@@ -425,7 +795,7 @@ function Section({ title, extra, children }: { title: string; extra?: React.Reac
   );
 }
 
-function TrafficPreview({ taskId, row }: { taskId: string; row: TrafficRecord }) {
+function TrafficPreview({ taskId, row, labelPrefix }: { taskId: string; row: TrafficRecord; labelPrefix?: string }) {
   const [open, setOpen] = useState(false);
   const [req, setReq] = useState("");
   const [res, setRes] = useState("");
@@ -439,10 +809,15 @@ function TrafficPreview({ taskId, row }: { taskId: string; row: TrafficRecord })
   return (
     <div className="gy-finding-traffic-row">
       <button type="button" className="gy-finding-traffic-toggle" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        {labelPrefix && <Tag size="small" color="cyan">{labelPrefix}</Tag>}
         <Tag size="small" color="blue">{row.method}</Tag>
         <Tag size="small" color={httpStatusColor(row.status)}>{row.status || "—"}</Tag>
-        <span className="gy-finding-traffic-path" title={row.path}>{row.host}{row.path}</span>
-        <span className="gy-finding-traffic-meta">{formatDuration(row.durationMs)}{row.resBodyBlob ? ` · ${formatBytes(row.resBodyBlob.size)}` : ""}</span>
+        <span className="gy-finding-traffic-path" title={`${row.host}${row.path}`}>{row.host}{row.path}</span>
+        <span className="gy-finding-traffic-meta">
+          {formatDuration(row.durationMs)}
+          {row.resBodyBlob ? ` · ${formatBytes(row.resBodyBlob.size)}` : ""}
+          {` · ${open ? "收起报文" : "展开报文"}`}
+        </span>
       </button>
       <Collapsible isOpen={open}>
         <div className="gy-finding-traffic-raw">

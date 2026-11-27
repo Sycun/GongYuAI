@@ -325,3 +325,58 @@ test("recordFinding dedup and verifyFinding backfill missing intentId and eviden
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("verifyFinding and updateFindingReport persist ARTEX detail fields and report tolerates missing proof blobs", () => {
+  const { root, evidenceDir, store } = setup("gy-find-artex-");
+  try {
+    const { finding } = recordLead(store, {
+      summary: "登录接口 user 参数存在未过滤 SQL 注入",
+      affectedScope: "POST /login (参数 user)",
+      rootCause: "直接字符串拼接 SQL 查询语句",
+    });
+    assert.equal(finding.rootCause, "直接字符串拼接 SQL 查询语句");
+    assert.equal(finding.summary, "登录接口 user 参数存在未过滤 SQL 注入");
+
+    writeEvidenceFile(evidenceDir, "findings/sqli-detail.txt", "uid=admin\n");
+    const verified = store.verifyFinding(TASK_ID, finding.id, {
+      evidencePaths: ["findings/sqli-detail.txt"],
+      repro: "### 步骤 1：发送单引号载荷\n观察 500 报错\n### 步骤 2：联合查询提取数据\n提取管理员行",
+      impact: "可脱取全库用户凭据并接管后台",
+      fix: "改用 PreparedStatement 参数化绑定",
+      pocCurl: "curl -X POST https://lab.example.com/login -d \"user=admin' OR '1'='1\"",
+    });
+    assert.equal(verified.rootCause, "直接字符串拼接 SQL 查询语句");
+
+    const updated = store.updateFindingReport(TASK_ID, finding.id, {
+      report: "## 概述\n完整定制报告正文。\n\n## 根因分析\nDAO 层未使用占位符。",
+      rootCause: "DAO 层未使用占位符。",
+    });
+    assert.ok(updated);
+    assert.equal(updated!.rootCause, "DAO 层未使用占位符。");
+    assert.match(updated!.report ?? "", /完整定制报告正文/);
+
+    const reportPath = writeTaskReport(
+      {
+        taskId: TASK_ID,
+        dataDir: root,
+        auth: {
+          authorizationNote: "test",
+          targets: ["lab.example.com"],
+          outOfScope: [],
+          capability: "full",
+        },
+      },
+      store,
+      { status: "completed" },
+    );
+    const md = readFileSync(reportPath, "utf8");
+    assert.match(md, /#### 概述/);
+    assert.match(md, /#### 复现步骤/);
+    assert.match(md, /##### 步骤 1：发送单引号载荷/);
+    assert.match(md, /#### 根因分析/);
+    assert.match(md, /DAO 层未使用占位符/);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

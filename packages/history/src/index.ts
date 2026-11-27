@@ -1563,10 +1563,14 @@ export class HistoryStore {
     dedupKey?: string;
     intentId?: string | null;
     factIds?: string[];
+    summary?: string;
+    affectedScope?: string;
+    rootCause?: string;
     repro?: string;
     impact?: string;
     fix?: string;
     pocCurl?: string | null;
+    report?: string;
     qualification?: FindingQualification | null;
   }): { finding: Finding; created: boolean } {
     return this.findingsStore.recordFinding(input);
@@ -1577,16 +1581,35 @@ export class HistoryStore {
     input: {
       evidencePaths: string[];
       repro: string;
+      summary?: string;
+      affectedScope?: string;
+      rootCause?: string;
       impact?: string;
       fix?: string;
       cvss?: string | null;
       verifiedBy?: string;
       intentId?: string | null;
       pocCurl?: string | null;
+      report?: string;
       qualification?: FindingQualification | null;
     },
   ): Finding {
     return this.findingsStore.verifyFinding(taskId, findingId, input);
+  }
+  updateFindingReport(
+    taskId: string,
+    findingId: string,
+    patch: {
+      summary?: string;
+      affectedScope?: string;
+      rootCause?: string;
+      impact?: string;
+      fix?: string;
+      pocCurl?: string;
+      report?: string;
+    },
+  ): Finding | null {
+    return this.findingsStore.updateFindingReport(taskId, findingId, patch);
   }
   updateFindingPocCurl(taskId: string, findingId: string, pocCurl: string): Finding | null {
     return this.findingsStore.updateFindingPocCurl(taskId, findingId, pocCurl);

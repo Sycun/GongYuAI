@@ -500,24 +500,28 @@ export const GRAPH_PHASE_TOOLS = [
     function: {
       name: "finding_record",
       description:
-        "Record a vuln lead as a tentative Finding (dedup idempotent by asset|vulnClass|endpoint). severity=info|low|medium|high|critical; vulnClass like CWE-89. tentative 不进交付；复现后用 finding_verify。",
+        "Record a vuln lead as a tentative Finding (dedup idempotent by asset|vulnClass|endpoint). severity=info|low|medium|high|critical; vulnClass like CWE-89. tentative 不进交付；复现后用 finding_verify 补齐结构化步骤、根因与修复建议。",
       parameters: {
         type: "object",
         properties: {
-          title: { type: "string" },
+          title: { type: "string", description: "明确含『目标组件 + 漏洞点 + 漏洞类型 + 实际危害』的可读标题。" },
           asset: { type: "string" },
-          vulnClass: { type: "string" },
+          vulnClass: { type: "string", description: "CWE 编号或分类标识（如 CWE-89 / CWE-306 / AUTHZ-BOLA）。" },
           severity: { type: "string" },
-          endpoint: { type: "string" },
+          endpoint: { type: "string", description: "受影响的完整协议端点/接口路径与关键参数。" },
           confidence: { type: "string" },
           cvss: { type: "string" },
           dedupKey: { type: "string" },
           factIds: { type: "string" },
-          impact: { type: "string" },
-          fix: { type: "string" },
+          summary: { type: "string", description: "一句话概述：是什么漏洞、位于何处、可造成什么后果。" },
+          affectedScope: { type: "string", description: "受影响范围与利用前提（资产/接口/参数/组件版本/所需权限）。" },
+          rootCause: { type: "string", description: "成因与技术机理（如缺失鉴权、拼接 SQL、危险配置暴露等）。" },
+          repro: { type: "string", description: "初步验证或复现步骤（建议按 ### 步骤 1：... 分步记录）。" },
+          impact: { type: "string", description: "业务影响与危害评估及严重等级依据。" },
+          fix: { type: "string", description: "具体可落地的修复与加固建议。" },
           pocCurl: {
             type: "string",
-            description: "Optional reproducible curl command for independent verification.",
+            description: "Optional reproducible curl command or PoC script for independent verification.",
           },
           qualification: {
             type: "string",
@@ -537,19 +541,38 @@ export const GRAPH_PHASE_TOOLS = [
     function: {
       name: "finding_verify",
       description:
-        "Promote a tentative Finding to verified. Requires ≥1 evidence file under evidence/ (comma-separated paths, SHA-256 sealed) AND non-empty repro steps. Only verified findings enter the delivery report.",
+        "Promote a tentative Finding to verified with ARTEX-grade report details. Requires ≥1 evidence item (evidence/ path, http:<id>, or oast:<token>, SHA-256 sealed) AND structured repro steps. Always populate summary, affectedScope, rootCause, impact, fix, and pocCurl based on real verified evidence.",
       parameters: {
         type: "object",
         properties: {
           findingId: { type: "string" },
-          evidencePaths: { type: "string" },
-          repro: { type: "string" },
-          impact: { type: "string" },
-          fix: { type: "string" },
+          evidencePaths: { type: "string", description: "逗号分隔的封存证据路径或引用（如 findings/poc.txt, http:<id>, oast:<token>）。" },
+          summary: { type: "string", description: "一句话漏洞概述：是什么漏洞、在哪、造成什么实际后果。" },
+          affectedScope: { type: "string", description: "受影响的资产、接口、参数、组件版本及前置利用条件。" },
+          repro: {
+            type: "string",
+            description: "可照做复现的分步操作，使用『### 步骤 1：<动作标题>』『### 步骤 2：<动作标题>』编号展开，每步写明操作输入/请求或命令、实际输出回显及对应证据来源。",
+          },
+          rootCause: {
+            type: "string",
+            description: "漏洞根因分析：从代码逻辑、协议机制或安全配置层面说明漏洞产生原因（如缺参数化绑定、未授权暴露 FastCGI 端口等）。",
+          },
+          impact: {
+            type: "string",
+            description: "影响与危害：结合业务与系统架构说明已证实的最坏后果（RCE/数据泄露/越权接管/内网横向等）及定级依据。",
+          },
+          fix: {
+            type: "string",
+            description: "修复建议：针对根因给出具体、可落地的代码/配置整改措施与加固建议（避免空泛套话）。",
+          },
           cvss: { type: "string" },
           pocCurl: {
             type: "string",
-            description: "Optional reproducible curl command for independent replay validation.",
+            description: "可直接复用的完整利用命令、curl 报文或 PoC 脚本。",
+          },
+          report: {
+            type: "string",
+            description: "可选：完整 ARTEX 风格单漏洞详细报告（Markdown，含 ## 概述 / ## 影响与危害 / ## 受影响范围 / ## 复现步骤 / ## 证据 / ## PoC / ## 根因分析 / ## 修复建议）。",
           },
           qualification: {
             type: "string",
@@ -1178,9 +1201,14 @@ export function handleGraphTool(
         dedupKey: args.dedupKey?.trim() || undefined,
         factIds: parseFactIds(args.factIds ?? ""),
         intentId: ctx.state.activeIntentId ?? undefined,
+        summary: args.summary ?? undefined,
+        affectedScope: (args.affectedScope ?? args.affected_scope) ?? undefined,
+        rootCause: (args.rootCause ?? args.root_cause) ?? undefined,
+        repro: args.repro ?? "",
         impact: args.impact ?? "",
         fix: args.fix ?? "",
         pocCurl: (args.pocCurl ?? args.poc_curl)?.trim() || null,
+        report: args.report ?? undefined,
         qualification: parseQualification(args.qualification),
       });
       const traffic = captureFindingTraffic(ctx, r.finding, {
@@ -1205,12 +1233,16 @@ export function handleGraphTool(
         {
           evidencePaths: parseFactIds(args.evidencePaths ?? ""),
           repro: args.repro ?? "",
+          summary: args.summary ?? undefined,
+          affectedScope: (args.affectedScope ?? args.affected_scope) ?? undefined,
+          rootCause: (args.rootCause ?? args.root_cause) ?? undefined,
           impact: args.impact,
           fix: args.fix,
           cvss: args.cvss?.trim() || undefined,
           verifiedBy: workerId,
           intentId: ctx.state.activeIntentId ?? undefined,
           pocCurl: (args.pocCurl ?? args.poc_curl)?.trim() || undefined,
+          report: args.report ?? undefined,
           qualification: parseQualification(args.qualification),
         },
       );
