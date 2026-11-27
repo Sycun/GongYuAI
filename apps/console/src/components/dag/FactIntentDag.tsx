@@ -129,6 +129,7 @@ const FACT_LAYER_LABEL: Record<string, string> = {
 
 const EDGE_KIND: Record<string, string> = {
   "asserted-by": "资产凭据",
+  contains: "下属资产",
   anchors: "前驱事实",
   produces: "Explore 回写",
   evidences: "支撑发现",
@@ -139,6 +140,7 @@ const EDGE_KIND: Record<string, string> = {
 
 const EDGE_COLOR: Record<string, string> = {
   "asserted-by": "#10b981",
+  contains: "#10b981",
   anchors: "#6366f1",
   produces: "#f59e0b",
   evidences: "#f43f5e",

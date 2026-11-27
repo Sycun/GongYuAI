@@ -15,7 +15,9 @@ import {
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
   DEFAULT_MAX_INTENTS_PER_REASON,
   DEFAULT_REASON_LEASE_MS,
+  ORIGIN_FACT_ID,
   PlanSetInputSchema,
+  normalizeHost,
 } from "@gongyuai/contracts";
 import {
   closeFindingWindow,
@@ -924,7 +926,7 @@ export function handleGraphTool(
   }
 
   if (name === "intent_propose") {
-    const sourceFactIds = parseFactIds(args.sourceFactIds ?? "");
+    let sourceFactIds = parseFactIds(args.sourceFactIds ?? "");
     // Lane D — asset_root 边界校验：只能落在已确认/已登记资产上，不许凭意图发明资产。
     let assetRoot: string | undefined;
     const rawAssetRoot = args.assetRoot?.trim();
@@ -932,6 +934,27 @@ export function handleGraphTool(
       const grounding = ctx.history.groundedAssetRoot(ctx.taskId, rawAssetRoot, sourceFactIds);
       if (!grounding.ok) return `错误: asset_root 边界校验失败 — ${grounding.reason}`;
       assetRoot = grounding.address;
+      if (
+        grounding.matchedBy === "inventory" &&
+        sourceFactIds.length > 0 &&
+        sourceFactIds.every((id) => id === ORIGIN_FACT_ID)
+      ) {
+        const matchedAssets = ctx.history
+          .listAssets(ctx.taskId)
+          .filter((a) => a.kind !== "oos" && normalizeHost(a.address) === grounding.address);
+        const hostBriefIds = ctx.history
+          .listFacts(ctx.taskId)
+          .filter(
+            (f) =>
+              f.tags.includes("scope-brief") &&
+              f.tags.some((t) => t.startsWith("asset.addr:") && normalizeHost(t.slice("asset.addr:".length)) === grounding.address),
+          )
+          .map((f) => f.id);
+        const groundedIds = [...new Set([...matchedAssets.map((a) => a.factId), ...hostBriefIds])];
+        if (groundedIds.length > 0) {
+          sourceFactIds = groundedIds;
+        }
+      }
     }
     const inReason = asGraphPhase(ctx.state.phase) === "reason";
     if (inReason && reasonLeaseMs > 0) {

@@ -40,7 +40,7 @@ export function parseShellOutput(
 ): string {
   const tool = shellParserTool(command);
   if (!tool) return "";
-  const result = parseAndRecord(ctx, tool, stdout);
+  const result = parseAndRecord(ctx, tool, stdout, { intentId: ctx.getActiveIntentId?.() });
   if (result.skipped) {
     if (opts?.strict === false) return "";
     return `\n[parser] mandatory: ${tool} output is not machine-readable; re-run with ${MACHINE_FLAGS[tool]}`;
@@ -73,6 +73,7 @@ export function parseAndRecord(
   opts: { intentId?: string | null } = {},
 ): ParsedToolOutput & { recordedAssets: number; recordedFindings: number } {
   const parsed = parseToolOutput(tool, text);
+  const activeIntentId = opts.intentId !== undefined ? opts.intentId : ctx.getActiveIntentId?.();
   let recordedAssets = 0;
   let recordedFindings = 0;
   for (const asset of parsed.assets) {
@@ -90,7 +91,7 @@ export function parseAndRecord(
         assetType: asset.kind,
         ...(asset.parent ? { parentAddress: asset.parent } : {}),
         summary: `${tool} 解析 · ${JSON.stringify(asset.attrs)}`,
-        intentId: opts.intentId ?? null,
+        ...(activeIntentId !== undefined ? { intentId: activeIntentId } : {}),
       });
       if (result.created) recordedAssets += 1;
     } catch {
@@ -106,7 +107,7 @@ export function parseAndRecord(
         vulnClass: finding.vulnClass,
         severity: finding.severity,
         endpoint: finding.endpoint ?? null,
-        intentId: opts.intentId ?? null,
+        ...(activeIntentId !== undefined ? { intentId: activeIntentId } : {}),
       });
       if (result.created) recordedFindings += 1;
     } catch {

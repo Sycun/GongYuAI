@@ -559,7 +559,7 @@ export async function openMcpHub(
       if (!parserTool) return called.text;
       return called.text + parseSummaryLine(
         parseAndRecord(ctx, parserTool, called.raw ?? called.text, {
-          intentId: null,
+          intentId: ctx.getActiveIntentId?.(),
         }),
       );
     },

@@ -25,6 +25,7 @@ import {
   ASSET_KIND_RANK,
   ASSET_TAG,
   admitAddress,
+  assetAddrTag,
   assetTags,
   credentialTierUpgrades,
   defaultCredentialTier,
@@ -786,7 +787,7 @@ export class SurfaceIntelStore {
       layer: "title",
       title: `凭据 · ${input.kind} · ${asset}`,
       summary: `${username ? `user=${username} · ` : ""}secret 不入图（按 credential_list 的 secretRef 读取）`,
-      tags: ["credential", `credential.id:${credentialId}`],
+      tags: ["credential", `credential.id:${credentialId}`, assetAddrTag(asset)],
       intentId: this.deps.resolveIntentIdForWrite(input.taskId, input.intentId),
     });
     const credential: Credential = {

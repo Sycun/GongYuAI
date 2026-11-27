@@ -70,10 +70,20 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
   }
   ckpt.save(state);
 
+  if (state.activeIntentId) {
+    try {
+      history.bindActiveIntent(manifest.taskId, state.activeIntentId);
+    } catch {
+      state.activeIntentId = null;
+      ckpt.save(state);
+    }
+  }
+
   const ctx: ToolContext = {
     manifest,
     history,
     usage: { toolCalls: state.toolCalls, installs: state.installs },
+    getActiveIntentId: () => state.activeIntentId,
   };
   const leader = isExploreLeader(manifest);
   const slot = manifest.workerSlot ?? 0;
@@ -150,7 +160,6 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
           insecureUpstream: true,
         });
         ctx.proxyEnv = trafficProxy.getProxyEnv();
-        ctx.getActiveIntentId = () => state.activeIntentId;
       } catch {
         trafficProxy = null;
       }

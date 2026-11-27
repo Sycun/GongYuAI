@@ -138,6 +138,37 @@ test("同一资产升级后的旧资产 Fact 也连回资产节点，不沦为�
   assert.equal(link(dag, assetNodeId("app.example"), "f-live-new", "asserted-by")?.structural, true);
 });
 
+test("未启动委托简报过滤、已启动简报挂资产、子端点挂父主机且不残留孤立节点", () => {
+  const hostAssets: DagAsset[] = [
+    { address: "10.0.160.128", kind: "live", assetType: "ip", factId: "f-host", createdAt: "2026-11-24T01:00:00Z" },
+    {
+      address: "10.0.160.128/secret-data/flag.txt",
+      kind: "live",
+      assetType: "endpoint",
+      parentAddress: "10.0.160.128",
+      factId: "f-ep",
+      intentId: "i-s3",
+      createdAt: "2026-11-24T02:00:00Z",
+    },
+  ];
+  const briefFacts: DagFact[] = [
+    { id: "f-host", layer: "title", title: "资产 · live · 10.0.160.128", tags: ["asset", "asset.addr:10.0.160.128"], createdAt: "2026-11-24T01:00:00Z" },
+    { id: "f-brief-live", layer: "title", title: "委托简报 [d-01]", tags: ["scope-brief", "asset.addr:10.0.160.128"], createdAt: "2026-11-24T01:00:01Z" },
+    { id: "f-brief-idle", layer: "title", title: "委托简报 [e1-04]", tags: ["scope-brief", "challenge:e1-04"], createdAt: "2026-11-24T01:00:02Z" },
+    { id: "f-ep", layer: "title", title: "资产 · live · endpoint", tags: ["asset", "asset.addr:10.0.160.128/secret-data/flag.txt", "asset.parent:10.0.160.128"], intentId: "i-s3", createdAt: "2026-11-24T02:00:00Z" },
+  ];
+  const s3Intents: DagIntent[] = [
+    { id: "i-s3", title: "S3 枚举", status: "succeeded", sourceFactIds: ["origin"], assetRoot: "10.0.160.128:9000", createdAt: "2026-11-24T01:30:00Z" },
+  ];
+  const dag = collectDag(briefFacts, s3Intents, [], hostAssets);
+  assert.equal(dag.records.has("f-brief-idle"), false);
+  assert.equal(dag.records.has("origin"), false);
+  assert.equal(dag.orphanIds.size, 0);
+  assert.equal(link(dag, assetNodeId("10.0.160.128"), "f-brief-live", "asserted-by")?.structural, true);
+  assert.equal(link(dag, assetNodeId("10.0.160.128"), assetNodeId("10.0.160.128/secret-data/flag.txt"), "contains")?.structural, true);
+  assert.equal(link(dag, "f-host", "i-s3", "anchors")?.verification, "proven");
+});
+
 test("节点记录完整保留原始数据与平滑曲线坐标，供右侧详情抽屉展示与复制", () => {
   const richIntents: DagIntent[] = [
     {

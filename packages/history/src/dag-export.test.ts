@@ -472,3 +472,80 @@ test("同一资产由 seed 升级为 live 时，旧资产 Fact 也连到对应�
   assert.ok(dag.edges.some((e) => e.from === "asset:10.0.160.242" && e.to === "fact:f-seed" && e.kind === "asserted-by"));
   assert.ok(dag.edges.some((e) => e.from === "asset:10.0.160.242" && e.to === "fact:f-live" && e.kind === "asserted-by"));
 });
+
+test("委托简报/实例切换/子端点资产与 assetRoot 意图全链路连通，未启动题库简报不作为孤立节点入图", () => {
+  const hostAssetFact = fact({
+    id: "f-host",
+    title: "资产 · live · 10.0.160.128",
+    tags: ["asset", "asset.kind:live", "asset.addr:10.0.160.128", "asset.source:discover"],
+    createdAt: T0,
+  });
+  const startedBrief = fact({
+    id: "f-brief-started",
+    title: "委托简报 [d-01] 对象存储审计",
+    tags: ["scope-brief", "transferable", "challenge:d-01", "asset.addr:10.0.160.128"],
+    createdAt: T0,
+  });
+  const unstartedBrief = fact({
+    id: "f-brief-unstarted",
+    title: "委托简报 [e1-04] 未启动靶机简报",
+    tags: ["scope-brief", "transferable", "challenge:e1-04"],
+    createdAt: T0,
+  });
+  const boundaryFact = fact({
+    id: "f-boundary",
+    title: "容器实例代际切换：10.0.160.128 现承载 d-01",
+    tags: ["instance-boundary", "challenge:d-01", "asset.addr:10.0.160.128"],
+    createdAt: T0,
+  });
+  const endpointFact = fact({
+    id: "f-ep",
+    title: "资产 · live · endpoint · 10.0.160.128/secret-data/flag.txt",
+    tags: [
+      "asset",
+      "asset.kind:live",
+      "asset.addr:10.0.160.128/secret-data/flag.txt",
+      "asset.type:endpoint",
+      "asset.parent:10.0.160.128",
+    ],
+    intentId: "i-d01",
+    createdAt: T2,
+  });
+  const originAssetIntent = intent({
+    id: "i-d01",
+    title: "d-01 S3 兼容对象存储枚举",
+    sourceFactIds: [ORIGIN_FACT_ID],
+    assetRoot: "10.0.160.128",
+    createdAt: T1,
+  });
+
+  const dag = buildDagExport({
+    taskId: TASK,
+    generatedAt: T3,
+    facts: [hostAssetFact, startedBrief, unstartedBrief, boundaryFact, endpointFact],
+    intents: [originAssetIntent],
+    findings: [],
+    assets: [
+      { ...ASSET, address: "10.0.160.128", kind: "live", assetType: "ip", factId: hostAssetFact.id },
+      {
+        ...ASSET,
+        address: "10.0.160.128/secret-data/flag.txt",
+        kind: "live",
+        assetType: "endpoint",
+        parentAddress: "10.0.160.128",
+        factId: endpointFact.id,
+        intentId: "i-d01",
+        createdAt: T2,
+      },
+    ],
+  });
+
+  const nodeIds = new Set(dag.nodes.map((n) => n.id));
+  assert.equal(nodeIds.has("fact:f-brief-unstarted"), false, "无实例地址的未启动简报不应入图成为孤立节点");
+  assert.equal(nodeIds.has(`fact:${ORIGIN_FACT_ID}`), false, "已解析到 assetRoot 资产 Fact 时不再悬挂伪起点");
+  assert.ok(dag.edges.some((e) => e.from === "asset:10.0.160.128" && e.to === "fact:f-brief-started" && e.kind === "asserted-by"));
+  assert.ok(dag.edges.some((e) => e.from === "asset:10.0.160.128" && e.to === "fact:f-boundary" && e.kind === "asserted-by"));
+  assert.ok(dag.edges.some((e) => e.from === "asset:10.0.160.128" && e.to === "asset:10.0.160.128/secret-data/flag.txt" && e.kind === "contains"));
+  assert.ok(dag.edges.some((e) => e.from === "fact:f-host" && e.to === "intent:i-d01" && e.kind === "anchors" && e.verification === "proven"));
+  assert.equal(dag.notes.some((n) => n.includes("孤立事实")), false);
+});

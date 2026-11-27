@@ -405,7 +405,8 @@ body {
   opacity: 0.62;
   transition: opacity 140ms ease, stroke-width 140ms ease;
 }
-.gy-dag-edge-kind-asserted-by .react-flow__edge-path { stroke: #10b981; }
+.gy-dag-edge-kind-asserted-by .react-flow__edge-path,
+.gy-dag-edge-kind-contains .react-flow__edge-path { stroke: #10b981; }
 .gy-dag-edge-kind-anchors .react-flow__edge-path { stroke: #6366f1; }
 .gy-dag-edge-kind-produces .react-flow__edge-path { stroke: #f59e0b; }
 .gy-dag-edge-kind-evidences .react-flow__edge-path,

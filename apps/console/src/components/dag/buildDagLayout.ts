@@ -81,6 +81,7 @@ export type DagAsset = {
   intentId?: string | null;
   source?: string;
   assetType?: string | null;
+  parentAddress?: string | null;
   weight?: number;
   createdAt?: string;
 };
@@ -269,6 +270,7 @@ function isSystemLifecycleFact(fact: Pick<DagFact, "title" | "tags" | "evidenceP
   const tags = fact.tags ?? [];
   if (tags.includes("asset") || tags.some((t) => t.startsWith("asset.addr:"))) return false;
   if (tags.includes("system") || tags.includes("lifecycle")) return true;
+  if (tags.includes("scope-brief")) return true;
   if (tags.includes("scope") && tags.some((t) => t.startsWith("scopeVersion:"))) return true;
   if (LEGACY_LIFECYCLE_TITLES.has(fact.title)) return true;
   if (/^加载 Skill\s+/.test(fact.title)) return true;
@@ -314,6 +316,40 @@ export function collectDag(
   const intentRefs = new Map<string, NodeRef>();
   const findingRefs = new Map<string, NodeRef>();
 
+  const isIpv4Cidr = (v: string) => /^\d{1,3}(?:\.\d{1,3}){3}\/\d{1,2}$/.test(v.trim());
+  const isConcreteHostAsset = (addr: string) =>
+    addr !== "*" && !addr.startsWith("*.") && !isIpv4Cidr(addr);
+  const assetsByAddress = new Map<string, DagAsset>();
+  const assetsByExact = new Map<string, DagAsset>();
+  const rootAssetsByHost = new Map<string, DagAsset>();
+  const assetsByHost = new Map<string, DagAsset>();
+  for (const asset of assets) {
+    assetsByAddress.set(asset.address, asset);
+    const exact = normAsset(asset.address);
+    if (exact && !assetsByExact.has(exact)) assetsByExact.set(exact, asset);
+    if (isConcreteHostAsset(asset.address) && !asset.parentAddress && asset.assetType !== "endpoint" && !asset.address.includes("/")) {
+      const host = normalizeHost(asset.address);
+      if (host && !rootAssetsByHost.has(host)) rootAssetsByHost.set(host, asset);
+      if (host && !assetsByHost.has(host)) assetsByHost.set(host, asset);
+    }
+  }
+  for (const asset of assets) {
+    if (!isConcreteHostAsset(asset.address)) continue;
+    const host = normalizeHost(asset.address);
+    if (host && !assetsByHost.has(host)) assetsByHost.set(host, asset);
+  }
+  const resolveAsset = (raw: string | null | undefined): DagAsset | undefined => {
+    if (!raw?.trim()) return undefined;
+    const trimmed = raw.trim();
+    const exact = normAsset(trimmed);
+    const host = isConcreteHostAsset(trimmed) ? normalizeHost(trimmed) : "";
+    return (
+      assetsByAddress.get(trimmed) ??
+      (exact ? assetsByExact.get(exact) : undefined) ??
+      (host ? assetsByHost.get(host) : undefined)
+    );
+  };
+
   for (const asset of assets) {
     records.set(assetNodeId(asset.address), {
       kind: "asset",
@@ -326,13 +362,16 @@ export function collectDag(
         intentId: asset.intentId ?? null,
         source: asset.source ?? null,
         assetType: asset.assetType ?? null,
+        parentAddress: asset.parentAddress ?? null,
         weight: asset.weight ?? null,
       },
       raw: { ...asset },
     });
   }
 
+  const visibleFactById = new Map<string, DagFact>();
   for (const fact of visibleFacts) {
+    visibleFactById.set(fact.id, fact);
     records.set(fact.id, {
       kind: "fact",
       title: fact.title,
@@ -354,8 +393,35 @@ export function collectDag(
     });
   }
 
-  const usesOrigin = intents.some((intent) => (intent.sourceFactIds ?? []).includes(ORIGIN_ID))
-    || (serverDag?.edges ?? []).some((e) => unwrapServerNodeId(e.from) === ORIGIN_ID);
+  const effectiveSourcesByIntent = new Map<string, string[]>();
+  for (const intent of intents) {
+    let sources = [...new Set(intent.sourceFactIds?.length ? intent.sourceFactIds : [ORIGIN_ID])];
+    if (!serverDag?.edges && sources.every((id) => id === ORIGIN_ID) && intent.assetRoot) {
+      const rootAsset = resolveAsset(intent.assetRoot);
+      if (rootAsset) {
+        const intentMs = parseMs(intent.createdAt);
+        const assetFacts = visibleFacts.filter(
+          (f) =>
+            f.id === rootAsset.factId ||
+            ((f.tags ?? []).includes("asset") &&
+              (f.tags ?? []).some((t) => t === `asset.addr:${rootAsset.address}`)),
+        );
+        const timely = intentMs !== null
+          ? assetFacts.filter((f) => {
+              const ms = parseMs(f.createdAt);
+              return ms !== null && ms <= intentMs;
+            })
+          : [];
+        const anchorFact = timely.at(-1) ?? visibleFactById.get(rootAsset.factId);
+        if (anchorFact) sources = [anchorFact.id];
+      }
+    }
+    effectiveSourcesByIntent.set(intent.id, sources);
+  }
+
+  const usesOrigin = serverDag?.edges
+    ? serverDag.edges.some((e) => unwrapServerNodeId(e.from) === ORIGIN_ID || unwrapServerNodeId(e.to) === ORIGIN_ID)
+    : intents.some((intent) => (effectiveSourcesByIntent.get(intent.id) ?? [ORIGIN_ID]).includes(ORIGIN_ID));
   if (usesOrigin) {
     records.set(ORIGIN_ID, {
       kind: "fact",
@@ -368,7 +434,7 @@ export function collectDag(
   }
 
   for (const intent of intents) {
-    const sources = [...new Set(intent.sourceFactIds?.length ? intent.sourceFactIds : [ORIGIN_ID])];
+    const sources = effectiveSourcesByIntent.get(intent.id) ?? [...new Set(intent.sourceFactIds?.length ? intent.sourceFactIds : [ORIGIN_ID])];
     records.set(intent.id, {
       kind: "intent",
       title: intent.title,
@@ -454,7 +520,7 @@ export function collectDag(
     }
   } else {
     for (const intent of intents) {
-      const sources = [...new Set(intent.sourceFactIds?.length ? intent.sourceFactIds : [ORIGIN_ID])];
+      const sources = effectiveSourcesByIntent.get(intent.id) ?? [...new Set(intent.sourceFactIds?.length ? intent.sourceFactIds : [ORIGIN_ID])];
       for (const source of sources) {
         if (source === ORIGIN_ID) {
           links.push({ source: ORIGIN_ID, target: intent.id, kind: "anchors", structural: true });
@@ -485,8 +551,31 @@ export function collectDag(
       }
     }
 
-    // 资产 → 事实（结构凭据边，含同资产升级后的历史资产事实）
-    const assetAddresses = new Set(assets.map((asset) => asset.address));
+    // 资产 → 子资产（主机 → 端口服务 / HTTP 端点）
+    for (const asset of assets) {
+      if (!isConcreteHostAsset(asset.address)) continue;
+      let parent: DagAsset | undefined;
+      if (asset.parentAddress) {
+        const rawParent = asset.parentAddress.trim();
+        const exactParent = normAsset(rawParent);
+        const hostParent = isConcreteHostAsset(rawParent) ? normalizeHost(rawParent) : "";
+        const candidate =
+          assetsByAddress.get(rawParent) ??
+          (exactParent ? assetsByExact.get(exactParent) : undefined) ??
+          (hostParent ? rootAssetsByHost.get(hostParent) : undefined);
+        if (candidate && candidate.address !== asset.address) parent = candidate;
+      }
+      if (!parent && (asset.address.includes("/") || /:\d+$/.test(asset.address))) {
+        const host = normalizeHost(asset.address);
+        const candidate = host ? (assetsByAddress.get(host) ?? rootAssetsByHost.get(host)) : undefined;
+        if (candidate && candidate.address !== asset.address) parent = candidate;
+      }
+      if (parent) {
+        links.push({ source: assetNodeId(parent.address), target: assetNodeId(asset.address), kind: "contains", structural: true });
+      }
+    }
+
+    // 资产 → 事实（结构凭据边 + 无活跃 Intent 父节点的资产关联事实）
     const assertedPairs = new Set<string>();
     for (const asset of assets) {
       if (!records.has(asset.factId)) continue;
@@ -495,15 +584,22 @@ export function collectDag(
       links.push({ source: assetNodeId(asset.address), target: asset.factId, kind: "asserted-by", structural: true });
     }
     for (const fact of visibleFacts) {
-      if (!fact.tags?.includes("asset")) continue;
-      const addrTag = fact.tags.find((tag) => tag.startsWith("asset.addr:"));
-      if (!addrTag) continue;
-      const address = addrTag.slice("asset.addr:".length);
-      if (!assetAddresses.has(address)) continue;
-      const key = `${address}\0${fact.id}`;
-      if (assertedPairs.has(key)) continue;
-      assertedPairs.add(key);
-      links.push({ source: assetNodeId(address), target: fact.id, kind: "asserted-by", structural: true });
+      const tags = fact.tags ?? [];
+      const isAssetFact = tags.includes("asset");
+      const hasIntentParent = Boolean(fact.intentId && intentIds.has(fact.intentId));
+      if (!isAssetFact && hasIntentParent) continue;
+      for (const tag of tags) {
+        if (!tag.startsWith("asset.addr:")) continue;
+        const rawAddr = tag.slice("asset.addr:".length);
+        const matched = isAssetFact
+          ? (assetsByAddress.get(rawAddr) ?? resolveAsset(rawAddr))
+          : resolveAsset(rawAddr);
+        if (!matched) continue;
+        const key = `${matched.address}\0${fact.id}`;
+        if (assertedPairs.has(key)) continue;
+        assertedPairs.add(key);
+        links.push({ source: assetNodeId(matched.address), target: fact.id, kind: "asserted-by", structural: true });
+      }
     }
 
     // 兜底链路：缺少 intentId 与 factIds 的漏洞按共享证据文件连 Fact，否则挂所属资产节点。
@@ -516,14 +612,6 @@ export function collectDag(
       const list = factsByEvidence.get(key) ?? [];
       list.push(fact);
       factsByEvidence.set(key, list);
-    }
-    const assetsByExact = new Map<string, DagAsset>();
-    const assetsByHost = new Map<string, DagAsset>();
-    for (const asset of assets) {
-      const exact = normAsset(asset.address);
-      if (exact && !assetsByExact.has(exact)) assetsByExact.set(exact, asset);
-      const host = exact.replace(/:\d+$/, "");
-      if (host && !assetsByHost.has(host)) assetsByHost.set(host, asset);
     }
     for (const finding of findings) {
       const hasExplicit = Boolean(finding.intentId && intentIds.has(finding.intentId)) || (finding.factIds?.length ?? 0) > 0;
@@ -538,10 +626,7 @@ export function collectDag(
         }
       }
       if (!linked) {
-        const targetAsset = normAsset(finding.asset);
-        const matched = targetAsset
-          ? (assetsByExact.get(targetAsset) ?? assetsByHost.get(targetAsset.replace(/:\d+$/, "")))
-          : undefined;
+        const matched = resolveAsset(finding.asset);
         if (matched) {
           links.push({ source: assetNodeId(matched.address), target: finding.id, kind: "affects", structural: true });
         }

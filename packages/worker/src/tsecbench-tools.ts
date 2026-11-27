@@ -181,18 +181,19 @@ export function ensureChallengeScopeBrief(
     const existing = ctx.history
       .listFacts(ctx.manifest.taskId)
       .find((f) => f.tags.includes("scope-brief") && f.tags.includes(tagKey));
-    const hostTags = hosts.map((h) => assetAddrTag(h));
+    const normalizedHosts = [...new Set(hosts.map((h) => h.trim()).filter(Boolean))];
+    if (!normalizedHosts.length) return existing?.id ?? null;
+    const hostTags = normalizedHosts.map((h) => assetAddrTag(h));
     if (existing) {
       // If container restarted on a new IP, append a lightweight binding update only when IP changed.
       const missingHost = hostTags.some((t) => !existing.tags.includes(t));
       if (!missingHost) return existing.id;
     }
-    if (!description && flagCount === undefined && !hosts.length) return existing?.id ?? null;
     const summaryLines = [
       `目标标识：${code}${titleName !== code ? `（${titleName}）` : ""}`,
       ...(difficulty ? [`难度分级：${difficulty}`] : []),
       ...(flagCount !== undefined ? [`目标验证项数（flag_count）：${String(flagCount)}`] : []),
-      ...(hosts.length ? [`当前实例地址：${hosts.join(", ")}`] : []),
+      `当前实例地址：${normalizedHosts.join(", ")}`,
       ...(description ? [`委托背景与预置线索：${description}`] : []),
       `专属产物目录：${targetWorkspace}`,
     ];
@@ -379,9 +380,11 @@ export async function tsecbenchTool(
     const list = JSON.parse(r.text) as Array<Record<string, unknown>>;
     for (const c of list) {
       const itemCode = String(c.unique_code ?? "");
-      if (c.container_addr) {
+      if (parseContainerAddresses(c.container_addr).length > 0) {
         const admitted = autoAdmitContainerTargets(ctx, itemCode, c.container_addr);
-        ensureChallengeScopeBrief(ctx, itemCode, c, admitted.map((a) => a.address));
+        if (admitted.length > 0) {
+          ensureChallengeScopeBrief(ctx, itemCode, c, admitted.map((a) => a.address));
+        }
       }
     }
     if (action === "status" && code) {
@@ -408,12 +411,14 @@ export async function tsecbenchTool(
       const dataObj = (parsed.data && typeof parsed.data === "object" ? parsed.data : parsed) as Record<string, unknown>;
       const addr = parsed.container_addr ?? dataObj.container_addr;
       if (addr) admitted = autoAdmitContainerTargets(ctx, code, addr);
-      let scopeBriefFactId = ensureChallengeScopeBrief(
-        ctx,
-        code,
-        dataObj,
-        admitted.map((a) => a.address),
-      );
+      let scopeBriefFactId = admitted.length > 0
+        ? ensureChallengeScopeBrief(
+            ctx,
+            code,
+            dataObj,
+            admitted.map((a) => a.address),
+          )
+        : null;
       if (!scopeBriefFactId && admitted.length) {
         // Fallback: if /start response omitted `description`, pull metadata once from /challenges so grey-box creds are never missed.
         try {

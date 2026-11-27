@@ -357,6 +357,18 @@ test("OpenAPI string[] container_addr auto-admits live assets, unblocks Leader i
             container_status: "running",
             container_addr: ["10.0.1.99:80"],
           },
+          {
+            unique_code: "e1-04",
+            title: "未启动靶机",
+            description: "某业务系统在边界部署了带检测能力的反向代理过滤请求",
+            difficulty: "medium",
+            total_score: 200,
+            flag_count: 1,
+            correct_flag_count: 0,
+            is_completed: false,
+            container_status: "stopped",
+            container_addr: [],
+          },
         ]),
         { status: 200, headers: { "content-type": "application/json" } },
       )) as typeof fetch;
@@ -372,6 +384,8 @@ test("OpenAPI string[] container_addr auto-admits live assets, unblocks Leader i
     assert.match(brief.summary, /Sys@Oa123/);
     const boundary = facts.find((f) => f.tags.includes("instance-boundary") && f.tags.includes("challenge:a-11"));
     assert.ok(boundary, "recycled IP 10.0.1.99 must record an instance-boundary Fact");
+    const unstartedBrief = facts.find((f) => f.tags.includes("challenge:e1-04"));
+    assert.equal(unstartedBrief, undefined, "unstarted challenge with empty container_addr [] must NOT create orphan scope-brief Fact");
 
     assert.equal(existsSync(join(dir, "admitted-pivot.json")), false);
     const follower = makeManifest(dir);

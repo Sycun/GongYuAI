@@ -183,9 +183,13 @@ export async function httpRequestTool(
     }
   }
 
+  const activeIntentId =
+    opts.intentId !== undefined
+      ? opts.intentId
+      : (ctx.getActiveIntentId?.() ?? ctx.history.resolveActiveIntentId(ctx.manifest.taskId));
   const { transaction } = ctx.history.recordHttpTransaction({
     taskId: ctx.manifest.taskId,
-    intentId: opts.intentId ?? null,
+    intentId: activeIntentId ?? null,
     method: artifact.method,
     url: artifact.url,
     host: artifact.host,
@@ -223,7 +227,7 @@ export async function httpRequestTool(
       const resBody = resBuf.length > 0 ? putBlob(ctx.manifest.dataDir, resBuf, resContentType) : undefined;
       insertTraffic(ctx.manifest.dataDir, {
         taskId: ctx.manifest.taskId,
-        ...(opts.intentId ? { intentId: opts.intentId } : {}),
+        ...(activeIntentId ? { intentId: activeIntentId } : {}),
         workerId: ctx.manifest.workerId,
         method: artifact.method,
         url: artifact.url,
@@ -257,7 +261,7 @@ export async function httpRequestTool(
           source: "discover",
           assetType: "endpoint",
           parentAddress: artifact.host,
-          intentId: opts.intentId ?? null,
+          ...(activeIntentId !== undefined ? { intentId: activeIntentId } : {}),
           summary: `HTTP ${artifact.method} → ${artifact.status}`,
         });
       } catch {

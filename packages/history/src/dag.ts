@@ -12,6 +12,8 @@
 import {
   ORIGIN_FACT_ID,
   graphNodeId,
+  isIpv4Cidr,
+  normalizeHost,
   type AssetRecord,
   type Credential,
   type Fact,
@@ -98,7 +100,9 @@ export type DagExport = {
   facts: DagFactRef[];
   intents: DagIntentRef[];
   findings: DagFindingRef[];
-  assets: Array<Pick<AssetRecord, "address" | "kind" | "assetType" | "factId" | "intentId" | "createdAt">>;
+  assets: Array<
+    Pick<AssetRecord, "address" | "kind" | "assetType" | "parentAddress" | "factId" | "intentId" | "createdAt">
+  >;
   nodes: GraphNode[];
   edges: GraphEdge[];
   notes: string[];
@@ -131,6 +135,7 @@ function isSystemLifecycleFact(fact: Pick<Fact, "title" | "tags" | "evidencePath
   if (fact.evidencePath) return false;
   if (fact.tags.includes("asset") || fact.tags.some((t) => t.startsWith("asset.addr:"))) return false;
   if (fact.tags.includes("system") || fact.tags.includes("lifecycle")) return true;
+  if (fact.tags.includes("scope-brief")) return true;
   if (fact.tags.includes("scope") && fact.tags.some((t) => t.startsWith("scopeVersion:"))) return true;
   if (LEGACY_LIFECYCLE_TITLES.has(fact.title)) return true;
   if (/^加载 Skill\s+/.test(fact.title)) return true;
@@ -233,6 +238,69 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
 
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
 
+  // 资产索引：精确地址优先，主机回退优先匹配根主机资产（避免把同主机子端点误作其他节点的根）。
+  const isConcreteHostAsset = (addr: string): boolean =>
+    addr !== "*" && !addr.startsWith("*.") && !isIpv4Cidr(addr);
+  const assetsByAddress = new Map<string, AssetRecord>();
+  const assetsByExact = new Map<string, AssetRecord>();
+  const rootAssetsByHost = new Map<string, AssetRecord>();
+  const assetsByHost = new Map<string, AssetRecord>();
+  for (const asset of input.assets) {
+    assetsByAddress.set(asset.address, asset);
+    const exact = artifact("asset", asset.address)?.value;
+    if (exact && !assetsByExact.has(exact)) assetsByExact.set(exact, asset);
+    if (isConcreteHostAsset(asset.address) && !asset.parentAddress && asset.assetType !== "endpoint" && !asset.address.includes("/")) {
+      const host = normalizeHost(asset.address);
+      if (host && !rootAssetsByHost.has(host)) rootAssetsByHost.set(host, asset);
+      if (host && !assetsByHost.has(host)) assetsByHost.set(host, asset);
+    }
+  }
+  for (const asset of input.assets) {
+    if (!isConcreteHostAsset(asset.address)) continue;
+    const host = normalizeHost(asset.address);
+    if (host && !assetsByHost.has(host)) assetsByHost.set(host, asset);
+  }
+  const resolveAsset = (raw: string | null | undefined): AssetRecord | undefined => {
+    if (!raw?.trim()) return undefined;
+    const trimmed = raw.trim();
+    const exact = artifact("asset", trimmed)?.value;
+    const host = isConcreteHostAsset(trimmed) ? normalizeHost(trimmed) : "";
+    return (
+      assetsByAddress.get(trimmed) ??
+      (exact ? assetsByExact.get(exact) : undefined) ??
+      (host ? assetsByHost.get(host) : undefined)
+    );
+  };
+
+  // 若 Intent 仅挂在伪起点 origin 但显式声明了已入库 assetRoot，优先挂到该资产早于 Intent 的资产 Fact，避免目标资产与意图脱节。
+  const effectiveSourcesByIntent = new Map<string, string[]>();
+  for (const intent of intents) {
+    let sources = [...intent.sourceFactIds];
+    if (sources.length > 0 && sources.every((id) => id === ORIGIN_FACT_ID) && intent.assetRoot) {
+      const rootAsset = resolveAsset(intent.assetRoot);
+      if (rootAsset) {
+        const intentMs = Date.parse(intent.createdAt);
+        const assetFacts = facts.filter(
+          (f) =>
+            f.id === rootAsset.factId ||
+            (f.tags.includes("asset") &&
+              f.tags.some((t) => t === `asset.addr:${rootAsset.address}`)),
+        );
+        const timely = Number.isFinite(intentMs)
+          ? assetFacts.filter((f) => {
+              const ms = Date.parse(f.createdAt);
+              return Number.isFinite(ms) && ms <= intentMs;
+            })
+          : [];
+        const anchorFact = timely.at(-1) ?? (factById.has(rootAsset.factId) ? factById.get(rootAsset.factId) : undefined);
+        if (anchorFact) {
+          sources = [anchorFact.id];
+        }
+      }
+    }
+    effectiveSourcesByIntent.set(intent.id, sources);
+  }
+
   const nodes: GraphNode[] = [];
   const nodeIds = new Set<string>();
   const pushNode = (node: GraphNode) => {
@@ -285,6 +353,7 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
       data: {
         factId: asset.factId,
         assetType: asset.assetType,
+        parentAddress: asset.parentAddress ?? null,
         source: asset.source,
         intentId: asset.intentId,
         createdAt: asset.createdAt,
@@ -305,7 +374,9 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
       },
     });
   }
-  const usesOrigin = intents.some((intent) => intent.sourceFactIds.includes(ORIGIN_FACT_ID));
+  const usesOrigin = intents.some((intent) =>
+    (effectiveSourcesByIntent.get(intent.id) ?? intent.sourceFactIds).includes(ORIGIN_FACT_ID),
+  );
   if (usesOrigin) {
     pushNode({
       id: factNodeId(ORIGIN_FACT_ID),
@@ -394,9 +465,43 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
     );
   };
 
-  // 资产 → 事实：资产清单凭据（含同一资产从 seed/admitted 升级至 live 时的历史资产事实，避免升级后旧资产事实沦为孤立节点）。
-  const assetAddresses = new Set(input.assets.map((asset) => asset.address));
+  // 资产 → 子资产（主机 → 端口服务 / HTTP 端点），保持攻击面层级连通。
   for (const asset of input.assets) {
+    if (!isConcreteHostAsset(asset.address)) continue;
+    let parent: AssetRecord | undefined;
+    if (asset.parentAddress) {
+      const rawParent = asset.parentAddress.trim();
+      const exactParent = artifact("asset", rawParent)?.value;
+      const hostParent = isConcreteHostAsset(rawParent) ? normalizeHost(rawParent) : "";
+      const candidate =
+        assetsByAddress.get(rawParent) ??
+        (exactParent ? assetsByExact.get(exactParent) : undefined) ??
+        (hostParent ? rootAssetsByHost.get(hostParent) : undefined);
+      if (candidate && candidate.address !== asset.address) parent = candidate;
+    }
+    if (!parent && (asset.address.includes("/") || /:\d+$/.test(asset.address))) {
+      const host = normalizeHost(asset.address);
+      const candidate = host ? (assetsByAddress.get(host) ?? rootAssetsByHost.get(host)) : undefined;
+      if (candidate && candidate.address !== asset.address) parent = candidate;
+    }
+    if (parent) {
+      pushEdge({
+        id: `${assetNodeId(parent.address)}->${assetNodeId(asset.address)}:contains`,
+        from: assetNodeId(parent.address),
+        to: assetNodeId(asset.address),
+        kind: "contains",
+        label: "下属资产",
+        broken: false,
+      });
+    }
+  }
+
+  // 资产 → 事实：资产清单凭据 + 无活跃 Intent 父节点的资产关联事实（委托简报 / 实例切换 / 凭据等）。
+  const credentialById = new Map(
+    (input.credentials ?? []).map((cred) => [cred.id.toLowerCase(), cred]),
+  );
+  for (const asset of input.assets) {
+    if (!factById.has(asset.factId)) continue;
     pushEdge({
       id: `${assetNodeId(asset.address)}->${factNodeId(asset.factId)}:asserted-by`,
       from: assetNodeId(asset.address),
@@ -407,24 +512,38 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
     });
   }
   for (const fact of facts) {
-    if (!fact.tags.includes("asset")) continue;
-    const addrTag = fact.tags.find((tag) => tag.startsWith("asset.addr:"));
-    if (!addrTag) continue;
-    const address = addrTag.slice("asset.addr:".length);
-    if (!assetAddresses.has(address)) continue;
-    pushEdge({
-      id: `${assetNodeId(address)}->${factNodeId(fact.id)}:asserted-by`,
-      from: assetNodeId(address),
-      to: factNodeId(fact.id),
-      kind: "asserted-by",
-      label: "资产清单凭据",
-      broken: false,
-    });
+    const isAssetFact = fact.tags.includes("asset");
+    const hasIntentParent = Boolean(fact.intentId && intentById.has(fact.intentId));
+    if (!isAssetFact && hasIntentParent) continue;
+    const candidateAddrs: string[] = [];
+    for (const tag of fact.tags) {
+      if (tag.startsWith("asset.addr:")) {
+        candidateAddrs.push(tag.slice("asset.addr:".length));
+      } else if (tag.startsWith("credential.id:")) {
+        const cred = credentialById.get(tag.slice("credential.id:".length).toLowerCase());
+        if (cred?.asset) candidateAddrs.push(cred.asset);
+      }
+    }
+    for (const rawAddr of candidateAddrs) {
+      const matched = isAssetFact
+        ? (assetsByAddress.get(rawAddr) ?? resolveAsset(rawAddr))
+        : resolveAsset(rawAddr);
+      if (!matched) continue;
+      pushEdge({
+        id: `${assetNodeId(matched.address)}->${factNodeId(fact.id)}:asserted-by`,
+        from: assetNodeId(matched.address),
+        to: factNodeId(fact.id),
+        kind: "asserted-by",
+        label: isAssetFact ? "资产清单凭据" : "资产关联事实",
+        broken: false,
+      });
+    }
   }
 
   // 事实 → 意图：sourceFactIds（origin 为伪 Fact，不参与校验）。
   for (const intent of intents) {
-    for (const sourceId of intent.sourceFactIds) {
+    const sources = effectiveSourcesByIntent.get(intent.id) ?? intent.sourceFactIds;
+    for (const sourceId of sources) {
       if (sourceId === ORIGIN_FACT_ID) {
         pushEdge({
           id: `${factNodeId(ORIGIN_FACT_ID)}->${intentNodeId(intent.id)}:anchors`,
@@ -504,14 +623,6 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
     list.push(fact);
     factsByEvidence.set(key, list);
   }
-  const assetsByExact = new Map<string, AssetRecord>();
-  const assetsByHost = new Map<string, AssetRecord>();
-  for (const asset of input.assets) {
-    const exact = artifact("asset", asset.address)?.value;
-    if (exact && !assetsByExact.has(exact)) assetsByExact.set(exact, asset);
-    const host = exact?.replace(/:\d+$/, "");
-    if (host && !assetsByHost.has(host)) assetsByHost.set(host, asset);
-  }
   for (const finding of findings) {
     if (finding.intentId || finding.factIds.length > 0) continue;
     let linked = false;
@@ -531,10 +642,7 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
       }
     }
     if (!linked) {
-      const targetAsset = artifact("asset", finding.asset)?.value;
-      const matchedAsset = targetAsset
-        ? (assetsByExact.get(targetAsset) ?? assetsByHost.get(targetAsset.replace(/:\d+$/, "")))
-        : undefined;
+      const matchedAsset = resolveAsset(finding.asset);
       if (matchedAsset) {
         pushEdge({
           id: `${assetNodeId(matchedAsset.address)}->${findingNodeId(finding.id)}:affects`,
@@ -641,9 +749,14 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
   }));
 
   const causal = summarizeCausalEdges(edges);
-  const orphanFacts = dagFacts.filter((fact) => !fact.intentId && !fact.tags.includes("asset")).length;
+  const connectedNodeIds = new Set<string>();
+  for (const edge of edges) {
+    connectedNodeIds.add(edge.from);
+    connectedNodeIds.add(edge.to);
+  }
+  const orphanFacts = dagFacts.filter((fact) => !connectedNodeIds.has(factNodeId(fact.id))).length;
   const orphanFindings = dagFindings.filter(
-    (finding) => !finding.intentId && finding.factIds.length === 0,
+    (finding) => !connectedNodeIds.has(findingNodeId(finding.id)),
   ).length;
   const unverifiedFindings = dagFindings.filter(
     (finding) => finding.status === "tentative",
@@ -680,6 +793,7 @@ export function buildDagExport(input: BuildDagExportInput): DagExport {
       address: asset.address,
       kind: asset.kind,
       assetType: asset.assetType,
+      parentAddress: asset.parentAddress ?? null,
       factId: asset.factId,
       intentId: asset.intentId,
       createdAt: asset.createdAt,
