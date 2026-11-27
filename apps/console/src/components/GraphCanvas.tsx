@@ -1,99 +1,29 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Graph, layout, type Point } from "@dagrejs/dagre";
-import { Button, Input } from "@douyinfe/semi-ui";
+import { Button, Input, Toast } from "@douyinfe/semi-ui";
 import { IconClose, IconExpand, IconMinus, IconPlus, IconSearch } from "@douyinfe/semi-icons";
+import { formatDateTime } from "../time";
 import { edgeStatement, nodeNavigation, type GEdge, type GNode, type GView, type ViewName } from "../workspace/model";
 import { setGraphSlot, useGraphSlot, type Viewport } from "../workspace/graphStore";
+import {
+  THUMB_H,
+  THUMB_W,
+  bezierBetween as baseBezierBetween,
+  clipText,
+  formatBadge,
+  isUnknownSurfaceEdge,
+  kindMeta,
+  layoutThumbScene,
+} from "./graphLayout";
 
-const NODE_W = 184;
-const NODE_H = 52;
+export { formatBadge, kindMeta };
 
-type KindVisual = { label: string; color: string; bg: string; border: string };
+const NODE_W = 208;
+const NODE_H = 62;
 
-const KIND_VISUALS: Record<string, KindVisual> = {
-  asset: { label: "资产", color: "#059669", bg: "#ecfdf5", border: "#a7f3d0" },
-  scope: { label: "范围", color: "#4465ed", bg: "#eff3ff", border: "#c7d4fc" },
-  intent: { label: "意图", color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
-  finding: { label: "漏洞", color: "#dc2626", bg: "#fef2f2", border: "#fecaca" },
-  technique: { label: "检查项", color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe" },
-  material: { label: "证据材料", color: "#0891b2", bg: "#ecfeff", border: "#a5f3fc" },
-  slot: { label: "执行槽", color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe" },
-  step: { label: "执行步", color: "#475569", bg: "#f8fafc", border: "#cbd5e1" },
-  tool_gate: { label: "工具拦截", color: "#dc2626", bg: "#fef2f2", border: "#fecaca" },
-  timeout: { label: "超时收卷", color: "#ea580c", bg: "#fff7ed", border: "#fed7aa" },
-  relay: { label: "上下文交接", color: "#7c3aed", bg: "#f5f3ff", border: "#ddd6fe" },
-  job: { label: "后台作业", color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
-  fact: { label: "事实", color: "#4465ed", bg: "#eff3ff", border: "#c7d4fc" },
-  memory: { label: "记忆", color: "#6366f1", bg: "#eef2ff", border: "#c7d2fe" },
-  source: { label: "来源", color: "#64748b", bg: "#f8fafc", border: "#cbd5e1" },
-  task: { label: "任务", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
-};
-
-const BADGE_LABELS: Record<string, string> = {
-  authorized: "授权范围",
-  "out-of-scope": "范围外",
-  seed: "种子",
-  live: "存活",
-  admitted: "已准入",
-  candidate: "候选",
-  oos: "范围外",
-  completed: "已完成",
-  succeeded: "成功",
-  failed: "失败",
-  running: "运行中",
-  claimed: "已认领",
-  proposed: "待执行",
-  pending: "待处理",
-  worker: "工作槽",
-  handoff: "交接",
-  partial: "部分收卷",
-  denied: "已拒绝",
-  verified: "已证实",
-  attempted: "已尝试",
-  manual: "人工覆盖",
-  material: "已有材料",
-  retracted: "已撤回",
-  unknown: "未知",
-  critical: "严重",
-  high: "高危",
-  medium: "中危",
-  low: "低危",
-  info: "信息",
-};
-
-export function kindMeta(kind: string): KindVisual {
-  return KIND_VISUALS[kind] ?? { label: kind, color: "#64748b", bg: "#f8fafc", border: "#cbd5e1" };
-}
-
-export function formatBadge(badge: string | null, kind: string): string {
-  if (!badge) return kindMeta(kind).label;
-  if (BADGE_LABELS[badge]) return BADGE_LABELS[badge];
-  if (badge.includes(":")) {
-    return badge
-      .split(":")
-      .map((part) => BADGE_LABELS[part] ?? part)
-      .join(" · ");
-  }
-  return badge;
-}
-
-function clipText(input: string, maxUnits = 20): string {
-  let units = 0;
-  let out = "";
-  for (const ch of input) {
-    const w = ch.charCodeAt(0) > 0xff ? 1.85 : 1;
-    if (units + w > maxUnits) return `${out}…`;
-    out += ch;
-    units += w;
-  }
-  return out;
-}
-
-function isUnknownSurfaceEdge(edge: GEdge, view: ViewName): boolean {
-  if (view !== "surface") return false;
-  if (edge.kind === "unknown") return true;
-  if (edge.kind === "coverage" && (edge.label === "unknown" || edge.label === "未知")) return true;
-  return false;
+function shortNodeTail(id: string): string {
+  const clean = id.includes("::") ? id.split("::").pop() ?? id : id.includes(":") ? id.split(":").pop() ?? id : id;
+  return clean.length > 10 ? `#${clean.slice(0, 8)}` : clean;
 }
 
 function bezierBetween(
@@ -102,37 +32,27 @@ function bezierBetween(
   w = NODE_W,
   h = NODE_H,
 ): string {
-  const sx = from.x + w;
-  const sy = from.y + h / 2;
-  const tx = to.x;
-  const ty = to.y + h / 2;
-  if (tx >= sx - 8) {
-    const dx = Math.max(28, (tx - sx) * 0.48);
-    return `M${sx} ${sy} C${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
-  }
-  // Row-wrap or backward edge: route smoothly through vertical gap
-  const midY = sy <= ty ? (from.y + h + to.y) / 2 : (to.y + h + from.y) / 2;
-  const pad = 18;
-  return `M${sx} ${sy} C${sx + pad} ${sy}, ${sx + pad} ${midY}, ${(sx + tx) / 2} ${midY} S${tx - pad} ${ty}, ${tx} ${ty}`;
+  return baseBezierBetween(from, to, w, h);
 }
 
-function smoothPointsPath(points: Point[]): string {
-  if (!points.length) return "";
-  if (points.length === 1) return `M${points[0]!.x} ${points[0]!.y}`;
-  if (points.length === 2) {
-    const [a, b] = points as [Point, Point];
-    const dx = Math.max(24, Math.abs(b.x - a.x) * 0.42);
-    return `M${a.x} ${a.y} C${a.x + dx} ${a.y}, ${b.x - dx} ${b.y}, ${b.x} ${b.y}`;
+function smoothAnchoredPath(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  points: Point[],
+  w = NODE_W,
+  h = NODE_H,
+): string {
+  if (points.length <= 3) return bezierBetween(from, to, w, h);
+  const start = { x: Math.round(from.x + w), y: Math.round(from.y + h / 2) };
+  const end = { x: Math.round(to.x), y: Math.round(to.y + h / 2) };
+  const pts = [start, ...points.slice(1, -1).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })), end];
+  let d = `M${pts[0]!.x} ${pts[0]!.y}`;
+  for (let i = 1; i < pts.length - 1; i += 1) {
+    const curr = pts[i]!;
+    const next = pts[i + 1]!;
+    d += ` Q${curr.x} ${curr.y} ${Math.round((curr.x + next.x) / 2)} ${Math.round((curr.y + next.y) / 2)}`;
   }
-  let d = `M${points[0]!.x} ${points[0]!.y}`;
-  for (let i = 1; i < points.length - 1; i += 1) {
-    const curr = points[i]!;
-    const next = points[i + 1]!;
-    const mx = (curr.x + next.x) / 2;
-    const my = (curr.y + next.y) / 2;
-    d += ` Q${curr.x} ${curr.y} ${mx} ${my}`;
-  }
-  const last = points[points.length - 1]!;
+  const last = pts[pts.length - 1]!;
   d += ` L${last.x} ${last.y}`;
   return d;
 }
@@ -169,7 +89,6 @@ function layoutExecutionScene(
     (n) => n.kind !== "step" && n.kind !== "slot" && n.kind !== "tool_gate" && n.kind !== "timeout" && n.kind !== "relay" && n.kind !== "job",
   );
 
-  // Map each step to its worker slot
   const stepToSlot = new Map<string, string>();
   for (const edge of edges) {
     if (edge.kind === "lane") stepToSlot.set(edge.to, edge.from);
@@ -187,36 +106,36 @@ function layoutExecutionScene(
     }
   }
 
-  const COLS = 5;
-  const GAP_X = 44;
-  const GAP_Y = 26;
+  const COLS = 4;
+  const GAP_X = 48;
+  const GAP_Y = 28;
   const MARGIN = 24;
   let cursorY = MARGIN;
-  let maxX = 420;
+  let maxX = 460;
 
   const firstStepOfSlot = new Set<string>();
 
   for (const slot of slotNodes) {
     const list = stepsBySlot.get(slot.id) ?? [];
     const laneTop = cursorY;
-    positions.set(slot.id, { x: MARGIN + 12, y: cursorY + 18 });
-    const startX = MARGIN + 12 + NODE_W + 54;
+    positions.set(slot.id, { x: MARGIN + 14, y: cursorY + 22 });
+    const startX = MARGIN + 14 + NODE_W + 58;
     if (list[0]) firstStepOfSlot.add(`${slot.id}->${list[0].id}`);
     list.forEach((step, index) => {
       const row = Math.floor(index / COLS);
       const col = index % COLS;
       const x = startX + col * (NODE_W + GAP_X);
-      const y = cursorY + 18 + row * (NODE_H + GAP_Y);
+      const y = cursorY + 22 + row * (NODE_H + GAP_Y);
       positions.set(step.id, { x, y });
       maxX = Math.max(maxX, x + NODE_W + 36);
     });
     const rows = Math.max(1, Math.ceil(list.length / COLS));
-    const laneHeight = rows * NODE_H + (rows - 1) * GAP_Y + 36;
+    const laneHeight = rows * NODE_H + (rows - 1) * GAP_Y + 42;
     lanes.push({
       label: `工作流 · ${slot.label}（${list.length} 步）`,
       x: MARGIN,
       y: laneTop,
-      width: Math.max(maxX - MARGIN - 12, NODE_W * 2 + 96),
+      width: Math.max(maxX - MARGIN - 12, NODE_W * 2 + 104),
       height: laneHeight,
     });
     cursorY += laneHeight + 22;
@@ -228,30 +147,30 @@ function layoutExecutionScene(
       const row = Math.floor(index / (COLS + 1));
       const col = index % (COLS + 1);
       const x = MARGIN + 14 + col * (NODE_W + GAP_X);
-      const y = cursorY + 28 + row * (NODE_H + GAP_Y);
+      const y = cursorY + 30 + row * (NODE_H + GAP_Y);
       positions.set(step.id, { x, y });
       maxX = Math.max(maxX, x + NODE_W + 36);
     });
     const rows = Math.ceil(unassignedSteps.length / (COLS + 1));
-    const laneHeight = rows * NODE_H + (rows - 1) * GAP_Y + 42;
+    const laneHeight = rows * NODE_H + (rows - 1) * GAP_Y + 46;
     lanes.push({ label: `执行步骤（${unassignedSteps.length}）`, x: MARGIN, y: laneTop, width: maxX - MARGIN - 12, height: laneHeight });
     cursorY += laneHeight + 22;
   }
 
   const placeGridGroup = (group: GNode[], title: string) => {
     if (!group.length) return;
-    const cols = Math.min(6, Math.max(3, COLS + 1));
+    const cols = Math.min(5, Math.max(3, COLS + 1));
     const laneTop = cursorY;
     group.forEach((node, index) => {
       const row = Math.floor(index / cols);
       const col = index % cols;
-      const x = MARGIN + 14 + col * (NODE_W + 24);
-      const y = cursorY + 28 + row * (NODE_H + 16);
+      const x = MARGIN + 14 + col * (NODE_W + 26);
+      const y = cursorY + 30 + row * (NODE_H + 18);
       positions.set(node.id, { x, y });
       maxX = Math.max(maxX, x + NODE_W + 36);
     });
     const rows = Math.ceil(group.length / cols);
-    const laneHeight = rows * NODE_H + (rows - 1) * 16 + 42;
+    const laneHeight = rows * NODE_H + (rows - 1) * 18 + 46;
     lanes.push({ label: `${title}（${group.length}）`, x: MARGIN, y: laneTop, width: maxX - MARGIN - 12, height: laneHeight });
     cursorY += laneHeight + 22;
   };
@@ -259,11 +178,9 @@ function layoutExecutionScene(
   placeGridGroup(eventNodes, "运行守卫与交接记录");
   placeGridGroup(otherNodes, "关联意图与上下文");
 
-  // Normalize lane widths to uniform right edge
-  const uniformWidth = Math.max(380, maxX - MARGIN - 16);
+  const uniformWidth = Math.max(420, maxX - MARGIN - 16);
   for (const lane of lanes) lane.width = uniformWidth;
 
-  // Draw clean edges: keep sequence edges + first lane edge per slot + non-spammy audit edges
   const auditPerSource = new Map<string, number>();
   const lines = edges.flatMap((edge) => {
     const from = positions.get(edge.from);
@@ -285,8 +202,8 @@ function layoutExecutionScene(
     lines,
     positions,
     lanes,
-    maxX: Math.max(420, maxX),
-    maxY: Math.max(200, cursorY + 8),
+    maxX: Math.max(460, maxX),
+    maxY: Math.max(220, cursorY + 8),
     unknownEdgeCount,
     orphanCount: 0,
   };
@@ -325,17 +242,15 @@ function layoutScene(graph: GView, options: LayoutOptions): Scene {
 
   const positions = new Map<string, { x: number; y: number }>();
   const lanes: Scene["lanes"] = [];
-  let maxX = 340;
-  let maxY = 180;
+  let maxX = 380;
+  let maxY = 190;
 
-  // Layout connected subgraph via Dagre with routed edge points
   const g = new Graph({ multigraph: true });
-  g.setGraph({ rankdir: "LR", ranksep: 78, nodesep: 22, marginx: 24, marginy: 24 });
+  g.setGraph({ rankdir: "LR", ranksep: 92, nodesep: 26, marginx: 28, marginy: 28 });
   for (const node of connectedNodes) g.setNode(node.id, { width: NODE_W, height: NODE_H });
   for (const edge of visibleEdges) g.setEdge(edge.from, edge.to, {}, edge.id);
   if (connectedNodes.length) layout(g);
 
-  // Check if rightmost leaf column is overly tall (> 9 leaf nodes) and wrap into compact sub-columns
   const outDegree = new Map<string, number>();
   for (const edge of visibleEdges) outDegree.set(edge.from, (outDegree.get(edge.from) ?? 0) + 1);
 
@@ -343,12 +258,11 @@ function layoutScene(graph: GView, options: LayoutOptions): Scene {
   for (const node of connectedNodes) {
     const at = g.node(node.id);
     rawPos.set(node.id, {
-      x: (at?.x ?? NODE_W) - NODE_W / 2,
-      y: (at?.y ?? NODE_H) - NODE_H / 2,
+      x: Math.round((at?.x ?? NODE_W) - NODE_W / 2),
+      y: Math.round((at?.y ?? NODE_H) - NODE_H / 2),
     });
   }
 
-  // Group leaf nodes that share the same Dagre X rank if > 9 in one column
   const byRankX = new Map<number, GNode[]>();
   for (const node of connectedNodes) {
     if ((outDegree.get(node.id) ?? 0) > 0) continue;
@@ -359,46 +273,45 @@ function layoutScene(graph: GView, options: LayoutOptions): Scene {
   }
   const wrappedNodeIds = new Set<string>();
   for (const [, bucket] of byRankX) {
-    if (bucket.length <= 9) continue;
+    if (bucket.length <= 8) continue;
     bucket.sort((a, b) => (rawPos.get(a.id)?.y ?? 0) - (rawPos.get(b.id)?.y ?? 0));
-    const subCols = bucket.length > 20 ? 3 : 2;
+    const subCols = bucket.length > 18 ? 3 : 2;
     const rows = Math.ceil(bucket.length / subCols);
-    const baseX = rawPos.get(bucket[0]!.id)?.x ?? 260;
-    const baseY = 24;
+    const baseX = rawPos.get(bucket[0]!.id)?.x ?? 280;
+    const baseY = 28;
     bucket.forEach((node, idx) => {
       const col = Math.floor(idx / rows);
       const row = idx % rows;
       rawPos.set(node.id, {
-        x: baseX + col * (NODE_W + 34),
-        y: baseY + row * (NODE_H + 18),
+        x: Math.round(baseX + col * (NODE_W + 38)),
+        y: Math.round(baseY + row * (NODE_H + 20)),
       });
       wrappedNodeIds.add(node.id);
     });
   }
 
-  let connectedBottom = 24;
+  let connectedBottom = 28;
   for (const node of connectedNodes) {
     const pos = rawPos.get(node.id)!;
     positions.set(node.id, pos);
-    maxX = Math.max(maxX, pos.x + NODE_W + 32);
-    maxY = Math.max(maxY, pos.y + NODE_H + 32);
+    maxX = Math.max(maxX, pos.x + NODE_W + 36);
+    maxY = Math.max(maxY, pos.y + NODE_H + 36);
     connectedBottom = Math.max(connectedBottom, pos.y + NODE_H);
   }
 
-  // Place orphan nodes in a neat multi-column grid below connected component
   const visibleOrphans = showOrphans ? orphanNodes : [];
   if (visibleOrphans.length > 0) {
     const cols = Math.min(5, Math.max(2, Math.ceil(Math.sqrt(visibleOrphans.length * 1.6))));
-    const startY = connectedNodes.length > 0 ? connectedBottom + 44 : 28;
-    const laneTop = startY - 24;
+    const startY = connectedNodes.length > 0 ? connectedBottom + 48 : 28;
+    const laneTop = startY - 26;
     visibleOrphans.forEach((node, index) => {
       const row = Math.floor(index / cols);
       const col = index % cols;
-      const x = 28 + col * (NODE_W + 24);
-      const y = startY + row * (NODE_H + 16);
+      const x = 28 + col * (NODE_W + 26);
+      const y = startY + row * (NODE_H + 18);
       positions.set(node.id, { x, y });
-      maxX = Math.max(maxX, x + NODE_W + 32);
-      maxY = Math.max(maxY, y + NODE_H + 32);
+      maxX = Math.max(maxX, x + NODE_W + 36);
+      maxY = Math.max(maxY, y + NODE_H + 36);
     });
     if (connectedNodes.length > 0) {
       const rows = Math.ceil(visibleOrphans.length / cols);
@@ -407,9 +320,9 @@ function layoutScene(graph: GView, options: LayoutOptions): Scene {
         x: 16,
         y: laneTop,
         width: maxX - 32,
-        height: rows * NODE_H + (rows - 1) * 16 + 38,
+        height: rows * NODE_H + (rows - 1) * 18 + 42,
       });
-      maxY = Math.max(maxY, laneTop + rows * NODE_H + (rows - 1) * 16 + 52);
+      maxY = Math.max(maxY, laneTop + rows * NODE_H + (rows - 1) * 18 + 56);
     }
   }
 
@@ -420,7 +333,7 @@ function layoutScene(graph: GView, options: LayoutOptions): Scene {
     if (!wrappedNodeIds.has(edge.from) && !wrappedNodeIds.has(edge.to)) {
       const routed = g.edge(edge.from, edge.to, edge.id) as { points?: Point[] } | undefined;
       if (routed?.points && routed.points.length >= 2) {
-        return [{ edge, d: smoothPointsPath(routed.points) }];
+        return [{ edge, d: smoothAnchoredPath(from, to, routed.points) }];
       }
     }
     return [{ edge, d: bezierBetween(from, to) }];
@@ -440,42 +353,45 @@ function layoutScene(graph: GView, options: LayoutOptions): Scene {
 
 export function GraphThumb({ graph }: { graph: GView }) {
   const markerId = useId().replace(/:/g, "");
-  const scene = useMemo(
-    () => layoutScene(graph, { kinds: null, hideUnknown: true, hideOrphans: true, maxNodes: 18 }),
-    [graph],
-  );
+  const scene = useMemo(() => layoutThumbScene(graph), [graph]);
   return (
     <svg
       className="gy-graph-thumb"
-      viewBox={`0 0 ${scene.maxX} ${scene.maxY}`}
+      viewBox={scene.viewBox}
       preserveAspectRatio="xMidYMid meet"
       role="img"
       aria-label="图谱缩略图"
     >
       <defs>
-        <marker id={`${markerId}-arrow`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-          <path d="M0,1 L7,4 L0,7 z" fill="#94a3b8" stroke="none" />
+        <marker id={`${markerId}-arrow`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse">
+          <path d="M0,1.2 L7,4 L0,6.8 z" fill="#94a3b8" stroke="none" />
         </marker>
       </defs>
       {scene.lines.map(({ edge, d }) => (
         <path
           key={edge.id}
           d={d}
+          vectorEffect="non-scaling-stroke"
           className={edge.broken || edge.kind === "unknown" ? "is-broken" : ""}
           markerEnd={edge.broken ? undefined : `url(#${markerId}-arrow)`}
         />
       ))}
       {scene.nodes.map((node) => {
-        const pos = scene.positions.get(node.id) ?? { x: 12, y: 12 };
+        const pos = scene.positions.get(node.id) ?? { x: 10, y: 10 };
         const meta = kindMeta(node.kind);
         return (
           <g key={node.id} transform={`translate(${pos.x} ${pos.y})`}>
-            <rect width={NODE_W} height={NODE_H} rx="10" style={{ stroke: meta.border }} />
-            <rect x="0" y="10" width="4" height={NODE_H - 20} rx="2" style={{ fill: meta.color, stroke: "none" }} />
-            <text x="14" y="23" className="gy-thumb-title">{clipText(node.label, 18)}</text>
-            <text x="14" y="39" className="gy-thumb-sub" style={{ fill: meta.color }}>
-              {clipText(formatBadge(node.badge, node.kind), 18)}
-            </text>
+            <rect
+              width={THUMB_W}
+              height={THUMB_H}
+              rx="8"
+              vectorEffect="non-scaling-stroke"
+              className="gy-thumb-card"
+              style={{ stroke: meta.border }}
+            />
+            <rect x="6" y="7" width="20" height="20" rx="5" style={{ fill: meta.color, stroke: "none" }} />
+            <text x="16" y="21" textAnchor="middle" className="gy-thumb-glyph">{meta.glyph}</text>
+            <text x="31" y="21" className="gy-thumb-title">{clipText(node.label, 11)}</text>
           </g>
         );
       })}
@@ -484,14 +400,95 @@ export function GraphThumb({ graph }: { graph: GView }) {
 }
 
 function fitViewport(scene: Scene, box: { width: number; height: number }): Viewport {
-  const pad = 20;
+  const pad = 24;
   const availW = Math.max(160, box.width - pad * 2);
   const availH = Math.max(140, box.height - pad * 2);
-  const rawK = Math.min(availW / scene.maxX, availH / scene.maxY, 1.15);
-  const k = Number.isFinite(rawK) && rawK > 0 ? Math.max(0.28, rawK) : 1;
-  const x = Math.max(12, Math.round((box.width - scene.maxX * k) / 2));
-  const y = Math.max(12, Math.round((box.height - scene.maxY * k) / 2));
+  const rawK = Math.min(availW / scene.maxX, availH / scene.maxY, 1.08);
+  const k = Number.isFinite(rawK) && rawK > 0 ? Math.max(0.3, rawK) : 1;
+  const x = Math.max(14, Math.round((box.width - scene.maxX * k) / 2));
+  const y = Math.max(14, Math.round((box.height - scene.maxY * k) / 2));
   return { x, y, k };
+}
+
+function StageMiniMap({
+  scene,
+  viewport,
+  frameSize,
+  selectedId,
+  onNavigate,
+}: {
+  scene: Scene;
+  viewport: Viewport;
+  frameSize: { width: number; height: number };
+  selectedId: string | null;
+  onNavigate: (worldX: number, worldY: number) => void;
+}) {
+  if (scene.nodes.length < 2 || frameSize.width < 260) return null;
+  const viewW = Math.max(80, Math.round(frameSize.width / viewport.k));
+  const viewH = Math.max(60, Math.round(frameSize.height / viewport.k));
+  const viewX = Math.round(-viewport.x / viewport.k);
+  const viewY = Math.round(-viewport.y / viewport.k);
+
+  const boundW = Math.max(scene.maxX, viewX + viewW, 240);
+  const boundH = Math.max(scene.maxY, viewY + viewH, 160);
+  const minX = Math.min(0, viewX);
+  const minY = Math.min(0, viewY);
+  const totalW = boundW - minX;
+  const totalH = boundH - minY;
+
+  return (
+    <svg
+      className="gy-stage-minimap"
+      viewBox={`${minX} ${minY} ${totalW} ${totalH}`}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label="画布缩略导航"
+      onClick={(event) => {
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const scale = Math.min(rect.width / totalW, rect.height / totalH);
+        const padX = (rect.width - totalW * scale) / 2;
+        const padY = (rect.height - totalH * scale) / 2;
+        const worldX = minX + (event.clientX - rect.left - padX) / scale;
+        const worldY = minY + (event.clientY - rect.top - padY) / scale;
+        onNavigate(worldX, worldY);
+      }}
+    >
+      {scene.nodes.map((node) => {
+        const pos = scene.positions.get(node.id);
+        if (!pos) return null;
+        const meta = kindMeta(node.kind);
+        const active = selectedId === node.id;
+        return (
+          <rect
+            key={node.id}
+            x={pos.x}
+            y={pos.y}
+            width={NODE_W}
+            height={NODE_H}
+            rx="12"
+            fill={meta.color}
+            fillOpacity={active ? 1 : 0.85}
+            stroke={active ? "#0f172a" : "#ffffff"}
+            strokeWidth={active ? 2 : 1}
+            vectorEffect="non-scaling-stroke"
+          />
+        );
+      })}
+      <rect
+        x={viewX}
+        y={viewY}
+        width={viewW}
+        height={viewH}
+        rx="8"
+        fill="rgba(59, 130, 246, 0.08)"
+        stroke="#3b82f6"
+        strokeWidth="1.6"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
 }
 
 export function GraphStage({
@@ -511,6 +508,8 @@ export function GraphStage({
   const viewport = useRef(slot.viewport);
   viewport.current = slot.viewport;
   const [search, setSearch] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [frameSize, setFrameSize] = useState({ width: 720, height: 460 });
 
   const hideUnknown = slot.hideUnknown ?? (view === "surface");
   const hideOrphans = slot.hideOrphans ?? (view === "surface");
@@ -522,6 +521,10 @@ export function GraphStage({
 
   const selected = graph.nodes.find((node) => node.id === slot.selectedId)
     ?? graph.edges.find((edge) => `edge:${edge.id}` === slot.selectedId);
+
+  useEffect(() => {
+    setCopied(false);
+  }, [slot.selectedId]);
 
   const kindCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -536,23 +539,20 @@ export function GraphStage({
     setGraphSlot(taskId, view, { viewport: fitViewport(scene, box), fitted: true });
   };
 
-  // Auto-fit when opening a graph for the first time or before manual zoom/pan
   useLayoutEffect(() => {
-    if (slot.fitted) return;
     const el = frame.current;
     if (!el) return;
-    const box = el.getBoundingClientRect();
-    if (box.width >= 40 && box.height >= 40) {
-      setGraphSlot(taskId, view, { viewport: fitViewport(scene, box), fitted: true });
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      const nextBox = el.getBoundingClientRect();
-      if (nextBox.width >= 40 && nextBox.height >= 40) {
-        setGraphSlot(taskId, view, { viewport: fitViewport(scene, nextBox), fitted: true });
-        observer.disconnect();
+    const syncSize = () => {
+      const box = el.getBoundingClientRect();
+      if (box.width >= 40 && box.height >= 40) {
+        setFrameSize({ width: Math.round(box.width), height: Math.round(box.height) });
+        if (!slot.fitted) {
+          setGraphSlot(taskId, view, { viewport: fitViewport(scene, box), fitted: true });
+        }
       }
-    });
+    };
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
     observer.observe(el);
     return () => observer.disconnect();
   }, [taskId, view, scene, slot.fitted]);
@@ -562,7 +562,7 @@ export function GraphStage({
     if (!el) return;
     const drag = { active: false, x: 0, y: 0, vx: 0, vy: 0 };
     const onDown = (event: PointerEvent) => {
-      if (!(event.target instanceof Element) || event.target.closest("button, a, input, .gy-canvas-node, .gy-edge-group")) return;
+      if (!(event.target instanceof Element) || event.target.closest("button, a, input, .gy-canvas-node, .gy-edge-group, .gy-stage-minimap")) return;
       drag.active = true;
       drag.x = event.clientX;
       drag.y = event.clientY;
@@ -573,7 +573,11 @@ export function GraphStage({
     const onMove = (event: PointerEvent) => {
       if (!drag.active) return;
       setGraphSlot(taskId, view, {
-        viewport: { ...viewport.current, x: drag.vx + event.clientX - drag.x, y: drag.vy + event.clientY - drag.y },
+        viewport: {
+          ...viewport.current,
+          x: Math.round(drag.vx + event.clientX - drag.x),
+          y: Math.round(drag.vy + event.clientY - drag.y),
+        },
         fitted: true,
       });
     };
@@ -589,8 +593,8 @@ export function GraphStage({
       setGraphSlot(taskId, view, {
         viewport: {
           k: nextK,
-          x: px - (px - viewport.current.x) * ratio,
-          y: py - (py - viewport.current.y) * ratio,
+          x: Math.round(px - (px - viewport.current.x) * ratio),
+          y: Math.round(py - (py - viewport.current.y) * ratio),
         },
         fitted: true,
       });
@@ -617,8 +621,8 @@ export function GraphStage({
     setGraphSlot(taskId, view, {
       viewport: {
         k: nextK,
-        x: cx - (cx - slot.viewport.x) * ratio,
-        y: cy - (cy - slot.viewport.y) * ratio,
+        x: Math.round(cx - (cx - slot.viewport.x) * ratio),
+        y: Math.round(cy - (cy - slot.viewport.y) * ratio),
       },
       fitted: true,
     });
@@ -635,7 +639,7 @@ export function GraphStage({
     const pos = scene.positions.get(node.id);
     const box = frame.current?.getBoundingClientRect();
     if (pos && box && box.width > 80) {
-      const k = Math.max(0.75, Math.min(1.15, slot.viewport.k));
+      const k = Math.max(0.78, Math.min(1.15, slot.viewport.k));
       updates.viewport = {
         k,
         x: Math.round(box.width / 2 - (pos.x + NODE_W / 2) * k),
@@ -677,6 +681,17 @@ export function GraphStage({
     }
     return set;
   }, [nodePanel, scene.lines]);
+
+  const copySelectedRaw = (payload: unknown) => {
+    const raw = JSON.stringify(payload, null, 2);
+    void navigator.clipboard?.writeText(raw).then(
+      () => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      },
+      () => Toast.error("复制失败"),
+    );
+  };
 
   return (
     <div className="gy-graph-stage-body">
@@ -748,25 +763,31 @@ export function GraphStage({
       <div className="gy-graph-frame" ref={frame}>
         <svg width="100%" height="100%" role="group" aria-label="图谱画布">
           <defs>
-            <pattern id={`${markerId}-grid`} width="20" height="20" patternUnits="userSpaceOnUse">
-              <circle cx="1" cy="1" r="1" fill="#dbe2ee" />
+            <pattern id={`${markerId}-grid`} width="16" height="16" patternUnits="userSpaceOnUse">
+              <circle cx="1.2" cy="1.2" r="1.15" fill="#cbd5e1" />
             </pattern>
             <marker id={`${markerId}-arrow`} viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M0,1.5 L9,5 L0,8.5 z" fill="#7c90b6" stroke="none" />
+              <path d="M0,1.5 L9,5 L0,8.5 z" fill="#64748b" stroke="none" />
             </marker>
             <marker id={`${markerId}-arrow-active`} viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M0,1.5 L9,5 L0,8.5 z" fill="#4465ed" stroke="none" />
+              <path d="M0,1.5 L9,5 L0,8.5 z" fill="#3b82f6" stroke="none" />
             </marker>
             <marker id={`${markerId}-arrow-broken`} viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M0,1.5 L9,5 L0,8.5 z" fill="#d94848" stroke="none" />
+              <path d="M0,1.5 L9,5 L0,8.5 z" fill="#dc2626" stroke="none" />
             </marker>
           </defs>
-          <rect width="100%" height="100%" fill={`url(#${markerId}-grid)`} className="gy-canvas-bg" />
+          <rect
+            width="100%"
+            height="100%"
+            fill={`url(#${markerId}-grid)`}
+            className="gy-canvas-bg"
+            onClick={() => slot.selectedId && setGraphSlot(taskId, view, { selectedId: null })}
+          />
           <g transform={`translate(${slot.viewport.x} ${slot.viewport.y}) scale(${slot.viewport.k})`}>
             {scene.lanes.map((lane) => (
               <g key={lane.label} className="gy-canvas-lane" transform={`translate(${lane.x} ${lane.y})`}>
-                <rect width={lane.width} height={lane.height} rx="12" />
-                <text x="14" y="18">{lane.label}</text>
+                <rect width={lane.width} height={lane.height} rx="14" />
+                <text x="16" y="19">{lane.label}</text>
               </g>
             ))}
             {scene.lines.map(({ edge, d }) => {
@@ -803,41 +824,70 @@ export function GraphStage({
                   className={`gy-canvas-node${isSelected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}`}
                   onClick={() => setGraphSlot(taskId, view, { selectedId: isSelected ? null : node.id })}
                 >
-                  <title>{`${meta.label}：${node.label}${node.badge ? ` (${node.badge})` : ""}`}</title>
-                  <rect width={NODE_W} height={NODE_H} rx="10" className="gy-node-card" style={{ stroke: isSelected ? "#4465ed" : meta.border }} />
-                  <rect x="0" y="10" width="4" height={NODE_H - 20} rx="2" className="gy-node-accent" style={{ fill: meta.color }} />
-                  <circle cx="15" cy="17" r="3.5" style={{ fill: meta.color, stroke: "none" }} />
-                  <text x="24" y="20" className="gy-node-kind">{meta.label}</text>
+                  <title>{`${meta.label}：${node.label}${node.badge ? ` (${badgeText})` : ""}`}</title>
+                  <rect y="2" width={NODE_W} height={NODE_H} rx="12" className="gy-node-shadow" />
+                  <rect
+                    width={NODE_W}
+                    height={NODE_H}
+                    rx="12"
+                    className="gy-node-card"
+                    style={{ stroke: isSelected ? "#3b82f6" : "rgba(15, 23, 42, 0.09)" }}
+                  />
+                  <rect x="10" y="9" width="20" height="20" rx="6" style={{ fill: meta.color, stroke: "none" }} />
+                  <text x="20" y="23" textAnchor="middle" className="gy-node-glyph">{meta.glyph}</text>
+                  <text x="36" y="23" className="gy-node-kind">{meta.label}</text>
                   {node.badge && (
-                    <text x={NODE_W - 10} y="20" textAnchor="end" className="gy-graph-badge" style={{ fill: meta.color }}>
-                      {clipText(badgeText, 11)}
+                    <text x={NODE_W - 11} y="23" textAnchor="end" className="gy-graph-badge" style={{ fill: meta.color }}>
+                      {clipText(badgeText, 12)}
                     </text>
                   )}
-                  <text x="14" y="39" className="gy-node-title">{clipText(node.label, 21)}</text>
+                  <text x="11" y="48" className="gy-node-title">{clipText(node.label, 23)}</text>
                 </g>
               );
             })}
           </g>
         </svg>
+        <StageMiniMap
+          scene={scene}
+          viewport={slot.viewport}
+          frameSize={frameSize}
+          selectedId={slot.selectedId}
+          onNavigate={(worldX, worldY) => {
+            setGraphSlot(taskId, view, {
+              viewport: {
+                k: slot.viewport.k,
+                x: Math.round(frameSize.width / 2 - worldX * slot.viewport.k),
+                y: Math.round(frameSize.height / 2 - worldY * slot.viewport.k),
+              },
+              fitted: true,
+            });
+          }}
+        />
         <div className="gy-canvas-stats">
           <span>画布显示 {scene.nodes.length}/{graph.nodes.length} 节点 · {scene.lines.length} 连线</span>
-          <span>滚轮缩放 · 拖拽平移</span>
+          <span>滚轮缩放 · 拖拽或点击右下角缩略图导航</span>
         </div>
         {slot.selectedId && !nodePanel && !edgePanel && <p className="gy-graph-missing">已选节点不在最新图中，选择仍保留。</p>}
       </div>
 
       <aside className="gy-graph-detail" aria-live="polite">
         <div className="gy-inspector-card">
-          {!selected && <p className="gy-inspector-empty">选择节点或关系查看来源。</p>}
+          {!selected && <p className="gy-inspector-empty">点击画布中的任意节点或连线，查看属性详情与原始数据。</p>}
           {nodePanel && (() => {
             const meta = kindMeta(nodePanel.kind);
+            const rawAt = typeof nodePanel.data.at === "string"
+              ? nodePanel.data.at
+              : typeof nodePanel.data.createdAt === "string"
+                ? nodePanel.data.createdAt
+                : null;
             return (
               <div className="gy-inspector-selected">
                 <div className="gy-inspector-head">
-                  <span className="gy-inspector-pill" style={{ color: meta.color, background: meta.bg, borderColor: meta.border }}>
-                    {meta.label}
-                  </span>
-                  {nodePanel.badge && <span className="gy-inspector-sub">{formatBadge(nodePanel.badge, nodePanel.kind)}</span>}
+                  <span className="gy-inspector-icon" style={{ background: meta.color }}>{meta.glyph}</span>
+                  <div className="gy-inspector-titles">
+                    <strong>{meta.label}</strong>
+                    <code>{shortNodeTail(nodePanel.id)}</code>
+                  </div>
                   <Button
                     size="small"
                     theme="borderless"
@@ -849,16 +899,19 @@ export function GraphStage({
                   />
                 </div>
                 <h3>{nodePanel.label}</h3>
-                {Object.keys(nodePanel.data).length > 0 && (
-                  <dl className="gy-inspector-meta">
-                    {typeof nodePanel.data.tokens === "number" && <><dt>Token</dt><dd>{nodePanel.data.tokens.toLocaleString()}</dd></>}
-                    {typeof nodePanel.data.shellCallCount === "number" && <><dt>Shell 调用</dt><dd>{nodePanel.data.shellCallCount}</dd></>}
-                    {typeof nodePanel.data.vulnClass === "string" && nodePanel.data.vulnClass && <><dt>漏洞类别</dt><dd>{nodePanel.data.vulnClass}</dd></>}
-                    {typeof nodePanel.data.technique === "string" && nodePanel.data.technique && <><dt>关联手法</dt><dd>{nodePanel.data.technique}</dd></>}
-                    {typeof nodePanel.data.source === "string" && nodePanel.data.source && <><dt>发现来源</dt><dd>{nodePanel.data.source}</dd></>}
-                    {typeof nodePanel.data.reason === "string" && nodePanel.data.reason && <><dt>原因说明</dt><dd>{nodePanel.data.reason}</dd></>}
-                  </dl>
-                )}
+                <dl className="gy-inspector-meta">
+                  <dt>类型</dt><dd>{meta.label}</dd>
+                  {nodePanel.badge && <><dt>状态</dt><dd>{formatBadge(nodePanel.badge, nodePanel.kind)}</dd></>}
+                  <dt>编号</dt><dd>{nodePanel.id}</dd>
+                  {typeof nodePanel.data.tokens === "number" && <><dt>Token</dt><dd>{nodePanel.data.tokens.toLocaleString()}</dd></>}
+                  {typeof nodePanel.data.shellCallCount === "number" && <><dt>Shell 调用</dt><dd>{nodePanel.data.shellCallCount}</dd></>}
+                  {typeof nodePanel.data.vulnClass === "string" && nodePanel.data.vulnClass && <><dt>漏洞类别</dt><dd>{nodePanel.data.vulnClass}</dd></>}
+                  {typeof nodePanel.data.technique === "string" && nodePanel.data.technique && <><dt>关联手法</dt><dd>{nodePanel.data.technique}</dd></>}
+                  {typeof nodePanel.data.asset === "string" && nodePanel.data.asset && <><dt>所属资产</dt><dd>{nodePanel.data.asset}</dd></>}
+                  {typeof nodePanel.data.source === "string" && nodePanel.data.source && <><dt>发现来源</dt><dd>{nodePanel.data.source}</dd></>}
+                  {typeof nodePanel.data.reason === "string" && nodePanel.data.reason && <><dt>原因说明</dt><dd>{nodePanel.data.reason}</dd></>}
+                  {rawAt && <><dt>时间</dt><dd>{formatDateTime(rawAt, true)}</dd></>}
+                </dl>
                 {navigation?.kind === "link" && (
                   <Button size="small" theme="light" type="primary" onClick={() => onOpen(navigation.href)}>
                     {navigation.label}
@@ -892,6 +945,15 @@ export function GraphStage({
                     </ul>
                   </div>
                 )}
+                <div className="gy-inspector-raw">
+                  <div className="gy-inspector-raw-head">
+                    <strong>原始数据</strong>
+                    <button type="button" onClick={() => copySelectedRaw(nodePanel)}>
+                      {copied ? "已复制" : "复制"}
+                    </button>
+                  </div>
+                  <pre>{JSON.stringify(nodePanel, null, 2)}</pre>
+                </div>
               </div>
             );
           })()}
@@ -917,6 +979,15 @@ export function GraphStage({
               <p className={edgeStatement(edgePanel).kind === "plain" ? "" : `is-${edgeStatement(edgePanel).kind}`}>
                 {edgeStatement(edgePanel).text}
               </p>
+              <div className="gy-inspector-raw">
+                <div className="gy-inspector-raw-head">
+                  <strong>原始数据</strong>
+                  <button type="button" onClick={() => copySelectedRaw(edgePanel)}>
+                    {copied ? "已复制" : "复制"}
+                  </button>
+                </div>
+                <pre>{JSON.stringify(edgePanel, null, 2)}</pre>
+              </div>
             </div>
           )}
         </div>

@@ -432,12 +432,13 @@ export function TaskDetailPage({ task, tab, onTabChange, onRefresh, focus, refre
               <Suspense fallback={<div className="gy-dag-empty" role="status">正在加载关系图…</div>}>
                 <FactIntentDag
                   key={graphFocus}
+                  taskId={task.id}
                   facts={history?.facts ?? []}
                   intents={history?.intents ?? []}
                   findings={history?.findings ?? []}
                   assets={history?.assets ?? []}
                   serverDag={history?.dag}
-                  height={560}
+                  height={640}
                   loading={loading}
                   focusId={graphFocus}
                 />

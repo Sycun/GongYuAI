@@ -18,6 +18,7 @@ function normalizeHost(input: string): string {
 
 export type DagFact = {
   id: string;
+  taskId?: string;
   layer: string;
   title: string;
   summary?: string;
@@ -29,36 +30,59 @@ export type DagFact = {
 
 export type DagIntent = {
   id: string;
+  taskId?: string;
   title: string;
   status: string;
   summary?: string;
   sourceFactIds?: string[];
   assetRoot?: string | null;
   technique?: string | null;
+  claimedBy?: string | null;
   createdAt?: string;
+  updatedAt?: string;
+  concludedAt?: string | null;
+  conclusion?: string | null;
 };
 
 export type DagFinding = {
   id: string;
+  taskId?: string;
   title: string;
   asset: string;
   vulnClass: string;
   severity: string;
   status: string;
   summary?: string;
+  cvss?: string | null;
+  confidence?: string;
+  dedupKey?: string;
   intentId?: string | null;
   factIds?: string[];
   trafficIds?: string[];
   endpoint?: string | null;
-  evidence?: Array<{ path: string; sha256: string }>;
+  evidence?: Array<{ path: string; sha256: string; role?: string; note?: string }>;
+  repro?: string;
+  impact?: string;
+  fix?: string;
+  rootCause?: string;
+  pocCurl?: string;
+  qualification?: string | null;
+  verifiedAt?: string | null;
+  verifiedBy?: string | null;
   createdAt?: string;
 };
 
 export type DagAsset = {
+  id?: string;
+  taskId?: string;
   address: string;
   kind: string;
   factId: string;
   intentId?: string | null;
+  source?: string;
+  assetType?: string | null;
+  weight?: number;
+  createdAt?: string;
 };
 
 export type ServerDagEdge = {
@@ -92,8 +116,13 @@ export type DagRecord = {
   title: string;
   meta?: string;
   summary?: string;
+  conclusion?: string | null;
   sources?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  concludedAt?: string | null;
   data?: Record<string, unknown>;
+  raw?: Record<string, unknown>;
 };
 
 export type DagVerification = "proven" | "proposed";
@@ -116,7 +145,7 @@ export type DagCollection = {
   topologyKey: string;
 };
 
-export const CARD_SIZE = { width: 196, height: 68 };
+export const CARD_SIZE = { width: 244, height: 108 };
 export const ORIGIN_ID = "origin";
 export const assetNodeId = (address: string) => `asset:${address}`;
 
@@ -287,13 +316,37 @@ export function collectDag(
 
   for (const asset of assets) {
     records.set(assetNodeId(asset.address), {
-      kind: "asset", title: asset.address, meta: asset.kind,
-      data: { factId: asset.factId, intentId: asset.intentId ?? null },
+      kind: "asset",
+      title: asset.address,
+      meta: asset.kind,
+      createdAt: asset.createdAt,
+      data: {
+        address: asset.address,
+        factId: asset.factId,
+        intentId: asset.intentId ?? null,
+        source: asset.source ?? null,
+        assetType: asset.assetType ?? null,
+        weight: asset.weight ?? null,
+      },
+      raw: { ...asset },
     });
   }
 
   for (const fact of visibleFacts) {
-    records.set(fact.id, { kind: "fact", title: fact.title, meta: fact.layer, summary: fact.summary });
+    records.set(fact.id, {
+      kind: "fact",
+      title: fact.title,
+      meta: fact.layer,
+      summary: fact.summary,
+      createdAt: fact.createdAt,
+      data: {
+        layer: fact.layer,
+        intentId: fact.intentId ?? null,
+        evidencePath: fact.evidencePath ?? null,
+        tags: fact.tags ?? [],
+      },
+      raw: { ...fact },
+    });
     factRefs.set(fact.id, {
       id: fact.id, createdAt: fact.createdAt,
       references: fact.intentId ? [fact.intentId] : [],
@@ -304,14 +357,34 @@ export function collectDag(
   const usesOrigin = intents.some((intent) => (intent.sourceFactIds ?? []).includes(ORIGIN_ID))
     || (serverDag?.edges ?? []).some((e) => unwrapServerNodeId(e.from) === ORIGIN_ID);
   if (usesOrigin) {
-    records.set(ORIGIN_ID, { kind: "fact", title: "任务起点", meta: "origin", data: { synthetic: true } });
+    records.set(ORIGIN_ID, {
+      kind: "fact",
+      title: "任务起点",
+      meta: "origin",
+      summary: "任务初始化起点（初始授权目标与任务契约）",
+      data: { synthetic: true },
+      raw: { id: ORIGIN_ID, type: "begin", state: "origin", title: "任务起点" },
+    });
   }
 
   for (const intent of intents) {
     const sources = [...new Set(intent.sourceFactIds?.length ? intent.sourceFactIds : [ORIGIN_ID])];
     records.set(intent.id, {
-      kind: "intent", title: intent.title, meta: intent.status, summary: intent.summary, sources,
-      data: { technique: intent.technique ?? null, assetRoot: intent.assetRoot ?? null },
+      kind: "intent",
+      title: intent.title,
+      meta: intent.status,
+      summary: intent.summary,
+      conclusion: intent.conclusion ?? null,
+      sources,
+      createdAt: intent.createdAt,
+      updatedAt: intent.updatedAt,
+      concludedAt: intent.concludedAt ?? null,
+      data: {
+        technique: intent.technique ?? null,
+        assetRoot: intent.assetRoot ?? null,
+        claimedBy: intent.claimedBy ?? null,
+      },
+      raw: { ...intent },
     });
     const intentArtifacts: Artifact[] = [];
     pushArtifact(intentArtifacts, "asset", intent.assetRoot);
@@ -323,9 +396,26 @@ export function collectDag(
 
   for (const finding of findings) {
     records.set(finding.id, {
-      kind: "finding", title: finding.title, meta: `${finding.severity}/${finding.status}`,
-      summary: finding.summary,
-      data: { asset: finding.asset, vulnClass: finding.vulnClass, severity: finding.severity, status: finding.status },
+      kind: "finding",
+      title: finding.title,
+      meta: `${finding.severity}/${finding.status}`,
+      summary: finding.summary || finding.repro || finding.impact || undefined,
+      createdAt: finding.createdAt,
+      data: {
+        asset: finding.asset,
+        endpoint: finding.endpoint ?? null,
+        vulnClass: finding.vulnClass,
+        severity: finding.severity,
+        status: finding.status,
+        qualification: finding.qualification ?? null,
+        cvss: finding.cvss ?? null,
+        verifiedBy: finding.verifiedBy ?? null,
+        verifiedAt: finding.verifiedAt ?? null,
+        repro: finding.repro ?? "",
+        impact: finding.impact ?? "",
+        pocCurl: finding.pocCurl ?? "",
+      },
+      raw: { ...finding },
     });
     findingRefs.set(finding.id, {
       id: finding.id, createdAt: finding.createdAt,
@@ -499,26 +589,87 @@ export function collectDag(
 
 export type DagGeometryEdge = DagLink & { id: string; path: string };
 
+function routeSmoothDagEdge(
+  fromPos: { x: number; y: number } | undefined,
+  toPos: { x: number; y: number } | undefined,
+  dagrePoints: Point[],
+  vertical: boolean,
+): string {
+  const start: Point = fromPos
+    ? vertical
+      ? { x: Math.round(fromPos.x + CARD_SIZE.width / 2), y: Math.round(fromPos.y + CARD_SIZE.height) }
+      : { x: Math.round(fromPos.x + CARD_SIZE.width), y: Math.round(fromPos.y + CARD_SIZE.height / 2) }
+    : (dagrePoints[0] ?? { x: 0, y: 0 });
+  const end: Point = toPos
+    ? vertical
+      ? { x: Math.round(toPos.x + CARD_SIZE.width / 2), y: Math.round(toPos.y) }
+      : { x: Math.round(toPos.x), y: Math.round(toPos.y + CARD_SIZE.height / 2) }
+    : (dagrePoints[dagrePoints.length - 1] ?? start);
+
+  if (dagrePoints.length <= 3) {
+    if (vertical) {
+      const dy = Math.max(36, Math.round(Math.abs(end.y - start.y) * 0.45));
+      return `M${start.x} ${start.y} C${start.x} ${start.y + dy}, ${end.x} ${end.y - dy}, ${end.x} ${end.y}`;
+    }
+    if (end.x >= start.x - 12) {
+      const dx = Math.max(42, Math.round((end.x - start.x) * 0.46));
+      return `M${start.x} ${start.y} C${start.x + dx} ${start.y}, ${end.x - dx} ${end.y}, ${end.x} ${end.y}`;
+    }
+    const midY = Math.round((start.y + end.y) / 2 + (start.y <= end.y ? CARD_SIZE.height * 0.65 : -CARD_SIZE.height * 0.65));
+    const pad = 32;
+    return `M${start.x} ${start.y} C${start.x + pad} ${start.y}, ${start.x + pad} ${midY}, ${Math.round((start.x + end.x) / 2)} ${midY} S${end.x - pad} ${end.y}, ${end.x} ${end.y}`;
+  }
+
+  const waypoints: Point[] = [
+    start,
+    ...dagrePoints.slice(1, -1).map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })),
+    end,
+  ];
+  let d = `M${waypoints[0]!.x} ${waypoints[0]!.y}`;
+  for (let i = 1; i < waypoints.length - 1; i += 1) {
+    const curr = waypoints[i]!;
+    const next = waypoints[i + 1]!;
+    const mx = Math.round((curr.x + next.x) / 2);
+    const my = Math.round((curr.y + next.y) / 2);
+    d += ` Q${curr.x} ${curr.y} ${mx} ${my}`;
+  }
+  const last = waypoints[waypoints.length - 1]!;
+  d += ` L${last.x} ${last.y}`;
+  return d;
+}
+
 export function buildDagLayout(dag: DagCollection, vertical: boolean, showOrphans: boolean) {
   const visible = new Set([...dag.records.keys()].filter((id) => showOrphans || !dag.orphanIds.has(id)));
   const links = dag.links.filter((link) => visible.has(link.source) && visible.has(link.target));
 
   const graph = new Graph({ multigraph: true });
-  graph.setGraph({ rankdir: vertical ? "TB" : "LR", ranksep: 64, nodesep: 26 });
+  graph.setGraph({
+    rankdir: vertical ? "TB" : "LR",
+    ranksep: vertical ? 76 : 104,
+    nodesep: vertical ? 28 : 30,
+    marginx: 24,
+    marginy: 24,
+  });
   for (const id of visible) graph.setNode(id, { ...CARD_SIZE });
   for (const link of links) graph.setEdge(link.source, link.target, {}, link.kind);
   if (visible.size) layout(graph);
 
+  const posMap = new Map<string, { x: number; y: number }>();
   const positions = [...visible].map((id) => {
     const node = graph.node(id);
-    return { id, position: { x: node.x - CARD_SIZE.width / 2, y: node.y - CARD_SIZE.height / 2 } };
+    const position = {
+      x: Math.round(node.x - CARD_SIZE.width / 2),
+      y: Math.round(node.y - CARD_SIZE.height / 2),
+    };
+    posMap.set(id, position);
+    return { id, position };
   }).sort((a, b) => vertical
     ? a.position.y - b.position.y || a.position.x - b.position.x
     : a.position.x - b.position.x || a.position.y - b.position.y);
 
   const edges: DagGeometryEdge[] = links.map((link) => {
-    const points: Point[] = graph.edge(link.source, link.target, link.kind).points;
-    const path = points.map(({ x, y }, i) => `${i ? "L" : "M"}${x} ${y}`).join(" ");
+    const points: Point[] = graph.edge(link.source, link.target, link.kind)?.points ?? [];
+    const path = routeSmoothDagEdge(posMap.get(link.source), posMap.get(link.target), points, vertical);
     return { ...link, id: JSON.stringify([link.source, link.target, link.kind]), path };
   });
   return { positions, edges };

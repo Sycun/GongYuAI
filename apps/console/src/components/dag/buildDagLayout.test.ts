@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { layoutThumbScene, toggleSelectedNode } from "../graphLayout.js";
+import type { GView } from "../../workspace/model.js";
 import { collectDag, buildDagLayout, assetNodeId, type DagAsset, type DagFact, type DagFinding, type DagIntent } from "./buildDagLayout.js";
 
 const assets: DagAsset[] = [{ address: "app.example", kind: "live", factId: "f-seed" }];
@@ -134,4 +136,72 @@ test("同一资产升级后的旧资产 Fact 也连回资产节点，不沦为�
   assert.equal(dag.orphanIds.size, 0);
   assert.equal(link(dag, assetNodeId("app.example"), "f-seed-old", "asserted-by")?.structural, true);
   assert.equal(link(dag, assetNodeId("app.example"), "f-live-new", "asserted-by")?.structural, true);
+});
+
+test("节点记录完整保留原始数据与平滑曲线坐标，供右侧详情抽屉展示与复制", () => {
+  const richIntents: DagIntent[] = [
+    {
+      id: "i-rich",
+      title: "审计文件传输面",
+      status: "running",
+      summary: "先核对归属再做匿名目录检查",
+      sourceFactIds: ["f-seed"],
+      assetRoot: "app.example",
+      technique: "CWE-287",
+      claimedBy: "w1",
+      createdAt: "2026-11-24T01:30:00Z",
+      updatedAt: "2026-11-24T01:35:00Z",
+      conclusion: "已完成被动核查",
+    },
+  ];
+  const dag = collectDag(facts, richIntents, findings, assets);
+  const intentRecord = dag.records.get("i-rich");
+  assert.ok(intentRecord);
+  assert.equal(intentRecord.conclusion, "已完成被动核查");
+  assert.equal(intentRecord.data?.claimedBy, "w1");
+  assert.equal(intentRecord.raw?.id, "i-rich");
+  assert.equal(intentRecord.raw?.summary, "先核对归属再做匿名目录检查");
+
+  const findingRecord = dag.records.get("v1");
+  assert.equal(findingRecord?.raw?.vulnClass, "CWE-89");
+
+  const geometry = buildDagLayout(dag, false, false);
+  assert.ok(geometry.positions.every((p) => Number.isInteger(p.position.x) && Number.isInteger(p.position.y)));
+  assert.ok(geometry.edges.every((e) => e.path.includes("C") || e.path.includes("Q")));
+});
+
+test("缩略图紧凑拓扑在多叶子节点下自动折列保持横向宽高比，且节点点击选择不回跳取消", () => {
+  assert.equal(toggleSelectedNode(null, "i1"), "i1");
+  assert.equal(toggleSelectedNode("i1", "f1"), "f1");
+  assert.equal(toggleSelectedNode("f1", "f1"), null);
+
+  const leafNodes = Array.from({ length: 8 }, (_, idx) => ({
+    id: `intent:i-${idx}`,
+    kind: "intent",
+    label: `检查目录遍历 ${idx}`,
+    badge: "running",
+    data: { intentId: `i-${idx}` },
+  }));
+  const sampleGraph: GView = {
+    taskId: "t1",
+    view: "assets",
+    empty: false,
+    notes: [],
+    nodes: [
+      { id: "asset:app.example", kind: "asset", label: "app.example", badge: "live", data: {} },
+      ...leafNodes,
+    ],
+    edges: leafNodes.map((n) => ({
+      id: `asset->${n.id}`,
+      from: "asset:app.example",
+      to: n.id,
+      kind: "discovered",
+      label: "发现",
+      broken: false,
+    })),
+  };
+  const thumb = layoutThumbScene(sampleGraph);
+  assert.equal(thumb.nodes.length, 9);
+  assert.ok(thumb.lines.every((l) => l.d.includes("C")));
+  assert.ok(thumb.vbW > thumb.vbH, `缩略图应保持横向宽高比避免在窄卡片中缩成竖条（当前 ${thumb.vbW}x${thumb.vbH}）`);
 });

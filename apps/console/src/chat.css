@@ -439,13 +439,13 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
 }
 .gy-graph-thumb-wrap {
-  box-sizing: border-box; width: 100%; height: 104px; border-radius: 10px;
-  background: linear-gradient(180deg, #f8fafd 0%, #f1f5fb 100%);
-  border: 1px solid #e6ebf4; padding: 6px; overflow: hidden; transition: border-color .15s;
+  box-sizing: border-box; width: 100%; height: 112px; border-radius: 10px;
+  background: #f0f2f7;
+  border: 1px solid #e2e8f0; padding: 6px; overflow: hidden; transition: border-color .15s, box-shadow .15s;
 }
 .gy-graph-thumb-wrap.is-clickable { cursor: pointer; }
-.gy-graph-thumb-wrap.is-clickable:hover { border-color: #a9bce8; }
-.gy-graph-thumb { width: 100%; height: 100%; display: block; }
+.gy-graph-thumb-wrap.is-clickable:hover { border-color: #93b4f8; box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.12); }
+.gy-graph-thumb { width: 100%; height: 100%; display: block; shape-rendering: geometricPrecision; text-rendering: geometricPrecision; }
 .gy-graph-placeholder {
   box-sizing: border-box; width: 100%; min-height: 84px; border-radius: 10px;
   background: #f5f7fb; border: 1px dashed #dde3ee;
@@ -455,10 +455,10 @@ body {
 .gy-graph-card-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 2px;
 }
-.gy-graph-thumb rect { fill: white; stroke: #cbd5e1; stroke-width: 1.2; }
-.gy-graph-thumb .gy-thumb-title { fill: #1e293b; font-size: 12px; font-weight: 600; }
-.gy-graph-thumb .gy-thumb-sub { font-size: 10.5px; font-weight: 500; }
-.gy-graph-thumb path { fill: none; stroke: #94a3b8; stroke-width: 1.5; }
+.gy-graph-thumb .gy-thumb-card { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.35; }
+.gy-graph-thumb .gy-thumb-glyph { fill: #ffffff; font-size: 10px; font-weight: 700; }
+.gy-graph-thumb .gy-thumb-title { fill: #0f172a; font-size: 10.5px; font-weight: 600; }
+.gy-graph-thumb path { fill: none; stroke: #8aa0c6; stroke-width: 1.5; stroke-linecap: round; }
 .gy-graph-thumb .is-broken { stroke: #dc2626; stroke-dasharray: 4 3; }
 
 .gy-graph-missing, .is-unknown { color: var(--gy-muted); font-size: 12.5px; }
@@ -565,40 +565,50 @@ body {
 .gy-zoom-fit { border-left: 1px solid #e5e9f0 !important; border-radius: 0 6px 6px 0 !important; padding-inline: 8px !important; }
 
 .gy-graph-frame {
-  position: relative; height: clamp(360px, 54vh, 560px); border: 1px solid #dfe5ef;
-  border-radius: 12px; overflow: hidden; background: #f8fafd; touch-action: none; cursor: grab;
+  position: relative; height: clamp(380px, 56vh, 600px); border: 1px solid #dfe5ef;
+  border-radius: 12px; overflow: hidden; background: #f0f2f7; touch-action: none; cursor: grab;
 }
 .gy-graph-frame:active { cursor: grabbing; }
-.gy-graph-frame svg { width: 100%; height: 100%; display: block; user-select: none; }
+.gy-graph-frame > svg:first-child { width: 100%; height: 100%; display: block; user-select: none; shape-rendering: geometricPrecision; text-rendering: geometricPrecision; }
 .gy-canvas-bg { stroke: none !important; }
-.gy-canvas-lane rect { fill: rgba(241, 245, 251, 0.65); stroke: #dce4f0; stroke-width: 1; stroke-dasharray: 4 3; }
-.gy-canvas-lane text { fill: #64748b; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; }
+.gy-canvas-lane rect { fill: rgba(255, 255, 255, 0.55); stroke: #cbd5e1; stroke-width: 1; stroke-dasharray: 4 3; }
+.gy-canvas-lane text { fill: #475569; font-size: 11.5px; font-weight: 600; letter-spacing: 0.01em; }
 
 .gy-edge-group { cursor: pointer; transition: opacity .15s; }
-.gy-edge-group.is-dimmed { opacity: 0.2; }
+.gy-edge-group.is-dimmed { opacity: 0.18; }
 .gy-edge-hit { fill: none !important; stroke: transparent !important; stroke-width: 12 !important; }
-.gy-edge-line { fill: none !important; stroke: #8aa0c6; stroke-width: 1.6; transition: stroke .15s, stroke-width .15s; }
-.gy-edge-group:hover .gy-edge-line { stroke: #4465ed; stroke-width: 2.2; }
+.gy-edge-line { fill: none !important; stroke: #7c90b6; stroke-width: 1.85; stroke-linecap: round; transition: stroke .15s, stroke-width .15s; }
+.gy-edge-group:hover .gy-edge-line { stroke: #3b82f6; stroke-width: 2.3; }
 .gy-edge-group.is-dashed .gy-edge-line { stroke-dasharray: 5 4; }
 .gy-edge-group.is-broken .gy-edge-line { stroke: #dc2626; stroke-dasharray: 4 3; }
-.gy-edge-group.is-selected .gy-edge-line { stroke: #4465ed; stroke-width: 2.4; stroke-dasharray: none; }
+.gy-edge-group.is-selected .gy-edge-line { stroke: #3b82f6; stroke-width: 2.5; stroke-dasharray: none; }
 
+/* 纯矢量阴影代替 SVG filter:drop-shadow，消除缩放位图栅格化模糊 */
 .gy-canvas-node { cursor: pointer; transition: opacity .15s; }
 .gy-canvas-node.is-dimmed { opacity: 0.28; }
+.gy-canvas-node .gy-node-shadow { fill: rgba(15, 23, 42, 0.05); stroke: none !important; }
 .gy-canvas-node .gy-node-card {
-  fill: white; stroke-width: 1.25;
-  filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.05));
+  fill: #ffffff; stroke-width: 1.35;
   transition: stroke .15s, stroke-width .15s;
 }
-.gy-canvas-node:hover .gy-node-card { stroke: #647ef2 !important; stroke-width: 1.8; }
+.gy-canvas-node:hover .gy-node-card { stroke: #60a5fa !important; stroke-width: 1.9; }
 .gy-canvas-node.is-selected .gy-node-card {
-  stroke: #4465ed !important; stroke-width: 2.2;
-  filter: drop-shadow(0 4px 10px rgba(68, 101, 237, 0.18));
+  stroke: #3b82f6 !important; stroke-width: 2.3;
 }
-.gy-canvas-node .gy-node-accent { stroke: none !important; }
-.gy-canvas-node .gy-node-kind { fill: #64748b; font-size: 10.5px; font-weight: 550; }
+.gy-canvas-node.is-selected .gy-node-shadow { fill: rgba(59, 130, 246, 0.14); }
+.gy-canvas-node .gy-node-glyph { fill: #ffffff; font-size: 10.5px; font-weight: 700; }
+.gy-canvas-node .gy-node-kind { fill: #1e293b; font-size: 11.5px; font-weight: 600; }
 .gy-canvas-node .gy-graph-badge { font-size: 10.5px; font-weight: 600; }
-.gy-canvas-node .gy-node-title { fill: #1e293b; font-size: 12.5px; font-weight: 600; }
+.gy-canvas-node .gy-node-title { fill: #475569; font-size: 12px; font-weight: 550; }
+
+.gy-stage-minimap {
+  position: absolute; right: 12px; bottom: 38px;
+  width: 176px; height: 112px; padding: 5px; box-sizing: border-box;
+  border-radius: 10px; border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.09);
+  cursor: pointer; display: block;
+}
 
 .gy-canvas-stats {
   position: absolute; left: 10px; right: 10px; bottom: 8px; pointer-events: none;
@@ -606,7 +616,7 @@ body {
   font-size: 11.5px; color: #64748b;
 }
 .gy-canvas-stats > span {
-  background: rgba(255, 255, 255, 0.88); backdrop-filter: blur(4px);
+  background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(4px);
   padding: 3px 8px; border-radius: 6px; border: 1px solid #e5eaf2;
 }
 .gy-graph-missing {
@@ -616,18 +626,29 @@ body {
 
 /* 右侧节点检查器与目录列表（彻底消除原生圆点与按钮边框） */
 .gy-graph-detail {
-  height: clamp(360px, 54vh, 560px); box-sizing: border-box;
+  height: clamp(380px, 56vh, 600px); box-sizing: border-box;
   display: flex; flex-direction: column; gap: 10px;
   border: 1px solid #dfe5ef; border-radius: 12px; background: #fbfcfe; padding: 10px;
   font-size: 13px; overflow: hidden;
 }
 .gy-inspector-card {
-  flex: none; max-height: 48%; overflow-y: auto; padding: 10px 11px;
+  flex: none; max-height: 58%; overflow-y: auto; padding: 11px 12px;
   border-radius: 10px; background: white; border: 1px solid #e6ebf4; scrollbar-width: thin;
 }
 .gy-inspector-empty { margin: 0; color: var(--gy-muted); font-size: 12.5px; line-height: 1.5; }
-.gy-inspector-selected { display: grid; gap: 7px; }
-.gy-inspector-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gy-inspector-selected { display: grid; gap: 8px; }
+.gy-inspector-head { display: flex; align-items: center; gap: 8px; }
+.gy-inspector-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 7px; color: #ffffff;
+  font-size: 12px; font-weight: 700; flex: none;
+}
+.gy-inspector-titles { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.gy-inspector-titles strong { font-size: 13px; font-weight: 600; color: #0f172a; line-height: 1.2; }
+.gy-inspector-titles code {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 11px; color: #64748b;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .gy-inspector-pill {
   font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
   border: 1px solid #cbd5e1; background: #f1f5f9; color: #334155;
@@ -638,11 +659,25 @@ body {
 .gy-inspector-selected p { margin: 0; font-size: 12.5px; line-height: 1.5; }
 .gy-graph-detail .is-broken { color: #b91c1c; }
 .gy-inspector-meta {
-  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 8px;
-  margin: 2px 0; padding: 6px 8px; border-radius: 7px; background: #f8fafc; font-size: 12px;
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 9px;
+  margin: 2px 0; padding: 7px 9px; border-radius: 8px; background: #f8fafc; font-size: 12px;
 }
 .gy-inspector-meta dt { color: var(--gy-muted); }
 .gy-inspector-meta dd { margin: 0; color: #1e293b; font-family: "SF Mono", ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+.gy-inspector-raw { border-top: 1px solid #edf0f6; padding-top: 8px; display: grid; gap: 5px; }
+.gy-inspector-raw-head { display: flex; align-items: center; justify-content: space-between; }
+.gy-inspector-raw-head strong { font-size: 11.5px; color: var(--gy-muted); font-weight: 600; }
+.gy-inspector-raw-head button {
+  border: 0; background: transparent; padding: 1px 5px; border-radius: 4px;
+  font: inherit; font-size: 11.5px; color: #64748b; cursor: pointer;
+}
+.gy-inspector-raw-head button:hover { color: #0f172a; background: #f1f5f9; }
+.gy-inspector-raw pre {
+  margin: 0; padding: 8px 9px; max-height: 168px; overflow: auto;
+  border-radius: 7px; border: 1px solid #e2e8f0; background: #f8fafc;
+  font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.55;
+  color: #0f172a; white-space: pre-wrap; word-break: break-all;
+}
 .gy-inspector-edges { border-top: 1px solid #edf0f6; padding-top: 7px; display: grid; gap: 5px; }
 .gy-inspector-edges > strong { font-size: 11.5px; color: var(--gy-muted); font-weight: 600; }
 .gy-inspector-edges ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
