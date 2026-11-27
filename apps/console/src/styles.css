@@ -745,6 +745,31 @@ body {
   .gy-dag-viewport .react-flow__minimap.gy-dag-minimap { width: 144px !important; height: 96px !important; }
 }
 
+/* SideSheet 通用与漏洞抽屉标题自动换行（修复 Semi 默认 flex: 1 0 auto 不收缩导致长标题溢出并挤走关闭按钮） */
+.semi-sidesheet-header {
+  gap: 12px;
+  align-items: flex-start;
+}
+.semi-sidesheet-title {
+  flex: 1 1 0%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.45;
+  text-align: left;
+}
+.semi-sidesheet-close {
+  flex-shrink: 0;
+}
+.gy-finding-sheet .semi-sidesheet-inner-wrap {
+  max-width: 96vw;
+}
+.gy-finding-sheet .semi-sidesheet-header {
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--semi-color-border);
+}
+
 /* 漏洞与报告（ARTEX 风格台账 + 专业报告视图） */
 .gy-findings { display: flex; flex-direction: column; gap: 16px; }
 .gy-findings-overview-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
