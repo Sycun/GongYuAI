@@ -144,6 +144,8 @@ export function runTrafficTool(
         offset: slice.offset,
         size: slice.size,
         nextOffset: slice.nextOffset,
+        ...(slice.rawSize != null ? { rawSize: slice.rawSize } : {}),
+        ...(slice.decodedEncoding ? { decodedEncoding: slice.decodedEncoding } : {}),
         ...(slice.contentType ? { contentType: slice.contentType } : {}),
         ...(slice.truncated ? { truncated: true, bufferedBytes: slice.bufferedBytes } : {}),
         body: slice.body,

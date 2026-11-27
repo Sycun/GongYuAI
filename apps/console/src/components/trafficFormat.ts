@@ -21,6 +21,36 @@ export function formatBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
+/** 根据服务端返回的切片偏移与长度计算累计已加载字节数，避免非 UTF-8 替换字符膨胀。 */
+export function sliceLoadedBytes(payload: {
+  offset: number;
+  size: number;
+  nextOffset: number | null;
+  byteLength?: number;
+}): number {
+  if (typeof payload.byteLength === "number" && payload.byteLength >= 0) {
+    return Math.min(payload.size, Math.max(0, payload.offset + payload.byteLength));
+  }
+  if (payload.nextOffset != null) {
+    return Math.min(payload.size, Math.max(0, payload.nextOffset));
+  }
+  return Math.max(0, payload.size);
+}
+
+export function formatBodyProgress(chunk: {
+  loadedBytes: number;
+  size: number;
+  rawSize?: number;
+  decodedEncoding?: string;
+}): string {
+  const loaded = Math.min(chunk.size, Math.max(0, chunk.loadedBytes));
+  const base = `${formatBytes(loaded)} / ${formatBytes(chunk.size)}`;
+  if (chunk.decodedEncoding && chunk.rawSize != null) {
+    return `${base}（${chunk.decodedEncoding} 解压，原始 ${formatBytes(chunk.rawSize)}）`;
+  }
+  return base;
+}
+
 function headerLines(headers: TrafficHeaders): string[] {
   return Object.entries(headers).map(([key, value]) =>
     `${key}: ${Array.isArray(value) ? value.join(", ") : value}`);

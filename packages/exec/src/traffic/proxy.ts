@@ -10,6 +10,7 @@ import { once } from "node:events";
 import type { TrafficBlobRef } from "@gongyuai/contracts";
 import { commitHashedFile } from "./blobs.js";
 import { ensureTaskCa, leafFor, type TaskCa } from "./ca.js";
+import { decodeTrafficPreview, hasSupportedContentEncoding } from "./encoding.js";
 import {
   isNoiseExchange,
   isStaticAssetExchange,
@@ -96,7 +97,13 @@ type Spool = {
   done: Promise<{ ref?: TrafficBlobRef; preview: string }>;
 };
 
-function spool(source: Readable, taskDir: string, type: string | undefined, maxPreviewBytes: number): Spool {
+function spool(
+  source: Readable,
+  taskDir: string,
+  type: string | undefined,
+  maxPreviewBytes: number,
+  headers?: Record<string, string | string[]>,
+): Spool {
   const forward = new PassThrough();
   // Source abort destroys forward with an error; no listener would crash the worker (done already rejects → 502).
   forward.on("error", () => {});
@@ -109,6 +116,7 @@ function spool(source: Readable, taskDir: string, type: string | undefined, maxP
   const preview: Buffer[] = [];
   let previewLen = 0;
   const previewCap = Math.max(0, Math.min(8192, maxPreviewBytes));
+  const rawPreviewCap = previewCap > 0 && hasSupportedContentEncoding(headers) ? 64 * 1024 : previewCap;
   const done = new Promise<{ ref?: TrafficBlobRef; preview: string }>((resolve, reject) => {
     const fail = (err: Error) => {
       forward.destroy(err);
@@ -119,7 +127,7 @@ function spool(source: Readable, taskDir: string, type: string | undefined, maxP
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       hash.update(buf);
       size += buf.length;
-      if (previewCap > 0 && previewLen < previewCap) {
+      if (rawPreviewCap > 0 && previewLen < rawPreviewCap) {
         preview.push(buf);
         previewLen += buf.length;
       }
@@ -134,7 +142,7 @@ function spool(source: Readable, taskDir: string, type: string | undefined, maxP
       file.end(() => {
         const sha256 = hash.digest("hex");
         const text = previewCap > 0
-          ? Buffer.concat(preview).subarray(0, previewCap).toString("utf8")
+          ? decodeTrafficPreview(Buffer.concat(preview).subarray(0, rawPreviewCap), headers, previewCap)
           : "";
         try {
           const ref = commitHashedFile(taskDir, tmp, sha256, size, type);
@@ -323,9 +331,10 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
     reqSpool: Spool,
     started: number,
   ): Promise<void> {
-    const type = contentType(headerMap(upstreamRes.headers));
-    const resSpool = spool(upstreamRes, opts.taskDir, type, previewBytes);
-    const headers = { ...headerMap(upstreamRes.headers) };
+    const resHeaders = headerMap(upstreamRes.headers);
+    const type = contentType(resHeaders);
+    const resSpool = spool(upstreamRes, opts.taskDir, type, previewBytes, resHeaders);
+    const headers = { ...resHeaders };
     delete headers["content-length"];
     // Hold the client response open until the index row is durable.
     const gate = new PassThrough();
@@ -333,7 +342,6 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
     gate.pipe(res);
     resSpool.forward.pipe(gate, { end: false });
     const reqHeaders = headerMap(req.headers);
-    const resHeaders = headerMap(upstreamRes.headers);
     const [reqBody, resBody] = await Promise.all([reqSpool.done, resSpool.done]);
     const currentIntentId = opts.getIntentId?.() ?? opts.intentId;
     const windowIds = matchFindingWindows(opts.taskDir, { intentId: currentIntentId, host: target.hostname });
@@ -442,7 +450,7 @@ export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<Traf
       return;
     }
     const reqHeaders = headerMap(req.headers);
-    const reqSpool = spool(req, opts.taskDir, contentType(reqHeaders), previewBytes);
+    const reqSpool = spool(req, opts.taskDir, contentType(reqHeaders), previewBytes, reqHeaders);
     const upstreamRes = await openUpstream(
       target,
       (req.method ?? "GET").toUpperCase(),

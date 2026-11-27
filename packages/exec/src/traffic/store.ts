@@ -9,7 +9,12 @@ import {
   type TrafficRecord,
   type TrafficSearchQuery,
 } from "@gongyuai/contracts";
-import { readBlobSlice, type BlobSlice } from "./blobs.js";
+import { normalizeSlice, readBlobBytes, readBlobSlice, type BlobSlice } from "./blobs.js";
+import {
+  MAX_COMPRESSED_BLOB_BYTES,
+  decodeTrafficBody,
+  hasSupportedContentEncoding,
+} from "./encoding.js";
 import {
   isNoiseExchange,
   isStaticAssetExchange,
@@ -415,6 +420,8 @@ export function queryFromSearchParams(taskDir: string, taskId: string, params: U
 export type TrafficBodySlice = BlobSlice & {
   side: "req" | "res";
   contentType?: string;
+  rawSize?: number;
+  decodedEncoding?: string;
   body: string;
   evidenceRef: string;
 };
@@ -430,7 +437,34 @@ export function readTrafficBody(
   if (!record) throw Object.assign(new Error("traffic not found"), { status: 404 });
   const blob = side === "req" ? record.reqBodyBlob : record.resBodyBlob;
   if (!blob) throw Object.assign(new Error(`no ${side} body`), { status: 404 });
-  const slice = readBlobSlice(taskDir, blob.sha256, offset, maxBytes);
+  const bounds = normalizeSlice(offset, maxBytes);
+  const headers = side === "req" ? record.reqHeaders : record.resHeaders;
+  if (hasSupportedContentEncoding(headers)) {
+    const raw = readBlobBytes(taskDir, blob.sha256, MAX_COMPRESSED_BLOB_BYTES);
+    const decoded = raw ? decodeTrafficBody(raw, headers) : null;
+    if (decoded) {
+      const end = Math.min(decoded.bytes.length, bounds.offset + bounds.maxBytes);
+      const bytes = bounds.offset < decoded.bytes.length
+        ? Buffer.from(decoded.bytes.subarray(bounds.offset, end))
+        : Buffer.alloc(0);
+      const next = bounds.offset + bytes.length;
+      return {
+        sha256: blob.sha256.trim().toLowerCase(),
+        offset: bounds.offset,
+        maxBytes: bounds.maxBytes,
+        size: decoded.bytes.length,
+        rawSize: blob.size,
+        decodedEncoding: decoded.encoding,
+        bytes,
+        nextOffset: next < decoded.bytes.length ? next : null,
+        side,
+        ...(blob.contentType ? { contentType: blob.contentType } : {}),
+        body: bytes.toString("utf8"),
+        evidenceRef: `http:${record.id}`,
+      };
+    }
+  }
+  const slice = readBlobSlice(taskDir, blob.sha256, bounds.offset, bounds.maxBytes);
   return {
     ...slice,
     side,

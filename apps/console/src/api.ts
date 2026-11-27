@@ -271,6 +271,9 @@ export type TrafficBlobPayload = {
   side: "req" | "res";
   offset: number;
   size: number;
+  byteLength?: number;
+  rawSize?: number;
+  decodedEncoding?: string;
   contentType?: string;
   body: string;
   nextOffset: number | null;

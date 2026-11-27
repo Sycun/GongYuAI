@@ -6,22 +6,33 @@ import { api } from "../api";
 import { shortId } from "../labels";
 import { formatDateTime } from "../time";
 import {
-  buildCurl, buildRawRequest, buildRawResponse, formatBytes, formatDuration,
-  httpStatusColor, matchKeyword, HTTP_METHODS, STATUS_CLASSES,
+  buildCurl, buildRawRequest, buildRawResponse, formatBodyProgress, formatBytes, formatDuration,
+  httpStatusColor, matchKeyword, sliceLoadedBytes, HTTP_METHODS, STATUS_CLASSES,
 } from "./trafficFormat";
 
 const PAGE_SIZE = 50;
 const CHUNK_BYTES = 8192;
+const MAX_CURL_BODY_BYTES = 64 * 1024;
 
 type BodyChunk = {
   text: string;
+  loadedBytes: number;
   nextOffset: number | null;
   size: number;
+  rawSize?: number;
+  decodedEncoding?: string;
   loading: boolean;
   error: string | null;
 };
 
-const emptyChunk = (size: number): BodyChunk => ({ text: "", nextOffset: 0, size, loading: false, error: null });
+const emptyChunk = (size: number): BodyChunk => ({
+  text: "",
+  loadedBytes: 0,
+  nextOffset: 0,
+  size,
+  loading: false,
+  error: null,
+});
 
 type Props = {
   taskId: string;
@@ -107,8 +118,11 @@ export function TrafficPanel({ taskId, intents = [] }: Props) {
             ...entry,
             [side]: {
               text: offset === 0 ? json.body : old.text + json.body,
+              loadedBytes: sliceLoadedBytes(json),
               nextOffset: json.nextOffset,
               size: json.size,
+              rawSize: json.rawSize ?? old.rawSize,
+              decodedEncoding: json.decodedEncoding ?? old.decodedEncoding,
               loading: false,
               error: null,
             },
@@ -150,7 +164,7 @@ export function TrafficPanel({ taskId, intents = [] }: Props) {
     try {
       let body = bodies[selected.id]?.req.text ?? "";
       if (selected.reqBodyBlob) {
-        const { json } = await api.trafficBlob(taskId, selected.id, "req", 0, 1024 * 1024);
+        const { json } = await api.trafficBlob(taskId, selected.id, "req", 0, MAX_CURL_BODY_BYTES);
         body = json.body;
       }
       const curl = buildCurl(selected, body);
@@ -296,14 +310,14 @@ function RawPane({ title, chunk, hasBlob, onLoadMore, build }: {
   build: (text: string) => string;
 }) {
   const text = chunk ? build(chunk.text) : build("");
-  const loadedBytes = chunk ? new Blob([chunk.text]).size : 0;
+  const loadedBytes = chunk?.loadedBytes ?? 0;
   return (
     <div className="gy-traffic-raw-pane">
       <div className="gy-traffic-raw-head">
         <Typography.Text strong size="small">{title}</Typography.Text>
         {hasBlob && chunk && (
           <Typography.Text type="tertiary" size="small">
-            {formatBytes(loadedBytes)} / {formatBytes(chunk.size)}
+            {formatBodyProgress(chunk)}
           </Typography.Text>
         )}
       </div>
@@ -311,7 +325,7 @@ function RawPane({ title, chunk, hasBlob, onLoadMore, build }: {
       {chunk?.error && <Typography.Text type="danger" size="small">{chunk.error}</Typography.Text>}
       {hasBlob && chunk && chunk.nextOffset != null && (
         <Button size="small" block loading={chunk.loading} onClick={() => onLoadMore(chunk.nextOffset!)} style={{ marginTop: 6 }}>
-          加载更多（{formatBytes(chunk.size - loadedBytes)} 剩余）
+          加载更多（{formatBytes(Math.max(0, chunk.size - loadedBytes))} 剩余）
         </Button>
       )}
       {hasBlob && chunk && chunk.nextOffset == null && chunk.size > 0 && (

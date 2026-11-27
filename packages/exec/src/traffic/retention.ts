@@ -95,6 +95,7 @@ export function resolveTrafficRetention(
 
 const HEADER_VALUE_CAP = 240;
 const HEADER_PRIORITY = [
+  "content-encoding",
   "content-type",
   "content-length",
   "location",
@@ -106,6 +107,7 @@ const HEADER_PRIORITY = [
   "set-cookie",
 ];
 const SLIM_HEADERS = new Set([
+  "content-encoding",
   "content-type",
   "content-length",
   "location",

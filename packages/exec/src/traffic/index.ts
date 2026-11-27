@@ -3,8 +3,18 @@ export {
   MAX_BLOB_READ,
   blobPath,
   putBlob,
+  readBlobBytes,
   readBlobSlice,
 } from "./blobs.js";
+export {
+  MAX_COMPRESSED_BLOB_BYTES,
+  MAX_DECOMPRESSED_BLOB_BYTES,
+  decodeTrafficBody,
+  decodeTrafficPreview,
+  hasSupportedContentEncoding,
+  parseContentEncodings,
+} from "./encoding.js";
+export type { DecodedTrafficBody, SupportedContentEncoding } from "./encoding.js";
 export {
   closeTrafficDb,
   countTrafficExchanges,

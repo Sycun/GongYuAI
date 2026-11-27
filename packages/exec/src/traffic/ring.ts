@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { TrafficRecord } from "@gongyuai/contracts";
 import { normalizeSlice, putBlob, type BlobSlice } from "./blobs.js";
+import { decodeTrafficBody, decodeTrafficPreview } from "./encoding.js";
 import { capHeaders, resolveTrafficRetention, type TrafficRetentionConfig } from "./retention.js";
 import {
   getTraffic,
@@ -210,9 +211,13 @@ export function ringRecord(entry: RingEntry): TrafficRecord {
   };
 }
 
-function previewOf(body: CapturedBody | undefined, max: number): string {
+function previewOf(
+  body: CapturedBody | undefined,
+  headers: Record<string, string | string[]>,
+  max: number,
+): string {
   if (!body || max <= 0) return "";
-  return body.head.subarray(0, Math.min(8192, max)).toString("utf8");
+  return decodeTrafficPreview(body.head, headers, Math.min(8192, max));
 }
 
 function ringMatches(entry: RingEntry, query: TrafficQuery): boolean {
@@ -233,8 +238,8 @@ function ringMatches(entry: RingEntry, query: TrafficQuery): boolean {
       w.url,
       w.host,
       w.path,
-      previewOf(entry.reqBody, 8192),
-      previewOf(entry.resBody, 8192),
+      previewOf(entry.reqBody, w.reqHeaders, 8192),
+      previewOf(entry.resBody, w.resHeaders, 8192),
       JSON.stringify(w.reqHeaders),
       JSON.stringify(w.resHeaders),
     ].join("\n").toLowerCase();
@@ -308,6 +313,32 @@ export function readTrafficBodyLive(
   const body = side === "req" ? entry.reqBody : entry.resBody;
   if (!body || body.size <= 0) throw Object.assign(new Error(`no ${side} body`), { status: 404 });
   const bounds = normalizeSlice(offset, maxBytes);
+  const headers = side === "req" ? entry.write.reqHeaders : entry.write.resHeaders;
+  const decoded = decodeTrafficBody(body.head, headers);
+  if (decoded) {
+    const end = Math.min(decoded.bytes.length, bounds.offset + bounds.maxBytes);
+    const bytes = bounds.offset < decoded.bytes.length
+      ? Buffer.from(decoded.bytes.subarray(bounds.offset, end))
+      : Buffer.alloc(0);
+    const next = bounds.offset + bytes.length;
+    return {
+      sha256: body.sha256,
+      offset: bounds.offset,
+      maxBytes: bounds.maxBytes,
+      size: decoded.bytes.length,
+      rawSize: body.size,
+      decodedEncoding: decoded.encoding,
+      bytes,
+      nextOffset: next < decoded.bytes.length ? next : null,
+      side,
+      ...(body.contentType ? { contentType: body.contentType } : {}),
+      body: bytes.toString("utf8"),
+      evidenceRef: `http:${entry.id}`,
+      truncated: body.size > body.head.length || decoded.partial,
+      bufferedBytes: body.head.length,
+      source: "ring",
+    };
+  }
   const end = Math.min(body.head.length, bounds.offset + bounds.maxBytes);
   const bytes = bounds.offset < body.head.length ? Buffer.from(body.head.subarray(bounds.offset, end)) : Buffer.alloc(0);
   const next = bounds.offset + bytes.length;
@@ -372,8 +403,8 @@ export function persistCapturedExchange(
     resHeaders,
     ...(req.ref ? { reqBody: req.ref } : {}),
     ...(res.ref ? { resBody: res.ref } : {}),
-    reqPreview: previewOf(input.reqBody, cfg.maxPreviewChars),
-    resPreview: previewOf(input.resBody, cfg.maxPreviewChars),
+    reqPreview: previewOf(input.reqBody, input.write.reqHeaders, cfg.maxPreviewChars),
+    resPreview: previewOf(input.resBody, input.write.resHeaders, cfg.maxPreviewChars),
     ...(input.findingIds?.length ? { findingIds: input.findingIds } : {}),
   }, retention);
 }

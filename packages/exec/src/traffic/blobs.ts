@@ -161,3 +161,23 @@ export function readBlobSlice(
     closeSync(fd);
   }
 }
+
+/** Read an entire stored blob when its size is within `maxBytes`, otherwise return `null`. */
+export function readBlobBytes(
+  taskDir: string,
+  sha256: string,
+  maxBytes: number,
+): Buffer | null {
+  if (!Number.isInteger(maxBytes) || maxBytes < 1) return null;
+  const file = contained(taskDir, blobPath(taskDir, sha256));
+  const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const size = fstatSync(fd).size;
+    if (size <= 0 || size > maxBytes) return null;
+    const bytes = Buffer.alloc(size);
+    readSync(fd, bytes, 0, size, 0);
+    return bytes;
+  } finally {
+    closeSync(fd);
+  }
+}

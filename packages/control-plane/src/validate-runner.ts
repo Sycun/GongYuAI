@@ -12,8 +12,12 @@ import {
 } from "@gongyuai/contracts";
 import {
   linkTrafficFinding,
+  MAX_COMPRESSED_BLOB_BYTES,
+  decodeTrafficPreview,
+  hasSupportedContentEncoding,
   openTrafficDb,
   queryTraffic,
+  readBlobBytes,
   readBlobSlice,
   startTrafficProxy,
   type TrafficProxy,
@@ -261,6 +265,11 @@ function replayHttps(proxy: TrafficProxy, target: URL, method: string): Promise<
 function bodyText(taskDir: string, record: TrafficRecord, side: "req" | "res"): string {
   const blob = side === "req" ? record.reqBodyBlob : record.resBodyBlob;
   if (!blob) return "";
+  const headers = side === "req" ? record.reqHeaders : record.resHeaders;
+  if (hasSupportedContentEncoding(headers)) {
+    const raw = readBlobBytes(taskDir, blob.sha256, MAX_COMPRESSED_BLOB_BYTES);
+    if (raw) return decodeTrafficPreview(raw, headers, 8192);
+  }
   return readBlobSlice(taskDir, blob.sha256, 0, 8192).bytes.toString("utf8");
 }
 

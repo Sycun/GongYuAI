@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { TrafficRecord } from "@gongyuai/contracts";
 import {
-  buildCurl, buildRawRequest, buildRawResponse, formatBytes, formatDuration,
-  httpStatusColor, matchKeyword,
+  buildCurl, buildRawRequest, buildRawResponse, formatBodyProgress, formatBytes, formatDuration,
+  httpStatusColor, matchKeyword, sliceLoadedBytes,
 } from "./trafficFormat.js";
 
 const record: TrafficRecord = {
@@ -66,4 +66,23 @@ test("状态码色标与耗时/大小格式化", () => {
   assert.equal(formatDuration(80), "80 ms");
   assert.equal(formatBytes(2048), "2.0 KB");
   assert.equal(formatBytes(512), "512 B");
+});
+
+test("字节进度按服务端切片长度统计，不受 U+FFFD 膨胀影响，并标注压缩编码", () => {
+  assert.equal(
+    sliceLoadedBytes({ offset: 0, size: 160, byteLength: 160, nextOffset: null }),
+    160,
+  );
+  assert.equal(
+    sliceLoadedBytes({ offset: 8192, size: 20000, byteLength: 8192, nextOffset: 16384 }),
+    16384,
+  );
+  assert.equal(
+    formatBodyProgress({ loadedBytes: 215, size: 215, rawSize: 160, decodedEncoding: "gzip" }),
+    "215 B / 215 B（gzip 解压，原始 160 B）",
+  );
+  assert.equal(
+    formatBodyProgress({ loadedBytes: 249, size: 249 }),
+    "249 B / 249 B",
+  );
 });
