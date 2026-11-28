@@ -1,9 +1,11 @@
-FROM golang:1.26-bookworm AS netd-builder
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS netd-builder
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
 WORKDIR /src/services/netd
 COPY services/netd/go.mod services/netd/go.sum ./
 RUN go mod download
 COPY services/netd ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gy-netd ./cmd/gy-netd
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/gy-netd ./cmd/gy-netd
 
 FROM kalilinux/kali-rolling
 
