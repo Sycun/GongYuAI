@@ -224,13 +224,34 @@ test("credential_record：同资产/同私网段在跑 Intent 收到脱敏 resou
       assert.doesNotMatch(advisory.summary, /S3cretPassw0rd/);
     }
 
-    const drained = history.consumePendingAdvisories(TASK, {
+    // Sender (`active` on 10.0.0.10) must NOT hijack advisories addressed to its /24 peers.
+    const senderDrained = history.consumePendingAdvisories(TASK, {
+      activeIntentId: active.id,
+      workerSlot: 0,
+      assetRoot: "10.0.0.10",
+      workerId: "w0",
+    });
+    assert.equal(senderDrained.length, 0);
+
+    // Each peer drains ONLY its own targeted broadcast without stealing the sibling's copy.
+    const drainedSame = history.consumePendingAdvisories(TASK, {
       activeIntentId: peerSame.id,
       workerSlot: 1,
       assetRoot: "10.0.0.11",
+      workerId: "w1",
     });
-    assert.equal(drained.length, 2);
-    assert.match(formatSupervisorAdvisoryGate(drained), /resource_broadcast/);
+    assert.equal(drainedSame.length, 1);
+    assert.equal(drainedSame[0]!.targetIntentId, peerSame.id);
+    assert.match(formatSupervisorAdvisoryGate(drainedSame), /resource_broadcast/);
+
+    const drained24 = history.consumePendingAdvisories(TASK, {
+      activeIntentId: peer24.id,
+      workerSlot: 2,
+      assetRoot: "10.0.0.12",
+      workerId: "w2",
+    });
+    assert.equal(drained24.length, 1);
+    assert.equal(drained24[0]!.targetIntentId, peer24.id);
   } finally {
     history.close();
     rmSync(root, { recursive: true, force: true });

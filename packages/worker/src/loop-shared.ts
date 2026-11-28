@@ -572,7 +572,18 @@ export function recordShellConnectionSignals(
     /ECONNREFUSED|ETIMEDOUT|ETIMEOUT|Connection timed out|Operation timed out|Connection refused/i.test(
       output,
     );
-  if (!anomalous) return null;
+  if (!anomalous) {
+    const okMatch =
+      /HTTP\/\d(?:\.\d)?\s+(200|301|302|400|401|403|404)\b/i.exec(output) ??
+      /^(200|301|302|400|401|403|404)\s*$/m.exec(output);
+    if (okMatch) {
+      const okStatus = Number(okMatch[1]);
+      for (const host of hosts) {
+        tracker.record(host, { status: okStatus });
+      }
+    }
+    return null;
+  }
   for (const host of hosts) {
     const count = tracker.record(host, { status: 0, error: output.slice(0, 400) });
     if (count >= ADAPTIVE_RATE_FUSE_THRESHOLD) {

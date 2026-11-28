@@ -58,7 +58,14 @@ test("worker_advisories：入队、定向/槽位/私网段匹配、单次原子�
       targetIntentId: intentB.id,
       assetScope: "192.168.5.20",
       summary: "新凭据 id=c1",
-      createdBy: "w1",
+      createdBy: "w0",
+    });
+    const forSubnet = store.enqueueAdvisory({
+      taskId: TASK,
+      kind: "resource_broadcast",
+      assetScope: "192.168.5.20",
+      summary: "子网级广播 id=c2",
+      createdBy: "w0",
     });
 
     const first = store.consumePendingAdvisories(TASK, {
@@ -85,23 +92,34 @@ test("worker_advisories：入队、定向/槽位/私网段匹配、单次原子�
     });
     assert.deepEqual(slotOnly.map((a) => a.id), [forSlot.id]);
 
-    // Same RFC1918 /24 must match even without a target Intent.
+    // Scope-only broadcast matches same RFC1918 /24, while `forPeer` (explicit targetIntentId=intentB)
+    // is NOT hijacked by an unrelated worker on 192.168.5.99.
     const crossSlot = store.consumePendingAdvisories(TASK, {
       activeIntentId: null,
       workerSlot: 7,
       assetRoot: "192.168.5.99",
+      workerId: "w7",
     });
-    assert.deepEqual(crossSlot.map((a) => a.id), [forPeer.id]);
+    assert.deepEqual(crossSlot.map((a) => a.id), [forSubnet.id]);
+
+    // `intentB` itself still receives its dedicated `forPeer` advisory intact.
+    const peerExact = store.consumePendingAdvisories(TASK, {
+      activeIntentId: intentB.id,
+      workerSlot: 1,
+      assetRoot: "192.168.5.20",
+      workerId: "w1",
+    });
+    assert.deepEqual(peerExact.map((a) => a.id), [forPeer.id]);
 
     const again = store.consumePendingAdvisories(TASK, {
-      activeIntentId: null,
-      workerSlot: 7,
-      assetRoot: "192.168.5.99",
+      activeIntentId: intentB.id,
+      workerSlot: 1,
+      assetRoot: "192.168.5.20",
     });
     assert.deepEqual(again, []);
 
     const recent = store.listRecentAdvisories(TASK, 10);
-    assert.equal(recent.length, 3);
+    assert.equal(recent.length, 4);
     assert.ok(recent.every((a) => a.consumedAt !== null));
   } finally {
     store.close();

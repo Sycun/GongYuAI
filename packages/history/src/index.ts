@@ -1996,7 +1996,12 @@ export class HistoryStore {
    */
   consumePendingAdvisories(
     taskId: string,
-    matcher: { activeIntentId?: string | null; workerSlot?: number | null; assetRoot?: string | null },
+    matcher: {
+      activeIntentId?: string | null;
+      workerSlot?: number | null;
+      assetRoot?: string | null;
+      workerId?: string | null;
+    },
   ): WorkerAdvisory[] {
     const now = this.now();
     const consumedBySlot = matcher.workerSlot ?? null;
@@ -2013,19 +2018,21 @@ export class HistoryStore {
       const matched = rows
         .map((r) => this.rowToAdvisory(r))
         .filter((advisory) => {
-          if (
-            advisory.targetIntentId &&
-            matcher.activeIntentId &&
-            advisory.targetIntentId === matcher.activeIntentId
-          ) {
-            return true;
+          // Strict hierarchical addressing: an advisory addressed to a specific Intent or
+          // worker slot must NEVER fall through to `/24` assetScope and get hijacked by a
+          // sibling slot (or by the broadcasting sender itself on the same subnet).
+          if (advisory.targetIntentId != null) {
+            return Boolean(
+              matcher.activeIntentId && advisory.targetIntentId === matcher.activeIntentId,
+            );
           }
-          if (
-            advisory.targetWorkerSlot != null &&
-            matcher.workerSlot != null &&
-            advisory.targetWorkerSlot === matcher.workerSlot
-          ) {
-            return true;
+          if (advisory.targetWorkerSlot != null) {
+            return (
+              matcher.workerSlot != null && advisory.targetWorkerSlot === matcher.workerSlot
+            );
+          }
+          if (matcher.workerId && advisory.createdBy === matcher.workerId) {
+            return false;
           }
           return Boolean(
             advisory.assetScope &&

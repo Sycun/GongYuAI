@@ -109,7 +109,10 @@ test("recordShellConnectionSignals：shell 中的 curl 000/连接拒绝连续两
   assert.equal(recordShellConnectionSignals("curl http://10.0.0.6/", refused, reset), null);
   const fuse2 = recordShellConnectionSignals("curl http://10.0.0.6/", refused, reset);
   assert.match(fuse2 ?? "", /10\.0\.0\.6/);
-  assert.equal(reset.record("10.0.0.6", { status: 200 }), 0);
+  assert.equal(
+    recordShellConnectionSignals("curl -i http://10.0.0.6/", "HTTP/1.1 200 OK\r\n\r\nok", reset),
+    null,
+  );
   assert.equal(reset.count("10.0.0.6"), 0);
 });
 

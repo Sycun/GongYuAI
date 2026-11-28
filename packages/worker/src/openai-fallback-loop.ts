@@ -708,20 +708,23 @@ export async function runOpenAiToolLoop(
 
     // Cross-slot supervisor inbox: drain advisories after this tool batch and inject
     // them as the next user turn (value-preserving; never clears the conversation).
-    try {
-      const activeIntent = state.activeIntentId
-        ? ctx.history.getIntent(manifest.taskId, state.activeIntentId)
-        : null;
-      const advisories = ctx.history.consumePendingAdvisories(manifest.taskId, {
-        activeIntentId: state.activeIntentId,
-        workerSlot: manifest.workerSlot ?? 0,
-        assetRoot: activeIntent?.assetRoot ?? null,
-      });
-      if (advisories.length > 0) {
-        messages.push({ role: "user", content: formatSupervisorAdvisoryGate(advisories) });
+    if (!relayResetOccurred && (role !== "follower" || Boolean(state.activeIntentId))) {
+      try {
+        const activeIntent = state.activeIntentId
+          ? ctx.history.getIntent(manifest.taskId, state.activeIntentId)
+          : null;
+        const advisories = ctx.history.consumePendingAdvisories(manifest.taskId, {
+          activeIntentId: state.activeIntentId,
+          workerSlot: manifest.workerSlot ?? 0,
+          assetRoot: activeIntent?.assetRoot ?? null,
+          workerId: manifest.workerId ?? null,
+        });
+        if (advisories.length > 0) {
+          messages.push({ role: "user", content: formatSupervisorAdvisoryGate(advisories) });
+        }
+      } catch {
+        /* advisory drain is best-effort */
       }
-    } catch {
-      /* advisory drain is best-effort */
     }
 
     if (allowedOpenAiNonRelayCalls > 0 && !relayResetOccurred) {

@@ -242,12 +242,37 @@ export async function tryPiDurable(
       return appendNoteToToolResult(out, rot);
     };
 
+    const drainSupervisorInbox = (): string | null => {
+      if (pendingFollowerIntentReset) return null;
+      const livePoolSize = readPoolSize();
+      const role = resolveWorkerRole({ leader, workerCount: livePoolSize });
+      if (role === "follower" && !state.activeIntentId) return null;
+      try {
+        const activeIntent = state.activeIntentId
+          ? ctx.history.getIntent(manifest.taskId, state.activeIntentId)
+          : null;
+        const advisories = ctx.history.consumePendingAdvisories(manifest.taskId, {
+          activeIntentId: state.activeIntentId,
+          workerSlot: manifest.workerSlot ?? 0,
+          assetRoot: activeIntent?.assetRoot ?? null,
+          workerId: manifest.workerId ?? null,
+        });
+        return advisories.length > 0 ? formatSupervisorAdvisoryGate(advisories) : null;
+      } catch {
+        return null;
+      }
+    };
+
     const attachLongTurnNotes = <T,>(toolName: string, out: T): T => {
       const armed = armedTools.get(toolName) ?? 0;
       if (armed <= 0) return out;
       if (armed === 1) armedTools.delete(toolName);
       else armedTools.set(toolName, armed - 1);
       const timedOut = applyExploreTimeout(toolName, out);
+      if (toolName !== "intent_conclude") {
+        const inboxGate = drainSupervisorInbox();
+        if (inboxGate) longTurn.notes.push(inboxGate);
+      }
       const { notes, consumedSoftPace } = takeLongTurnNotes(state, longTurn);
       if (consumedSoftPace) {
         try {
@@ -578,24 +603,6 @@ export async function tryPiDurable(
                 /* advisory only */
               }
 
-              // Cross-slot supervisor inbox: drain advisories after the tool batch and
-              // surface them as a gate note in the next tool result (no session break).
-              try {
-                const activeIntent = state.activeIntentId
-                  ? ctx.history.getIntent(manifest.taskId, state.activeIntentId)
-                  : null;
-                const advisories = ctx.history.consumePendingAdvisories(manifest.taskId, {
-                  activeIntentId: state.activeIntentId,
-                  workerSlot: manifest.workerSlot ?? 0,
-                  assetRoot: activeIntent?.assetRoot ?? null,
-                });
-                if (advisories.length > 0) {
-                  longTurn.notes.push(formatSupervisorAdvisoryGate(advisories));
-                }
-              } catch {
-                /* advisory drain is best-effort */
-              }
-
               maybeBackgroundSnapshot();
 
               if (leader && livePoolSize > 1 && notifiedScaleUpPool <= 1) {
@@ -796,6 +803,7 @@ export async function tryPiDurable(
         ) {
           await root.reset(undefined, context);
           state.observeFingerprint = {};
+          longTurn.notes.length = 0;
           pendingFollowerIntentReset = false;
           didCleanIntentReset = true;
           appendProgress(
@@ -816,6 +824,7 @@ export async function tryPiDurable(
           includeRelays: role !== "follower" && round === 1,
           knowledgeRag,
         });
+        const roundAdvisoryGate = drainSupervisorInbox();
         ckpt.save(state);
 
         const yieldRuleLine =
@@ -840,6 +849,7 @@ export async function tryPiDurable(
                 terminalFinalizationBanner,
                 timeoutNote ?? "",
                 softPace ?? "",
+                roundAdvisoryGate ?? "",
                 "",
                 observeBlock,
               ]
@@ -853,6 +863,7 @@ export async function tryPiDurable(
                 terminalFinalizationBanner,
                 timeoutNote ?? "",
                 softPace ?? "",
+                roundAdvisoryGate ?? "",
                 "",
                 observeBlock,
               ]
