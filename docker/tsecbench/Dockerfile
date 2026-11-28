@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
-# GongYuAI — TSecBench Hosted Official Competition Image (linux/amd64)
+# GongYuAI — TSecBench Hosted Official Competition Image (build with --platform linux/amd64)
 # Runs Control Plane + Watchdog + 1 Leader + 3 Followers autonomously in offline sandbox.
 
-FROM --platform=linux/amd64 node:22-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 
 WORKDIR /opt/gongyuai
 
@@ -16,10 +16,11 @@ COPY apps/console/package.json ./apps/console/package.json
 RUN pnpm install --frozen-lockfile \
   && pnpm --filter '!@gongyuai/console' run build
 
-FROM --platform=linux/amd64 kalilinux/kali-rolling AS runtime
+FROM kalilinux/kali-rolling AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     NEEDRESTART_MODE=a \
+    TERM=xterm-256color \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     GY_TSEC_HOSTED=1 \
@@ -29,17 +30,21 @@ ENV DEBIAN_FRONTEND=noninteractive \
     GY_TSEC_ALLOW_HINT=0 \
     NODE_ENV=production
 
-# Copy Node.js 22.x runtime (with built-in node:sqlite) from official node image
+# Copy Node.js 22.x runtime (with built-in node:sqlite) and cached pnpm from builder
 COPY --from=builder /usr/local/bin/node /usr/local/bin/node
-COPY --from=builder /usr/local/bin/npm /usr/local/bin/npm
-COPY --from=builder /usr/local/bin/npx /usr/local/bin/npx
-COPY --from=builder /usr/local/bin/corepack /usr/local/bin/corepack
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=builder /root/.cache/node/corepack /root/.cache/node/corepack
+
+RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+  && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+  && ln -sf /usr/local/lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
+  && corepack enable
 
 # Offline pentest, intranet pivot, crypto, and reverse-engineering arsenal (no public internet in hosted sandbox)
 RUN apt-get update -qq \
   && apt-get install -y -qq --no-install-recommends \
     ca-certificates \
+    ncurses-base \
     curl \
     wget \
     git \
@@ -117,15 +122,20 @@ RUN apt-get update -qq \
     python3-redis \
     python3-ldap3 \
     python3-sympy \
-  && (apt-get install -y -qq --no-install-recommends r2ghidra-radare2 2>/dev/null \
-      || apt-get install -y -qq --no-install-recommends rizin-plugin-ghidra rizin 2>/dev/null \
-      || true) \
+  && pip3 install --no-cache-dir --break-system-packages pycryptodome \
+  && ln -sf /usr/bin/httpx-toolkit /usr/local/bin/httpx \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /usr/share/doc/* /usr/share/man/* /tmp/* /var/tmp/*
 
-# Ensure pnpm is available if any tool/script invokes it
-RUN corepack enable && corepack prepare pnpm@10.15.0 --activate \
-  && ln -sf /usr/bin/httpx-toolkit /usr/local/bin/httpx || true
+# Build r2ghidra (pdg pseudo-C decompiler for radare2) cleanly and strip build caches
+RUN apt-get update -qq \
+  && apt-get install -y -qq --no-install-recommends libradare2-dev pkg-config cmake bison flex \
+  && (r2pm -U && r2pm -ci r2ghidra || true) \
+  && rm -rf /root/.local/share/radare2/r2pm/git /root/.local/share/radare2/r2pm/db \
+  && apt-get purge -y -qq cmake bison flex \
+  && apt-get autoremove -y -qq \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 WORKDIR /opt/gongyuai
 
