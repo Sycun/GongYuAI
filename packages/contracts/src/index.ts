@@ -744,6 +744,7 @@ export const IntentSchema = z.object({
   /** 与其他并发槽位的边界约定；旧档缺省为空。 */
   mutexNote: z.string().optional(),
   claimedBy: z.string().nullable().default(null),
+  claimedAt: z.string().datetime().nullable().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   concludedAt: z.string().datetime().nullable().default(null),

@@ -20,10 +20,14 @@ const TASK_ID = "99999999-9999-4999-8999-999999999999";
 const NOW = Date.parse("2026-11-28T12:00:00.000Z");
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
 
-const intent = (id: string, overrides: Partial<{ status: string; createdAt: string; updatedAt: string }> = {}) => ({
+const intent = (
+  id: string,
+  overrides: Partial<{ status: string; createdAt: string; updatedAt: string; claimedAt: string | null }> = {},
+) => ({
   id,
   status: "claimed",
-  createdAt: ago(10),
+  createdAt: ago(15),
+  claimedAt: ago(3),
   updatedAt: ago(1),
   ...overrides,
 });
@@ -100,10 +104,11 @@ test("findAnomalousActiveIntents: error storms and silent spins wake the leader,
   });
   assert.equal(rewoken.length, 1);
 
-  // Silent spin: 7 minutes since heartbeat, zero Facts.
+  // Silent spin: 7 minutes since claim with zero Facts MUST fire even when `updatedAt`
+  // was just refreshed 10s ago by live `heartbeatIntent` tool calls!
   const spinId = randomUUID();
   const spin = findAnomalousActiveIntents({
-    activeIntents: [intent(spinId, { updatedAt: ago(7) })],
+    activeIntents: [intent(spinId, { claimedAt: ago(7), updatedAt: ago(0.2) })],
     facts: [],
     httpTransactions: [],
     recentAdvisories: [],
@@ -114,8 +119,8 @@ test("findAnomalousActiveIntents: error storms and silent spins wake the leader,
   assert.equal(spin[0]!.code, "silent-spin");
 
   const spinWithFact = findAnomalousActiveIntents({
-    activeIntents: [intent(spinId, { updatedAt: ago(7) })],
-    facts: [{ intentId: spinId, createdAt: ago(20) }],
+    activeIntents: [intent(spinId, { claimedAt: ago(7), updatedAt: ago(0.2) })],
+    facts: [{ intentId: spinId, createdAt: ago(2) }],
     httpTransactions: [],
     recentAdvisories: [],
     nowMs: NOW,
@@ -123,9 +128,9 @@ test("findAnomalousActiveIntents: error storms and silent spins wake the leader,
   });
   assert.equal(spinWithFact.length, 0);
 
-  // Fresh heartbeat inside 6 minutes never counts as silent.
+  // Freshly claimed inside 6 minutes never counts as silent even if proposed 15m ago.
   const fresh = findAnomalousActiveIntents({
-    activeIntents: [intent(spinId, { updatedAt: ago(2) })],
+    activeIntents: [intent(spinId, { createdAt: ago(15), claimedAt: ago(2), updatedAt: ago(0.2) })],
     facts: [],
     httpTransactions: [],
     recentAdvisories: [],

@@ -894,10 +894,10 @@ export class HistoryStore {
     const result = this.db
       .prepare(
         `UPDATE intents
-         SET status = 'claimed', claimed_by = ?, updated_at = ?
+         SET status = 'claimed', claimed_by = ?, claimed_at = ?, updated_at = ?
          WHERE id = ? AND task_id = ? AND status = 'proposed'`,
       )
-      .run(workerId, now, intentId, taskId);
+      .run(workerId, now, now, intentId, taskId);
     if ((result.changes ?? 0) === 0) return null;
     this.bindActiveIntent(taskId, intentId);
     this.emit(taskId, "intent_claimed", { intentId, workerId });
@@ -1046,7 +1046,7 @@ export class HistoryStore {
         const result = this.db
           .prepare(
             `UPDATE intents
-             SET status = 'proposed', claimed_by = NULL, requeue_count = requeue_count + 1, updated_at = ?
+             SET status = 'proposed', claimed_by = NULL, claimed_at = NULL, requeue_count = requeue_count + 1, updated_at = ?
              WHERE id = ? AND task_id = ? AND status IN ('claimed', 'running')`,
           )
           .run(this.now(), intent.id, taskId);
@@ -1122,6 +1122,7 @@ export class HistoryStore {
       assignedSurfaces,
       mutexNote: String(r.mutex_note ?? ""),
       claimedBy: (r.claimed_by as string | null) ?? null,
+      claimedAt: (r.claimed_at as string | null) ?? null,
       createdAt: String(r.created_at),
       updatedAt: String(r.updated_at),
       concludedAt: (r.concluded_at as string | null) ?? null,
@@ -1612,6 +1613,14 @@ export class HistoryStore {
     const ownTx = !this.db.isTransaction;
     if (ownTx) this.db.exec("BEGIN IMMEDIATE");
     try {
+      const prior = this.db
+        .prepare(
+          `SELECT verdict FROM credential_checks
+           WHERE task_id = ? AND credential_id = ? AND target_asset = ? AND service = ?`,
+        )
+        .get(input.taskId, input.credentialId, targetAsset, service) as
+        | { verdict: string }
+        | undefined;
       const row = this.db
         .prepare(
           `INSERT INTO credential_checks
@@ -1638,7 +1647,11 @@ export class HistoryStore {
           now,
         ) as { id: string } | undefined;
       this.touchCredential(input.taskId, input.credentialId);
-      if (input.verdict === "valid" && targetAsset !== normalizeHost(credential.asset)) {
+      if (
+        input.verdict === "valid" &&
+        prior?.verdict !== "valid" &&
+        targetAsset !== normalizeHost(credential.asset)
+      ) {
         this.appendFact({
           taskId: input.taskId,
           layer: "auth",

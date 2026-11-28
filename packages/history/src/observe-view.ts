@@ -69,7 +69,7 @@ function renderIntentPulse(
 ): string {
   if (!ACTIVE_INTENT_STATUSES.has(intent.status)) return "";
   const parts: string[] = [];
-  const startedMs = Date.parse(intent.createdAt);
+  const startedMs = Date.parse(intent.claimedAt ?? intent.createdAt);
   if (Number.isFinite(startedMs)) {
     parts.push(`已运行 ${formatDuration(nowMs - startedMs)}`);
   }

@@ -189,6 +189,7 @@ export type SupervisorPulseIntent = {
   status: string;
   createdAt: string;
   updatedAt: string;
+  claimedAt?: string | null;
 };
 
 export type SupervisorPulseFact = {
@@ -274,8 +275,10 @@ export function findAnomalousActiveIntents(input: {
       }
     }
 
-    const activeSince = pulseMs(intent.updatedAt);
-    const since = Number.isFinite(activeSince) ? activeSince : pulseMs(intent.createdAt);
+    // Measure active execution time from `claimedAt` (NOT `updatedAt`, which is reset
+    // every tool call by `heartbeatIntent` and would mask an actively spinning worker).
+    const claimedMs = intent.claimedAt ? pulseMs(intent.claimedAt) : Number.NaN;
+    const since = Number.isFinite(claimedMs) ? claimedMs : pulseMs(intent.createdAt);
     if (
       Number.isFinite(since) &&
       input.nowMs - since > SUPERVISOR_PULSE_SILENT_MS &&
@@ -284,7 +287,7 @@ export function findAnomalousActiveIntents(input: {
       hits.push({
         intentId: intent.id,
         code: "silent-spin",
-        reason: `已活跃 ${Math.round((input.nowMs - since) / 60_000)} 分钟且名下 0 Fact（静默空转）`,
+        reason: `已认领运行 ${Math.round((input.nowMs - since) / 60_000)} 分钟且名下 0 Fact（静默空转）`,
       });
     }
   }
@@ -453,6 +456,7 @@ export async function waitForPoolTurn(opts: {
                 status: intent.status,
                 createdAt: intent.createdAt,
                 updatedAt: intent.updatedAt,
+                claimedAt: intent.claimedAt ?? null,
               })),
             facts: ctx.history.listFacts(taskId),
             httpTransactions: ctx.history.listHttpTransactions(taskId, 200),

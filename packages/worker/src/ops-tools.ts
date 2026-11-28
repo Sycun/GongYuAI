@@ -252,6 +252,7 @@ export function credentialUseTool(ctx: OpsToolContext, args: {
   evidencePath?: string;
   note?: string;
 }): string {
+  requireCapability(ctx.manifest, "scan");
   const action = (args.action ?? "").trim().toLowerCase();
   const credentialId = (args.credentialId ?? "").trim();
   const targetAsset = (args.targetAsset ?? "").trim();
@@ -269,6 +270,7 @@ export function credentialUseTool(ctx: OpsToolContext, args: {
 
   if (action === "resolve") {
     if (ENV_STYLE_SECRET.test(credential.secretRef)) {
+      const consumed = ctx.history.touchCredential(ctx.manifest.taskId, credentialId);
       return JSON.stringify({
         ok: true,
         credentialId,
@@ -276,6 +278,8 @@ export function credentialUseTool(ctx: OpsToolContext, args: {
         asset: credential.asset,
         username: credential.username,
         secret: { type: "env", envVar: credential.secretRef },
+        reuseCount: consumed.reuseCount,
+        lastUsedAt: consumed.lastUsedAt,
         note: "环境变量型 secretRef：值只在 Worker 进程环境内，不落证据文件。",
       });
     }

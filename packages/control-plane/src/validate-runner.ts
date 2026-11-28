@@ -811,7 +811,13 @@ export function findActiveTunnelRoute(taskDir: string, target: URL): ActiveTunne
       continue;
     }
     if (meta.status !== "running") continue;
-    if (meta.kind !== "socat" && meta.kind !== "ssh-local") continue;
+    if (
+      meta.kind !== "socat" &&
+      meta.kind !== "ssh-local" &&
+      meta.kind !== "http-connect"
+    ) {
+      continue;
+    }
     const pid = Number(meta.pid);
     if (!Number.isInteger(pid) || pid <= 0 || !pidAlive(pid)) continue;
     if (String(meta.targetHost ?? "").toLowerCase() !== target.hostname.toLowerCase()) continue;
@@ -848,10 +854,16 @@ function replayDirect(
   );
   return new Promise((resolve, reject) => {
     const socket = netConnect(route.localPort, "127.0.0.1");
+    let activeTls: ReturnType<typeof tlsConnect> | null = null;
     let settled = false;
+    const deadline = setTimeout(() => {
+      finish(Buffer.alloc(0), new Error("tunnel replay timeout"));
+    }, 15_000);
     const finish = (raw: Buffer, error?: Error): void => {
       if (settled) return;
       settled = true;
+      clearTimeout(deadline);
+      activeTls?.destroy();
       socket.destroy();
       if (error) {
         reject(error);
@@ -864,6 +876,7 @@ function replayDirect(
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     };
+    socket.setTimeout(15_000, () => finish(Buffer.alloc(0), new Error("tunnel replay timeout")));
     socket.once("error", (err) => finish(Buffer.alloc(0), err));
     if (target.protocol === "https:") {
       socket.once("connect", () => {
@@ -877,6 +890,7 @@ function replayDirect(
             rejectUnauthorized: false,
             ...replayTlsOptions(target.hostname),
           });
+          activeTls = tls;
         } catch (err) {
           finish(Buffer.alloc(0), err instanceof Error ? err : new Error(String(err)));
           return;

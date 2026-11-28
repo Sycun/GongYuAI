@@ -518,6 +518,9 @@ function ensureIntentSurfacePartitionColumns(db: DatabaseSync): void {
   if (!have.has("mutex_note")) {
     db.exec(`ALTER TABLE intents ADD COLUMN mutex_note TEXT NOT NULL DEFAULT ''`);
   }
+  if (!have.has("claimed_at")) {
+    db.exec(`ALTER TABLE intents ADD COLUMN claimed_at TEXT`);
+  }
 }
 
 function migrateColumns(db: DatabaseSync): void {
