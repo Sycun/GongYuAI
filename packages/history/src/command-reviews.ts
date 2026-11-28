@@ -47,11 +47,36 @@ export class CommandLedger {
     }
   }
   close() { this.db.close(); }
+  private expireUnsettled(whereClause: string, reason: string, ...params: Array<string | number>): void {
+    const rows = this.db
+      .prepare(`SELECT id FROM requests WHERE ${whereClause} AND state IN ('pending','awaiting_user')`)
+      .all(...params) as Array<{ id: string }>;
+    if (!rows.length) return;
+    const nowIso = new Date().toISOString();
+    const update = this.db.prepare(
+      "UPDATE requests SET state='expired', receipt=? WHERE id=? AND state IN ('pending','awaiting_user')",
+    );
+    for (const row of rows) {
+      const receipt: ApprovalReceipt = {
+        id: row.id,
+        at: nowIso,
+        model: "",
+        scope: "local-validation",
+        decision: "expired",
+        risk: "low",
+        actor: "policy",
+        reason,
+      };
+      update.run(JSON.stringify(receipt), row.id);
+    }
+  }
   activate(task: string, fence: number) {
     this.db.prepare("INSERT INTO review_epoch VALUES (?,?,1) ON CONFLICT(task) DO UPDATE SET fence=excluded.fence,active=1 WHERE excluded.fence>review_epoch.fence").run(task, fence);
+    this.expireUnsettled("task=? AND fence<?", "任务已进入新运行代际，旧代际未决审批票据已自动过期。", task, fence);
   }
   deactivate(task: string, fence: number) {
     this.db.prepare("UPDATE review_epoch SET active=0 WHERE task=? AND fence=?").run(task, fence);
+    this.expireUnsettled("task=? AND fence<=?", "任务暂停或停止，当前代际未决审批票据已自动过期。", task, fence);
   }
   active(task: string, fence: number): boolean {
     return !!this.db.prepare("SELECT 1 FROM review_epoch WHERE task=? AND fence=? AND active=1").get(task, fence);

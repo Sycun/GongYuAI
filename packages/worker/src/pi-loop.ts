@@ -214,7 +214,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
           terminalStatus === "budget_exhausted"
             ? state.lastError ?? "hard budget gate"
             : terminalStatus === "incomplete"
-              ? "loop exited before all goals passed (not a budget gate)"
+              ? state.lastError ?? "loop exited before all goals passed (not a budget gate)"
               : undefined,
       });
     }
@@ -225,6 +225,7 @@ export async function runPiLoop(manifest: WorkerManifest): Promise<void> {
       manifest.dataDir,
       {
         status: terminalStatus,
+        ...(terminalStatus !== "completed" && state.lastError ? { error: state.lastError } : {}),
         usage: {
           tokens: state.tokens,
           toolCalls: ctx.usage.toolCalls,

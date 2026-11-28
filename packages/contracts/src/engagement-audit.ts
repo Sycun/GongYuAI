@@ -71,6 +71,7 @@ export type EngagementAuditObservationCode =
   | "stalled-intent"
   | "tentative-backlog"
   | "unexplored-asset"
+  | "shallow-failure"
   | "idle-credential"
   | "l1-unverified";
 
@@ -147,8 +148,9 @@ const CODE_RANK: Record<EngagementAuditObservationCode, number> = {
   "stalled-intent": 2,
   "tentative-backlog": 3,
   "unexplored-asset": 4,
-  "idle-credential": 5,
-  "l1-unverified": 6,
+  "shallow-failure": 5,
+  "idle-credential": 6,
+  "l1-unverified": 7,
 };
 
 const norm = (value: string | null | undefined): string =>
@@ -318,6 +320,45 @@ export function deriveEngagementAudit(
         `${untouched.slice(0, 5).map((asset) => asset.address).join("、")}` +
         `；优先为未触达目标 intent_propose，勿只磨已测资产。`,
       refs: untouched.slice(0, 8).map((asset) => asset.address),
+    });
+  }
+
+  // ---- 4b. Shallow-failed surfaces (1 failed attempt, 0 succeeded/open/confirmed, abandoned while grinding elsewhere) ----
+  const confirmedAssetRoots = new Set(
+    findings
+      .filter((finding) => CONFIRMED_STATUS.has(finding.status))
+      .map((finding) => norm(finding.asset)),
+  );
+  const byRoot = new Map<string, EngagementAuditIntent[]>();
+  for (const intent of intents) {
+    const root = norm(intent.assetRoot);
+    if (!root) continue;
+    const list = byRoot.get(root) ?? [];
+    list.push(intent);
+    byRoot.set(root, list);
+  }
+  const shallowFailedRoots: string[] = [];
+  const shallowFailedIntentIds: string[] = [];
+  for (const [root, list] of byRoot) {
+    if (confirmedAssetRoots.has(root)) continue;
+    const hasOpen = list.some((i) => OPEN_STATUS.has(i.status));
+    const hasSucceeded = list.some((i) => i.status === "succeeded");
+    const failedList = list.filter((i) => i.status === "failed" || i.status === "expired");
+    if (!hasOpen && !hasSucceeded && failedList.length === 1 && list.length === 1) {
+      shallowFailedRoots.push(root);
+      shallowFailedIntentIds.push(failedList[0]!.id);
+    }
+  }
+  if (shallowFailedRoots.length > 0 && intents.length >= 3) {
+    shallowFailedRoots.sort((a, b) => a.localeCompare(b));
+    observations.push({
+      code: "shallow-failure",
+      key: "shallow",
+      severity: "warn",
+      text:
+        `${shallowFailedRoots.length} 个攻击面仅首探受挫 1 次且零确认战果即被搁置：${shallowFailedRoots.slice(0, 5).join("、")}；` +
+        `首探时间盒仅覆盖浅层假设，优先换正交 technique 二探回补，严禁将单次未果视为已穷尽。`,
+      refs: shallowFailedIntentIds.slice(0, 8),
     });
   }
 

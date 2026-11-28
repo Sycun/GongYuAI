@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { buildNonInteractiveEnv, wrapSubprocessCommand } from "./proc.js";
 
 /**
  * 后台作业：一次工具调用之外的命令，活过 120s 工具超时。
@@ -76,10 +77,12 @@ export class JobStore {
     const exitPath = join(dir, "exit.code");
     const out = openSync(stdoutPath, "a");
     const err = openSync(stderrPath, "a");
-    const wrapped = `(\n${input.command}\n) ; __gy_ec=$? ; printf '%s' "$__gy_ec" > ${JSON.stringify(exitPath)}`;
+    const effectiveEnv = buildNonInteractiveEnv(input.env);
+    const guardedBody = wrapSubprocessCommand(input.command, effectiveEnv);
+    const wrapped = `(\n${guardedBody}\n) ; __gy_ec=$? ; printf '%s' "$__gy_ec" > ${JSON.stringify(exitPath)}`;
     const child = spawn("/bin/bash", ["-lc", wrapped], {
       cwd: input.cwd,
-      env: input.env ?? process.env,
+      env: effectiveEnv,
       detached: true,
       stdio: ["ignore", out, err],
     });

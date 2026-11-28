@@ -433,6 +433,14 @@ export class WorkerRunner {
         /* ignore */
       }
     }
+    const envTerminalPath = join(task.dataDir, "environment-terminal.json");
+    if (existsSync(envTerminalPath)) {
+      try {
+        unlinkSync(envTerminalPath);
+      } catch {
+        /* ignore */
+      }
+    }
     try {
       for (const name of readdirSync(task.dataDir)) {
         if (/^worker-status(-w\d+)?\.json$/.test(name)) {

@@ -114,6 +114,25 @@ type KnowledgeSectionHit = {
   pageBasis: string | null;
 };
 
+/**
+ * Guard against benchmark evaluation scorecards / leaderboards contaminating
+ * real-world vulnerability research (e.g. archived benchmark runs mentioning
+ * challenge codes, hint usage counts, or leaderboard scores).
+ */
+export function isBenchmarkContaminatedHit(
+  hit: Pick<KnowledgeSectionHit, "materialTitle" | "locator" | "heading" | "text">,
+): boolean {
+  const meta = `${hit.materialTitle} ${hit.locator} ${hit.heading ?? ""}`.toLowerCase();
+  if (/(?:sapperlens|tsecbench|leaderboard|benchmark[-_ ]?(?:report|score|eval)|跑分|评测基线)/i.test(meta)) {
+    return true;
+  }
+  const body = hit.text;
+  if (/(?:tsecbench|sapperlens|用了\s*\d+\s*条提示|openapi\/v1\/challenges\/hint)/i.test(body)) {
+    return true;
+  }
+  return false;
+}
+
 function queryKnowledgeDb(
   dbPath: string,
   fp: FingerprintQuery,
@@ -129,6 +148,7 @@ function queryKnowledgeDb(
     const scopeClause = engagementId
       ? `(m.scope_key = 'shared' OR m.scope_key = ?)`
       : `m.scope_key = 'shared'`;
+    const fetchLimit = Math.max(limit * 3, 6);
     const baseSelect = `
       SELECT
         m.id AS materialId,
@@ -164,9 +184,11 @@ function queryKnowledgeDb(
         AND (lower(m.title) LIKE ? OR lower(s.text) LIKE ?)
         LIMIT ?`;
       const params = engagementId
-        ? [`engagement:${engagementId}`, prodLike, prodLike, prodLike, verLike, verLike, limit]
-        : [prodLike, prodLike, prodLike, verLike, verLike, limit];
-      const exact = db.prepare(exactSql).all(...params) as KnowledgeSectionHit[];
+        ? [`engagement:${engagementId}`, prodLike, prodLike, prodLike, verLike, verLike, fetchLimit]
+        : [prodLike, prodLike, prodLike, verLike, verLike, fetchLimit];
+      const exact = (db.prepare(exactSql).all(...params) as KnowledgeSectionHit[])
+        .filter((row) => !isBenchmarkContaminatedHit(row))
+        .slice(0, limit);
       if (exact.length > 0) return exact;
     }
 
@@ -175,9 +197,11 @@ function queryKnowledgeDb(
       AND (lower(m.title) LIKE ? OR lower(COALESCE(s.heading, '')) LIKE ?)
       LIMIT ?`;
     const params = engagementId
-      ? [`engagement:${engagementId}`, prodLike, prodLike, limit]
-      : [prodLike, prodLike, limit];
-    return db.prepare(titleSql).all(...params) as KnowledgeSectionHit[];
+      ? [`engagement:${engagementId}`, prodLike, prodLike, fetchLimit]
+      : [prodLike, prodLike, fetchLimit];
+    return (db.prepare(titleSql).all(...params) as KnowledgeSectionHit[])
+      .filter((row) => !isBenchmarkContaminatedHit(row))
+      .slice(0, limit);
   } catch {
     return [];
   } finally {

@@ -5,6 +5,7 @@ import { writeEvidenceFile } from "@gongyuai/history";
 import { promoteTrafficForFinding, trafficLabelUuid } from "@gongyuai/exec";
 import type { ToolContext } from "./tools.js";
 import { appendProgress, chargeToolCall, gateTool } from "./tools.js";
+import { writeEnvironmentTerminal } from "./loop-shared.js";
 
 /**
  * TSecBench 平台一等工具：list / start / submit / close / status。
@@ -356,6 +357,71 @@ export function autoAdmitContainerTargets(
   return admitted;
 }
 
+function isBoardTerminalResponse(status: number, text: string): boolean {
+  if (status === 409 && /already\s+finished|invalid_state/i.test(text)) return true;
+  if (status >= 400 && /"code"\s*:\s*"invalid_state"/i.test(text) && /already\s+finished/i.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function recordBoardTerminalState(
+  ctx: ToolContext,
+  action: string,
+  res: { status: number; text: string },
+): string {
+  const reason = `受测靶场窗口已结束（HTTP ${res.status}: ${res.text.slice(0, 180).trim()}）`;
+  writeEnvironmentTerminal(ctx.manifest.dataDir, reason, {
+    source: "tsecbench",
+    status: res.status,
+  });
+  const relPath = "tsecbench/task-terminal.json";
+  try {
+    writeEvidenceFile(
+      ctx.manifest.evidenceDir,
+      relPath,
+      JSON.stringify(
+        {
+          observedAt: new Date().toISOString(),
+          action,
+          status: res.status,
+          response: res.text.slice(0, 500),
+          terminal: true,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch {
+    /* best-effort terminal evidence */
+  }
+  try {
+    const alreadyRecorded = ctx.history
+      .listFacts(ctx.manifest.taskId)
+      .some((f) => f.tags.includes("environment-terminal"));
+    if (!alreadyRecorded) {
+      ctx.history.appendFact({
+        taskId: ctx.manifest.taskId,
+        layer: "title",
+        title: "目标环境已进入终态：受测窗口已关闭，靶机已回收",
+        summary: `${reason}。已写入终态凭证 ${relPath}；禁止继续调用 start/submit/close 或新建 Explore/QA 意图，请在途会话立即结项并完成单次报告封账后退出。`,
+        evidencePath: relPath,
+        tags: ["system", "lifecycle", "environment-terminal"],
+      });
+    }
+  } catch {
+    /* non-fatal */
+  }
+  return JSON.stringify({
+    error: "environment_terminal",
+    terminal: true,
+    status: res.status,
+    evidencePath: relPath,
+    message:
+      "受测环境窗口已结束（409 already finished），禁止继续发起 start/submit/close 或新建任何 Explore 意图；若持有在途 Intent 请立即 intent_conclude，主节点完成单次报告收尾后即自动停机。",
+  });
+}
+
 export async function tsecbenchTool(
   ctx: ToolContext,
   args: { action: string; code?: string; flag?: string },
@@ -376,6 +442,7 @@ export async function tsecbenchTool(
   }
   if (action === "list" || action === "status") {
     const r = await api(ctx, "GET", "/openapi/v1/challenges");
+    if (isBoardTerminalResponse(r.status, r.text)) return recordBoardTerminalState(ctx, action, r);
     if (r.status >= 400) return JSON.stringify({ error: r.text.slice(0, 500) });
     const list = JSON.parse(r.text) as Array<Record<string, unknown>>;
     for (const c of list) {
@@ -405,6 +472,7 @@ export async function tsecbenchTool(
   if (!code) return JSON.stringify({ error: "code required for start/submit/close" });
   if (action === "start") {
     const r = await api(ctx, "POST", "/openapi/v1/challenges/start", { query: { unique_code: code } });
+    if (isBoardTerminalResponse(r.status, r.text)) return recordBoardTerminalState(ctx, action, r);
     let admitted: Array<{ address: string; factId: string }> = [];
     try {
       const parsed = JSON.parse(r.text) as Record<string, unknown>;
@@ -471,12 +539,14 @@ export async function tsecbenchTool(
   }
   if (action === "close") {
     const r = await api(ctx, "POST", "/openapi/v1/challenges/close", { query: { unique_code: code } });
+    if (isBoardTerminalResponse(r.status, r.text)) return recordBoardTerminalState(ctx, action, r);
     return r.text.slice(0, 2000);
   }
   if (action === "submit") {
     const flag = (args.flag ?? "").trim();
     if (!flag) return JSON.stringify({ error: "flag required" });
     const r = await api(ctx, "POST", "/openapi/v1/challenges/submit", { body: { unique_code: code, flag } });
+    if (isBoardTerminalResponse(r.status, r.text)) return recordBoardTerminalState(ctx, action, r);
     if (r.status < 400) {
       try {
         const safeCode = code.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 80) || "challenge";

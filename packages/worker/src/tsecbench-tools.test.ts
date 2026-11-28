@@ -395,6 +395,43 @@ test("OpenAPI string[] container_addr auto-admits live assets, unblocks Leader i
       () => assertCommandAllowed(follower, "proxychains curl -s http://172.19.0.4:8080/"),
       /not in task targets|越界|denied/,
     );
+
+    // 5. HTTP 409 already finished writes environment-terminal sidecar and blocks post-window intent_propose drift
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ code: "invalid_state", message: "task task_202611pnxk28u19i already finished" }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+    const termRaw = await tsecbenchTool(ctx, { action: "list" });
+    const termJson = JSON.parse(termRaw) as { error?: string; terminal?: boolean; evidencePath?: string };
+    assert.equal(termJson.error, "environment_terminal");
+    assert.equal(termJson.terminal, true);
+    assert.equal(existsSync(join(dir, "environment-terminal.json")), true);
+    assert.equal(existsSync(join(leader.evidenceDir, "tsecbench/task-terminal.json")), true);
+
+    const blockedPropose = handleGraphTool(
+      "intent_propose",
+      {
+        title: "Post-stop TeX QA drift",
+        summary: "Mutate verify-all.sh",
+        assetRoot: "10.0.1.99",
+        sourceFactIds: "origin",
+      },
+      {
+        history,
+        taskId: leader.taskId,
+        workspaceDir: leader.workspaceDir,
+        trafficDir: leader.dataDir,
+        state,
+        workerId: leader.workerId,
+        execution: leader.execution,
+        leader: true,
+        workerCount: 4,
+        save: () => ckpt.save(state),
+      },
+    );
+    assert.match(blockedPropose ?? "", /目标环境已进入终态.*禁止再派发/);
   } finally {
     globalThis.fetch = origFetch;
     if (prevUrl === undefined) delete process.env.BENCHMARK_BASE_URL;

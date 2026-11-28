@@ -258,7 +258,10 @@ export function maybeForceEvidenceStall(opts: {
       const nextLeft = opts.state.drainStepsRemaining - 1;
       opts.state.drainStepsRemaining = nextLeft;
       opts.save();
-      const drainMsg = `[收尾保护窗 剩余 ${nextLeft}/${maxDrain} 步] 请立即完成最终证据验证提交或调用 intent_conclude 落盘客观试验增量（逾期将强制回收会话）。`;
+      const drainMsg =
+        nextLeft === 1
+          ? `[收尾保护窗 最后 1/${maxDrain} 步] 下一步是本轮最后一次工具调用机会：禁止再启动耗时扫描或盲爆命令，请立即完成已获突破入账（finding_verify / credential_record / asset_record）并调用 intent_conclude 写入客观已测输入、响应特征、已获凭据与存活隧道/会话标识（逾期将强制回收会话）。`
+          : `[收尾保护窗 剩余 ${nextLeft}/${maxDrain} 步] 请尽快完成最终证据验证提交或调用 intent_conclude 落盘客观试验增量（逾期将强制回收会话）。`;
       return {
         concluded: false,
         draining: true,

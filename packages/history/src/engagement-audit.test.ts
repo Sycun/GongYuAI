@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { openHistory } from "./index.js";
+import { openHistory, CommandLedger } from "./index.js";
 
 const TASK_ID = "55555555-5555-4555-8555-555555555555";
 
@@ -86,6 +86,90 @@ test("engagementAudit derives repeat failures, untouched assets and tentative ba
     assert.match(observe, /## 作业记分卡/);
     assert.match(observe, /确认率 0%/);
     assert.match(observe, /空台账|待确认|未测/);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Observe projects credential spray ledger and unclosed single-attempt scope-brief debt; CommandLedger expires stale epoch tickets", () => {
+  const { root, store } = setup("gy-observe-debt-");
+  try {
+    const auth = { targets: ["10.0.160.0/24"], outOfScope: [] };
+    store.recordAsset({ taskId: TASK_ID, address: "10.0.160.129", auth, live: true });
+    const briefE304 = store.appendFact({
+      taskId: TASK_ID,
+      layer: "title",
+      title: "委托简报 [e3-04] 终端检测规避",
+      summary: "目标标识：e3-04",
+      tags: ["scope-brief", "transferable", "challenge:e3-04", "asset.addr:10.0.160.129"],
+    });
+    const briefE103 = store.appendFact({
+      taskId: TASK_ID,
+      layer: "title",
+      title: "委托简报 [e1-03] WAF 诊断绕过",
+      summary: "目标标识：e1-03",
+      tags: ["scope-brief", "transferable", "challenge:e1-03", "asset.addr:10.0.160.129"],
+    });
+
+    const i1 = store.proposeIntent({
+      taskId: TASK_ID,
+      title: "e3-04 首探",
+      sourceFactIds: [briefE304.id],
+      technique: "contract-probe",
+      assetRoot: "10.0.160.129",
+    });
+    store.claimIntent(TASK_ID, i1.id, "w1");
+    store.concludeIntent(TASK_ID, i1.id, "failed", "POST /check returned HTTP 500 without Win32 API symbols", { workerId: "w1" });
+
+    for (const n of [1, 2]) {
+      const ix = store.proposeIntent({
+        taskId: TASK_ID,
+        title: `e1-03 探索 #${n}`,
+        sourceFactIds: [briefE103.id],
+        technique: `waf-${n}`,
+        assetRoot: "10.0.160.129",
+      });
+      store.claimIntent(TASK_ID, ix.id, "w2");
+      store.concludeIntent(TASK_ID, ix.id, "succeeded", "bypassed WAF", {
+        workerId: "w2",
+        facts: [{ layer: "title", title: `e1-03 verified #${n}` }],
+      });
+    }
+
+    store.recordCredential({
+      taskId: TASK_ID,
+      kind: "password",
+      asset: "10.0.160.128",
+      username: "zhangwei",
+      secretRef: "evidence/b-02/init-sql.txt",
+      verified: true,
+      tier: "L2",
+    });
+
+    const observe = store.observe(TASK_ID);
+    assert.match(observe, /## 委托范围受挫待回补项/);
+    assert.match(observe, /e3-04（失败 1 次，0 成功/);
+    assert.doesNotMatch(observe, /e1-03（失败/);
+    assert.match(observe, /## 凭据台账/);
+    assert.match(observe, /user=zhangwei .* ref=evidence\/b-02\/init-sql\.txt/);
+
+    const ledger = new CommandLedger(root);
+    try {
+      ledger.activate(TASK_ID, 1);
+      const orphan = ledger.request(TASK_ID, 1, { tool: "shell", summary: "id", digest: "d1", command: "id" });
+      assert.equal(ledger.state(orphan.id), "pending");
+      // Advancing to fence 2 expires orphan pending tickets from fence 1
+      ledger.activate(TASK_ID, 2);
+      assert.equal(ledger.state(orphan.id), "expired");
+      assert.equal(ledger.get(orphan.id)?.receipt?.decision, "expired");
+
+      const activeTicket = ledger.request(TASK_ID, 2, { tool: "shell", summary: "whoami", digest: "d2", command: "whoami" });
+      ledger.deactivate(TASK_ID, 2);
+      assert.equal(ledger.state(activeTicket.id), "expired");
+    } finally {
+      ledger.close();
+    }
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

@@ -45,9 +45,11 @@ import {
 } from "./prompt-builder.js";
 import { canRelay, synthesizeGroundedRelayFields, writeRelayProtocol } from "./relay-protocol.js";
 import {
+  evaluateEnvironmentTerminalExit,
   flushUsage,
   maybeSoftPaceMessage,
   poolTurnYieldDirective,
+  readEnvironmentTerminal,
   resolvePiModelRef,
   runExploreTimeoutGate,
   shouldResetFollowerSession,
@@ -130,6 +132,7 @@ export async function runOpenAiToolLoop(
   let refusalStreak = 0;
   let leaderIdleStepsSincePropose = 0;
   let pendingFollowerIntentReset = false;
+  let terminalFinalizationRounds = 0;
 
   const messages: ChatMessage[] = [];
   const resetConversationToObserve = (banner: string, includeRelays: boolean) => {
@@ -266,6 +269,27 @@ export async function runOpenAiToolLoop(
 
     const livePoolSize = readPoolSize();
     const role = resolveWorkerRole({ leader, workerCount: livePoolSize });
+    const envTerminal = readEnvironmentTerminal(manifest.dataDir);
+    const termDecision = evaluateEnvironmentTerminalExit({
+      terminal: envTerminal,
+      leader: role !== "follower",
+      openIntentsCount: envTerminal ? ctx.history.openIntents(manifest.taskId).length : 0,
+      activeIntentId: state.activeIntentId,
+      finalizationRoundsCompleted: terminalFinalizationRounds,
+    });
+    if (termDecision.shouldExit) {
+      if (envTerminal && role !== "follower") state.lastError = envTerminal.reason;
+      ckpt.save(state);
+      appendProgress(manifest.workspaceDir, "目标环境已进入终态且收尾完成，退出工具循环");
+      break;
+    }
+    if (termDecision.runFinalizationRound && envTerminal) {
+      terminalFinalizationRounds += 1;
+      messages.push({
+        role: "user",
+        content: `[目标环境终态收口 · 唯一封账轮] ${envTerminal.reason}。所有在途 Explore 已排空，禁止再向靶机发起请求或新建意图；请仅核对既有 verified findings 完成可达成报告目标断言（assert_goal）并总结残余风险，本轮结束后系统将自动停机。`,
+      });
+    }
 
     const timeoutNote = runExploreTimeoutGate(
       manifest,

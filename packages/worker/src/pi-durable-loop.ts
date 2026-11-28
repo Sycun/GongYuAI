@@ -44,9 +44,11 @@ import {
   accountExploreTimeoutTurn,
   beginExploreTimeoutClock,
   consumePendingSoftPace,
+  evaluateEnvironmentTerminalExit,
   flushUsage,
   maybeSoftPaceMessage,
   poolTurnYieldDirective,
+  readEnvironmentTerminal,
   resolvePiModelRef,
   runExploreTimeoutGate,
   shouldResetFollowerSession,
@@ -207,6 +209,7 @@ export async function tryPiDurable(
       return { ...obj, control: { ...prevControl, terminate: true } } as T;
     };
 
+    let drainChargedOnStep = -1;
     const applyExploreTimeout = <T,>(toolName: string, out: T): T => {
       if (toolName === "intent_conclude") return out;
       const due = accountExploreTimeoutTurn({
@@ -222,6 +225,9 @@ export async function tryPiDurable(
       const livePoolSize = readPoolSize();
       const rot = runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolSize);
       if (!rot) return out;
+      if (state.activeIntentId && state.drainIntentId === state.activeIntentId) {
+        drainChargedOnStep = state.step;
+      }
       const role = resolveWorkerRole({ leader, workerCount: livePoolSize });
       if (!state.activeIntentId) {
         pendingRotationNotice = rot;
@@ -577,12 +583,14 @@ export async function tryPiDurable(
 
               // Deferred final Soft Drain step (`drainStepsRemaining === 1`): run after every
               // sibling tool in the final grace batch (`write_evidence`, `finding_verify`,
-              // `intent_conclude`) has settled so an active conclude/verify is never killed mid-batch.
+              // `intent_conclude`) has settled — NEVER on the same `state.step` that just
+              // decremented `2 -> 1` in `applyExploreTimeout` before the model sees `剩余 1/3 步`.
               if (
                 state.phase === "explore" &&
                 state.activeIntentId &&
                 state.drainIntentId === state.activeIntentId &&
-                (state.drainStepsRemaining ?? 0) <= 1
+                (state.drainStepsRemaining ?? 0) <= 1 &&
+                drainChargedOnStep !== state.step
               ) {
                 const rot = runExploreTimeoutGate(manifest, ctx.history, state, ckpt, livePoolSize);
                 if (rot) {
@@ -686,6 +694,7 @@ export async function tryPiDurable(
       let round = state.round;
       let refusalStreak = 0;
       let pendingRefusalPrompt: string | null = null;
+      let terminalFinalizationRounds = 0;
       for (;;) {
         const poolDecision = await waitForPoolTurn({
           manifest,
@@ -710,6 +719,33 @@ export async function tryPiDurable(
         manifest.workerCount = livePoolForPrompt;
         syncPiToolSurface("role");
         const role = resolveWorkerRole({ leader, workerCount: livePoolForPrompt });
+
+        const envTerminal = readEnvironmentTerminal(manifest.dataDir);
+        const termDecision = evaluateEnvironmentTerminalExit({
+          terminal: envTerminal,
+          leader: role !== "follower",
+          openIntentsCount: envTerminal ? ctx.history.openIntents(manifest.taskId).length : 0,
+          activeIntentId: state.activeIntentId,
+          finalizationRoundsCompleted: terminalFinalizationRounds,
+        });
+        if (termDecision.shouldExit) {
+          if (envTerminal && role !== "follower") {
+            state.lastError = envTerminal.reason;
+          }
+          ckpt.save(state);
+          appendProgress(
+            manifest.workspaceDir,
+            "目标环境已进入终态且在途工作已全部收束，结束 Pi 循环",
+          );
+          break;
+        }
+        const terminalFinalizationBanner =
+          termDecision.runFinalizationRound && envTerminal
+            ? `[目标环境终态收口 · 唯一封账轮] ${envTerminal.reason}。所有在途 Explore 已排空，禁止再向靶机发起请求或新建任何 Explore/QA 意图；请仅核对当前既有 verified findings，将已满足的报告/台账目标调用 assert_goal，如实记录未闭环残余风险后直接回复 DONE 结束本轮（本轮结束后系统立即停机，不再续跑）。`
+            : "";
+        if (termDecision.runFinalizationRound) {
+          terminalFinalizationRounds += 1;
+        }
 
         const timeoutNote =
           pendingRotationNotice ??
@@ -777,6 +813,7 @@ export async function tryPiDurable(
                 role === "follower" ? "" : "全部目标通过后回复 DONE。",
                 "",
                 kickoffUserMessage(state.phase),
+                terminalFinalizationBanner,
                 timeoutNote ?? "",
                 softPace ?? "",
                 "",
@@ -789,6 +826,7 @@ export async function tryPiDurable(
                 "禁止输出交接摘要 / Session Relay 交接块或主动收口；请直接继续调用工具推进未完成目标。",
                 yieldRuleLine,
                 "按渗透测试节奏继续：建图/验证影响/写 finding/换面；完成语义以 assert_goal / evidence gate 为准。",
+                terminalFinalizationBanner,
                 timeoutNote ?? "",
                 softPace ?? "",
                 "",
@@ -906,6 +944,12 @@ export async function tryPiDurable(
         }
         if (ctx.history.allGoalsPass(manifest.taskId)) {
           appendProgress(manifest.workspaceDir, "全部目标已通过，结束 Pi 循环");
+          break;
+        }
+        if (termDecision.runFinalizationRound && envTerminal) {
+          state.lastError = envTerminal.reason;
+          ckpt.save(state);
+          appendProgress(manifest.workspaceDir, "完成目标环境终态唯一封账轮，结束 Pi 循环");
           break;
         }
         if (isBudgetHit(ctx.usage.toolCalls, manifest.budget.maxToolCalls)) {

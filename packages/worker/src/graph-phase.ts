@@ -29,6 +29,7 @@ import {
 } from "@gongyuai/exec";
 import type { ConcludeFactInput, FanoutPolicy, HistoryStore } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
+import { readEnvironmentTerminal } from "./loop-shared.js";
 import { appendProgress } from "./tools.js";
 
 export function fanoutPolicyFromExecution(
@@ -274,11 +275,11 @@ export function phaseDirective(
     }
   } else if (p === "explore") {
     lines.push(
-      "Explore（轻装试错 · 客观收束）：先读 Observe 中的委托简报（预置账号/内部域名/多目标数）与「存活持久连接与后台设施」（跨 Intent 直接复用已有 SOCKS 隧道、PTY shell_session 与后台监听），一次只 claim 一个 Intent → 高速验证（同目标多路并行时工作区临时文件/Cookie 按 <host>-<technique>-* 隔离命名；随时用 fact_draft 更新草稿防超时丢失；平时不写长篇台账报告）→ 仅在拿到实质突破（可复现漏洞/有效凭据/立足点/内网新主机）或进入 3 步收尾保护窗时集中入账（finding_verify / credential_record / host_profile_record / asset_record，支持 tunnel_open / proxychains 内网横移）→ intent_conclude（未完全达成时只准客观陈述测试接口、响应状态码/特征、产物路径及存活会话/隧道标识，严禁写“无漏洞/此路不通/已穷尽”绝对否定结论）。",
+      "Explore（轻装试错 · 立足点搜刮先行 · 客观收束）：先读 Observe 中的委托简报（若含预置工号/口令/Token，首探第一步必须先实测预置凭据登录与鉴权边界，严禁越过已知凭据盲爆）、凭据台账与「存活持久连接与后台设施」（跨 Intent 直接复用已有 SOCKS 隧道、PTY shell_session 与后台监听），一次只 claim 一个 Intent → 高速验证（一旦取得任意文件读或命令执行立足点，前 5 分钟必须优先搜刮本机源码配置、*.sql/init.sql、本地 DB/Redis 与环境变量，用 credential_record 登记凭据并对内网认证面交叉喷洒，发现内网存活主机立即 asset_record 建档 + tunnel_open 纳管隧道；跨架构二进制/VM 逆向优先用 r2 -2 -q -e scr.color=0 -c 'aa; afl; pdg @ main' 导出全量跳表 handler 伪 C 再写 Python/Z3/Unicorn 求解，严禁讨要靶场 hint；同目标多路并行时临时文件按 <host>-<technique>-* 隔离，随时用 fact_draft 更新草稿）→ 突破或进入 3 步收尾保护窗时集中入账 → intent_conclude（未完全达成时只客观陈述已测输入、响应特征、已获凭据与存活会话/隧道端口，严禁写“无漏洞/此路不通/已穷尽”绝对否定结论）。",
     );
   } else if (p === "reason") {
     lines.push(
-      `Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + 存活隧道/会话 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 优先为 0 Intent 未触达资产补单；当活跃可测主机少于并发槽位或面对复杂重点资产/跳板内网时，主动对同一 assetRoot 按不同正交 technique 并行扇出 2～3 条短 Intent（如 recon-ports-fingerprint、greybox-auth-logic、known-cve-poc、intranet-pivot 并行推进，复用已建立的隧道与会话）→ 更新 engagement 叙事。${multiWorkerLeader ? `当前 ${exploreSlots} 路并发 Follower 在岗：靶场已解题或本轮时间盒耗尽容器先 tsecbench(close) 腾槽，优先按 easy → medium → hard 梯队 start 新题（首探 12m 快扫建图，二探 30m 攻坚长链，三探+ 45m 纵深决战，阶段突破自动续期 20m），尾盘题少时单题多路正交并进保持 ${exploreSlots} 路满槽（勿传 claim='true'）。` : "单节点下 intent_propose 可传 claim='true' 直接切入 Explore。"}repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset 出现时先处理，不要继续磨。可质疑子会话失败结论的完整性并换正交维度重测；oos 禁止作利用唯一前驱。交付叙述只引用 verified finding。禁止 shell / MCP 执行。`,
+      `Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + 凭据台账 + 存活隧道/会话 + 委托范围待回补项 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 优先为 0 Intent 未触达资产与仅首探失败 1 次即被搁置的受挫目标（shallow-failure / 待回补项）换正交 technique 补单；内网横向发现新存活主机（如 172.x / 192.168.x）必须按单台内网主机作为独立 assetRoot 拆单推进并组织既有凭据交叉喷洒，严禁全部堆在公网入口 IP 大包干；当活跃可测主机少于并发槽位或面对复杂重点资产时，主动按不同正交 technique 并行扇出 2～3 条短 Intent → 更新 engagement 叙事。${multiWorkerLeader ? `当前 ${exploreSlots} 路并发 Follower 在岗：靶场已解题或本轮时间盒耗尽容器先 tsecbench(close) 腾槽，优先按 easy → medium → hard 梯队 start 新题（首探 12m 快扫建图，二探 30m 攻坚长链，三探+ 45m 纵深决战，阶段突破自动续期 20m），尾盘优先回补仅首探 1 次未果的挂起目标，再单题多路正交并进保持 ${exploreSlots} 路满槽（勿传 claim='true'）。` : "单节点下 intent_propose 可传 claim='true' 直接切入 Explore。"}repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset / shallow-failure 出现时先处理，不要继续磨。可质疑子会话失败结论的完整性并换正交维度重测；oos 禁止作利用唯一前驱。交付叙述只引用 verified finding。禁止 shell / MCP 执行。`,
     );
   }
   return lines.join("\n");
@@ -926,6 +927,10 @@ export function handleGraphTool(
   }
 
   if (name === "intent_propose") {
+    const envTerminal = readEnvironmentTerminal(ctx.trafficDir);
+    if (envTerminal) {
+      return `错误: 目标环境已进入终态（${envTerminal.reason}），禁止再派发新 Explore 或文书 QA 意图；请核对既有 verified findings 完成单次交付收尾后直接结束任务。`;
+    }
     let sourceFactIds = parseFactIds(args.sourceFactIds ?? "");
     // Lane D — asset_root 边界校验：只能落在已确认/已登记资产上，不许凭意图发明资产。
     let assetRoot: string | undefined;
@@ -1183,6 +1188,10 @@ export function handleGraphTool(
   }
 
   if (name === "technique_transfer") {
+    const envTerminal = readEnvironmentTerminal(ctx.trafficDir);
+    if (envTerminal) {
+      return `错误: 目标环境已进入终态（${envTerminal.reason}），禁止再广播扇出新意图；请完成单次交付收尾后直接结束任务。`;
+    }
     const sourceFactIds = parseFactIds(args.sourceFactIds ?? "");
     const targets = (args.targetAddresses ?? "")
       .split(/[,;\s]+/)

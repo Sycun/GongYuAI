@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import type { WorkerManifest } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
-import { extractFingerprints, openFingerprintKnowledgeRag } from "./knowledge-rag.js";
+import { extractFingerprints, isBenchmarkContaminatedHit, openFingerprintKnowledgeRag } from "./knowledge-rag.js";
 import { matchesTrigger } from "./skills/runtime.js";
 
 function createTestKnowledgeDb(dbPath: string): void {
@@ -157,4 +157,25 @@ test("matchesTrigger enforces word boundaries for ASCII triggers and keeps CJK s
   assert.equal(matchesTrigger("main domain plain text chain", "ai"), false);
   assert.equal(matchesTrigger("found active directory kerberos ticket", "kerberos"), true);
   assert.equal(matchesTrigger("存在越权读取漏洞", "越权"), true);
+});
+
+test("isBenchmarkContaminatedHit filters benchmark scorecards and hint logs while keeping real CVE guides", () => {
+  assert.equal(
+    isBenchmarkContaminatedHit({
+      materialTitle: "upstream-sapperlens.md",
+      locator: "docs/evidence/knowledge-library/upstream-sapperlens.md:1057",
+      heading: "Baseline Run",
+      text: "f2-05 1/1 解出（VM 障眼法 + bytecode recipe，用了 1 条提示）",
+    }),
+    true,
+  );
+  assert.equal(
+    isBenchmarkContaminatedHit({
+      materialTitle: "GeoServer 2.23.2 JXPath RCE Guide",
+      locator: "sec-1",
+      heading: "CVE-2024-36401 valueReference",
+      text: "GeoServer 2.23.2 evaluates XPath expressions via Commons JXPath in WFS GetPropertyValue.",
+    }),
+    false,
+  );
 });

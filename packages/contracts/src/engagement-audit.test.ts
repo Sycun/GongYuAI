@@ -309,3 +309,21 @@ test("formatEngagementAuditSummary renders counts, rate and gaps", () => {
   assert.match(text, /确认率 100%/);
   assert.match(text, /缺口：1 个在范围主机未测/);
 });
+
+test("shallow-failure flags single-attempt failed surfaces abandoned while other targets advance", () => {
+  const audit = deriveEngagementAudit({
+    now: NOW,
+    assets: [asset("edr.example.com", 5), asset("portal.example.com", 3)],
+    intents: [
+      intent("i-edr-1", "evasion-probe", "edr.example.com", "failed"),
+      intent("i-portal-1", "ssrf", "portal.example.com", "succeeded"),
+      intent("i-portal-2", "lateral", "portal.example.com", "failed"),
+    ],
+    findings: [finding("f-portal", "verified", { asset: "portal.example.com" })],
+  });
+  const shallow = audit.observations.find((item) => item.code === "shallow-failure");
+  assert.ok(shallow, "expected shallow-failure observation");
+  assert.equal(shallow.severity, "warn");
+  assert.match(shallow.text, /edr\.example\.com/);
+  assert.deepEqual(shallow.refs, ["i-edr-1"]);
+});

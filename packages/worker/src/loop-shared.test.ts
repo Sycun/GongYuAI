@@ -13,6 +13,9 @@ import {
   EXPLORE_TIMEOUT_MIN_INTERVAL_MS,
   accountExploreTimeoutTurn,
   beginExploreTimeoutClock,
+  evaluateEnvironmentTerminalExit,
+  readEnvironmentTerminal,
+  writeEnvironmentTerminal,
   type ExploreTimeoutClock,
 } from "./loop-shared.js";
 
@@ -140,5 +143,85 @@ test("Soft Drain attaches 3/3 on the triggering tool result and parallel calls c
     else process.env.GY_EVIDENCE_STALL_MS = prev;
     history.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("evaluateEnvironmentTerminalExit parks followers immediately, waits for drain, and bounds leader to 1 finalization round", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gy-env-term-"));
+  try {
+    assert.equal(readEnvironmentTerminal(dir), null);
+    assert.deepEqual(
+      evaluateEnvironmentTerminalExit({
+        terminal: null,
+        leader: true,
+        openIntentsCount: 0,
+        activeIntentId: null,
+        finalizationRoundsCompleted: 0,
+      }),
+      { shouldExit: false, runFinalizationRound: false },
+    );
+
+    const written = writeEnvironmentTerminal(dir, "409 task already finished", {
+      source: "tsecbench",
+      status: 409,
+    });
+    assert.ok(written?.terminal);
+    assert.equal(readEnvironmentTerminal(dir)?.status, 409);
+
+    // Idle follower exits immediately; busy follower finishes its active Intent first
+    assert.deepEqual(
+      evaluateEnvironmentTerminalExit({
+        terminal: written,
+        leader: false,
+        openIntentsCount: 1,
+        activeIntentId: "intent-in-flight",
+        finalizationRoundsCompleted: 0,
+      }),
+      { shouldExit: false, runFinalizationRound: false },
+    );
+    assert.deepEqual(
+      evaluateEnvironmentTerminalExit({
+        terminal: written,
+        leader: false,
+        openIntentsCount: 0,
+        activeIntentId: null,
+        finalizationRoundsCompleted: 0,
+      }),
+      { shouldExit: true, runFinalizationRound: false },
+    );
+
+    // Leader waits while followers drain open Intents, runs 1 finalization round, then exits
+    assert.deepEqual(
+      evaluateEnvironmentTerminalExit({
+        terminal: written,
+        leader: true,
+        openIntentsCount: 2,
+        activeIntentId: null,
+        finalizationRoundsCompleted: 0,
+      }),
+      { shouldExit: false, runFinalizationRound: false },
+    );
+    assert.deepEqual(
+      evaluateEnvironmentTerminalExit({
+        terminal: written,
+        leader: true,
+        openIntentsCount: 0,
+        activeIntentId: null,
+        finalizationRoundsCompleted: 0,
+      }),
+      { shouldExit: false, runFinalizationRound: true },
+    );
+    assert.deepEqual(
+      evaluateEnvironmentTerminalExit({
+        terminal: written,
+        leader: true,
+        openIntentsCount: 0,
+        activeIntentId: null,
+        finalizationRoundsCompleted: 1,
+      }),
+      { shouldExit: true, runFinalizationRound: false },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

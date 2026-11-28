@@ -117,6 +117,7 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
   const hints = src.listHints(taskId, 20);
   const transferable = src.listTransferableFacts(taskId).slice(-20);
   const findings = src.listFindings(taskId).filter((f) => f.status !== "retracted");
+  const credentials = src.listCredentials(taskId);
 
   const factById = new Map(allFacts.map((f) => [f.id, f]));
   const intentById = new Map(allIntents.map((i) => [i.id, i]));
@@ -187,6 +188,42 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
   lines.push("## 目标");
   for (const g of goals) {
     lines.push(`- [${g.passes ? "通过" : "未通过"}] ${g.id}: ${g.title}`);
+  }
+
+  // Deterministic scope-brief debt tracker: surface commissioned targets (`challenge:<code>`)
+  // that stalled/failed once and have 0 open/succeeded Intents so context compaction never drops them.
+  const briefCodes = new Map<string, string>();
+  for (const f of allFacts) {
+    if (!f.tags.includes("scope-brief")) continue;
+    const chTag = f.tags.find((t) => t.startsWith("challenge:"));
+    const code = chTag ? chTag.slice("challenge:".length).trim() : "";
+    if (code && !briefCodes.has(code)) {
+      briefCodes.set(code, f.id);
+    }
+  }
+  if (briefCodes.size > 0 && allIntents.length >= 3) {
+    const shallowBriefs: string[] = [];
+    for (const [code, briefId] of briefCodes) {
+      const codeToken = code.toLowerCase();
+      const matchingIntents = allIntents.filter((i) => {
+        const hay = `${i.title} ${i.conclusion ?? ""}`.toLowerCase();
+        return hay.includes(codeToken) || i.sourceFactIds.includes(briefId);
+      });
+      if (matchingIntents.length === 0) continue;
+      const hasOpen = matchingIntents.some((i) => ["proposed", "claimed", "running"].includes(i.status));
+      const hasSucceeded = matchingIntents.some((i) => i.status === "succeeded");
+      const failedCount = matchingIntents.filter((i) => i.status === "failed" || i.status === "expired").length;
+      if (!hasOpen && !hasSucceeded && failedCount >= 1 && failedCount <= 2) {
+        shallowBriefs.push(`${code}（失败 ${failedCount} 次，0 成功 ←brief ${briefId}）`);
+      }
+    }
+    if (shallowBriefs.length > 0) {
+      lines.push("", `## 委托范围受挫待回补项（${shallowBriefs.length} · 防首探未果静默遗忘）`);
+      for (const item of shallowBriefs.slice(0, 12)) {
+        lines.push(`- ${item}`);
+      }
+      lines.push("（首探失败 ≠ 已验证穷尽；空闲槽位优先换正交 technique 回补上述目标，禁止仅凭压缩记忆臆断已完成。）");
+    }
   }
   lines.push("", `## 资产清单（${assets.length}）`);
   if (assets.length === 0) {
@@ -281,6 +318,16 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
         `- ${profile.asset} · ${profile.os ?? "os?"} · ${profile.domain ?? "domain?"} · users=${profile.users.length} priv=${profile.privileges.join("/") || "-"} svc=${profile.services.length} share=${profile.shares.length} av=${profile.av.join("/") || "-"}`,
       );
     }
+  }
+  if (credentials.length) {
+    lines.push("", `## 凭据台账（${credentials.length} · 供跨主机与内网横向喷洒复用）`);
+    for (const cred of credentials.slice(-20)) {
+      const verifiedTag = cred.verifiedAt ? "verified" : "unverified";
+      lines.push(
+        `- [${cred.id}] (${cred.tier ?? "L1"}/${verifiedTag}) ${cred.kind} @${cred.asset} · user=${cred.username || "—"} · reuse=${cred.reuseCount} · ref=${cred.secretRef}`,
+      );
+    }
+    lines.push("（内网横向或遇到新登录面时优先交叉复用已捕获凭据，盲爆字典前必先验证同源员工/管理员口令复用。）");
   }
   const plan = src.listPlan(taskId);
   if (plan.length) {

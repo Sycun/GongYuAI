@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   isBudgetHit,
   isExploreLeader,
@@ -17,6 +19,93 @@ import { writeWorkerStatus } from "./status.js";
 import { appendProgress, type ToolContext } from "./tools.js";
 
 export const STALE_INTENT_MAX_AGE_MS = 20 * 60_000;
+export const ENVIRONMENT_TERMINAL_FILE = "environment-terminal.json";
+
+export type EnvironmentTerminalState = {
+  terminal: true;
+  reason: string;
+  at: string;
+  source?: string;
+  status?: number;
+};
+
+export function writeEnvironmentTerminal(
+  dataDir: string | undefined,
+  reason: string,
+  extra?: { source?: string; status?: number },
+): EnvironmentTerminalState | null {
+  if (!dataDir) return null;
+  const existing = readEnvironmentTerminal(dataDir);
+  if (existing) return existing;
+  const payload: EnvironmentTerminalState = {
+    terminal: true,
+    reason,
+    at: new Date().toISOString(),
+    ...(extra?.source ? { source: extra.source } : {}),
+    ...(extra?.status !== undefined ? { status: extra.status } : {}),
+  };
+  try {
+    const filePath = join(dataDir, ENVIRONMENT_TERMINAL_FILE);
+    const tmpPath = `${filePath}.${process.pid}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(payload, null, 2));
+    renameSync(tmpPath, filePath);
+    return payload;
+  } catch {
+    return payload;
+  }
+}
+
+export function readEnvironmentTerminal(
+  dataDir: string | undefined,
+): EnvironmentTerminalState | null {
+  if (!dataDir) return null;
+  const filePath = join(dataDir, ENVIRONMENT_TERMINAL_FILE);
+  if (!existsSync(filePath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, "utf8")) as Partial<EnvironmentTerminalState>;
+    if (parsed && parsed.terminal === true && typeof parsed.reason === "string") {
+      return {
+        terminal: true,
+        reason: parsed.reason,
+        at: typeof parsed.at === "string" ? parsed.at : new Date().toISOString(),
+        ...(typeof parsed.source === "string" ? { source: parsed.source } : {}),
+        ...(typeof parsed.status === "number" ? { status: parsed.status } : {}),
+      };
+    }
+  } catch {
+    /* ignore transient sidecar read */
+  }
+  return null;
+}
+
+/**
+ * Bounded finalization policy when the external target environment / authorization window
+ * has permanently closed (e.g. target range reclaimed / HTTP 409 already finished):
+ * - Followers exit immediately once they have no active Intent (zero post-window drift);
+ * - Leader waits for in-flight Follower Intents to drain, runs at most 1 finalization round
+ *   to assert satisfied report/ledger goals and summarize residual risk, then exits cleanly.
+ */
+export function evaluateEnvironmentTerminalExit(opts: {
+  terminal: EnvironmentTerminalState | null;
+  leader: boolean;
+  openIntentsCount: number;
+  activeIntentId: string | null;
+  finalizationRoundsCompleted: number;
+}): { shouldExit: boolean; runFinalizationRound: boolean } {
+  if (!opts.terminal) {
+    return { shouldExit: false, runFinalizationRound: false };
+  }
+  if (!opts.leader) {
+    return { shouldExit: !opts.activeIntentId, runFinalizationRound: false };
+  }
+  if (opts.activeIntentId || opts.openIntentsCount > 0) {
+    return { shouldExit: false, runFinalizationRound: false };
+  }
+  if (opts.finalizationRoundsCompleted >= 1) {
+    return { shouldExit: true, runFinalizationRound: false };
+  }
+  return { shouldExit: false, runFinalizationRound: true };
+}
 
 /**
  * Decide whether a Follower's local conversation context should be wiped clean
@@ -145,6 +234,7 @@ export async function waitForPoolTurn(opts: {
       });
     }
 
+    const envTerminal = readEnvironmentTerminal(manifest.dataDir);
     if (ctx.history.allGoalsPass(taskId)) return "exit";
     if (
       isBudgetHit(ctx.usage.toolCalls, manifest.budget.maxToolCalls) ||
@@ -160,6 +250,20 @@ export async function waitForPoolTurn(opts: {
       ["proposed", "claimed", "running"].includes(i.status),
     );
     if (leader) {
+      if (envTerminal && open.length === 0 && !state.activeIntentId) {
+        state.phase = syncGraphPhase(ctx.history, taskId, state.phase, {
+          leader: true,
+          workerCount,
+          activeIntentId: state.activeIntentId,
+        });
+        return "ready";
+      }
+      if (envTerminal && open.length > 0 && !state.activeIntentId) {
+        // Environment is terminal: stay parked without proposing new work while followers drain active Intents.
+        flushUsage(manifest, ctx, state);
+        await new Promise((r) => setTimeout(r, 1_000));
+        continue;
+      }
       const decision = shouldWakeMultiWorkerLeader({
         openIntents: open,
         workerCount,
@@ -181,6 +285,7 @@ export async function waitForPoolTurn(opts: {
     }
 
     if (isLeaderStatusTerminal(manifest.dataDir)) return "exit";
+    if (envTerminal && !state.activeIntentId) return "exit";
     if (state.activeIntentId || open.some((i) => i.status === "proposed")) {
       state.phase = "explore";
       return "ready";

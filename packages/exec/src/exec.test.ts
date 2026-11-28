@@ -488,3 +488,22 @@ JSON`,
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("子进程非交互环境与 Linux OOM/虚拟内存护栏", async () => {
+  const { buildNonInteractiveEnv, resolveLinuxSubprocessMaxVmemKb, wrapSubprocessCommand } = await import("./proc.js");
+  const env = buildNonInteractiveEnv({ CUSTOM_KEY: "ok" });
+  assert.equal(env.DEBIAN_FRONTEND, "noninteractive");
+  assert.equal(env.SUDO_ASKPASS, "/bin/false");
+  assert.equal(env.GIT_TERMINAL_PROMPT, "0");
+  assert.equal(env.CUSTOM_KEY, "ok");
+
+  // 8 GiB host → ~5.76 GiB cap (leaves headroom for V8/QEMU while stopping runaway 11 GiB Python scripts)
+  const cap8g = resolveLinuxSubprocessMaxVmemKb({}, 8 * 1024 * 1024 * 1024);
+  assert.ok(cap8g >= 5_242_880 && cap8g <= 8_388_608, `unexpected cap8g=${cap8g}`);
+  assert.equal(resolveLinuxSubprocessMaxVmemKb({ GY_SUBPROCESS_MAX_VMEM_KB: "0" }), 0);
+
+  const linuxWrapped = wrapSubprocessCommand("python3 solve.py", {}, "linux");
+  assert.match(linuxWrapped, /oom_score_adj/);
+  assert.match(linuxWrapped, /ulimit -v \d+/);
+  assert.equal(wrapSubprocessCommand("python3 solve.py", {}, "darwin"), "python3 solve.py");
+});
