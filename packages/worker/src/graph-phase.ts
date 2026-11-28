@@ -118,6 +118,7 @@ const EXPLORE = new Set([
   "parse_tool_output",
   "change_record",
   "credential_record",
+  "credential_use",
   "install_tool",
   "install_mcp",
   "install_skill",

@@ -41,6 +41,7 @@ import {
   consultTool,
   credentialListTool,
   credentialRecordTool,
+  credentialUseTool,
   hostProfileListTool,
   hostProfileParseTool,
   hostProfileRecordTool,
@@ -50,7 +51,12 @@ import {
 import type { SkillHub } from "./skills/runtime.js";
 import { broadcastCredentialAdvisory, broadcastTunnelAdvisory } from "./supervisor-advisory.js";
 import { INSTALL_METHODS, type InstallMethod } from "./tool-installer.js";
-import { parseAndRecord, parseSummaryLine, toolForServer } from "./tool-output.js";
+import {
+  foldRepetitiveToolNoise,
+  parseAndRecord,
+  parseSummaryLine,
+  toolForServer,
+} from "./tool-output.js";
 import {
   appendProgress,
   installTool,
@@ -111,13 +117,14 @@ export type ToolCatalogEnv = {
   onCatalogChanged?: () => void;
 };
 
-/** Preserve leading headers and trailing diagnostics/tracebacks on large tool outputs. */
+/** Preserve leading headers and trailing diagnostics; fold scanner spam before truncating. */
 export function smartTruncateToolOutput(text: string, maxChars = 12_000): string {
-  if (text.length <= maxChars) return text;
+  const folded = foldRepetitiveToolNoise(text);
+  if (folded.length <= maxChars) return folded;
   const head = Math.floor(maxChars * 0.67);
   const tail = maxChars - head;
-  const omitted = text.length - head - tail;
-  return `${text.slice(0, head)}\n\n... [已省略中间 ${omitted} 字符，完整原始输出见 evidence/] ...\n\n${text.slice(-tail)}`;
+  const omitted = folded.length - head - tail;
+  return `${folded.slice(0, head)}\n\n... [已省略中间 ${omitted} 字符，完整原始输出见 evidence/] ...\n\n${folded.slice(-tail)}`;
 }
 
 function asStr(v: unknown): string {
@@ -929,6 +936,22 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
       execute: async () => safeSyncText(() => credentialListTool(opsCtx())),
     },
     {
+      name: "credential_use",
+      description:
+        "P18 凭据消费闭环（须在任务授权范围内）：action=resolve 按凭据取回 evidence/ 内相对路径 + 512B 受限预览并计一次消费（越界/目录穿越立即拒绝）；action=verify 回写 (credential×asset×service) 验证矩阵，valid 且跨主机时自动追加 auth Fact。",
+      params: {
+        action: { type: "string", required: true },
+        credentialId: { type: "string", required: true },
+        targetAsset: { type: "string", required: true },
+        service: { type: "string" },
+        verdict: { type: "string" },
+        evidencePath: { type: "string" },
+        note: { type: "string" },
+      },
+      replay: "safe",
+      execute: async (args) => safeSyncText(() => credentialUseTool(opsCtx(), strMap(args))),
+    },
+    {
       name: "parse_tool_output",
       description:
         "P14 解析：把 evidence/ 下的 nmap/httpx/nuclei/ffuf 机器可读输出解析成资产与 tentative finding（只搬运不改结论）。",
@@ -956,7 +979,7 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
     {
       name: "tunnel_open",
       description:
-        "P14 内网推进：起本地监听隧道（socat/ssh-local/ssh-socks/chisel-socks），只绑 127.0.0.1；目标与跳板主机必须在本任务 scope/pivot 内。返回 localPort 与 tunnel id。",
+        "P14 内网推进：起本地监听隧道（socat/ssh-local/ssh-socks/chisel-socks/http-connect），只绑 127.0.0.1；目标与跳板主机必须在本任务 scope/pivot 内。http-connect 用已授权 HTTP 代理（via=http://host:port）做零外部二进制 CONNECT 桥。返回 localPort 与 tunnel id（所有槽位共享）。",
       params: {
         kind: { type: "string", required: true },
         targetHost: { type: "string" },

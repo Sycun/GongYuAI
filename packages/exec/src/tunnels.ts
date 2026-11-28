@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { createServer } from "node:net";
+import { createServer, connect } from "node:net";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -30,7 +30,12 @@ import { setTimeout as delay } from "node:timers/promises";
  * 保持同步纯函数（供形状测试/预览），单独调用时只能用随机端口、不做探测。
  */
 
-export type TunnelKind = "socat" | "ssh-local" | "ssh-socks" | "chisel-socks";
+export type TunnelKind =
+  | "socat"
+  | "ssh-local"
+  | "ssh-socks"
+  | "chisel-socks"
+  | "http-connect";
 
 export type TunnelMeta = {
   id: string;
@@ -52,7 +57,15 @@ export type TunnelOpenInput =
   | { kind: "socat"; targetHost: string; targetPort: number; localPort?: number }
   | { kind: "ssh-local"; via: string; targetHost: string; targetPort: number; localPort?: number }
   | { kind: "ssh-socks"; via: string; localPort?: number }
-  | { kind: "chisel-socks"; via: string; localPort?: number };
+  | { kind: "chisel-socks"; via: string; localPort?: number }
+  | {
+      kind: "http-connect";
+      /** Authorized HTTP proxy `http://host:port`. */
+      via: string;
+      targetHost: string;
+      targetPort: number;
+      localPort?: number;
+    };
 
 export type TunnelCommand = {
   bin: string;
@@ -61,6 +74,8 @@ export type TunnelCommand = {
   targetHost: string;
   targetPort: number | null;
   via?: string;
+  /** Human/ledger-facing command line when argv is an opaque bridge script. */
+  display?: string;
 };
 
 export type TunnelManagerOptions = {
@@ -76,15 +91,54 @@ const MAX_PORT = 65_535;
 const CHISEL_SOCKS_PORT = 1080;
 /** spawn 后观察窗口：300ms 内退出即视为启动失败。 */
 const READY_PROBE_MS = 300;
+/** http-connect bridge is our own Node child: actively wait for its listener. */
+const HTTP_CONNECT_LISTEN_WAIT_MS = 2_500;
 const LOG_TAIL_BYTES = 2_000;
 const CLOSE_WAIT_MS = 1_000;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Zero-dependency HTTP CONNECT bridge (`node -e <this>`): listens on
+ * 127.0.0.1:<localPort>, asks the authorized proxy for a CONNECT tunnel to
+ * targetHost:targetPort, then pipes bytes both ways.
+ * argv: <localPort> <viaHost> <viaPort> <targetHost> <targetPort>
+ */
+export const HTTP_CONNECT_BRIDGE_SOURCE = [
+  "const net=require(\"node:net\");",
+  "const [lp,vh,vp,th,tp]=process.argv.slice(1);",
+  "const srv=net.createServer((client)=>{",
+  "const up=net.connect(Number(vp),vh,()=>{",
+  "up.write(\"CONNECT \"+th+\":\"+tp+\" HTTP/1.1\\r\\nHost: \"+th+\":\"+tp+\"\\r\\n\\r\\n\");",
+  "});",
+  "let head=\"\",buffered=[],bridged=false;",
+  "const flush=()=>{bridged=true;for(const c of buffered)up.write(c);buffered=[];client.pipe(up);up.pipe(client);};",
+  "client.on(\"data\",(c)=>{if(!bridged)buffered.push(c);});",
+  "const onData=(c)=>{",
+  "head+=c.toString(\"latin1\");",
+  "const split=head.indexOf(\"\\r\\n\\r\\n\");",
+  "if(split<0){if(head.length>8192){client.destroy();up.destroy();}return;}",
+  "up.off(\"data\",onData);",
+  "if(!/^HTTP\\/1\\.[01] 2\\d\\d/.test(head)){client.destroy();up.destroy();return;}",
+  "const rest=Buffer.from(head.slice(split+4),\"latin1\");",
+  "flush();",
+  "if(rest.length)client.write(rest);",
+  "};",
+  "up.on(\"data\",onData);",
+  "up.on(\"error\",()=>client.destroy());",
+  "client.on(\"error\",()=>up.destroy());",
+  "client.on(\"close\",()=>up.destroy());",
+  "up.on(\"close\",()=>client.destroy());",
+  "});",
+  "srv.on(\"error\",()=>process.exit(1));",
+  "srv.listen(Number(lp),\"127.0.0.1\");",
+].join("");
 
 const TUNNEL_KINDS: ReadonlySet<string> = new Set<TunnelKind>([
   "socat",
   "ssh-local",
   "ssh-socks",
   "chisel-socks",
+  "http-connect",
 ]);
 
 function isTunnelKind(value: unknown): value is TunnelKind {
@@ -163,7 +217,26 @@ function hostFromVia(value: string): string {
   return host;
 }
 
+/** Parse `http://host:port` (or bare `host:port`) into the CONNECT upstream. */
+function parseHttpProxy(via: string): { host: string; port: number } {
+  const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(via) ? via : `http://${via}`;
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error(`http-connect 的 via 必须是 http://host:port 代理：${via}`);
+  }
+  if (url.protocol !== "http:") {
+    throw new Error(`http-connect 的 via 仅支持 http:// 代理：${via}`);
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, "").trim();
+  if (!host) throw new Error(`无法从 via 解析代理主机：${via}`);
+  const port = url.port ? assertPort(Number(url.port), "via port") : 80;
+  return { host, port };
+}
+
 function displayCommand(command: TunnelCommand): string {
+  if (command.display) return command.display;
   return [command.bin, ...command.args].join(" ");
 }
 
@@ -194,6 +267,32 @@ function readLogTail(path: string, maxBytes = LOG_TAIL_BYTES): string {
   } catch {
     return "";
   }
+}
+
+/** Bounded TCP-connect probe for the built-in http-connect bridge. */
+function waitForLocalListener(port: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise<boolean>((resolve) => {
+    const attempt = (): void => {
+      const socket = connect({ host: LOOPBACK, port });
+      let settled = false;
+      const retry = (): void => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        if (Date.now() >= deadline) resolve(false);
+        else setTimeout(attempt, 50);
+      };
+      socket.once("connect", () => {
+        settled = true;
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once("error", retry);
+      socket.once("close", retry);
+    };
+    attempt();
+  });
 }
 
 function canBindLocalPort(port: number): Promise<boolean> {
@@ -311,6 +410,32 @@ export function buildTunnelCommand(
         via,
       };
     }
+    case "http-connect": {
+      const via = requireVia(input.via);
+      const proxy = parseHttpProxy(via);
+      const targetHost = requireTargetHost(input.targetHost);
+      const targetPort = assertPort(input.targetPort, "targetPort");
+      const localPort = requested === undefined ? randomLocalPort() : assertPort(requested, "localPort");
+      return {
+        bin: process.execPath,
+        args: [
+          "-e",
+          HTTP_CONNECT_BRIDGE_SOURCE,
+          String(localPort),
+          proxy.host,
+          String(proxy.port),
+          targetHost,
+          String(targetPort),
+        ],
+        localPort,
+        targetHost,
+        targetPort,
+        via,
+        display:
+          `node -e <http-connect-bridge> ${localPort} ${proxy.host}:${proxy.port} ` +
+          `${targetHost}:${targetPort}`,
+      };
+    }
   }
 }
 
@@ -413,7 +538,11 @@ export class TunnelManager {
 
   private hostsToAuthorize(input: TunnelOpenInput): string[] {
     const hosts: string[] = [];
-    if (input.kind === "socat" || input.kind === "ssh-local") {
+    if (
+      input.kind === "socat" ||
+      input.kind === "ssh-local" ||
+      input.kind === "http-connect"
+    ) {
       hosts.push(requireTargetHost(input.targetHost));
     }
     if (input.kind !== "socat") {
@@ -437,9 +566,10 @@ export class TunnelManager {
     if (input.localPort !== undefined) {
       return this.reservePort(assertPort(input.localPort, "localPort"));
     }
+    const diskPorts = this.diskRunningPorts();
     for (let attempt = 0; attempt < 64; attempt += 1) {
       const candidate = randomLocalPort();
-      if (this.reservedPorts.has(candidate)) continue;
+      if (this.reservedPorts.has(candidate) || diskPorts.has(candidate)) continue;
       // 先占位再探测：并发 open 在这里看到同候选会直接跳过。
       this.reservedPorts.add(candidate);
       if (await canBindLocalPort(candidate)) return candidate;
@@ -448,9 +578,24 @@ export class TunnelManager {
     throw new Error(`无法在 ${MIN_RANDOM_PORT}–${MAX_RANDOM_PORT} 之间找到空闲本地端口`);
   }
 
+  /**
+   * Local ports held by *other worker processes*: every `running` meta whose pid
+   * is actually alive. Closed/error rows and dead pids never block a port.
+   */
+  private diskRunningPorts(): Set<number> {
+    const ports = new Set<number>();
+    for (const meta of this.list()) {
+      if (meta.status === "running" && isPidAlive(meta.pid)) ports.add(meta.localPort);
+    }
+    return ports;
+  }
+
   private reservePort(port: number): number {
     if (this.reservedPorts.has(port)) {
       throw new Error(`本地端口 ${port} 已被本任务其它隧道占用`);
+    }
+    if (this.diskRunningPorts().has(port)) {
+      throw new Error(`本地端口 ${port} 已被其它 Worker 进程的存活隧道占用`);
     }
     this.reservedPorts.add(port);
     return port;
@@ -493,6 +638,15 @@ export class TunnelManager {
     child.unref();
 
     await delayMs(READY_PROBE_MS);
+    if (
+      input.kind === "http-connect" &&
+      spawnErrors.length === 0 &&
+      child.exitCode === null &&
+      child.signalCode === null
+    ) {
+      // Node child startup can exceed the fixed probe window: wait for the bind.
+      await waitForLocalListener(command.localPort, HTTP_CONNECT_LISTEN_WAIT_MS);
+    }
 
     const spawnError: Error | undefined = spawnErrors[0];
     const exited = child.exitCode !== null || child.signalCode !== null;
@@ -608,6 +762,16 @@ export class TunnelManager {
       await delayMs(25);
     }
   }
+}
+
+/**
+ * Read-only cross-process view: every `running` tunnel under
+ * `<baseDir>/tunnels/*` whose pid is alive (dead pids are reconciled to
+ * `closed` on disk). Used by prompts and the independent validator.
+ */
+export function listRunningTunnels(baseDir: string): TunnelMeta[] {
+  const manager = new TunnelManager({ baseDir, authorizeHost: () => true });
+  return manager.list().filter((meta) => meta.status === "running" && isPidAlive(meta.pid));
 }
 
 function describeExit(exitCode: number | null, signal: NodeJS.Signals | null): string {

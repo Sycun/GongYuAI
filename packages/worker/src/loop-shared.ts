@@ -158,12 +158,148 @@ export function shouldWakeMultiWorkerLeader(opts: {
 }
 
 /**
+ * P18 — supervisor pulse.
+ *
+ * A fully saturated pool parks the Leader at zero token cost, but a Follower that
+ * is stuck in an error storm or silently spinning can burn its whole timebox
+ * before anyone looks. This pure detector wakes the Leader early so it can run
+ * ≤2 lightweight supervision steps (`intent_advise` / `engagement_audit` /
+ * `history_overview`) and then park again.
+ */
+export const SUPERVISOR_PULSE_COOLDOWN_MS = 180_000;
+export const SUPERVISOR_PULSE_FACT_QUIET_MS = 180_000;
+export const SUPERVISOR_PULSE_ERROR_WINDOW = 6;
+export const SUPERVISOR_PULSE_ERROR_RATIO = 0.75;
+export const SUPERVISOR_PULSE_SILENT_MS = 6 * 60_000;
+/** While parked, probing the pulse every second would be noise: check at this cadence. */
+export const SUPERVISOR_PULSE_CHECK_INTERVAL_MS = 15_000;
+
+/** Leader-only supervision tools allowed during a pulse wake-up. */
+export const LEADER_SUPERVISION_TOOLS: ReadonlySet<string> = new Set([
+  "intent_advise",
+  "engagement_audit",
+  "history_overview",
+]);
+
+const PULSE_ANOMALY_STATUSES = new Set([0, 500, 502, 504, 403]);
+const ACTIVE_INTENT_STATUSES = new Set(["claimed", "running"]);
+
+export type SupervisorPulseIntent = {
+  id: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SupervisorPulseFact = {
+  intentId: string | null;
+  createdAt: string;
+};
+
+export type SupervisorPulseTransaction = {
+  intentId: string | null;
+  status: number;
+  startedAt: string;
+};
+
+export type SupervisorPulseAdvisory = {
+  targetIntentId: string | null;
+  createdAt: string;
+};
+
+export type SupervisorPulseHit = {
+  intentId: string;
+  code: "error-storm" | "silent-spin";
+  reason: string;
+};
+
+const pulseMs = (iso: string): number => {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? t : Number.NaN;
+};
+
+/**
+ * Pure anomaly detector over already-loaded History projections.
+ * - error-storm: last ≥6 HTTP transactions with ≥75% in {0,500,502,504,403} and
+ *   no new Fact for that Intent in the last 3 minutes;
+ * - silent-spin: active >6 minutes since the last heartbeat/creation with 0 Facts.
+ * Both respect the 3-minute per-Intent wake cooldown and the "already advised in
+ * the last 3 minutes" guard.
+ */
+export function findAnomalousActiveIntents(input: {
+  activeIntents: ReadonlyArray<SupervisorPulseIntent>;
+  facts: ReadonlyArray<SupervisorPulseFact>;
+  httpTransactions: ReadonlyArray<SupervisorPulseTransaction>;
+  recentAdvisories: ReadonlyArray<SupervisorPulseAdvisory>;
+  nowMs: number;
+  lastSupervisorWakeByIntent: ReadonlyMap<string, number>;
+}): SupervisorPulseHit[] {
+  const hits: SupervisorPulseHit[] = [];
+  for (const intent of input.activeIntents) {
+    if (!ACTIVE_INTENT_STATUSES.has(intent.status)) continue;
+    const lastWake = input.lastSupervisorWakeByIntent.get(intent.id);
+    if (lastWake !== undefined && input.nowMs - lastWake < SUPERVISOR_PULSE_COOLDOWN_MS) {
+      continue;
+    }
+    const recentlyAdvised = input.recentAdvisories.some((advisory) => {
+      if (advisory.targetIntentId !== intent.id) return false;
+      const at = pulseMs(advisory.createdAt);
+      return Number.isFinite(at) && input.nowMs - at < SUPERVISOR_PULSE_COOLDOWN_MS;
+    });
+    if (recentlyAdvised) continue;
+
+    const ownFacts = input.facts.filter((fact) => fact.intentId === intent.id);
+    const latestFactMs = ownFacts.reduce((max, fact) => {
+      const at = pulseMs(fact.createdAt);
+      return Number.isFinite(at) && at > max ? at : max;
+    }, Number.NEGATIVE_INFINITY);
+    const factQuiet =
+      !Number.isFinite(latestFactMs) ||
+      input.nowMs - latestFactMs >= SUPERVISOR_PULSE_FACT_QUIET_MS;
+
+    const ownTx = input.httpTransactions
+      .filter((tx) => tx.intentId === intent.id)
+      .slice(-SUPERVISOR_PULSE_ERROR_WINDOW);
+    if (ownTx.length >= SUPERVISOR_PULSE_ERROR_WINDOW && factQuiet) {
+      const anomalies = ownTx.filter((tx) => PULSE_ANOMALY_STATUSES.has(tx.status)).length;
+      if (anomalies / ownTx.length >= SUPERVISOR_PULSE_ERROR_RATIO) {
+        hits.push({
+          intentId: intent.id,
+          code: "error-storm",
+          reason:
+            `最近 ${ownTx.length} 条 HTTP 中 ${anomalies} 条为 0/500/502/504/403，` +
+            `且 3 分钟无新增 Fact（高频异常响应卡死）`,
+        });
+        continue;
+      }
+    }
+
+    const activeSince = pulseMs(intent.updatedAt);
+    const since = Number.isFinite(activeSince) ? activeSince : pulseMs(intent.createdAt);
+    if (
+      Number.isFinite(since) &&
+      input.nowMs - since > SUPERVISOR_PULSE_SILENT_MS &&
+      ownFacts.length === 0
+    ) {
+      hits.push({
+        intentId: intent.id,
+        code: "silent-spin",
+        reason: `已活跃 ${Math.round((input.nowMs - since) / 60_000)} 分钟且名下 0 Fact（静默空转）`,
+      });
+    }
+  }
+  return hits;
+}
+
+/**
  * Inside a continuous submission turn, instruct a multi-worker Leader (once all Follower
  * slots are fed) or an idle Follower (with no active/proposed Intent) to reply `YIELD`
  * and end the submission so `waitForPoolTurn()` parks at zero LLM token cost.
  * The "no new surface" Leader yield only targets fan-out tools (intent_propose /
  * technique_transfer); surface-creating dispatch (tsecbench start, plan_set) stays
  * allowed so the Leader can keep feeding idle Follower slots while the board is open.
+ * `supervisionBudget` > 0 lets a pulse-woken Leader run its lightweight supervision
+ * tools even while every slot is saturated.
  */
 export function poolTurnYieldDirective(opts: {
   toolName: string;
@@ -174,6 +310,7 @@ export function poolTurnYieldDirective(opts: {
   openIntents: ReadonlyArray<{ id: string; status: string }>;
   allGoalsPass: boolean;
   leaderIdleStepsSincePropose?: number;
+  supervisionBudget?: number;
 }): string | undefined {
   if (opts.workerCount <= 1 || opts.allGoalsPass) return undefined;
   if (opts.toolName === "operator_consult") return undefined;
@@ -187,6 +324,13 @@ export function poolTurnYieldDirective(opts: {
   if (opts.leader) {
     if (opts.phase === "bootstrap" && opts.toolName === "phase_set") return undefined;
     if (!opts.activeIntentId && proposedCount + activeCount >= exploreSlots) {
+      if (
+        proposedCount === 0 &&
+        LEADER_SUPERVISION_TOOLS.has(opts.toolName) &&
+        (opts.supervisionBudget ?? 0) > 0
+      ) {
+        return undefined;
+      }
       return `当前 ${exploreSlots} 个并发 Follower 槽位已全部排满（open=${proposedCount + activeCount}，proposed=${proposedCount}，claimed=${activeCount}）。无需继续轮询，请停止调用任何工具并直接简短回复 YIELD 结束本轮，进入零 Token 驻留池等待槽位空闲唤醒。`;
     }
     if (
@@ -207,6 +351,18 @@ export function poolTurnYieldDirective(opts: {
   return undefined;
 }
 
+/** Mutable park-loop bookkeeping shared between `waitForPoolTurn` and its caller. */
+export type PoolSweepState = {
+  at: number;
+  lastRefillActiveKey?: string | null;
+  /** Per-Intent cooldown for supervisor-pulse wake-ups. */
+  lastSupervisorWakeByIntent?: Map<string, number>;
+  /** Throttle for pulse evaluation while parked. */
+  lastPulseCheckAt?: number;
+  /** Set when the pulse woke the Leader; consumed by the loop (2 supervision steps). */
+  supervisionRequested?: boolean;
+};
+
 /**
  * Multi-worker coordination gate (zero LLM token cost):
  * - Periodically sweeps stale claimed Intents back to `proposed` (up to maxRequeues=2) on leader;
@@ -219,7 +375,7 @@ export async function waitForPoolTurn(opts: {
   state: CheckpointState;
   workerStartedAt: number;
   readPoolSize: () => number;
-  lastStaleSweep: { at: number; lastRefillActiveKey?: string | null };
+  lastStaleSweep: PoolSweepState;
 }): Promise<"ready" | "exit"> {
   const { manifest, ctx, state, workerStartedAt, readPoolSize, lastStaleSweep } = opts;
   const taskId = manifest.taskId;
@@ -279,6 +435,52 @@ export async function waitForPoolTurn(opts: {
           activeIntentId: state.activeIntentId,
         });
         return "ready";
+      }
+      // Supervisor pulse: Followers are saturated but one may be stuck in an error
+      // storm / silent spin. Wake the Leader for a bounded lightweight supervision.
+      if (now - (lastStaleSweep.lastPulseCheckAt ?? 0) >= SUPERVISOR_PULSE_CHECK_INTERVAL_MS) {
+        lastStaleSweep.lastPulseCheckAt = now;
+        const wakeByIntent =
+          lastStaleSweep.lastSupervisorWakeByIntent ??
+          (lastStaleSweep.lastSupervisorWakeByIntent = new Map<string, number>());
+        let pulseHits: SupervisorPulseHit[] = [];
+        try {
+          pulseHits = findAnomalousActiveIntents({
+            activeIntents: open
+              .filter((intent) => ACTIVE_INTENT_STATUSES.has(intent.status))
+              .map((intent) => ({
+                id: intent.id,
+                status: intent.status,
+                createdAt: intent.createdAt,
+                updatedAt: intent.updatedAt,
+              })),
+            facts: ctx.history.listFacts(taskId),
+            httpTransactions: ctx.history.listHttpTransactions(taskId, 200),
+            recentAdvisories: ctx.history.listRecentAdvisories(taskId, 20),
+            nowMs: now,
+            lastSupervisorWakeByIntent: wakeByIntent,
+          });
+        } catch {
+          pulseHits = [];
+        }
+        if (pulseHits.length > 0) {
+          for (const hit of pulseHits) wakeByIntent.set(hit.intentId, now);
+          lastStaleSweep.supervisionRequested = true;
+          state.pendingSoftPaceMessage =
+            `[督导脉搏] 检测到在跑 Follower 异常：` +
+            pulseHits
+              .slice(0, 3)
+              .map((hit) => `${hit.intentId.slice(0, 8)} ${hit.reason}`)
+              .join("；") +
+            `。本轮最多执行 2 步轻量事中督导（intent_advise / engagement_audit / history_overview），` +
+            `督导发出后立即简短回复 YIELD 回零 Token 休眠池。`;
+          state.phase = syncGraphPhase(ctx.history, taskId, state.phase, {
+            leader: true,
+            workerCount,
+            activeIntentId: state.activeIntentId,
+          });
+          return "ready";
+        }
       }
       flushUsage(manifest, ctx, state);
       await new Promise((r) => setTimeout(r, 1_000));

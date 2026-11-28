@@ -42,6 +42,7 @@ import { formatGateSpinRecoveryHint, shouldSnapshotRelay } from "./relay.js";
 import { canRelay, synthesizeGroundedRelayFields, writeRelayProtocol } from "./relay-protocol.js";
 import { formatSupervisorAdvisoryGate } from "./supervisor-advisory.js";
 import {
+  LEADER_SUPERVISION_TOOLS,
   accountExploreTimeoutTurn,
   beginExploreTimeoutClock,
   consumePendingSoftPace,
@@ -54,6 +55,7 @@ import {
   runExploreTimeoutGate,
   shouldResetFollowerSession,
   waitForPoolTurn,
+  type PoolSweepState,
 } from "./loop-shared.js";
 
 function sumPiTokens(usage: {
@@ -177,7 +179,7 @@ export async function tryPiDurable(
     const context = BACKGROUND_CONTEXT;
     const readPoolSize = createPoolSizeReader(manifest);
     const leader = isExploreLeader(manifest);
-    const lastStaleSweep = { at: Date.now() };
+    const lastStaleSweep: PoolSweepState = { at: Date.now() };
     let candidateIdx = 0;
 
     const {
@@ -312,6 +314,8 @@ export async function tryPiDurable(
     let consecutiveBlockedCalls = 0;
     let allowedNonRelayCalls = 0;
     let leaderIdleStepsSincePropose = 0;
+    /** Pulse-woken Leader may run ≤2 lightweight supervision steps before YIELD. */
+    let supervisionStepsRemaining = 0;
     let notifiedScaleUpPool = readPoolSize();
     const timeoutClock = beginExploreTimeoutClock();
     let pendingFollowerIntentReset = false;
@@ -450,10 +454,20 @@ export async function tryPiDurable(
                 openIntents: livePoolSize > 1 ? ctx.history.openIntents(manifest.taskId) : [],
                 allGoalsPass: livePoolSize > 1 ? ctx.history.allGoalsPass(manifest.taskId) : false,
                 leaderIdleStepsSincePropose,
+                supervisionBudget: supervisionStepsRemaining,
               });
               if (yieldBlock) {
                 appendProgress(manifest.workspaceDir, `pool yield ${call.name}: ${yieldBlock.slice(0, 120)}`);
                 return { block: yieldBlock };
+              }
+              if (
+                leader &&
+                livePoolSize > 1 &&
+                !state.activeIntentId &&
+                supervisionStepsRemaining > 0 &&
+                LEADER_SUPERVISION_TOOLS.has(call.name)
+              ) {
+                supervisionStepsRemaining -= 1;
               }
               const block = evaluateWorkerToolGate({
                 ctx,
@@ -738,6 +752,14 @@ export async function tryPiDurable(
         if (poolDecision === "exit") {
           appendProgress(manifest.workspaceDir, "任务目标已清或主节点已收卷，结束 Pi 循环");
           break;
+        }
+        if (lastStaleSweep.supervisionRequested) {
+          lastStaleSweep.supervisionRequested = false;
+          supervisionStepsRemaining = 2;
+          appendProgress(
+            manifest.workspaceDir,
+            "supervisor pulse wake: leader granted 2 lightweight supervision steps",
+          );
         }
 
         maybeBackgroundSnapshot();

@@ -3,7 +3,7 @@ import { request as httpRequest } from "node:http";
 import { connect as netConnect, isIP } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   type Finding,
@@ -366,6 +366,207 @@ function supplementSessionCookie(taskDir: string, host: string, headers: Record<
   }
 }
 
+export type EvidenceChainStep = {
+  id: string;
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+};
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Ordered evidence chain of a finding: `http:<id>` refs first (author-declared
+ * order), then any linked `trafficIds`. Boundary is the caller's (≤4 steps).
+ */
+export function collectEvidenceChain(
+  finding: Pick<Finding, "evidence" | "trafficIds">,
+): string[] {
+  const ids: string[] = [];
+  const push = (raw: string): void => {
+    const id = raw.trim().replace(/^http:/, "");
+    if (UUID_RE.test(id) && !ids.includes(id)) ids.push(id);
+  };
+  for (const item of finding.evidence ?? []) {
+    if (String(item.path).startsWith("http:")) push(String(item.path));
+  }
+  for (const id of finding.trafficIds ?? []) push(String(id));
+  return ids;
+}
+
+/** Load recorded requests for chain replay from the task traffic store. */
+export function loadEvidenceChainSteps(
+  taskDir: string,
+  taskId: string,
+  ids: readonly string[],
+): EvidenceChainStep[] {
+  const db = openTrafficDb(taskDir);
+  const stmt = db.prepare(
+    `SELECT id, method, url, req_headers_json, req_sha256, req_size
+     FROM exchanges WHERE task_id = ? AND id = ?`,
+  );
+  const steps: EvidenceChainStep[] = [];
+  for (const id of ids) {
+    const row = stmt.get(taskId, id) as Record<string, unknown> | undefined;
+    if (!row) continue;
+    let url: URL;
+    try {
+      url = new URL(String(row.url));
+    } catch {
+      continue;
+    }
+    const headers: Record<string, string> = {};
+    try {
+      const parsed = JSON.parse(String(row.req_headers_json ?? "{}")) as Record<string, unknown>;
+      for (const [name, value] of Object.entries(parsed)) {
+        if (typeof value === "string") headers[name] = value;
+        else if (Array.isArray(value)) headers[name] = value.map(String).join(", ");
+      }
+    } catch {
+      /* malformed recorded headers: replay with defaults */
+    }
+    for (const name of Object.keys(headers)) {
+      if (["content-length", "connection", "transfer-encoding"].includes(name.toLowerCase())) {
+        delete headers[name];
+      }
+    }
+    let body: string | undefined;
+    const sha = typeof row.req_sha256 === "string" && row.req_sha256 ? row.req_sha256 : null;
+    const size = Number(row.req_size ?? 0);
+    if (sha && size > 0) {
+      try {
+        body = readBlobSlice(taskDir, sha, 0, Math.min(size, 64 * 1024)).bytes.toString("utf8");
+      } catch {
+        body = undefined;
+      }
+    }
+    steps.push({
+      id,
+      method: String(row.method).toUpperCase(),
+      url: url.href,
+      headers,
+      ...(body ? { body } : {}),
+    });
+  }
+  return steps;
+}
+
+/** host → (cookie name → value); replay-local, never touches exploration jars. */
+type CookieJar = Map<string, Map<string, string>>;
+
+function cookiePairs(header: string): Array<[string, string]> {
+  const pairs: Array<[string, string]> = [];
+  for (const part of header.split(";")) {
+    const item = part.trim();
+    if (!item) continue;
+    const idx = item.indexOf("=");
+    if (idx <= 0) continue;
+    pairs.push([item.slice(0, idx).trim(), item.slice(idx + 1).trim()]);
+  }
+  return pairs;
+}
+
+function absorbSetCookie(jar: CookieJar, host: string, capture: ReplayCapture): void {
+  const raw = capture.headers["set-cookie"];
+  const cookies = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  if (!cookies.length) return;
+  const bucket = jar.get(host) ?? new Map<string, string>();
+  for (const cookie of cookies) {
+    const pair = cookiePairs(String(cookie).split(";")[0] ?? "")[0];
+    if (pair) bucket.set(pair[0], pair[1]);
+  }
+  jar.set(host, bucket);
+}
+
+function withJarCookies(step: EvidenceChainStep, jar: CookieJar, target: URL): Record<string, string> {
+  const headers: Record<string, string> = { ...step.headers };
+  const existingName = Object.keys(headers).find((name) => name.toLowerCase() === "cookie");
+  const merged = new Map<string, string>();
+  if (existingName) {
+    for (const [name, value] of cookiePairs(String(headers[existingName]))) merged.set(name, value);
+    delete headers[existingName];
+  }
+  for (const [name, value] of jar.get(target.hostname.toLowerCase()) ?? []) {
+    merged.set(name, value);
+  }
+  if (merged.size) {
+    headers.Cookie = [...merged.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+  }
+  if (step.body != null && !hasHeader(headers, "content-length")) {
+    headers["Content-Length"] = String(Buffer.byteLength(step.body));
+  }
+  return headers;
+}
+
+type ChainReplayResult = {
+  capture: ReplayCapture | null;
+  finalUrl: URL | null;
+  finalUsedTunnel: boolean;
+  replayed: number;
+  skipped: number;
+  tunnelIds: string[];
+};
+
+/**
+ * Replay 2–4 recorded requests in causal order through the validator's own
+ * proxy session, carrying `Set-Cookie` into later same-host requests. Steps
+ * outside the validator scope are skipped (never widened). The final step's
+ * response drives Dark-Moon grading.
+ */
+async function replayEvidenceChain(
+  proxy: TrafficProxy,
+  taskDir: string,
+  auth: ValidatorScopeAuth,
+  steps: readonly EvidenceChainStep[],
+): Promise<ChainReplayResult> {
+  const jar: CookieJar = new Map();
+  const result: ChainReplayResult = {
+    capture: null,
+    finalUrl: null,
+    finalUsedTunnel: false,
+    replayed: 0,
+    skipped: 0,
+    tunnelIds: [],
+  };
+  for (const step of steps) {
+    let target: URL;
+    try {
+      target = new URL(step.url);
+    } catch {
+      result.skipped += 1;
+      continue;
+    }
+    if (target.protocol !== "http:" && target.protocol !== "https:") {
+      result.skipped += 1;
+      continue;
+    }
+    if (!validatorHostAllowed(target, auth, taskDir)) {
+      result.skipped += 1;
+      continue;
+    }
+    const headers = withJarCookies(step, jar, target);
+    const request: ReplayHttpRequest = {
+      method: step.method,
+      headers,
+      ...(step.body != null ? { body: step.body } : {}),
+    };
+    const route = findActiveTunnelRoute(taskDir, target);
+    const capture = route
+      ? await replayDirect(target, route, request)
+      : target.protocol === "https:"
+        ? await replayHttps(proxy, target, request)
+        : await replayHttp(proxy, target, request);
+    if (route) result.tunnelIds.push(route.id);
+    absorbSetCookie(jar, target.hostname.toLowerCase(), capture);
+    result.capture = capture;
+    result.finalUrl = target;
+    result.finalUsedTunnel = Boolean(route);
+    result.replayed += 1;
+  }
+  return result;
+}
+
 export type ReplayHttpRequest = { method: string; headers: Record<string, string>; body?: string };
 
 export function buildReplayRequest(packet: ValidatorPacket, taskDir: string, target: URL): ReplayHttpRequest {
@@ -379,9 +580,80 @@ export function buildReplayRequest(packet: ValidatorPacket, taskDir: string, tar
   return { method, headers, ...(parsed.body != null ? { body: parsed.body } : {}) };
 }
 
-function replayHttp(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): Promise<void> {
+export type ReplayCapture = {
+  method: string;
+  url: URL;
+  status: number;
+  headers: Record<string, string | string[]>;
+  body: string;
+};
+
+const MAX_REPLAY_CAPTURE_BYTES = 256 * 1024;
+const MAX_CHAIN_STEPS = 4;
+
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  return Object.keys(headers).some((key) => key.toLowerCase() === name);
+}
+
+function captureHeaders(headers: NodeJS.Dict<string | string[]>): Record<string, string | string[]> {
+  const out: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (value == null) continue;
+    out[name.toLowerCase()] = value;
+  }
+  return out;
+}
+
+function decodeChunked(buffer: Buffer): Buffer {
+  const out: Buffer[] = [];
+  let index = 0;
+  while (index < buffer.length) {
+    const lineEnd = buffer.indexOf("\r\n", index);
+    if (lineEnd < 0) break;
+    const sizeHex = (buffer.subarray(index, lineEnd).toString("latin1").split(";")[0] ?? "").trim();
+    const size = Number.parseInt(sizeHex, 16);
+    if (!Number.isFinite(size) || size <= 0) break;
+    const start = lineEnd + 2;
+    out.push(buffer.subarray(start, Math.min(start + size, buffer.length)));
+    index = start + size + 2;
+  }
+  return Buffer.concat(out);
+}
+
+/** Parse a raw HTTP/1.x response collected over a direct TCP/TLS socket. */
+export function parseRawHttpResponse(raw: Buffer): {
+  status: number;
+  headers: Record<string, string | string[]>;
+  body: string;
+} {
+  const split = raw.indexOf("\r\n\r\n");
+  const head = (split < 0 ? raw : raw.subarray(0, split)).toString("latin1");
+  const bodyRaw = split < 0 ? Buffer.alloc(0) : raw.subarray(split + 4);
+  const lines = head.split("\r\n");
+  const statusMatch = /^HTTP\/\d(?:\.\d)?\s+(\d{3})/.exec(lines[0] ?? "");
+  const headers: Record<string, string | string[]> = {};
+  for (const line of lines.slice(1)) {
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const name = line.slice(0, idx).trim().toLowerCase();
+    const value = line.slice(idx + 1).trim();
+    const prev = headers[name];
+    if (prev === undefined) headers[name] = value;
+    else if (Array.isArray(prev)) prev.push(value);
+    else headers[name] = [prev, value];
+  }
+  const transferEncoding = String(headers["transfer-encoding"] ?? "").toLowerCase();
+  const body = transferEncoding.includes("chunked") ? decodeChunked(bodyRaw) : bodyRaw;
+  return {
+    status: statusMatch ? Number(statusMatch[1]) : 0,
+    headers,
+    body: body.toString("utf8").slice(0, 64 * 1024),
+  };
+}
+
+function replayHttp(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): Promise<ReplayCapture> {
   const headers: Record<string, string> = { ...req.headers };
-  if (!Object.keys(headers).some((name) => name.toLowerCase() === "host")) headers.host = target.host;
+  if (!hasHeader(headers, "host")) headers.host = target.host;
   return new Promise((resolve, reject) => {
     const httpReq = httpRequest({
       host: "127.0.0.1",
@@ -390,8 +662,23 @@ function replayHttp(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): P
       path: target.href,
       headers,
     }, (res) => {
-      res.resume();
-      res.on("end", () => resolve());
+      const chunks: Buffer[] = [];
+      let size = 0;
+      res.on("data", (chunk: Buffer) => {
+        if (size >= MAX_REPLAY_CAPTURE_BYTES) return;
+        chunks.push(chunk);
+        size += chunk.length;
+      });
+      res.on("end", () =>
+        resolve({
+          method: req.method,
+          url: target,
+          status: res.statusCode ?? 0,
+          headers: captureHeaders(res.headers),
+          body: Buffer.concat(chunks).toString("utf8").slice(0, 64 * 1024),
+        }),
+      );
+      res.on("error", reject);
     });
     httpReq.setTimeout(15_000, () => httpReq.destroy(new Error("replay timeout")));
     httpReq.on("error", reject);
@@ -404,7 +691,7 @@ export function replayTlsOptions(hostname: string): { host?: string; servername?
   return isIP(hostname) ? { host: hostname } : { servername: hostname };
 }
 
-function replayHttps(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): Promise<void> {
+function replayHttps(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): Promise<ReplayCapture> {
   const port = Number(target.port || 443);
   return new Promise((resolve, reject) => {
     const socket = netConnect(proxy.port, "127.0.0.1");
@@ -437,20 +724,186 @@ function replayHttps(proxy: TrafficProxy, target: URL, req: ReplayHttpRequest): 
           fail(err instanceof Error ? err : new Error(String(err)));
           return;
         }
+        const chunks: Buffer[] = [];
+        let size = 0;
         tls.once("error", fail);
         tls.once("secureConnect", () => {
           const lines = [`${req.method} ${target.pathname}${target.search} HTTP/1.1`];
-          const hasHost = Object.keys(req.headers).some((name) => name.toLowerCase() === "host");
-          const hasConn = Object.keys(req.headers).some((name) => name.toLowerCase() === "connection");
+          const hasHost = hasHeader(req.headers, "host");
+          const hasConn = hasHeader(req.headers, "connection");
           if (!hasHost) lines.push(`Host: ${target.host}`);
           for (const [name, value] of Object.entries(req.headers)) lines.push(`${name}: ${value}`);
           if (!hasConn) lines.push("Connection: close");
           tls.write(`${lines.join("\r\n")}\r\n\r\n${req.body ?? ""}`);
         });
-        tls.on("end", () => resolve());
+        tls.on("data", (chunk: Buffer) => {
+          if (size >= MAX_REPLAY_CAPTURE_BYTES) return;
+          chunks.push(chunk);
+          size += chunk.length;
+        });
+        tls.on("end", () => {
+          try {
+            const parsed = parseRawHttpResponse(Buffer.concat(chunks));
+            resolve({ method: req.method, url: target, ...parsed });
+          } catch (err) {
+            fail(err instanceof Error ? err : new Error(String(err)));
+          }
+        });
       };
       socket.on("data", onData);
     });
+  });
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+export type ActiveTunnelRoute = {
+  id: string;
+  kind: string;
+  localPort: number;
+  targetHost: string;
+  targetPort: number;
+};
+
+/** RFC1918 literal check — tunneling is only a second-layer intranet route. */
+function isRfc1918(host: string): boolean {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (!match) return false;
+  const [a, b, c, d] = match.slice(1).map(Number) as [number, number, number, number];
+  if ([a, b, c, d].some((octet) => octet > 255)) return false;
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+}
+
+/**
+ * Find a live local port-forward (`socat` / `ssh-local`) whose RFC1918 target
+ * exactly matches the replay URL. Used to reach intranet assets through a
+ * Follower's already-authorized tunnel instead of failing on direct connectivity.
+ */
+export function findActiveTunnelRoute(taskDir: string, target: URL): ActiveTunnelRoute | null {
+  if (!isRfc1918(target.hostname.toLowerCase())) return null;
+  const targetPort = Number(target.port || (target.protocol === "https:" ? 443 : 80));
+  const tunnelsDir = join(taskDir, "exec", "tunnels");
+  let entries: string[];
+  try {
+    entries = readdirSync(tunnelsDir);
+  } catch {
+    return null;
+  }
+  entries.sort();
+  for (const entry of entries) {
+    let meta: Record<string, unknown>;
+    try {
+      meta = JSON.parse(readFileSync(join(tunnelsDir, entry, "meta.json"), "utf8")) as Record<
+        string,
+        unknown
+      >;
+    } catch {
+      continue;
+    }
+    if (meta.status !== "running") continue;
+    if (meta.kind !== "socat" && meta.kind !== "ssh-local") continue;
+    const pid = Number(meta.pid);
+    if (!Number.isInteger(pid) || pid <= 0 || !pidAlive(pid)) continue;
+    if (String(meta.targetHost ?? "").toLowerCase() !== target.hostname.toLowerCase()) continue;
+    if (Number(meta.targetPort) !== targetPort) continue;
+    const localPort = Number(meta.localPort);
+    if (!Number.isInteger(localPort) || localPort <= 0 || localPort > 65_535) continue;
+    return {
+      id: entry,
+      kind: String(meta.kind),
+      localPort,
+      targetHost: String(meta.targetHost),
+      targetPort,
+    };
+  }
+  return null;
+}
+
+/** Direct replay through a local port-forward: original Host header + SNI kept. */
+function replayDirect(
+  target: URL,
+  route: Pick<ActiveTunnelRoute, "localPort">,
+  req: ReplayHttpRequest,
+): Promise<ReplayCapture> {
+  const headers: Record<string, string> = { ...req.headers };
+  if (!hasHeader(headers, "host")) headers.Host = target.host;
+  if (!hasHeader(headers, "connection")) headers.Connection = "close";
+  if (!hasHeader(headers, "accept-encoding")) headers["Accept-Encoding"] = "identity";
+  const payload = Buffer.from(
+    `${req.method} ${target.pathname}${target.search} HTTP/1.1\r\n` +
+      `${Object.entries(headers)
+        .map(([name, value]) => `${name}: ${value}`)
+        .join("\r\n")}\r\n\r\n${req.body ?? ""}`,
+    "utf8",
+  );
+  return new Promise((resolve, reject) => {
+    const socket = netConnect(route.localPort, "127.0.0.1");
+    let settled = false;
+    const finish = (raw: Buffer, error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (error) {
+        reject(error);
+        return;
+      }
+      try {
+        const parsed = parseRawHttpResponse(raw);
+        resolve({ method: req.method, url: target, ...parsed });
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
+    };
+    socket.once("error", (err) => finish(Buffer.alloc(0), err));
+    if (target.protocol === "https:") {
+      socket.once("connect", () => {
+        // The tunnel forwards raw TCP. SNI keeps the original hostname; certificate
+        // verification mirrors the proxy replay lane (insecure upstream), so intranet
+        // self-signed certs behave the same as a proxy replay.
+        let tls: ReturnType<typeof tlsConnect>;
+        try {
+          tls = tlsConnect({
+            socket,
+            rejectUnauthorized: false,
+            ...replayTlsOptions(target.hostname),
+          });
+        } catch (err) {
+          finish(Buffer.alloc(0), err instanceof Error ? err : new Error(String(err)));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let size = 0;
+        tls.once("error", (err) => finish(Buffer.alloc(0), err));
+        tls.once("secureConnect", () => tls.write(payload));
+        tls.on("data", (chunk: Buffer) => {
+          if (size >= MAX_REPLAY_CAPTURE_BYTES) return;
+          chunks.push(chunk);
+          size += chunk.length;
+        });
+        tls.on("end", () => finish(Buffer.concat(chunks)));
+      });
+    } else {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      socket.once("connect", () => socket.write(payload));
+      socket.on("data", (chunk: Buffer) => {
+        if (size >= MAX_REPLAY_CAPTURE_BYTES) return;
+        chunks.push(chunk);
+        size += chunk.length;
+      });
+      socket.on("end", () => finish(Buffer.concat(chunks)));
+      socket.on("close", () => finish(Buffer.concat(chunks)));
+    }
   });
 }
 
@@ -630,25 +1083,73 @@ export async function runIndependentValidation(input: {
       mode: "all",
     });
     const target = replayUrl(packet);
-    if (target && validatorHostAllowed(target, effectiveAuth, input.taskDir)) {
+    const chainIds = collectEvidenceChain(finding);
+    const chainSteps =
+      chainIds.length >= 2
+        ? loadEvidenceChainSteps(input.taskDir, input.taskId, chainIds.slice(0, MAX_CHAIN_STEPS))
+        : [];
+    let chain: ChainReplayResult | null = null;
+    let tunnelRoute: ActiveTunnelRoute | null = null;
+    let directCapture: ReplayCapture | null = null;
+    if (chainSteps.length >= 2) {
+      const attempt = await replayEvidenceChain(
+        proxy,
+        input.taskDir,
+        effectiveAuth,
+        chainSteps,
+      );
+      if (attempt.replayed > 0) chain = attempt;
+    }
+    if (!chain && target && validatorHostAllowed(target, effectiveAuth, input.taskDir)) {
       const replay = buildReplayRequest(packet, input.taskDir, target);
-      if (target.protocol === "https:") await replayHttps(proxy, target, replay);
-      else await replayHttp(proxy, target, replay);
+      tunnelRoute = findActiveTunnelRoute(input.taskDir, target);
+      if (tunnelRoute) {
+        directCapture = await replayDirect(target, tunnelRoute, replay);
+      } else if (target.protocol === "https:") {
+        directCapture = await replayHttps(proxy, target, replay);
+      } else {
+        directCapture = await replayHttp(proxy, target, replay);
+      }
     }
 
     const page = queryTraffic(input.taskDir, { taskId: input.taskId, workerId: "independent-validator", limit: 20 });
     const record = page.traffic.at(-1);
-    const requestText = record ? `${record.method} ${record.url}\n${bodyText(input.taskDir, record, "req")}` : "";
-    const responseText = record ? bodyText(input.taskDir, record, "res") : "";
+    // Tunnel / chain-final-direct replays never traverse the proxy: grade the capture.
+    const captureForGrade =
+      tunnelRoute !== null
+        ? directCapture
+        : chain?.finalUsedTunnel
+          ? chain.capture
+          : null;
+    const requestText = captureForGrade
+      ? `${captureForGrade.method} ${captureForGrade.url.href}`
+      : record
+        ? `${record.method} ${record.url}\n${bodyText(input.taskDir, record, "req")}`
+        : "";
+    const responseText = captureForGrade
+      ? captureForGrade.body.slice(0, 8192)
+      : record
+        ? bodyText(input.taskDir, record, "res")
+        : "";
+    const replayStatus = captureForGrade ? captureForGrade.status : record?.status ?? 0;
     const grade = gradeDarkMoon({
       requestText,
       responseText,
-      status: record?.status ?? 0,
+      status: replayStatus,
     });
     const trafficIds = page.traffic.map((row) => row.id);
+    const chainTunnelIds = chain ? [...new Set(chain.tunnelIds)] : [];
     const note = [
       `qualification: ${grade.qualification}`,
       grade.reason,
+      ...(chain
+        ? [
+            `chain: ${chain.replayed}/${chainSteps.length} steps` +
+              (chain.skipped ? ` (skipped ${chain.skipped})` : ""),
+          ]
+        : []),
+      ...(tunnelRoute ? [`tunnel: ${tunnelRoute.id} → 127.0.0.1:${tunnelRoute.localPort}`] : []),
+      ...(chainTunnelIds.length ? [`tunnel: ${chainTunnelIds.join(",")}`] : []),
       ...trafficIds.map((id) => `http:${id}`),
     ].join("\n");
     const evidencePath = writeEvidenceFile(input.evidenceDir, `validations/${jobId}.txt`, note);

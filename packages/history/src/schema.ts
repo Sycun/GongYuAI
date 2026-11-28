@@ -297,6 +297,21 @@ export function migrateHistorySchema(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_credentials_task ON credentials(task_id, asset);
 
+    CREATE TABLE IF NOT EXISTS credential_checks (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      credential_id TEXT NOT NULL,
+      target_asset TEXT NOT NULL,
+      service TEXT NOT NULL,
+      verdict TEXT NOT NULL,
+      evidence_path TEXT,
+      note TEXT NOT NULL DEFAULT '',
+      checked_by TEXT NOT NULL,
+      checked_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_credential_checks_unique
+      ON credential_checks(task_id, credential_id, target_asset, service);
+
     CREATE TABLE IF NOT EXISTS leases (
       task_id TEXT NOT NULL,
       kind TEXT NOT NULL,

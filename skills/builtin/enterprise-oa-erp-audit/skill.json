@@ -1,0 +1,21 @@
+{
+  "id": "enterprise-oa-erp-audit",
+  "name": "政企 OA/ERP 审计",
+  "description": "泛微/致远/用友/蓝凌/通达/金蝶的指纹识别、历史高危接口族与会话鉴权差分顺序",
+  "defaultEnabled": true,
+  "source": "builtin",
+  "triggers": [
+    "泛微",
+    "weaver",
+    "e-cology",
+    "e-office",
+    "seeyon",
+    "致远",
+    "用友",
+    "yonyou",
+    "nc",
+    "蓝凌",
+    "通达",
+    "金蝶"
+  ]
+}

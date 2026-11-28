@@ -185,6 +185,53 @@
       ]
     },
     {
+      "id": "enterprise-oa-erp-audit",
+      "triggers": [
+        "泛微",
+        "weaver",
+        "e-cology",
+        "e-office",
+        "seeyon",
+        "致远",
+        "用友",
+        "yonyou",
+        "nc",
+        "蓝凌",
+        "通达",
+        "金蝶"
+      ]
+    },
+    {
+      "id": "java-microservice-middleware",
+      "triggers": [
+        "ruoyi",
+        "若依",
+        "jeecg",
+        "actuator",
+        "spring cloud gateway",
+        "nacos",
+        "xxl-job",
+        "shiro",
+        "fastjson",
+        "druid"
+      ]
+    },
+    {
+      "id": "ai-infra-service-audit",
+      "triggers": [
+        "vllm",
+        "dify",
+        "ray",
+        "mlflow",
+        "gradio",
+        "jupyter",
+        "triton",
+        "comfyui",
+        "chromadb",
+        "qdrant"
+      ]
+    },
+    {
       "id": "binary-mobile-reversing",
       "triggers": [
         "apk",

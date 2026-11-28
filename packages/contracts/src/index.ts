@@ -698,7 +698,7 @@ export const UpdateScopeRequestSchema = z.object({
 });
 export type UpdateScopeRequest = z.infer<typeof UpdateScopeRequestSchema>;
 
-export const FactLayerSchema = z.enum(["title", "summary", "evidence"]);
+export const FactLayerSchema = z.enum(["title", "summary", "evidence", "auth"]);
 export type FactLayer = z.infer<typeof FactLayerSchema>;
 
 export const FactSchema = z.object({

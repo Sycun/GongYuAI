@@ -27,6 +27,8 @@ import type {
   CoverageReviewInput,
   CreateFactReview,
   Credential,
+  CredentialCheck,
+  CredentialCheckVerdict,
   CredentialKind,
   CredentialTier,
   EngagementAudit,
@@ -159,7 +161,8 @@ export type { DeliverySnapshot, Scorecard, ScorecardGoal } from "./scorecard.js"
 export { computeScorecard, finalizeSnapshot, scorecardFromSnapshot, snapshotSha256 } from "./scorecard.js";
 export { describeGoalEvidence, formatAccounting, formatCorrections, type GoalEvidenceSupport } from "./delivery.js";
 export { minimatch } from "./minimatch.js";
-export { renderSurfaceMutexDeclaration } from "./observe-view.js";
+export { renderHistoryObserve, renderHistoryOverview, renderSurfaceMutexDeclaration } from "./observe-view.js";
+export type { ObserveActiveTunnel, ObserveRenderSource } from "./observe-view.js";
 export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
 export {
   listEvidenceFiles,
@@ -1574,6 +1577,116 @@ export class HistoryStore {
     patch: { tier?: CredentialTier; impactSummary?: string | null },
   ): Credential {
     return this.surface.updateCredential(taskId, credentialId, patch);
+  }
+
+  /**
+   * P18 — credential verification matrix write. One cell per
+   * (credential, targetAsset, service): re-running the probe updates the latest
+   * verdict instead of appending duplicates. Every check is also a consumption:
+   * `reuse_count` / `last_used_at` move in the same transaction. A `valid` probe
+   * against a different host appends an `auth` Fact so lateral reuse is citable.
+   */
+  recordCredentialCheck(input: {
+    taskId: string;
+    credentialId: string;
+    targetAsset: string;
+    service: string;
+    verdict: CredentialCheckVerdict;
+    evidencePath?: string | null;
+    note?: string;
+    checkedBy: string;
+  }): CredentialCheck {
+    const credential = this.getCredential(input.taskId, input.credentialId);
+    if (!credential) throw new Error(`unknown credential: ${input.credentialId}`);
+    const targetAsset =
+      normalizeHost(input.targetAsset) || input.targetAsset.trim().toLowerCase();
+    if (!targetAsset) throw new Error("credential check requires targetAsset");
+    const service = input.service.trim().toLowerCase();
+    if (!service) throw new Error("credential check requires service");
+    const checkedBy = input.checkedBy.trim();
+    if (!checkedBy) throw new Error("credential check requires checkedBy");
+    if (!["valid", "invalid", "error"].includes(input.verdict)) {
+      throw new Error(`invalid credential check verdict: ${input.verdict}`);
+    }
+    const now = this.now();
+    const ownTx = !this.db.isTransaction;
+    if (ownTx) this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.db
+        .prepare(
+          `INSERT INTO credential_checks
+            (id, task_id, credential_id, target_asset, service, verdict, evidence_path, note, checked_by, checked_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(task_id, credential_id, target_asset, service) DO UPDATE SET
+             verdict = excluded.verdict,
+             evidence_path = excluded.evidence_path,
+             note = excluded.note,
+             checked_by = excluded.checked_by,
+             checked_at = excluded.checked_at
+           RETURNING id`,
+        )
+        .get(
+          randomUUID(),
+          input.taskId,
+          input.credentialId,
+          targetAsset,
+          service,
+          input.verdict,
+          input.evidencePath?.trim() || null,
+          (input.note ?? "").trim(),
+          checkedBy,
+          now,
+        ) as { id: string } | undefined;
+      this.touchCredential(input.taskId, input.credentialId);
+      if (input.verdict === "valid" && targetAsset !== normalizeHost(credential.asset)) {
+        this.appendFact({
+          taskId: input.taskId,
+          layer: "auth",
+          title:
+            `跨主机凭据复用确认 · ${credential.kind} @${credential.asset} → ${targetAsset}`.slice(0, 200),
+          summary:
+            `credential ${input.credentialId}` +
+            `${credential.username ? `（user=${credential.username}）` : ""} 在 ${targetAsset} 的 ${service} 服务验证通过；` +
+            `验证人 ${checkedBy}。`,
+          tags: [
+            "credential",
+            "auth-reuse",
+            `credential.id:${input.credentialId}`,
+            `service:${service}`,
+          ],
+        });
+      }
+      if (ownTx) this.db.exec("COMMIT");
+      const saved = this.listCredentialChecks(input.taskId).find(
+        (check) => check.id === row?.id,
+      );
+      if (!saved) throw new Error("credential check write did not produce a row");
+      return saved;
+    } catch (err) {
+      if (ownTx) this.db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  listCredentialChecks(taskId: string): CredentialCheck[] {
+    if (this.archiveTables && !this.archiveTables.has("credential_checks")) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM credential_checks WHERE task_id = ? ORDER BY checked_at, rowid`,
+      )
+      .all(taskId) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: String(r.id),
+      taskId: String(r.task_id),
+      credentialId: String(r.credential_id),
+      targetAsset: String(r.target_asset),
+      service: String(r.service),
+      verdict: r.verdict as CredentialCheck["verdict"],
+      evidencePath: (r.evidence_path as string | null) ?? null,
+      note: String(r.note ?? ""),
+      checkedBy: String(r.checked_by),
+      checkedAt: String(r.checked_at),
+    }));
   }
 
   /* ====================================================================== *

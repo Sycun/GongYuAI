@@ -1,0 +1,19 @@
+{
+  "id": "ai-infra-service-audit",
+  "name": "AI 推理与编排服务审计",
+  "description": "vLLM/Dify/Ray/MLflow/Gradio/Jupyter/Triton/ComfyUI/Chroma/Qdrant 的未授权 API、密钥面与沙箱边界",
+  "defaultEnabled": true,
+  "source": "builtin",
+  "triggers": [
+    "vllm",
+    "dify",
+    "ray",
+    "mlflow",
+    "gradio",
+    "jupyter",
+    "triton",
+    "comfyui",
+    "chromadb",
+    "qdrant"
+  ]
+}

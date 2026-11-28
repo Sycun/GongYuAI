@@ -35,8 +35,16 @@ function requireTunnelCapability(manifest: WorkerManifest): void {
 }
 
 function parseKind(raw: string | undefined): TunnelOpenInput["kind"] {
-  if (raw === "socat" || raw === "ssh-local" || raw === "ssh-socks" || raw === "chisel-socks") return raw;
-  throw new Error("tunnel kind must be socat|ssh-local|ssh-socks|chisel-socks");
+  if (
+    raw === "socat" ||
+    raw === "ssh-local" ||
+    raw === "ssh-socks" ||
+    raw === "chisel-socks" ||
+    raw === "http-connect"
+  ) {
+    return raw;
+  }
+  throw new Error("tunnel kind must be socat|ssh-local|ssh-socks|chisel-socks|http-connect");
 }
 
 function openInput(args: Record<string, string>): TunnelOpenInput {
@@ -53,6 +61,12 @@ function openInput(args: Record<string, string>): TunnelOpenInput {
   if (kind === "ssh-local") {
     if (!args.via || !args.targetHost || targetPort === undefined) {
       throw new Error("ssh-local needs via + targetHost + targetPort");
+    }
+    return { kind, via: args.via, targetHost: args.targetHost, targetPort, ...(localPort ? { localPort } : {}) };
+  }
+  if (kind === "http-connect") {
+    if (!args.via || !args.targetHost || targetPort === undefined) {
+      throw new Error("http-connect needs via(http://host:port) + targetHost + targetPort");
     }
     return { kind, via: args.via, targetHost: args.targetHost, targetPort, ...(localPort ? { localPort } : {}) };
   }

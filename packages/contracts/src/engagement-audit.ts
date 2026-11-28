@@ -57,12 +57,21 @@ export type EngagementAuditCredential = {
   tier?: "L1" | "L2" | "L3";
 };
 
+/** P18 — one credential-verification matrix cell already probed by a worker. */
+export type EngagementAuditCredentialCheck = {
+  credentialId: string;
+  targetAsset: string;
+  verdict: "valid" | "invalid" | "error";
+};
+
 export type EngagementAuditInput = {
   now: string;
   assets: ReadonlyArray<EngagementAuditAsset>;
   intents: ReadonlyArray<EngagementAuditIntent>;
   findings: ReadonlyArray<EngagementAuditFinding>;
   credentials?: ReadonlyArray<EngagementAuditCredential>;
+  /** Conclusive probes (valid/invalid) drop their (credential, live host) cell. */
+  credentialChecks?: ReadonlyArray<EngagementAuditCredentialCheck>;
 };
 
 export type EngagementAuditObservationCode =
@@ -112,6 +121,15 @@ export type EngagementAuditScorecard = {
     independentRate: number | null;
     /** Delivery gaps — an empty ledger is not a clean target. */
     gaps: string[];
+  };
+  credentials: {
+    total: number;
+    verified: number;
+    /**
+     * P18 — remaining untested spray matrix: every (credential, live host) pair
+     * except the credential's own host and pairs already probed (valid/invalid).
+     */
+    sprayBacklog: number;
   };
 };
 
@@ -194,6 +212,29 @@ export function deriveEngagementAudit(
   const intents = input.intents;
   const findings = input.findings;
   const credentials = input.credentials ?? [];
+  const credentialChecks = input.credentialChecks ?? [];
+
+  // ---- 0. P18 credential spray matrix: conclusive probes retire their cell ----
+  // `error` stays on the backlog: the login surface was never actually reached.
+  const resolvedCells = new Set(
+    credentialChecks
+      .filter((check) => check.verdict === "valid" || check.verdict === "invalid")
+      .map((check) => `${check.credentialId}::${norm(check.targetAsset)}`),
+  );
+  const liveHosts = [
+    ...new Set(
+      assets.filter((asset) => norm(asset.kind) === "live").map((asset) => norm(asset.address)),
+    ),
+  ].filter(Boolean);
+  const sprayBacklogCells: Array<{ credentialId: string; asset: string }> = [];
+  for (const credential of credentials) {
+    const own = norm(credential.asset);
+    for (const host of liveHosts) {
+      if (host === own) continue;
+      if (resolvedCells.has(`${credential.id}::${host}`)) continue;
+      sprayBacklogCells.push({ credentialId: credential.id, asset: host });
+    }
+  }
 
   const observations: EngagementAuditObservation[] = [];
 
@@ -473,6 +514,11 @@ export function deriveEngagementAudit(
             : null,
         gaps,
       },
+      credentials: {
+        total: credentials.length,
+        verified: credentials.filter((credential) => Boolean(credential.verifiedAt)).length,
+        sprayBacklog: sprayBacklogCells.length,
+      },
     },
   };
 }
@@ -487,7 +533,8 @@ export function formatEngagementAuditSummary(audit: EngagementAudit): string {
   const lines = [
     `资产 ${scorecard.assets.total}（可测 ${scorecard.assets.testable} / 高权重 ${scorecard.assets.highWeight} / 未触碰 ${scorecard.assets.untouched}）` +
       ` · Intent ${scorecard.intents.total}（open ${scorecard.intents.open} / failed ${scorecard.intents.failed} / succeeded ${scorecard.intents.succeeded}）` +
-      ` · Finding ${scorecard.findings.total}（确认 ${scorecard.findings.confirmed} / 独立 ${scorecard.findings.independentlyConfirmed} / 待验 ${scorecard.findings.tentative} / 撤回 ${scorecard.findings.contradicted}，确认率 ${rate}）`,
+      ` · Finding ${scorecard.findings.total}（确认 ${scorecard.findings.confirmed} / 独立 ${scorecard.findings.independentlyConfirmed} / 待验 ${scorecard.findings.tentative} / 撤回 ${scorecard.findings.contradicted}，确认率 ${rate}）` +
+      ` · 凭据 ${scorecard.credentials.total}（已验证 ${scorecard.credentials.verified} / 待测矩阵 ${scorecard.credentials.sprayBacklog}）`,
   ];
   if (scorecard.findings.gaps.length) {
     lines.push(`缺口：${scorecard.findings.gaps.join("；")}`);

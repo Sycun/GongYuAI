@@ -464,3 +464,167 @@ test("运行时：socat 隧道转发本地 TCP；并发 open 端口不重复；c
     clean(baseDir);
   }
 });
+
+test("buildTunnelCommand：http-connect 使用 node -e 内置桥，保留 via 代理与目标", () => {
+  const command = buildTunnelCommand({
+    kind: "http-connect",
+    via: "http://proxy.example.test:8080",
+    targetHost: "10.0.0.9",
+    targetPort: 443,
+    localPort: 21_004,
+  });
+  assert.equal(command.bin, process.execPath);
+  assert.equal(command.args[0], "-e");
+  assert.ok(command.args[1]!.includes("CONNECT"));
+  assert.deepEqual(command.args.slice(2), ["21004", "proxy.example.test", "8080", "10.0.0.9", "443"]);
+  assert.equal(command.localPort, 21_004);
+  assert.equal(command.targetHost, "10.0.0.9");
+  assert.equal(command.targetPort, 443);
+  assert.equal(command.via, "http://proxy.example.test:8080");
+  assert.match(command.display ?? "", /http-connect-bridge> 21004 proxy\.example\.test:8080 10\.0\.0\.9:443/);
+
+  assert.throws(
+    () =>
+      buildTunnelCommand({
+        kind: "http-connect",
+        via: "socks5://proxy.example.test:1080",
+        targetHost: "10.0.0.9",
+        targetPort: 443,
+      }),
+    /http:\/\//,
+  );
+});
+
+/** Minimal HTTP CONNECT proxy fixture: replies 200 and pipes to a local echo server. */
+async function startConnectProxy(upstreamPort: number): Promise<{
+  port: number;
+  connects: string[];
+  close: () => Promise<void>;
+}> {
+  const sockets = new Set<Socket>();
+  const connects: string[] = [];
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+    let buffer = "";
+    const onData = (chunk: Buffer) => {
+      buffer += chunk.toString("latin1");
+      const split = buffer.indexOf("\r\n\r\n");
+      if (split < 0) return;
+      socket.off("data", onData);
+      connects.push(buffer.slice(0, buffer.indexOf("\r\n")));
+      const rest = Buffer.from(buffer.slice(split + 4), "latin1");
+      const upstream = connect({ host: "127.0.0.1", port: upstreamPort });
+      sockets.add(upstream);
+      upstream.once("close", () => sockets.delete(upstream));
+      upstream.once("error", () => socket.destroy());
+      socket.once("error", () => upstream.destroy());
+      socket.once("close", () => upstream.destroy());
+      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (rest.length) upstream.write(rest);
+      socket.pipe(upstream);
+      upstream.pipe(socket);
+    };
+    socket.on("data", onData);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  return {
+    port: (server.address() as AddressInfo).port,
+    connects,
+    close: () =>
+      new Promise<void>((done) => {
+        for (const socket of sockets) socket.destroy();
+        server.close(() => done());
+      }),
+  };
+}
+
+test("http-connect：本地桥经 mock CONNECT 代理转发；跨实例磁盘可见且显式端口防撞", async () => {
+  const baseDir = tempBase();
+  const echo = await startEchoServer();
+  const proxy = await startConnectProxy(echo.port);
+  try {
+    const manager1 = new TunnelManager({ baseDir, authorizeHost: () => true });
+    const tunnel = await manager1.open({
+      kind: "http-connect",
+      via: `http://127.0.0.1:${proxy.port}`,
+      targetHost: "10.0.0.5",
+      targetPort: 445,
+    });
+    assert.equal(tunnel.status, "running");
+    assert.equal(tunnel.kind, "http-connect");
+    assert.equal(typeof tunnel.pid, "number");
+    assert.match(tunnel.command, /http-connect-bridge/);
+
+    // A second worker process (separate manager over the same baseDir) sees the
+    // running tunnel immediately and its local port is protected.
+    const manager2 = new TunnelManager({ baseDir, authorizeHost: () => true });
+    const visible = manager2.list().find((meta) => meta.id === tunnel.id);
+    assert.ok(visible, "跨实例 list 必须立即看到存活隧道");
+    assert.equal(visible.status, "running");
+
+    await assert.rejects(
+      () =>
+        manager2.open({
+          kind: "socat",
+          targetHost: "127.0.0.1",
+          targetPort: echo.port,
+          localPort: tunnel.localPort,
+        }),
+      /其它 Worker 进程/,
+    );
+
+    // The bridge performs CONNECT via the (authorized) proxy and pipes bytes.
+    assert.equal(await echoWithRetry(tunnel.localPort, "gy-connect-ping\n"), "gy-connect-ping\n");
+    assert.ok(proxy.connects.some((line) => line === "CONNECT 10.0.0.5:445 HTTP/1.1"));
+
+    await manager1.close(tunnel.id);
+    assert.equal(manager2.list().find((meta) => meta.id === tunnel.id)?.status, "closed");
+    // After close the port is released for a new manager.
+    const manager3 = new TunnelManager({ baseDir, authorizeHost: () => true });
+    const reopened = await manager3.open({
+      kind: "http-connect",
+      via: `http://127.0.0.1:${proxy.port}`,
+      targetHost: "10.0.0.5",
+      targetPort: 445,
+      localPort: tunnel.localPort,
+    });
+    assert.equal(reopened.localPort, tunnel.localPort);
+    await manager3.close(reopened.id);
+  } finally {
+    await proxy.close();
+    await echo.close();
+    clean(baseDir);
+  }
+});
+
+test("http-connect 越界主机在 spawn 之前被 authorizeHost 拒绝", async () => {
+  const baseDir = tempBase();
+  try {
+    const seen: string[] = [];
+    const manager = new TunnelManager({
+      baseDir,
+      authorizeHost: (host) => {
+        seen.push(host);
+        return host !== "203.0.113.77";
+      },
+    });
+    await assert.rejects(
+      () =>
+        manager.open({
+          kind: "http-connect",
+          via: "http://127.0.0.1:3128",
+          targetHost: "203.0.113.77",
+          targetPort: 443,
+        }),
+      /未授权/,
+    );
+    assert.ok(seen.includes("203.0.113.77"));
+    assert.deepEqual(findMetaFiles(baseDir), []);
+  } finally {
+    clean(baseDir);
+  }
+});

@@ -39,6 +39,7 @@ import {
 } from "./tool-catalog.js";
 import {
   buildTurnObserveBlock,
+  manifestObserve,
   redactOutboundChatMessages,
   sessionBootstrapText,
   systemPrompt,

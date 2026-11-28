@@ -1,9 +1,18 @@
+import { join } from "node:path";
 import type { WorkerManifest } from "@gongyuai/contracts";
 import { isExploreLeader, suggestFamilyKey } from "@gongyuai/contracts";
-import { openHistory, renderSurfaceMutexDeclaration } from "@gongyuai/history";
+import { listRunningTunnels } from "@gongyuai/exec";
+import {
+  openHistory,
+  renderHistoryObserve,
+  renderSurfaceMutexDeclaration,
+  type ObserveActiveTunnel,
+  type ObserveRenderSource,
+} from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import { collectorsPromptBlock } from "./asset-collectors.js";
 import { boardClearPolicyBlock, systematicDiscoveryPolicyBlock } from "./board-policy.js";
+import { renderBriefingSeedsBlock } from "./briefing-seeds.js";
 import { formatLiveExecResourcesBlock, listLiveExecResources } from "./exec-runtime.js";
 import type { KnowledgeRagHub } from "./knowledge-rag.js";
 import type { McpHub } from "./mcp/client.js";
@@ -89,6 +98,52 @@ export function buildObserveSnapshot(
 
 const MAX_OBSERVE_DELTA_ENTRIES = 50;
 export const OBSERVE_FACT_LIMIT = 30;
+
+/** Live tunnels under `<dataDir>/exec/tunnels`, shared by every worker slot. */
+export function listActiveTunnelSummaries(manifest: WorkerManifest): ObserveActiveTunnel[] {
+  try {
+    return listRunningTunnels(join(manifest.dataDir, "exec")).map((tunnel) => ({
+      id: tunnel.id,
+      kind: tunnel.kind,
+      localPort: tunnel.localPort,
+      targetHost: tunnel.targetHost,
+      targetPort: tunnel.targetPort,
+      ...(tunnel.via ? { via: tunnel.via } : {}),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Observe rendering with runtime projections History cannot see (cross-process
+ * tunnels). Every slot's first Observe uses this so `127.0.0.1:<localPort>` is
+ * reusable from round one instead of re-opening the same pivot.
+ */
+export function manifestObserve(
+  manifest: WorkerManifest,
+  history: ReturnType<typeof openHistory>,
+): string {
+  const tunnels = listActiveTunnelSummaries(manifest);
+  const source: ObserveRenderSource = {
+    listGoals: (taskId) => history.listGoals(taskId),
+    listAssets: (taskId) => history.listAssets(taskId),
+    listFacts: (taskId, layer) => history.listFacts(taskId, layer),
+    listTransferableFacts: (taskId) => history.listTransferableFacts(taskId),
+    listIntents: (taskId) => history.listIntents(taskId),
+    listHints: (taskId, limit) => history.listHints(taskId, limit),
+    listFindings: (taskId) => history.listFindings(taskId),
+    listCredentials: (taskId) => history.listCredentials(taskId),
+    listHostProfiles: (taskId) => history.listHostProfiles(taskId),
+    listPlan: (taskId) => history.listPlan(taskId),
+    listHttpTransactions: (taskId, limit) => history.listHttpTransactions(taskId, limit),
+    hasConfirmedValidation: (taskId, findingId) =>
+      history.hasConfirmedValidation(taskId, findingId),
+    listCredentialChecks: (taskId) => history.listCredentialChecks(taskId),
+    ...(tunnels.length ? { listActiveTunnels: () => tunnels } : {}),
+  };
+  return renderHistoryObserve(source, manifest.taskId);
+}
 const OBSERVE_DELTA_LABEL: Record<string, string> = {
   goal: "目标",
   intent: "进行中意图",
@@ -226,12 +281,13 @@ export function buildTurnObserveBlock(
   const observeBody =
     incremental && hasPrev
       ? renderObserveDelta(snapshot, state.observeFingerprint)
-      : sessionBootstrapText(manifest, history.observe(manifest.taskId), {
+      : sessionBootstrapText(manifest, manifestObserve(manifest, history), {
           includeRelays: opts?.includeRelays ?? !incremental,
         });
   state.observeFingerprint = snapshot;
   const guidance = activeIntentGuidanceBlock(manifest, history, state);
-  return [phaseBlock, observeBody, guidance, autoSkillBlock, autoRagBlock]
+  const briefingBlock = renderBriefingSeedsBlock(manifest);
+  return [phaseBlock, briefingBlock, observeBody, guidance, autoSkillBlock, autoRagBlock]
     .filter(Boolean)
     .join("\n\n");
 }

@@ -10,6 +10,7 @@ import {
   type AssetKind,
   type AssetRecord,
   type Credential,
+  type CredentialCheck,
   type EngagementAudit,
   type Fact,
   type Finding,
@@ -20,6 +21,16 @@ import {
   type Intent,
   type PlanStep,
 } from "@gongyuai/contracts";
+
+/** Cross-process tunnel summary injected by the prompt builder (no fs access here). */
+export type ObserveActiveTunnel = {
+  id: string;
+  kind: string;
+  localPort: number;
+  targetHost: string;
+  targetPort: number | null;
+  via?: string;
+};
 
 export type ObserveRenderSource = {
   listGoals(taskId: string): GoalState[];
@@ -34,6 +45,9 @@ export type ObserveRenderSource = {
   listPlan(taskId: string): PlanStep[];
   listHttpTransactions?(taskId: string, limit?: number): HttpTransaction[];
   hasConfirmedValidation(taskId: string, findingId: string): boolean;
+  listCredentialChecks?(taskId: string): CredentialCheck[];
+  /** Live `running` tunnels from `<dataDir>/exec/tunnels` (all worker slots share them). */
+  listActiveTunnels?(): ObserveActiveTunnel[];
 };
 
 const ACTIVE_INTENT_STATUSES = new Set(["claimed", "running"]);
@@ -156,6 +170,11 @@ export function deriveHistoryEngagementAudit(
       reuseCount: credential.reuseCount,
       verifiedAt: credential.verifiedAt,
       tier: credential.tier,
+    })),
+    credentialChecks: (src.listCredentialChecks?.(taskId) ?? []).map((check) => ({
+      credentialId: check.credentialId,
+      targetAsset: check.targetAsset,
+      verdict: check.verdict,
     })),
   });
 }
@@ -422,6 +441,22 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
       );
     }
     lines.push("（内网横向或遇到新登录面时优先交叉复用已捕获凭据，盲爆字典前必先验证同源员工/管理员口令复用。）");
+  }
+  const activeTunnels = src.listActiveTunnels?.() ?? [];
+  if (activeTunnels.length) {
+    lines.push("", `## 活跃本地转发隧道（${activeTunnels.length} · 全进程共享）`);
+    for (const tunnel of activeTunnels.slice(0, 20)) {
+      const target =
+        tunnel.targetPort == null
+          ? tunnel.targetHost || "—"
+          : `${tunnel.targetHost}:${tunnel.targetPort}`;
+      lines.push(
+        `- [${tunnel.id}] (${tunnel.kind}) 127.0.0.1:${tunnel.localPort} → ${target}${tunnel.via ? ` via ${tunnel.via}` : ""}`,
+      );
+    }
+    lines.push(
+      "（所有槽位直接复用上述 127.0.0.1:<localPort>，无需重复 tunnel_open；失效先 tunnel_list 复核。）",
+    );
   }
   const plan = src.listPlan(taskId);
   if (plan.length) {

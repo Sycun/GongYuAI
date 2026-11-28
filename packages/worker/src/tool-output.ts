@@ -5,6 +5,88 @@ import {
 } from "@gongyuai/contracts";
 import type { ToolContext } from "./tools.js";
 
+const ANSI_SEQUENCE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+
+/** Scanner progress chatter that never carries evidence (ports/paths/headers). */
+const PROGRESS_NOISE: RegExp[] = [
+  // "Progress: [=====>    ] 42%", ffuf ":: Progress: [123/5000] :: Job ..."
+  /^\s*(?:::\s*)?progress\s*[:=]/i,
+  // "[####################] 100%"
+  /^\s*\[[=>.#\-\s]*\]\s*\d{1,3}\s*%/,
+  // masscan "rate: 1234.00-kpps, 0.01% done, ..." / generic "rate: 100/s"
+  /^\s*(?:\[\s*[^\]]*\s*\]\s*)?rate\s*[:=]\s*[\d.]+\s*[-a-z0-9/]*(?:pps|\/s)\b/i,
+  // "42% |█████     | 123/500"
+  /^\s*\d{1,3}\s*%\s*\|/,
+  // "[12:34:56] 42%"
+  /^\s*\[?\d{2}:\d{2}:\d{2}\]?\s*\[?\d{1,3}\s*%\s*\]?\s*$/,
+];
+
+function isProgressNoise(line: string): boolean {
+  return PROGRESS_NOISE.some((pattern) => pattern.test(line));
+}
+
+/** Lines that differ only by timestamps / leading sequence counters are duplicates. */
+function foldKey(line: string): string {
+  return line
+    .replace(
+      /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?/g,
+      "<ts>",
+    )
+    .replace(/\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b/g, "<ts>")
+    .replace(/^(\s*(?:\[\s*)?)\d+(\s*\])?[.:)]?\s+/, "$1# ");
+}
+
+/**
+ * P18 — keep the 12k-character window for real results. Strips ANSI, removes
+ * scanner progress spam (carriage-return redraws included), and folds runs of
+ * >=4 identical (or timestamp/counter-only differing) log lines to
+ * first + last + `… [已折叠 N 行重复扫描输出]`.
+ */
+export function foldRepetitiveToolNoise(text: string): string {
+  if (!text) return text;
+  const cleaned = text.replace(ANSI_SEQUENCE, "").replace(/\r\n/g, "\n");
+  const lines = cleaned.split("\n").map((line) => {
+    const overwritten = line.lastIndexOf("\r");
+    return overwritten >= 0 ? line.slice(overwritten + 1) : line;
+  });
+  const out: string[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const key = foldKey(lines[index]!);
+    let end = index + 1;
+    if (key.trim() !== "" && !isProgressNoise(lines[index]!)) {
+      while (end < lines.length && foldKey(lines[end]!) === key && !isProgressNoise(lines[end]!)) {
+        end += 1;
+      }
+    }
+    const run = end - index;
+    if (run >= 4) {
+      out.push(lines[index]!);
+      out.push(lines[end - 1]!);
+      out.push(`… [已折叠 ${run - 2} 行重复扫描输出]`);
+    } else {
+      for (let k = index; k < end; k += 1) {
+        if (isProgressNoise(lines[k]!)) continue;
+        out.push(lines[k]!);
+      }
+    }
+    index = end;
+  }
+  // Collapse 3+ consecutive blank lines left behind by removed progress bars.
+  const compacted: string[] = [];
+  let blanks = 0;
+  for (const line of out) {
+    if (line.trim() === "") {
+      blanks += 1;
+      if (blanks >= 2) continue;
+    } else {
+      blanks = 0;
+    }
+    compacted.push(line);
+  }
+  return compacted.join("\n");
+}
+
 /** Shell-invoked tools that have a structured parser (P15-C4). */
 const SHELL_TOOLS: Record<string, SupportedTool> = {
   nmap: "nmap",

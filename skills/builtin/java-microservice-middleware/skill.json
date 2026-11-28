@@ -1,0 +1,19 @@
+{
+  "id": "java-microservice-middleware",
+  "name": "Java 脚手架与微服务中间件",
+  "description": "若依/Jeecg/Actuator/Gateway/Nacos/XXL-Job/Shiro/Fastjson/Druid 的指纹、默认鉴权核查与前缀绕过",
+  "defaultEnabled": true,
+  "source": "builtin",
+  "triggers": [
+    "ruoyi",
+    "若依",
+    "jeecg",
+    "actuator",
+    "spring cloud gateway",
+    "nacos",
+    "xxl-job",
+    "shiro",
+    "fastjson",
+    "druid"
+  ]
+}

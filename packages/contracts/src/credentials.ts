@@ -96,6 +96,30 @@ export const CredentialDraftSchema = CredentialDraftObjectSchema.transform((draf
 }));
 export type CredentialDraft = z.infer<typeof CredentialDraftSchema>;
 
+/**
+ * P18 — credential verification matrix cell: one probe of one credential against
+ * one (asset, service) pair. `valid` / `invalid` are conclusive; `error` means the
+ * probe itself failed (unreachable service) and the cell stays on the backlog.
+ */
+export const CredentialCheckVerdictSchema = z.enum(["valid", "invalid", "error"]);
+export type CredentialCheckVerdict = z.infer<typeof CredentialCheckVerdictSchema>;
+
+export const CredentialCheckSchema = z.object({
+  id: z.string().uuid(),
+  taskId: z.string().uuid(),
+  credentialId: z.string().uuid(),
+  /** Normalized target host the probe ran against. */
+  targetAsset: z.string().min(1),
+  /** Login surface, e.g. `ssh`, `mysql`, `http-login`. */
+  service: z.string().min(1),
+  verdict: CredentialCheckVerdictSchema,
+  evidencePath: z.string().nullable().default(null),
+  note: z.string().default(""),
+  checkedBy: z.string().min(1),
+  checkedAt: z.string().datetime(),
+});
+export type CredentialCheck = z.infer<typeof CredentialCheckSchema>;
+
 /** Redact anything that looks like a secret value before it reaches a prompt. */
 export function redactSecretRef(ref: string): string {
   const value = ref.trim();
