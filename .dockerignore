@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.*
+.gongyuai
+node_modules
+**/node_modules
+out
+artifacts
+archive
+docs
+*.tar
+*.tar.gz
+*.tgz
+.DS_Store
