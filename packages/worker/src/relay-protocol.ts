@@ -16,6 +16,12 @@ export type RelayWriteInput = {
   active_sessions?: string;
   foothold?: string;
   unexplored_surface?: string;
+  /** Structured engineering slots (optional; old π files parse with ""). */
+  confirmed_architecture_and_decoys?: string;
+  falsified_hypotheses?: string;
+  workspace_artifacts?: string;
+  live_footholds?: string;
+  next_falsifiable_experiment?: string;
   tokens: number;
   toolCalls: number;
   wallMs?: number;
@@ -82,6 +88,21 @@ export function formatRelayInjection(protocols: RelayProtocol[]): string {
     lines.push(`- active_sessions: ${p.active_sessions || "—"}`);
     lines.push(`- foothold: ${p.foothold || "—"}`);
     lines.push(`- unexplored_surface: ${p.unexplored_surface || "—"}`);
+    if (p.confirmed_architecture_and_decoys) {
+      lines.push(`- confirmed_architecture_and_decoys: ${p.confirmed_architecture_and_decoys}`);
+    }
+    if (p.falsified_hypotheses) {
+      lines.push(`- falsified_hypotheses: ${p.falsified_hypotheses}`);
+    }
+    if (p.workspace_artifacts) {
+      lines.push(`- workspace_artifacts: ${p.workspace_artifacts}`);
+    }
+    if (p.live_footholds) {
+      lines.push(`- live_footholds: ${p.live_footholds}`);
+    }
+    if (p.next_falsifiable_experiment) {
+      lines.push(`- next_falsifiable_experiment: ${p.next_falsifiable_experiment}`);
+    }
     lines.push(`- open_intents: ${p.open_intents.join(", ") || "—"}`);
     lines.push(
       `- budget_spent: tokens=${p.budget_spent.tokens} toolCalls=${p.budget_spent.toolCalls} wallMs=${p.budget_spent.wallMs}`,
@@ -111,6 +132,11 @@ export function writeRelayProtocol(
     active_sessions: input.active_sessions ?? "",
     foothold: input.foothold ?? "",
     unexplored_surface: input.unexplored_surface ?? "",
+    confirmed_architecture_and_decoys: input.confirmed_architecture_and_decoys ?? "",
+    falsified_hypotheses: input.falsified_hypotheses ?? "",
+    workspace_artifacts: input.workspace_artifacts ?? "",
+    live_footholds: input.live_footholds ?? "",
+    next_falsifiable_experiment: input.next_falsifiable_experiment ?? "",
     open_intents: open,
     budget_spent: {
       tokens: input.tokens,
@@ -182,10 +208,16 @@ export function synthesizeGroundedRelayFields(
   tried: string;
   foothold: string;
   unexplored_surface: string;
+  confirmed_architecture_and_decoys: string;
+  falsified_hypotheses: string;
+  workspace_artifacts: string;
+  live_footholds: string;
+  next_falsifiable_experiment: string;
 } {
   const assets = history.listAssets(taskId);
   const liveOrAdmitted = assets.filter((a) => a.kind === "live" || a.kind === "admitted");
-  const recentFacts = history.listFacts(taskId).slice(-8);
+  const allFacts = history.listFacts(taskId);
+  const recentFacts = allFacts.slice(-8);
   const intents = history.listIntents(taskId);
   const recentDone = intents
     .filter((i) => i.status === "succeeded" || i.status === "failed")
@@ -193,6 +225,7 @@ export function synthesizeGroundedRelayFields(
   const open = intents.filter((i) => ["proposed", "claimed", "running"].includes(i.status));
   const profiles = history.listHostProfiles(taskId);
   const creds = history.listCredentials(taskId);
+  const activeIntent = activeIntentId ? history.getIntent(taskId, activeIntentId) : null;
 
   const current_position = activeIntentId
     ? `activeIntent=${activeIntentId}`
@@ -221,11 +254,78 @@ export function synthesizeGroundedRelayFields(
     .map((i) => i.title)
     .join("; ") || "unfinished goals in History observe";
 
+  const lessons = activeIntent?.assetRoot
+    ? history.recallTacticalLessons(taskId, {
+        assetRoot: activeIntent.assetRoot,
+        techTags: activeIntent.technique ? [activeIntent.technique] : [],
+      })
+    : { exactAssetLessons: [], siblingFamilyLessons: [] };
+
+  const architecture = profiles
+    .slice(0, 4)
+    .map(
+      (p) =>
+        `${p.asset}: os=${p.os ?? "?"} domain=${p.domain ?? "?"} svc=${p.services.length} share=${p.shares.length}`,
+    )
+    .join("; ");
+  const decoyJudgements = recentDone
+    .filter((i) =>
+      /(诱饵|decoy|死分支|dead\s*end|伪分支|不参与校验)/i.test(i.conclusion ?? ""),
+    )
+    .map((i) => `${i.title}: ${(i.conclusion ?? "").slice(0, 120)}`);
+  const confirmed_architecture_and_decoys =
+    [architecture, decoyJudgements.length ? `死分支/诱饵: ${decoyJudgements.join("; ")}` : ""]
+      .filter(Boolean)
+      .join(" | ");
+
+  const falsifiedParts: string[] = [];
+  for (const lesson of lessons.exactAssetLessons.slice(0, 3)) {
+    for (const falsified of lesson.falsifiedHypotheses.slice(0, 2)) {
+      falsifiedParts.push(
+        `${falsified.hypothesis.slice(0, 100)} → ${falsified.resultSummary.slice(0, 120)}（证据: ${falsified.commandEvidence.slice(0, 100)}）`,
+      );
+    }
+  }
+  if (falsifiedParts.length === 0) {
+    for (const intent of recentDone.filter((i) => i.status === "failed").slice(-3)) {
+      falsifiedParts.push(`${intent.title} → ${(intent.conclusion ?? "").slice(0, 140)}`);
+    }
+  }
+  const falsified_hypotheses = falsifiedParts.join("; ");
+
+  const workspace_artifacts = allFacts
+    .filter((f) => Boolean(f.evidencePath))
+    .slice(-6)
+    .map((f) => `${f.evidencePath} (${f.title.slice(0, 60)})`)
+    .join("; ");
+
+  const liveParts: string[] = [];
+  for (const profile of profiles.slice(0, 3)) {
+    liveParts.push(
+      `${profile.asset} users=${profile.users.length} priv=${profile.privileges.join("/") || "-"}`,
+    );
+  }
+  if (creds.length > 0) {
+    liveParts.push(`creds=${creds.slice(0, 6).map((c) => `${c.id}@${c.asset}`).join(",")}`);
+  }
+  liveParts.push("转发端口: tunnel_list");
+  const live_footholds = liveParts.join("; ");
+
+  const pivotLesson = lessons.exactAssetLessons.find((lesson) => Boolean(lesson.nextPivotAdvice));
+  const next_falsifiable_experiment = open.length
+    ? `验证「${open[0]!.title.slice(0, 120)}」`
+    : pivotLesson?.nextPivotAdvice.slice(0, 160) ?? "";
+
   return {
     current_position,
     network_map,
     tried,
     foothold,
     unexplored_surface,
+    confirmed_architecture_and_decoys,
+    falsified_hypotheses,
+    workspace_artifacts,
+    live_footholds,
+    next_falsifiable_experiment,
   };
 }

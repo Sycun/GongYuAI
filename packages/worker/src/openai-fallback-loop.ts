@@ -44,6 +44,7 @@ import {
   systemPrompt,
 } from "./prompt-builder.js";
 import { canRelay, synthesizeGroundedRelayFields, writeRelayProtocol } from "./relay-protocol.js";
+import { formatSupervisorAdvisoryGate } from "./supervisor-advisory.js";
 import {
   evaluateEnvironmentTerminalExit,
   flushUsage,
@@ -161,6 +162,11 @@ export async function runOpenAiToolLoop(
     active_sessions?: string;
     foothold?: string;
     unexplored_surface?: string;
+    confirmed_architecture_and_decoys?: string;
+    falsified_hypotheses?: string;
+    workspace_artifacts?: string;
+    live_footholds?: string;
+    next_falsifiable_experiment?: string;
   }): string => {
     const check = canRelay({
       manifest,
@@ -181,6 +187,11 @@ export async function runOpenAiToolLoop(
       active_sessions: opts.active_sessions,
       foothold: opts.foothold,
       unexplored_surface: opts.unexplored_surface,
+      confirmed_architecture_and_decoys: opts.confirmed_architecture_and_decoys,
+      falsified_hypotheses: opts.falsified_hypotheses,
+      workspace_artifacts: opts.workspace_artifacts,
+      live_footholds: opts.live_footholds,
+      next_falsifiable_experiment: opts.next_falsifiable_experiment,
       tokens: state.tokens,
       toolCalls: ctx.usage.toolCalls,
       wallMs: Date.now() - workerStartedAt,
@@ -236,6 +247,11 @@ export async function runOpenAiToolLoop(
         active_sessions: args.active_sessions,
         foothold: args.foothold,
         unexplored_surface: args.unexplored_surface,
+        confirmed_architecture_and_decoys: args.confirmed_architecture_and_decoys,
+        falsified_hypotheses: args.falsified_hypotheses,
+        workspace_artifacts: args.workspace_artifacts,
+        live_footholds: args.live_footholds,
+        next_falsifiable_experiment: args.next_falsifiable_experiment,
       }),
     }),
   });
@@ -688,6 +704,24 @@ export async function runOpenAiToolLoop(
         tool_call_id: call.id,
         content: smartTruncateToolOutput(result, 12_000),
       });
+    }
+
+    // Cross-slot supervisor inbox: drain advisories after this tool batch and inject
+    // them as the next user turn (value-preserving; never clears the conversation).
+    try {
+      const activeIntent = state.activeIntentId
+        ? ctx.history.getIntent(manifest.taskId, state.activeIntentId)
+        : null;
+      const advisories = ctx.history.consumePendingAdvisories(manifest.taskId, {
+        activeIntentId: state.activeIntentId,
+        workerSlot: manifest.workerSlot ?? 0,
+        assetRoot: activeIntent?.assetRoot ?? null,
+      });
+      if (advisories.length > 0) {
+        messages.push({ role: "user", content: formatSupervisorAdvisoryGate(advisories) });
+      }
+    } catch {
+      /* advisory drain is best-effort */
     }
 
     if (allowedOpenAiNonRelayCalls > 0 && !relayResetOccurred) {

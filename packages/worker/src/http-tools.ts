@@ -10,6 +10,11 @@ import {
 } from "@gongyuai/exec";
 import { capabilityAtLeast, syncAdmittedTargets } from "./tools.js";
 import { readEvidenceBytes } from "@gongyuai/history";
+import {
+  ADAPTIVE_RATE_FUSE_THRESHOLD,
+  formatAdaptiveRateFuse,
+  targetOverloadTracker,
+} from "./loop-shared.js";
 import type { ToolContext } from "./tools.js";
 
 const IDEMPOTENT = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -150,12 +155,26 @@ export async function httpRequestTool(
   );
   const artifact = result.artifact;
 
+  const fuseHost = artifact.host || targetHost;
+  const scopeBlocked = Boolean(artifact.blockedRedirect) || (artifact.error?.startsWith("blocked:") ?? false);
+  let rateFuse: string | null = null;
+  if (fuseHost && !scopeBlocked) {
+    const anomalyCount = targetOverloadTracker.record(fuseHost, {
+      status: artifact.status,
+      ...(artifact.error ? { error: artifact.error } : {}),
+    });
+    if (anomalyCount >= ADAPTIVE_RATE_FUSE_THRESHOLD) {
+      rateFuse = formatAdaptiveRateFuse(fuseHost, anomalyCount);
+    }
+  }
+
   if (artifact.error || artifact.status === 0) {
     return JSON.stringify({
       ok: false,
       error: artifact.error ?? "request failed",
       status: 0,
       blockedRedirect: artifact.blockedRedirect,
+      ...(rateFuse ? { rateFuse } : {}),
     });
   }
 
@@ -305,6 +324,7 @@ export async function httpRequestTool(
     blockedRedirect: artifact.blockedRedirect ?? null,
     ...(sessionName ? { session: sessionName, sessionCookies: sessionCookieCount ?? 0 } : {}),
     ...(diff ? { diff } : {}),
+    ...(rateFuse ? { rateFuse } : {}),
     note: "证据已封存；finding_verify 可直接 cite http:<id>",
   });
 }

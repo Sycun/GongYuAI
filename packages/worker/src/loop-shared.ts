@@ -4,6 +4,7 @@ import {
   isBudgetHit,
   isExploreLeader,
   isWallHit,
+  normalizeHost,
   selectModelRoute,
   type ModelRef,
   type ModelTier,
@@ -16,7 +17,7 @@ import { syncGraphPhase, type WorkerRole } from "./graph-phase.js";
 import { isLeaderStatusTerminal, normalizeProviderId } from "./model-resilience.js";
 import { takeSoftPaceAdvice } from "./soft-pace.js";
 import { writeWorkerStatus } from "./status.js";
-import { appendProgress, type ToolContext } from "./tools.js";
+import { appendProgress, extractHosts, type ToolContext } from "./tools.js";
 
 export const STALE_INTENT_MAX_AGE_MS = 20 * 60_000;
 export const ENVIRONMENT_TERMINAL_FILE = "environment-terminal.json";
@@ -482,4 +483,101 @@ export function runExploreTimeoutGate(
     ckpt.save(state);
   }
   return result.message;
+}
+
+/* ======================================================================== *
+ * Adaptive rate fuse: per-host consecutive connection-anomaly tracking.
+ * ======================================================================== */
+
+export const ADAPTIVE_RATE_FUSE_THRESHOLD = 2;
+
+const NORMAL_HTTP_STATUSES = new Set([200, 301, 302, 400, 401, 403, 404]);
+const OVERLOAD_HTTP_STATUSES = new Set([0, 502, 504]);
+const CONNECTION_OVERLOAD_RE =
+  /ECONNREFUSED|ETIMEDOUT|ETIMEOUT|ECONNRESET|timed?\s*out|timeout/i;
+
+export type TargetOverloadSignal = {
+  status?: number | null;
+  error?: string | null;
+  timedOut?: boolean;
+};
+
+/**
+ * Counts consecutive connection anomalies per target host. A normal response
+ * (200/301/302/400/401/403/404) resets that host to zero immediately.
+ */
+export class TargetOverloadTracker {
+  private readonly consecutiveAnomalies = new Map<string, number>();
+
+  constructor(private readonly maxHosts = 256) {}
+
+  record(hostRaw: string, signal: TargetOverloadSignal): number {
+    const host = normalizeHost(hostRaw);
+    if (!host) return 0;
+    const status = signal.status ?? null;
+    if (status != null && NORMAL_HTTP_STATUSES.has(status)) {
+      this.consecutiveAnomalies.delete(host);
+      return 0;
+    }
+    const anomaly =
+      signal.timedOut === true ||
+      (status != null && OVERLOAD_HTTP_STATUSES.has(status)) ||
+      (status == null && CONNECTION_OVERLOAD_RE.test(signal.error ?? ""));
+    if (!anomaly) return this.consecutiveAnomalies.get(host) ?? 0;
+    const next = (this.consecutiveAnomalies.get(host) ?? 0) + 1;
+    if (!this.consecutiveAnomalies.has(host) && this.consecutiveAnomalies.size >= this.maxHosts) {
+      const oldest = this.consecutiveAnomalies.keys().next().value;
+      if (oldest) this.consecutiveAnomalies.delete(oldest);
+    }
+    this.consecutiveAnomalies.set(host, next);
+    return next;
+  }
+
+  count(hostRaw: string): number {
+    return this.consecutiveAnomalies.get(normalizeHost(hostRaw)) ?? 0;
+  }
+
+  reset(hostRaw?: string): void {
+    if (hostRaw == null) {
+      this.consecutiveAnomalies.clear();
+      return;
+    }
+    this.consecutiveAnomalies.delete(normalizeHost(hostRaw));
+  }
+}
+
+export const targetOverloadTracker = new TargetOverloadTracker();
+
+export function formatAdaptiveRateFuse(host: string, count: number): string {
+  return (
+    `[ADAPTIVE_RATE_FUSE · 目标连接异常降速保护] ${host} 连续 ${count} 次连接超时/拒绝或收到 000/502/504。` +
+    "目标服务可能已过载或临时不可用：请立即切换为单线程低频探测（如 --rate 10、-t 1 -p 0.5），" +
+    "先确认目标服务存活性（curl -sS -o /dev/null -w '%{http_code}'），异常未恢复前不要再并发压测。"
+  );
+}
+
+/**
+ * Feed shell output into the shared tracker when it clearly shows curl status `000`
+ * or repeated connection timeouts toward the hosts named in the command.
+ */
+export function recordShellConnectionSignals(
+  command: string,
+  output: string,
+  tracker: TargetOverloadTracker = targetOverloadTracker,
+): string | null {
+  const hosts = extractHosts(command);
+  if (!hosts.length) return null;
+  const anomalous =
+    /(?:^|[\s:=])000(?:$|[\s,;])/m.test(output) ||
+    /ECONNREFUSED|ETIMEDOUT|ETIMEOUT|Connection timed out|Operation timed out|Connection refused/i.test(
+      output,
+    );
+  if (!anomalous) return null;
+  for (const host of hosts) {
+    const count = tracker.record(host, { status: 0, error: output.slice(0, 400) });
+    if (count >= ADAPTIVE_RATE_FUSE_THRESHOLD) {
+      return formatAdaptiveRateFuse(host, count);
+    }
+  }
+  return null;
 }

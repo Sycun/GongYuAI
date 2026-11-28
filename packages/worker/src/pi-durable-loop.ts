@@ -40,6 +40,7 @@ import {
 } from "./prompt-builder.js";
 import { formatGateSpinRecoveryHint, shouldSnapshotRelay } from "./relay.js";
 import { canRelay, synthesizeGroundedRelayFields, writeRelayProtocol } from "./relay-protocol.js";
+import { formatSupervisorAdvisoryGate } from "./supervisor-advisory.js";
 import {
   accountExploreTimeoutTurn,
   beginExploreTimeoutClock,
@@ -368,6 +369,11 @@ export async function tryPiDurable(
           active_sessions: args.active_sessions,
           foothold: args.foothold,
           unexplored_surface: args.unexplored_surface,
+          confirmed_architecture_and_decoys: args.confirmed_architecture_and_decoys,
+          falsified_hypotheses: args.falsified_hypotheses,
+          workspace_artifacts: args.workspace_artifacts,
+          live_footholds: args.live_footholds,
+          next_falsifiable_experiment: args.next_falsifiable_experiment,
           tokens: state.tokens,
           toolCalls: ctx.usage.toolCalls,
           generation: state.relayGeneration,
@@ -570,6 +576,24 @@ export async function tryPiDurable(
                 }
               } catch {
                 /* advisory only */
+              }
+
+              // Cross-slot supervisor inbox: drain advisories after the tool batch and
+              // surface them as a gate note in the next tool result (no session break).
+              try {
+                const activeIntent = state.activeIntentId
+                  ? ctx.history.getIntent(manifest.taskId, state.activeIntentId)
+                  : null;
+                const advisories = ctx.history.consumePendingAdvisories(manifest.taskId, {
+                  activeIntentId: state.activeIntentId,
+                  workerSlot: manifest.workerSlot ?? 0,
+                  assetRoot: activeIntent?.assetRoot ?? null,
+                });
+                if (advisories.length > 0) {
+                  longTurn.notes.push(formatSupervisorAdvisoryGate(advisories));
+                }
+              } catch {
+                /* advisory drain is best-effort */
               }
 
               maybeBackgroundSnapshot();

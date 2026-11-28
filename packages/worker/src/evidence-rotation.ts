@@ -8,7 +8,7 @@
  * force-conclude the active Intent and return to Reason only when a surface is
  * genuinely exhausted. Granularity is the Intent/attack-surface, never a benchmark code.
  */
-import { normalizeHost, targetAllows, type Intent } from "@gongyuai/contracts";
+import { normalizeHost, suggestFamilyKey, targetAllows, type Intent } from "@gongyuai/contracts";
 import type { HistoryStore } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import { appendProgress } from "./tools.js";
@@ -145,6 +145,66 @@ export type EvidenceStallResult = {
   draining?: boolean;
   drainStepsRemaining?: number;
 };
+
+/**
+ * 超时强制结项后的保底经验沉淀：用已有执行痕迹 / factDraft 写一条 tactical_lesson，
+ * 避免时间盒白跑——同资产后续 Intent 直接看到这条排除路径与换面建议。
+ * 已有显式 lesson 时不重复写入；失败不影响结项。
+ */
+function recordTimeoutFallbackLesson(
+  opts: { history: HistoryStore; taskId: string; workspaceDir: string },
+  intent: Intent,
+  minutes: number,
+  draft: CheckpointState["factDraft"],
+): void {
+  try {
+    if (opts.history.hasTacticalLessonForIntent(opts.taskId, intent.id)) return;
+    const assetRoot =
+      intent.assetRoot ??
+      opts.history.primaryAssetAddress(opts.taskId, intent.sourceFactIds) ??
+      "";
+    if (!assetRoot) return;
+    const trail = opts.history.listFacts(opts.taskId).filter((f) => f.intentId === intent.id);
+    const latestFact = trail[trail.length - 1];
+    const commandEvidence =
+      draft?.evidencePath ||
+      latestFact?.evidencePath ||
+      `explore-timeout:${intent.id}（时间盒内执行轨迹，见 exec/ 步骤日志与历史 Fact）`;
+    const resultSummary = (
+      draft?.summary ||
+      latestFact?.summary ||
+      `时间盒 ${minutes}min 到期仍无新 verified 证据`
+    ).slice(0, 400);
+    const familyHint = suggestFamilyKey({
+      title: intent.title,
+      summary: resultSummary,
+      addresses: [assetRoot],
+    });
+    const lesson = opts.history.recordTacticalLesson({
+      taskId: opts.taskId,
+      intentId: intent.id,
+      assetRoot,
+      familyKey: familyHint?.key ?? null,
+      techTags: [...(intent.technique ? [intent.technique] : []), "explore-timeout"],
+      falsifiedHypotheses: [
+        {
+          hypothesis: `按原路线「${intent.title}」继续推进即可在时间盒内取得突破`,
+          commandEvidence,
+          resultSummary: resultSummary || `时间盒 ${minutes}min 到期仍无新 verified 证据`,
+        },
+      ],
+      antipatterns: ["单一攻击面持续消耗超过时间盒仍未落盘验证证据"],
+      nextPivotAdvice:
+        "换正交 technique 重派（recon-surface / 凭据复用 / 已知 CVE PoC），不要重复同一命令序列；先核对已获部分回显、存活会话与隧道端口。",
+    });
+    appendProgress(
+      opts.workspaceDir,
+      `tactical_lesson ${lesson.id} fallback ← ${intent.id} @${lesson.assetRoot}`,
+    );
+  } catch {
+    /* fallback lesson is best-effort; rotation already completed */
+  }
+}
 
 /**
  * Resolve tiered timebox for an Intent based on prior concluded attempts against the same `assetRoot`:
@@ -290,12 +350,21 @@ export function maybeForceEvidenceStall(opts: {
   }
 
   const reason = `Evidence stall: ${minutes}min since last verified evidence on this surface; force rotate (relay-safe)`;
+  const rescuedDraft = opts.state.factDraft;
   const done = opts.history.forceConcludeExploreTimeout({
     taskId: opts.taskId,
     intentId,
     workerId: opts.workerId,
     reason,
   });
+  if (done) {
+    recordTimeoutFallbackLesson(
+      { history: opts.history, taskId: opts.taskId, workspaceDir: opts.workspaceDir },
+      intent,
+      minutes,
+      rescuedDraft,
+    );
+  }
   opts.state.activeIntentId = null;
   opts.state.activeIntentClaimedAt = null;
   opts.state.toolsAtIntentClaim = null;

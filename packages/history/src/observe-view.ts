@@ -6,6 +6,7 @@ import {
   ORIGIN_FACT_ID,
   deriveEngagementAudit,
   formatEngagementAuditSummary,
+  sameAssetScope,
   type AssetKind,
   type AssetRecord,
   type Credential,
@@ -15,6 +16,7 @@ import {
   type GoalState,
   type Hint,
   type HostProfile,
+  type HttpTransaction,
   type Intent,
   type PlanStep,
 } from "@gongyuai/contracts";
@@ -30,8 +32,84 @@ export type ObserveRenderSource = {
   listCredentials(taskId: string): Credential[];
   listHostProfiles(taskId: string): HostProfile[];
   listPlan(taskId: string): PlanStep[];
+  listHttpTransactions?(taskId: string, limit?: number): HttpTransaction[];
   hasConfirmedValidation(taskId: string, findingId: string): boolean;
 };
+
+const ACTIVE_INTENT_STATUSES = new Set(["claimed", "running"]);
+
+function formatDuration(ms: number): string {
+  const minutes = Math.floor(Math.max(0, ms) / 60_000);
+  if (minutes < 1) return "<1m";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h${minutes % 60}m`;
+}
+
+/** 简明运行脉搏：已运行时长 / claimed_by / 最近 HTTP 状态码统计或最新 Fact 标题。 */
+function renderIntentPulse(
+  intent: Intent,
+  facts: readonly Fact[],
+  transactions: readonly HttpTransaction[],
+  nowMs: number,
+): string {
+  if (!ACTIVE_INTENT_STATUSES.has(intent.status)) return "";
+  const parts: string[] = [];
+  const startedMs = Date.parse(intent.createdAt);
+  if (Number.isFinite(startedMs)) {
+    parts.push(`已运行 ${formatDuration(nowMs - startedMs)}`);
+  }
+  parts.push(`claimed_by=${intent.claimedBy ?? "—"}`);
+  const ownTx = transactions.filter((tx) => tx.intentId === intent.id).slice(-12);
+  if (ownTx.length > 0) {
+    const counts = new Map<number, number>();
+    for (const tx of ownTx) counts.set(tx.status, (counts.get(tx.status) ?? 0) + 1);
+    const codes = [...counts.entries()]
+      .map(([status, count]) => `${status === 0 ? "000" : status}×${count}`)
+      .join("/");
+    parts.push(`HTTP ${codes}`);
+  } else {
+    const ownFacts = facts.filter((fact) => fact.intentId === intent.id);
+    const latest = ownFacts[ownFacts.length - 1];
+    if (latest) parts.push(`最新事实: ${latest.title.slice(0, 60)}`);
+  }
+  return parts.join(" · ");
+}
+
+/**
+ * 并发槽位子表面互斥声明：把同 assetRoot / 同 RFC1918 /24 的其他活跃 Intent
+ * 的子表面与互斥说明显式呈现，避免并行槽位重复探测同一子路径。
+ */
+export function renderSurfaceMutexDeclaration(
+  active: Pick<Intent, "id" | "title" | "assetRoot" | "assignedSurfaces" | "mutexNote">,
+  peers: readonly Intent[],
+): string | null {
+  const activeRoot = active.assetRoot?.trim();
+  if (!activeRoot) return null;
+  const siblings = peers.filter(
+    (peer) =>
+      peer.id !== active.id &&
+      ACTIVE_INTENT_STATUSES.has(peer.status) &&
+      peer.assetRoot != null &&
+      sameAssetScope(activeRoot, peer.assetRoot),
+  );
+  if (siblings.length === 0) return null;
+  const lines: string[] = ["[并发槽位子表面互斥声明]"];
+  const ownSurfaces = (active.assignedSurfaces ?? []).join(" / ") || "（未声明）";
+  lines.push(
+    `- 本槽位 @${activeRoot}「${active.title.slice(0, 80)}」负责子表面: ${ownSurfaces}${active.mutexNote ? ` · 互斥说明: ${active.mutexNote.slice(0, 200)}` : ""}`,
+  );
+  for (const peer of siblings.slice(0, 6)) {
+    const surfaces = (peer.assignedSurfaces ?? []).join(" / ") || "（未声明）";
+    lines.push(
+      `- 友邻槽位 @${peer.assetRoot}「${peer.title.slice(0, 80)}」负责子表面: ${surfaces}${peer.mutexNote ? ` · 互斥说明: ${peer.mutexNote.slice(0, 200)}` : ""}`,
+    );
+  }
+  lines.push(
+    "（避免重复探测同一子路径/端口面；跨槽复用资源走 credential_list / tunnel_list 或 supervisor 督导，勿重复新建同类会话。）",
+  );
+  return lines.join("\n");
+}
 
 export function deriveHistoryEngagementAudit(
   src: ObserveRenderSource,
@@ -118,6 +196,10 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
   const transferable = src.listTransferableFacts(taskId).slice(-20);
   const findings = src.listFindings(taskId).filter((f) => f.status !== "retracted");
   const credentials = src.listCredentials(taskId);
+  const httpTransactions = src.listHttpTransactions
+    ? src.listHttpTransactions(taskId, 200)
+    : [];
+  const nowMs = Date.now();
 
   const factById = new Map(allFacts.map((f) => [f.id, f]));
   const intentById = new Map(allIntents.map((i) => [i.id, i]));
@@ -289,10 +371,22 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
   } else {
     for (const i of open.slice(0, MAX_OPEN_INTENTS)) {
       const srcIds = i.sourceFactIds.join(",");
-      lines.push(`- [${i.id}] (${i.status}) ${i.title} ←facts ${srcIds}`);
+      const surfaces = i.assignedSurfaces?.length
+        ? ` · surfaces=${i.assignedSurfaces.join(",")}`
+        : "";
+      const mutex = i.mutexNote ? ` · mutex=${i.mutexNote.slice(0, 120)}` : "";
+      const pulse = renderIntentPulse(i, allFacts, httpTransactions, nowMs);
+      lines.push(
+        `- [${i.id}] (${i.status}) ${i.title} ←facts ${srcIds}${surfaces}${mutex}${pulse ? ` · ${pulse}` : ""}`,
+      );
     }
     if (open.length > MAX_OPEN_INTENTS) {
       lines.push(`- … 另有 ${open.length - MAX_OPEN_INTENTS} 条进行中意图未展开。`);
+    }
+    if (open.some((i) => ACTIVE_INTENT_STATUSES.has(i.status))) {
+      lines.push(
+        "（claimed/running 意图附运行脉搏：已运行时长、claimed_by、最近 HTTP 状态码统计或最新 Fact 标题；连续 500/000 或长时间无新证据应视为停滞信号。）",
+      );
     }
   }
   const concluded = allIntents

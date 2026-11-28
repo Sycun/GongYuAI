@@ -17,6 +17,85 @@ import { appendProgress } from "./tools.js";
 
 import { execRuntimeFor } from "./exec-runtime.js";
 
+const PROXYCHAINS_BIN_RE = /(?:^|\/)proxychains4?(?:\.exe)?$/i;
+const PROXY_BRUTE_TOOLS = new Set(["hydra", "medusa", "ncrack"]);
+const PROXY_FUZZ_TOOLS = new Set(["ffuf", "gobuster", "dirb", "wfuzz"]);
+
+function stripShellQuotes(token: string): string {
+  return token.replace(/^["']+|["']+$/g, "");
+}
+
+function executableBasename(token: string): string {
+  const cleaned = stripShellQuotes(token).replace(/\\/g, "/");
+  const parts = cleaned.split("/");
+  return (parts[parts.length - 1] ?? "").toLowerCase();
+}
+
+function flagValue(args: readonly string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+/** Single-thread / rate-limited invocation for fuzz-style tools. */
+function hasSerialRateLimit(tool: string, args: readonly string[]): boolean {
+  const singleThread = (flag: string) => flagValue(args, flag) === "1";
+  switch (tool) {
+    case "ffuf":
+      return singleThread("-t") || args.includes("-rate");
+    case "gobuster":
+      return singleThread("-t") || args.includes("--delay");
+    case "dirb":
+      return args.includes("-z");
+    case "wfuzz":
+      return singleThread("-t") || args.includes("--rate") || args.includes("--delay");
+    default:
+      return false;
+  }
+}
+
+/**
+ * Static guard: proxychains directly wrapping high-connection scanners / brute forcers
+ * multiplies every worker connection through the proxy chain and easily drowns a fragile
+ * jump host or target. Single-connection proxychains use (curl / python3 / ssh) is allowed.
+ *
+ * Returns a structured denial message, or null when the command is acceptable.
+ */
+export function detectProxyConcurrencyAntipattern(command: string): string | null {
+  const segments = command.split(/&&|\|\||[;|\n]/);
+  for (const segment of segments) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    const proxyIndex = tokens.findIndex((token) => PROXYCHAINS_BIN_RE.test(stripShellQuotes(token)));
+    if (proxyIndex < 0) continue;
+    let cursor = proxyIndex + 1;
+    while (cursor < tokens.length) {
+      const token = stripShellQuotes(tokens[cursor] ?? "");
+      if (!token.startsWith("-")) break;
+      // proxychains -f <config> consumes a value; other flags are standalone.
+      cursor += token === "-f" ? 2 : 1;
+    }
+    const tool = executableBasename(tokens[cursor] ?? "");
+    if (!tool) continue;
+    if (PROXY_BRUTE_TOOLS.has(tool)) {
+      return (
+        `denied: proxychains 直接包裹高连接数口令枚举工具 ${tool}，会在代理链上叠加大量并发连接，` +
+        "极易压垮跳板与目标并触发封禁。替代：tunnel_open 单端口转发后本地单连接串行校验（小字典），" +
+        "或先完成本地配置/数据库凭据提取再复用；确需枚举请在无代理链的单跳上显式限速执行。"
+      );
+    }
+    if (PROXY_FUZZ_TOOLS.has(tool)) {
+      const toolArgs = tokens.slice(cursor + 1).map(stripShellQuotes);
+      if (!hasSerialRateLimit(tool, toolArgs)) {
+        return (
+          `denied: proxychains 包裹 ${tool} 且未指定单线程/限速参数，代理链高并发扫描会压垮脆弱服务。` +
+          `替代：改用 tunnel_open 单端口转发后本地串行验证，或显式限速（${tool} 使用 -t 1 配合 -rate 10 / --delay / -z 500）；` +
+          "先完成本地配置/数据库凭据提取，减少盲扫连接数。"
+        );
+      }
+    }
+  }
+  return null;
+}
+
 function stamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }

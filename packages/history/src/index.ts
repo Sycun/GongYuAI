@@ -66,11 +66,17 @@ import type {
   RetestRequest,
   RetestRequestInput,
   RetestVerdict,
+  TacticalLesson,
+  WorkerAdvisory,
+  WorkerAdvisoryKind,
+  WorkerAdvisoryPriority,
 } from "@gongyuai/contracts";
 import {
   ASSET_TAG,
   ORIGIN_FACT_ID,
   TRANSFERABLE_TAG,
+  TacticalLessonSchema,
+  WorkerAdvisorySchema,
   assetGroupKey,
   assetRootKey,
   attackEdgeTags,
@@ -87,6 +93,7 @@ import {
   parseAssetKindFromTags,
   reconcileConfigDigest,
   resolveGateAssets,
+  sameAssetScope,
   suggestFamilyKey,
 } from "@gongyuai/contracts";
 import type {
@@ -152,6 +159,7 @@ export type { DeliverySnapshot, Scorecard, ScorecardGoal } from "./scorecard.js"
 export { computeScorecard, finalizeSnapshot, scorecardFromSnapshot, snapshotSha256 } from "./scorecard.js";
 export { describeGoalEvidence, formatAccounting, formatCorrections, type GoalEvidenceSupport } from "./delivery.js";
 export { minimatch } from "./minimatch.js";
+export { renderSurfaceMutexDeclaration } from "./observe-view.js";
 export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
 export {
   listEvidenceFiles,
@@ -571,12 +579,20 @@ export class HistoryStore {
     rejectOosOnly?: boolean;
     fanout?: FanoutPolicy;
     planStepId?: string | null;
+    /** Sub-surface partition this Intent owns (paths/ports), rendered for concurrent peers. */
+    assignedSurfaces?: string[];
+    /** Coordination note for sibling slots on the same asset scope. */
+    mutexNote?: string;
   }): Intent {
     const sourceFactIds = this.validateSourceFactIds(input.taskId, input.sourceFactIds);
     if (input.rejectOosOnly !== false) {
       this.assertNotOosOnlyExploit(input.taskId, sourceFactIds);
     }
     const normalizedAssetRoot = input.assetRoot ? normalizeHost(input.assetRoot) : null;
+    const assignedSurfaces = [
+      ...new Set((input.assignedSurfaces ?? []).map((s) => s.trim()).filter(Boolean)),
+    ].slice(0, 12);
+    const mutexNote = (input.mutexNote ?? "").trim().slice(0, 500);
     if (input.fanout) {
       this.assertFanoutAllows(input.taskId, sourceFactIds, input.fanout, {
         assetRoot: normalizedAssetRoot,
@@ -601,6 +617,8 @@ export class HistoryStore {
       sourceFactIds,
       technique: input.technique?.trim() ? input.technique.trim() : null,
       assetRoot: normalizedAssetRoot,
+      assignedSurfaces,
+      mutexNote,
       claimedBy: null,
       createdAt: now,
       updatedAt: now,
@@ -611,8 +629,8 @@ export class HistoryStore {
       .prepare(
         `INSERT INTO intents
           (id, task_id, title, summary, status, source_fact_ids_json, claimed_by, technique, asset_root,
-           created_at, updated_at, concluded_at, conclusion)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           assigned_surfaces_json, mutex_note, created_at, updated_at, concluded_at, conclusion)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         intent.id,
@@ -624,6 +642,8 @@ export class HistoryStore {
         intent.claimedBy,
         intent.technique,
         intent.assetRoot,
+        JSON.stringify(assignedSurfaces),
+        mutexNote,
         intent.createdAt,
         intent.updatedAt,
         intent.concludedAt,
@@ -1080,6 +1100,13 @@ export class HistoryStore {
     } catch {
       sourceFactIds = [ORIGIN_FACT_ID];
     }
+    let assignedSurfaces: string[] = [];
+    try {
+      const parsed = JSON.parse(String(r.assigned_surfaces_json ?? "[]")) as unknown;
+      if (Array.isArray(parsed)) assignedSurfaces = parsed.map(String).filter(Boolean);
+    } catch {
+      assignedSurfaces = [];
+    }
     return {
       id: String(r.id),
       taskId: String(r.task_id),
@@ -1089,6 +1116,8 @@ export class HistoryStore {
       sourceFactIds,
       technique: (r.technique as string | null) ?? null,
       assetRoot: (r.asset_root as string | null) ?? null,
+      assignedSurfaces,
+      mutexNote: String(r.mutex_note ?? ""),
       claimedBy: (r.claimed_by as string | null) ?? null,
       createdAt: String(r.created_at),
       updatedAt: String(r.updated_at),
@@ -1906,6 +1935,281 @@ export class HistoryStore {
 
   listTransferableFacts(taskId: string): Fact[] {
     return this.listFacts(taskId).filter((f) => f.tags.includes(TRANSFERABLE_TAG));
+  }
+
+  /* ====================================================================== *
+   * 5.5 Supervisor advisories & tactical lessons (cross-slot in-flight inbox)
+   * ====================================================================== */
+
+  enqueueAdvisory(input: {
+    taskId: string;
+    kind: WorkerAdvisoryKind;
+    priority?: WorkerAdvisoryPriority;
+    targetIntentId?: string | null;
+    targetWorkerSlot?: number | null;
+    assetScope?: string | null;
+    summary: string;
+    createdBy: string;
+  }): WorkerAdvisory {
+    const advisory = WorkerAdvisorySchema.parse({
+      id: randomUUID(),
+      taskId: input.taskId,
+      kind: input.kind,
+      priority: input.priority ?? "normal",
+      targetIntentId: input.targetIntentId ?? null,
+      targetWorkerSlot: input.targetWorkerSlot ?? null,
+      assetScope: input.assetScope ? normalizeHost(input.assetScope) || null : null,
+      summary: input.summary,
+      createdBy: input.createdBy,
+      createdAt: this.now(),
+      consumedAt: null,
+      consumedBySlot: null,
+    });
+    this.db
+      .prepare(
+        `INSERT INTO worker_advisories
+          (id, task_id, kind, priority, target_intent_id, target_worker_slot, asset_scope,
+           summary, created_by, created_at, consumed_at, consumed_by_slot)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        advisory.id,
+        advisory.taskId,
+        advisory.kind,
+        advisory.priority,
+        advisory.targetIntentId,
+        advisory.targetWorkerSlot,
+        advisory.assetScope,
+        advisory.summary,
+        advisory.createdBy,
+        advisory.createdAt,
+        advisory.consumedAt,
+        advisory.consumedBySlot,
+      );
+    return advisory;
+  }
+
+  /**
+   * Atomically drain advisories addressed to this Worker: an exact target Intent,
+   * this worker slot, or the same asset scope (identical host or same RFC1918 /24).
+   * Each row is consumed exactly once even under concurrent Worker transactions.
+   */
+  consumePendingAdvisories(
+    taskId: string,
+    matcher: { activeIntentId?: string | null; workerSlot?: number | null; assetRoot?: string | null },
+  ): WorkerAdvisory[] {
+    const now = this.now();
+    const consumedBySlot = matcher.workerSlot ?? null;
+    const consumed: WorkerAdvisory[] = [];
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM worker_advisories
+           WHERE task_id = ? AND consumed_at IS NULL
+           ORDER BY created_at, rowid`,
+        )
+        .all(taskId) as Array<Record<string, unknown>>;
+      const matched = rows
+        .map((r) => this.rowToAdvisory(r))
+        .filter((advisory) => {
+          if (
+            advisory.targetIntentId &&
+            matcher.activeIntentId &&
+            advisory.targetIntentId === matcher.activeIntentId
+          ) {
+            return true;
+          }
+          if (
+            advisory.targetWorkerSlot != null &&
+            matcher.workerSlot != null &&
+            advisory.targetWorkerSlot === matcher.workerSlot
+          ) {
+            return true;
+          }
+          return Boolean(
+            advisory.assetScope &&
+              matcher.assetRoot &&
+              sameAssetScope(advisory.assetScope, matcher.assetRoot),
+          );
+        });
+      const update = this.db.prepare(
+        `UPDATE worker_advisories
+         SET consumed_at = ?, consumed_by_slot = ?
+         WHERE id = ? AND task_id = ? AND consumed_at IS NULL`,
+      );
+      for (const advisory of matched) {
+        const result = update.run(now, consumedBySlot, advisory.id, taskId);
+        if ((result.changes ?? 0) > 0) {
+          consumed.push({ ...advisory, consumedAt: now, consumedBySlot });
+        }
+      }
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
+    return consumed;
+  }
+
+  listRecentAdvisories(taskId: string, limit = 20): WorkerAdvisory[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM worker_advisories WHERE task_id = ?
+         ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+      )
+      .all(taskId, Math.max(1, Math.floor(limit))) as Array<Record<string, unknown>>;
+    return rows.map((r) => this.rowToAdvisory(r));
+  }
+
+  recordTacticalLesson(input: {
+    taskId: string;
+    intentId?: string | null;
+    assetRoot: string;
+    familyKey?: string | null;
+    techTags?: string[];
+    falsifiedHypotheses?: Array<{
+      hypothesis: string;
+      commandEvidence: string;
+      resultSummary: string;
+    }>;
+    antipatterns?: string[];
+    effectivePattern?: string | null;
+    nextPivotAdvice?: string;
+  }): TacticalLesson {
+    const lesson = TacticalLessonSchema.parse({
+      id: randomUUID(),
+      taskId: input.taskId,
+      intentId: input.intentId ?? null,
+      assetRoot: normalizeHost(input.assetRoot),
+      familyKey: normalizeFamilyKey(input.familyKey ?? "") ?? "",
+      techTags: [...new Set((input.techTags ?? []).map((t) => t.trim()).filter(Boolean))],
+      falsifiedHypotheses: (input.falsifiedHypotheses ?? []).map((h) => ({
+        hypothesis: h.hypothesis,
+        commandEvidence: h.commandEvidence,
+        resultSummary: h.resultSummary,
+      })),
+      antipatterns: [...new Set((input.antipatterns ?? []).map((t) => t.trim()).filter(Boolean))],
+      effectivePattern: input.effectivePattern?.trim() ? input.effectivePattern.trim() : null,
+      nextPivotAdvice: input.nextPivotAdvice ?? "",
+      createdAt: this.now(),
+    });
+    this.db
+      .prepare(
+        `INSERT INTO tactical_lessons
+          (id, task_id, intent_id, asset_root, family_key, tech_tags_json,
+           falsified_hypotheses_json, antipatterns_json, effective_pattern, next_pivot_advice, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        lesson.id,
+        lesson.taskId,
+        lesson.intentId,
+        lesson.assetRoot,
+        lesson.familyKey,
+        JSON.stringify(lesson.techTags),
+        JSON.stringify(lesson.falsifiedHypotheses),
+        JSON.stringify(lesson.antipatterns),
+        lesson.effectivePattern,
+        lesson.nextPivotAdvice,
+        lesson.createdAt,
+      );
+    return lesson;
+  }
+
+  /**
+   * Recall verified dead ends for the same asset root, plus transferable lessons
+   * from sibling assets sharing the family key or at least one tech tag.
+   */
+  recallTacticalLessons(
+    taskId: string,
+    query: { assetRoot?: string | null; familyKey?: string | null; techTags?: string[] },
+  ): { exactAssetLessons: TacticalLesson[]; siblingFamilyLessons: TacticalLesson[] } {
+    const wantRoot = query.assetRoot ? normalizeHost(query.assetRoot) : "";
+    const wantFamily = normalizeFamilyKey(query.familyKey ?? "") ?? "";
+    const wantTags = new Set(
+      (query.techTags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean),
+    );
+    const rows = this.db
+      .prepare(`SELECT * FROM tactical_lessons WHERE task_id = ? ORDER BY created_at DESC, rowid DESC`)
+      .all(taskId) as Array<Record<string, unknown>>;
+    const lessons = rows.map((r) => this.rowToTacticalLesson(r));
+    const exactAssetLessons = wantRoot
+      ? lessons.filter((lesson) => normalizeHost(lesson.assetRoot) === wantRoot)
+      : [];
+    const exactIds = new Set(exactAssetLessons.map((lesson) => lesson.id));
+    const siblingFamilyLessons = lessons.filter((lesson) => {
+      if (exactIds.has(lesson.id)) return false;
+      if (
+        wantFamily &&
+        lesson.familyKey &&
+        normalizeFamilyKey(lesson.familyKey) === wantFamily
+      ) {
+        return true;
+      }
+      if (wantTags.size === 0) return false;
+      return lesson.techTags.some((tag) => wantTags.has(tag.trim().toLowerCase()));
+    });
+    return {
+      exactAssetLessons: exactAssetLessons.slice(0, 20),
+      siblingFamilyLessons: siblingFamilyLessons.slice(0, 20),
+    };
+  }
+
+  hasTacticalLessonForIntent(taskId: string, intentId: string): boolean {
+    const row = this.db
+      .prepare(`SELECT 1 AS ok FROM tactical_lessons WHERE task_id = ? AND intent_id = ? LIMIT 1`)
+      .get(taskId, intentId) as { ok: number } | undefined;
+    return Boolean(row?.ok);
+  }
+
+  private rowToAdvisory(r: Record<string, unknown>): WorkerAdvisory {
+    return {
+      id: String(r.id),
+      taskId: String(r.task_id),
+      kind: r.kind as WorkerAdvisoryKind,
+      priority: r.priority as WorkerAdvisoryPriority,
+      targetIntentId: (r.target_intent_id as string | null) ?? null,
+      targetWorkerSlot:
+        r.target_worker_slot == null ? null : Number(r.target_worker_slot),
+      assetScope: (r.asset_scope as string | null) ?? null,
+      summary: String(r.summary),
+      createdBy: String(r.created_by),
+      createdAt: String(r.created_at),
+      consumedAt: (r.consumed_at as string | null) ?? null,
+      consumedBySlot: r.consumed_by_slot == null ? null : Number(r.consumed_by_slot),
+    };
+  }
+
+  private rowToTacticalLesson(r: Record<string, unknown>): TacticalLesson {
+    const parseArray = <T>(raw: unknown, map: (value: unknown) => T): T[] => {
+      try {
+        const parsed = JSON.parse(String(raw ?? "[]")) as unknown;
+        return Array.isArray(parsed) ? parsed.map(map) : [];
+      } catch {
+        return [];
+      }
+    };
+    return {
+      id: String(r.id),
+      taskId: String(r.task_id),
+      intentId: (r.intent_id as string | null) ?? null,
+      assetRoot: String(r.asset_root),
+      familyKey: String(r.family_key ?? ""),
+      techTags: parseArray(r.tech_tags_json, (value) => String(value)),
+      falsifiedHypotheses: parseArray(r.falsified_hypotheses_json, (value) => {
+        const item = (value ?? {}) as Record<string, unknown>;
+        return {
+          hypothesis: String(item.hypothesis ?? ""),
+          commandEvidence: String(item.commandEvidence ?? ""),
+          resultSummary: String(item.resultSummary ?? ""),
+        };
+      }),
+      antipatterns: parseArray(r.antipatterns_json, (value) => String(value)),
+      effectivePattern: (r.effective_pattern as string | null) ?? null,
+      nextPivotAdvice: String(r.next_pivot_advice ?? ""),
+      createdAt: String(r.created_at),
+    };
   }
 
   broadcastTechnique(input: {

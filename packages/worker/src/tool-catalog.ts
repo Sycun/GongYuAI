@@ -11,7 +11,7 @@ import { readEvidenceFile, type openHistory } from "@gongyuai/history";
 import type { CheckpointStore, CheckpointState } from "./checkpoint.js";
 import { runAssetSearch } from "./asset-collectors.js";
 import { hasBenchmarkHarness } from "./board-policy.js";
-import { c2Tool, shellJob, shellSession } from "./exec-tools.js";
+import { c2Tool, detectProxyConcurrencyAntipattern, shellJob, shellSession } from "./exec-tools.js";
 import { formatShellResult } from "./execution-trace.js";
 import {
   FOLLOWER_EXCLUDED_TOOLS,
@@ -29,6 +29,7 @@ import {
   type WorkerRole,
 } from "./graph-phase.js";
 import { httpRequestTool } from "./http-tools.js";
+import { recordShellConnectionSignals } from "./loop-shared.js";
 import { isMcpToolName, type McpHub } from "./mcp/client.js";
 import { oastHitsTool, oastIssueTool } from "./oast-tools.js";
 import {
@@ -47,6 +48,7 @@ import {
   skillEnableTool,
 } from "./ops-tools.js";
 import type { SkillHub } from "./skills/runtime.js";
+import { broadcastCredentialAdvisory, broadcastTunnelAdvisory } from "./supervisor-advisory.js";
 import { INSTALL_METHODS, type InstallMethod } from "./tool-installer.js";
 import { parseAndRecord, parseSummaryLine, toolForServer } from "./tool-output.js";
 import {
@@ -309,7 +311,16 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
       params: { command: { type: "string", required: true } },
       replay: "none",
       execute: async (args) => {
-        const r = await runShell(ctx, asStr(args.command));
+        const command = asStr(args.command);
+        const proxyDenial = detectProxyConcurrencyAntipattern(command);
+        if (proxyDenial) {
+          appendProgress(
+            manifest.workspaceDir,
+            `proxychains 并发守卫拒绝 shell: ${command.slice(0, 140)}`,
+          );
+          return { text: proxyDenial };
+        }
+        const r = await runShell(ctx, command);
         state.toolCalls = ctx.usage.toolCalls;
         state.installs = ctx.usage.installs;
         env.flushUsage();
@@ -324,8 +335,10 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
           stdout: smartTruncateToolOutput(r.stdout, 12_000),
           stderr: smartTruncateToolOutput(r.stderr, 4_000),
         });
+        const rateFuse = recordShellConnectionSignals(command, `${r.stdout}\n${r.stderr}`);
+        const visible = rateFuse ? `${truncatedFormatted}\n\n${rateFuse}` : truncatedFormatted;
         return {
-          text: markUntrusted(truncatedFormatted, { tool: "shell" }),
+          text: markUntrusted(visible, { tool: "shell" }),
           alreadyMarkedUntrusted: true,
           details: {
             shellResult: fullFormatted,
@@ -354,8 +367,19 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
       },
       replay: "none",
       execute: async (args) => {
+        const action = (optStr(args.action) as "start" | "poll" | "wait" | "list" | "kill") ?? "poll";
+        if (action === "start") {
+          const proxyDenial = detectProxyConcurrencyAntipattern(asStr(args.command));
+          if (proxyDenial) {
+            appendProgress(
+              manifest.workspaceDir,
+              `proxychains 并发守卫拒绝 shell_job: ${asStr(args.command).slice(0, 140)}`,
+            );
+            return { text: proxyDenial };
+          }
+        }
         const raw = await shellJob(ctx, {
-          action: (optStr(args.action) as "start" | "poll" | "wait" | "list" | "kill") ?? "poll",
+          action,
           ...(optStr(args.command) ? { command: asStr(args.command) } : {}),
           ...(optStr(args.jobId) ? { jobId: asStr(args.jobId) } : {}),
           ...(optStr(args.label) ? { label: asStr(args.label) } : {}),
@@ -792,6 +816,11 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
         active_sessions: { type: "string" },
         foothold: { type: "string" },
         unexplored_surface: { type: "string" },
+        confirmed_architecture_and_decoys: { type: "string" },
+        falsified_hypotheses: { type: "string" },
+        workspace_artifacts: { type: "string" },
+        live_footholds: { type: "string" },
+        next_falsifiable_experiment: { type: "string" },
       },
       replay: "none",
       execute: async (args) => {
@@ -855,7 +884,42 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
         expiresAt: { type: "string" },
       },
       replay: "none",
-      execute: async (args) => safeSyncText(() => credentialRecordTool(opsCtx(), strMap(args))),
+      execute: async (args) => {
+        try {
+          const text = credentialRecordTool(opsCtx(), strMap(args));
+          try {
+            const parsed = JSON.parse(text) as {
+              credential?: { id?: string; asset?: string; username?: string | null; kind?: string };
+            };
+            const credential = parsed.credential;
+            if (credential?.id && credential.asset) {
+              const broadcastIds = broadcastCredentialAdvisory({
+                history: ctx.history,
+                taskId: manifest.taskId,
+                createdBy: manifest.workerId || "worker",
+                excludeIntentId: state.activeIntentId,
+                credential: {
+                  id: credential.id,
+                  asset: credential.asset,
+                  username: credential.username,
+                  kind: credential.kind,
+                },
+              });
+              if (broadcastIds.length) {
+                appendProgress(
+                  manifest.workspaceDir,
+                  `resource_broadcast credential ${credential.id} → peers=${broadcastIds.length}`,
+                );
+              }
+            }
+          } catch {
+            /* cross-slot broadcast is best-effort */
+          }
+          return { text };
+        } catch (err) {
+          return { text: `错误: ${err instanceof Error ? err.message : String(err)}` };
+        }
+      },
     },
     {
       name: "credential_list",
@@ -903,7 +967,38 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
       replay: "none",
       execute: async (args) => {
         try {
-          return { text: await tunnelOpenTool(ctx, strMap(args)) };
+          const text = await tunnelOpenTool(ctx, strMap(args));
+          try {
+            const parsed = JSON.parse(text) as {
+              ok?: boolean;
+              tunnel?: { id?: string; kind?: string; localPort?: number; targetHost?: string; via?: string };
+            };
+            const tunnel = parsed.tunnel;
+            if (parsed.ok && tunnel?.id) {
+              const broadcastIds = broadcastTunnelAdvisory({
+                history: ctx.history,
+                taskId: manifest.taskId,
+                createdBy: manifest.workerId || "worker",
+                excludeIntentId: state.activeIntentId,
+                tunnel: {
+                  id: tunnel.id,
+                  kind: tunnel.kind,
+                  localPort: tunnel.localPort,
+                  targetHost: tunnel.targetHost,
+                  via: tunnel.via,
+                },
+              });
+              if (broadcastIds.length) {
+                appendProgress(
+                  manifest.workspaceDir,
+                  `resource_broadcast tunnel ${tunnel.id} → peers=${broadcastIds.length}`,
+                );
+              }
+            }
+          } catch {
+            /* cross-slot broadcast is best-effort */
+          }
+          return { text };
         } catch (err) {
           return { text: `错误: ${err instanceof Error ? err.message : String(err)}` };
         }

@@ -135,6 +135,38 @@ export function migrateHistorySchema(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_hints_task ON hints(task_id, created_at);
 
+    CREATE TABLE IF NOT EXISTS worker_advisories (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      priority TEXT NOT NULL,
+      target_intent_id TEXT,
+      target_worker_slot INTEGER,
+      asset_scope TEXT,
+      summary TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      consumed_at TEXT,
+      consumed_by_slot INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_advisories_task ON worker_advisories(task_id, consumed_at);
+
+    CREATE TABLE IF NOT EXISTS tactical_lessons (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      intent_id TEXT,
+      asset_root TEXT NOT NULL,
+      family_key TEXT NOT NULL DEFAULT '',
+      tech_tags_json TEXT NOT NULL DEFAULT '[]',
+      falsified_hypotheses_json TEXT NOT NULL DEFAULT '[]',
+      antipatterns_json TEXT NOT NULL DEFAULT '[]',
+      effective_pattern TEXT,
+      next_pivot_advice TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tactical_lessons_asset ON tactical_lessons(task_id, asset_root);
+    CREATE INDEX IF NOT EXISTS idx_tactical_lessons_family ON tactical_lessons(task_id, family_key);
+
     CREATE TABLE IF NOT EXISTS host_profiles (
       id TEXT PRIMARY KEY,
       task_id TEXT NOT NULL,
@@ -413,6 +445,7 @@ export function migrateHistorySchema(db: DatabaseSync): void {
 
   ensureIntentSourceFactIdsColumn(db);
   ensureIntentTechniqueColumns(db);
+  ensureIntentSurfacePartitionColumns(db);
   ensureGoalColumns(db);
   ensureCitationPinColumns(db);
   migrateColumns(db);
@@ -458,6 +491,18 @@ function ensureIntentSourceFactIdsColumn(db: DatabaseSync): void {
   const cols = db.prepare(`PRAGMA table_info(intents)`).all() as Array<{ name: string }>;
   if (cols.some((c) => c.name === "source_fact_ids_json")) return;
   db.exec(`ALTER TABLE intents ADD COLUMN source_fact_ids_json TEXT NOT NULL DEFAULT '["origin"]'`);
+}
+
+/** Sub-surface mutex partition: additive columns for legacy intent rows. */
+function ensureIntentSurfacePartitionColumns(db: DatabaseSync): void {
+  const cols = db.prepare(`PRAGMA table_info(intents)`).all() as Array<{ name: string }>;
+  const have = new Set(cols.map((column) => column.name));
+  if (!have.has("assigned_surfaces_json")) {
+    db.exec(`ALTER TABLE intents ADD COLUMN assigned_surfaces_json TEXT NOT NULL DEFAULT '[]'`);
+  }
+  if (!have.has("mutex_note")) {
+    db.exec(`ALTER TABLE intents ADD COLUMN mutex_note TEXT NOT NULL DEFAULT ''`);
+  }
 }
 
 function migrateColumns(db: DatabaseSync): void {

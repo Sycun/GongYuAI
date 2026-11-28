@@ -659,3 +659,48 @@ test("instance-boundary resets the tiered timebox to 12m and drops pre-boundary 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("evidence stall 超时强制结项自动写入保底 tactical_lesson（不白跑）", () => {
+  const { root, history } = setup();
+  try {
+    const taskId = "t-stall-lesson";
+    const intent = history.proposeIntent({
+      taskId,
+      title: "grind nginx admin",
+      sourceFactIds: [ORIGIN_FACT_ID],
+      assetRoot: "10.0.0.10",
+      technique: "dirb",
+    });
+    history.claimIntent(taskId, intent.id, "w0");
+    const ckpt = state({
+      activeIntentId: intent.id,
+      factDraft: {
+        title: "partial admin sweep",
+        summary: "只拿到 404 与登录页，无有效路径",
+        evidencePath: "exec/step-1.md",
+        updatedAt: new Date().toISOString(),
+      },
+    });
+    const result = maybeForceEvidenceStall({
+      history,
+      taskId,
+      workerId: "w0",
+      workspaceDir: root,
+      state: ckpt,
+      stallMs: 1000,
+      save: () => {},
+      nowMs: Date.now() + 5000,
+    });
+    assert.equal(result.concluded, true);
+    assert.equal(history.hasTacticalLessonForIntent(taskId, intent.id), true);
+    const lessons = history.recallTacticalLessons(taskId, { assetRoot: "10.0.0.10" })
+      .exactAssetLessons;
+    assert.equal(lessons.length, 1);
+    assert.equal(lessons[0]!.intentId, intent.id);
+    assert.match(lessons[0]!.falsifiedHypotheses[0]!.commandEvidence, /exec\/step-1\.md/);
+    assert.match(lessons[0]!.nextPivotAdvice, /正交 technique/);
+  } finally {
+    history.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1,6 +1,6 @@
 import type { WorkerManifest } from "@gongyuai/contracts";
-import { isExploreLeader } from "@gongyuai/contracts";
-import { openHistory } from "@gongyuai/history";
+import { isExploreLeader, suggestFamilyKey } from "@gongyuai/contracts";
+import { openHistory, renderSurfaceMutexDeclaration } from "@gongyuai/history";
 import type { CheckpointState } from "./checkpoint.js";
 import { collectorsPromptBlock } from "./asset-collectors.js";
 import { boardClearPolicyBlock, systematicDiscoveryPolicyBlock } from "./board-policy.js";
@@ -130,6 +130,69 @@ export function piRequestId(taskId: string, epoch: number, round: number): strin
   return `gy-${taskId}-e${epoch}-r${round}`;
 }
 
+function activeIntentGuidanceBlock(
+  manifest: WorkerManifest,
+  history: ReturnType<typeof openHistory>,
+  state: CheckpointState,
+): string {
+  const activeIntentId = state.activeIntentId;
+  if (!activeIntentId) return "";
+  const active = history.getIntent(manifest.taskId, activeIntentId);
+  if (!active) return "";
+  const blocks: string[] = [];
+  const familyHint = suggestFamilyKey({
+    title: active.title,
+    summary: active.summary,
+    addresses: active.assetRoot ? [active.assetRoot] : [],
+  });
+  const lessons = history.recallTacticalLessons(manifest.taskId, {
+    assetRoot: active.assetRoot ?? null,
+    familyKey: familyHint?.key ?? null,
+    techTags: active.technique ? [active.technique] : [],
+  });
+  if (lessons.exactAssetLessons.length > 0) {
+    const lines = ["[本资产已验证排除路径（严禁重复执行）]"];
+    for (const lesson of lessons.exactAssetLessons.slice(0, 6)) {
+      for (const falsified of lesson.falsifiedHypotheses.slice(0, 3)) {
+        lines.push(
+          `- 假设「${falsified.hypothesis.slice(0, 120)}」→ 证据: ${falsified.commandEvidence.slice(0, 160)} → 结果: ${falsified.resultSummary.slice(0, 160)}`,
+        );
+      }
+      for (const antipattern of lesson.antipatterns.slice(0, 2)) {
+        lines.push(`- 反模式: ${antipattern.slice(0, 160)}`);
+      }
+      if (lesson.effectivePattern) {
+        lines.push(`- 已验证有效路径: ${lesson.effectivePattern.slice(0, 200)}`);
+      }
+      if (lesson.nextPivotAdvice) {
+        lines.push(`- 换面建议: ${lesson.nextPivotAdvice.slice(0, 200)}`);
+      }
+    }
+    blocks.push(lines.join("\n"));
+  }
+  if (lessons.siblingFamilyLessons.length > 0) {
+    const lines = ["[同族资产可迁移方法参考（注意环境值隔离，必须先核对当前目标真实指纹）]"];
+    for (const lesson of lessons.siblingFamilyLessons.slice(0, 5)) {
+      const tags = lesson.techTags.slice(0, 4).join("/") || "—";
+      const pattern = lesson.effectivePattern
+        ? `有效: ${lesson.effectivePattern.slice(0, 180)}`
+        : lesson.nextPivotAdvice
+          ? `建议: ${lesson.nextPivotAdvice.slice(0, 180)}`
+          : `排除 ${lesson.falsifiedHypotheses.length} 条假设`;
+      lines.push(
+        `- @${lesson.assetRoot} family=${lesson.familyKey || "—"} tags=${tags} · ${pattern}`,
+      );
+    }
+    blocks.push(lines.join("\n"));
+  }
+  const mutex = renderSurfaceMutexDeclaration(
+    active,
+    history.listIntents(manifest.taskId),
+  );
+  if (mutex) blocks.push(mutex);
+  return blocks.join("\n\n");
+}
+
 export function buildTurnObserveBlock(
   manifest: WorkerManifest,
   history: ReturnType<typeof openHistory>,
@@ -167,7 +230,10 @@ export function buildTurnObserveBlock(
           includeRelays: opts?.includeRelays ?? !incremental,
         });
   state.observeFingerprint = snapshot;
-  return [phaseBlock, observeBody, autoSkillBlock, autoRagBlock].filter(Boolean).join("\n\n");
+  const guidance = activeIntentGuidanceBlock(manifest, history, state);
+  return [phaseBlock, observeBody, guidance, autoSkillBlock, autoRagBlock]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 const INITIAL_TARGETS_CACHE = new WeakMap<WorkerManifest, string>();
@@ -223,6 +289,7 @@ ${manifest.auth.roe ? `操作者意图（RoE）：${manifest.auth.roe}\n` : ""}
 2. **立足点必先搜刮（Loot-First）与内网建户**：一旦拿到任意文件读（LFI/SSRF）或命令执行（WebShell/RCE），**前 5 分钟必须搜刮本机源码配置、\`*.sql\`/\`init.sql\`、本机 DB/Redis、环境变量与历史记录**，将口令调用 \`credential_record\` 入库并向内网认证面交叉喷洒，**严禁未搜刮立足点就直接对内网盲爆字典**；发现内网存活主机立即 \`asset_record\` 建档并用 \`tunnel_open\` 纳管隧道，重大突破立即 \`finding_verify\` 落库。
 3. **认识论铁律（防假阴性）**：随时用 \`fact_draft\` 更新关键发现草稿；未完全达成目标时，\`intent_conclude\` **只准客观陈述“已测输入、响应状态码/特征、已获凭据及存活会话/隧道标识”，严禁写“无漏洞/此路不通/已穷尽”绝对否定结论**。
 4. **本地弹药与伪 C 逆向**：通用组件优先检索本机 PoC/模板库对照版本；跨架构 stripped 二进制或自定义 VM 优先用 \`r2 -2 -q -e scr.color=0 -c 'aa; afl; pdg @ main'\`（r2ghidra 伪 C）批量导出主函数及跳表**全部 handler（含未引用分支）**后用 Python/Z3/Unicorn 求解，严禁逐段 \`sed\` 裸啃汇编或通过 \`operator_consult\` 讨要平台 \`hint\`；禁止修改宿主机网络或 pkill 无关进程。
+5. **工程效率**：预计 >30s 的枚举任务优先走 shell_job 异步轮询，禁止在主循环同步 sleep 空等；逆向/路由分析先核实中间计算值是否流入最终判定出口，跳过不产生实际副作用的诱饵分支（Decoy Logic）。
 ${visionLine}${boardClearPolicyBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}${observeText ? `\n当前 Observe（History）：\n${observeText}\n` : ""}`;
   }
 
@@ -263,6 +330,8 @@ ${poolLine}
 - 求助：影响/坐标事实判断不了时 operator_consult（24h 无回复自动转非阻塞），不要猜。
 - 缺少二进制时用 install_tool（需 ≥scan；默认 method=auto：先复用 Kali 已集成二进制/别名，再走 Kali APT，仅缺包时走官方 go/pipx/npm/brew，严禁多余下载）。
 - 管理自己启动的后台作业用 shell_job(action=kill, jobId)；禁止 pkill/killall（可能误杀无关进程，会被工程自保拒绝）。
+- **长任务异步化**：预计耗时 >30s 的枚举/扫描优先走 shell_job（start/poll/wait）后台执行，禁止在主循环同步跑 sleep 空等。
+- **识别诱饵分支（Decoy Logic）**：静态分析二进制或复杂路由时，先核实中间计算值是否真正流入最终判定出口；对不产生实际副作用、不参与校验判定的死循环/伪分支及时识别并跳过，别在诱饵逻辑上耗尽时间盒。
 - MCP：常开核以外用 enable_mcp 再调用（内置 MCP 缺二进制时 enable_mcp 会自动走 Kali-first 安装）；未 enable 的 MCP 不可调用。仅当 Kali 内置未覆盖时可用 install_mcp 从官方/高星（≥500⭐）社区源热安装。
 - Skill：系统只给路由表。需要方法论时 load_skill(id, reason, ref?)（可按需读 references/ 子文档）；按阶段加载，不要一次灌入全部正文。本地未覆盖时可用 install_skill 从官方/高星（≥500⭐）GitHub 源热安装。
 - ${trustedRegistryCatalogHint()}

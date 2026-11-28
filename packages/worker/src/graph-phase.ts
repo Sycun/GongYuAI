@@ -15,9 +15,13 @@ import {
   DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
   DEFAULT_MAX_INTENTS_PER_REASON,
   DEFAULT_REASON_LEASE_MS,
+  FalsifiedHypothesisSchema,
   ORIGIN_FACT_ID,
   PlanSetInputSchema,
+  WorkerAdvisoryKindSchema,
+  WorkerAdvisoryPrioritySchema,
   normalizeHost,
+  suggestFamilyKey,
 } from "@gongyuai/contracts";
 import {
   closeFindingWindow,
@@ -62,6 +66,7 @@ const ALWAYS = new Set([
   "engagement_audit",
   "relay",
   "operator_consult",
+  "intent_advise",
   "credential_list",
   "change_list",
   "plan_list",
@@ -197,6 +202,7 @@ export const FOLLOWER_EXCLUDED_TOOLS = new Set([
   "phase_set",
   "engagement_audit",
   "relay",
+  "intent_advise",
   "plan_list",
   "plan_set",
   "plan_update",
@@ -441,6 +447,14 @@ export const GRAPH_PHASE_TOOLS = [
           assetRoot: { type: "string" },
           planStepId: { type: "string" },
           claim: { type: "string" },
+          assigned_surfaces: {
+            type: "string",
+            description: "本 Intent 独占的子表面（逗号分隔，如 /admin,/api/v2 或 3306,6379），供并发槽位避让。",
+          },
+          mutex_note: {
+            type: "string",
+            description: "与同资产其他并发槽位的互斥边界说明（例如：只测 /admin，不碰 /api）。",
+          },
         },
         required: ["title", "sourceFactIds"],
       },
@@ -456,6 +470,27 @@ export const GRAPH_PHASE_TOOLS = [
         type: "object",
         properties: { intentId: { type: "string" } },
         required: ["intentId"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "intent_advise",
+      description:
+        "调度督导：向一条活跃 Intent（proposed/claimed/running）投递事中指导（tactical_advisory / resource_broadcast / surface_redirect）。通知进入对方收件箱，在其下一轮工具结果中以 SUPERVISOR_ADVISORY_GATE 无损注入，不打断会话。",
+      parameters: {
+        type: "object",
+        properties: {
+          target_intent_id: { type: "string", description: "目标 Intent id（必须在进行中）。" },
+          priority: { type: "string", description: "normal|important|urgent（默认 normal）。" },
+          kind: {
+            type: "string",
+            description: "tactical_advisory|resource_broadcast|surface_redirect（默认 tactical_advisory）。",
+          },
+          summary: { type: "string", description: "具体、可执行的督导内容（勿含明文凭据）。" },
+        },
+        required: ["target_intent_id", "summary"],
       },
     },
   },
@@ -489,6 +524,27 @@ export const GRAPH_PHASE_TOOLS = [
           status: { type: "string" },
           conclusion: { type: "string" },
           factsJson: { type: "string" },
+          tech_tags: {
+            type: "string",
+            description: "可选：本 Intent 命中的技术标签（逗号分隔），用于同族经验召回。",
+          },
+          falsified_hypotheses: {
+            type: "string",
+            description:
+              "可选：JSON 数组 [{hypothesis, command_evidence, result_summary}]；三项均非空，禁止登记无执行证据的猜测。",
+          },
+          antipatterns: {
+            type: "string",
+            description: "可选：本轮确认的失败反模式（逗号分隔）。",
+          },
+          effective_pattern: {
+            type: "string",
+            description: "可选：已验证有效的可复用打法（无则省略）。",
+          },
+          next_pivot_advice: {
+            type: "string",
+            description: "可选：留给后续同族资产的下一步换面建议。",
+          },
         },
         required: ["intentId", "status", "conclusion"],
       },
@@ -725,6 +781,48 @@ function parseFactIds(raw: string): string[] {
     .split(/[,;\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/** Comma/newline separated string list (surfaces, tags, antipatterns). */
+function parseStringList(raw: string | undefined): string[] {
+  return [...new Set((raw ?? "")
+    .split(/[,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean))];
+}
+
+type ParsedFalsifiedHypotheses =
+  | { ok: true; items: Array<{ hypothesis: string; commandEvidence: string; resultSummary: string }> }
+  | { ok: false; error: string };
+
+function parseFalsifiedHypotheses(raw: string | undefined): ParsedFalsifiedHypotheses {
+  if (!raw?.trim()) return { ok: true, items: [] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: "falsified_hypotheses 必须是 JSON 数组" };
+  }
+  if (!Array.isArray(parsed)) {
+    return { ok: false, error: "falsified_hypotheses 必须是 JSON 数组" };
+  }
+  const items: Array<{ hypothesis: string; commandEvidence: string; resultSummary: string }> = [];
+  for (let index = 0; index < parsed.length; index += 1) {
+    const record = (parsed[index] ?? {}) as Record<string, unknown>;
+    const validated = FalsifiedHypothesisSchema.safeParse({
+      hypothesis: String(record.hypothesis ?? ""),
+      commandEvidence: String(record.command_evidence ?? record.commandEvidence ?? ""),
+      resultSummary: String(record.result_summary ?? record.resultSummary ?? ""),
+    });
+    if (!validated.success) {
+      return {
+        ok: false,
+        error: `falsified_hypotheses[${index}] 必须同时包含非空 hypothesis / command_evidence / result_summary（禁止登记无执行证据的猜测）`,
+      };
+    }
+    items.push(validated.data);
+  }
+  return { ok: true, items };
 }
 
 function parseFactsJson(raw: string | undefined): ConcludeFactInput[] {
@@ -981,6 +1079,12 @@ export function handleGraphTool(
         ...(args.technique ? { technique: args.technique } : {}),
         ...(assetRoot ? { assetRoot } : {}),
         ...(args.planStepId ? { planStepId: args.planStepId } : {}),
+        ...(args.assigned_surfaces || args.assignedSurfaces
+          ? { assignedSurfaces: parseStringList(args.assigned_surfaces ?? args.assignedSurfaces) }
+          : {}),
+        ...(args.mutex_note || args.mutexNote
+          ? { mutexNote: args.mutex_note ?? args.mutexNote }
+          : {}),
         rejectOosOnly: true,
         fanout: inReason ? fanout : undefined,
       });
@@ -1102,6 +1206,49 @@ export function handleGraphTool(
     return JSON.stringify(claimed);
   }
 
+  if (name === "intent_advise") {
+    const targetId = (args.target_intent_id ?? args.targetIntentId ?? "").trim();
+    if (!targetId) return "错误: intent_advise requires target_intent_id";
+    const target = ctx.history.getIntent(ctx.taskId, targetId);
+    if (!target) return `错误: unknown intent ${targetId}`;
+    if (!["proposed", "claimed", "running"].includes(target.status)) {
+      return `错误: target intent ${targetId} 已结项（${target.status}），只能督导进行中的 Intent`;
+    }
+    const kind = WorkerAdvisoryKindSchema.safeParse(
+      (args.kind ?? "").trim() || "tactical_advisory",
+    );
+    if (!kind.success) {
+      return "错误: kind must be tactical_advisory|resource_broadcast|surface_redirect";
+    }
+    const priority = WorkerAdvisoryPrioritySchema.safeParse(
+      (args.priority ?? "").trim() || "normal",
+    );
+    if (!priority.success) {
+      return "错误: priority must be normal|important|urgent";
+    }
+    const summary = (args.summary ?? "").trim();
+    if (summary.length < 4) return "错误: intent_advise requires a concrete summary";
+    try {
+      const advisory = ctx.history.enqueueAdvisory({
+        taskId: ctx.taskId,
+        kind: kind.data,
+        priority: priority.data,
+        targetIntentId: target.id,
+        targetWorkerSlot: null,
+        assetScope: target.assetRoot,
+        summary: summary.slice(0, 2000),
+        createdBy: workerId,
+      });
+      appendProgress(
+        ctx.workspaceDir,
+        `intent_advise ${advisory.id} → ${target.id} (${priority.data}/${kind.data})`,
+      );
+      return JSON.stringify({ ok: true, advisory });
+    } catch (err) {
+      return `错误: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
   if (name === "fact_draft") {
     const title = (args.title ?? "").trim();
     const summary = (args.summary ?? "").trim();
@@ -1158,6 +1305,68 @@ export function handleGraphTool(
         { facts, workerId },
       );
       if (!done) return `conclude failed: ${args.intentId ?? ""}`;
+      // 经验沉淀：仅在显式传入 lesson 字段时登记；登记失败不阻断结项。
+      const techTags = parseStringList(args.tech_tags ?? args.techTags);
+      const antipatterns = parseStringList(args.antipatterns);
+      const effectivePattern = (args.effective_pattern ?? args.effectivePattern ?? "").trim();
+      const nextPivotAdvice = (args.next_pivot_advice ?? args.nextPivotAdvice ?? "").trim();
+      const falsified = parseFalsifiedHypotheses(
+        args.falsified_hypotheses ?? args.falsifiedHypotheses,
+      );
+      const wantsLesson =
+        techTags.length > 0 ||
+        antipatterns.length > 0 ||
+        Boolean(effectivePattern) ||
+        Boolean(nextPivotAdvice) ||
+        !falsified.ok ||
+        (falsified.ok && falsified.items.length > 0);
+      let tacticalLesson: Record<string, unknown> | null = null;
+      if (wantsLesson) {
+        if (!falsified.ok) {
+          tacticalLesson = { recorded: false, error: falsified.error };
+        } else {
+          const lessonAssetRoot =
+            done.assetRoot ??
+            ctx.history.primaryAssetAddress(ctx.taskId, done.sourceFactIds) ??
+            "";
+          if (!lessonAssetRoot) {
+            tacticalLesson = {
+              recorded: false,
+              error: "资产根缺失，跳过经验沉淀（先 asset_record 或给 Intent 指定 assetRoot）",
+            };
+          } else {
+            const familyHint = suggestFamilyKey({
+              title: done.title,
+              summary: conclusionText,
+              tags: techTags,
+              addresses: [lessonAssetRoot],
+            });
+            try {
+              const lesson = ctx.history.recordTacticalLesson({
+                taskId: ctx.taskId,
+                intentId: done.id,
+                assetRoot: lessonAssetRoot,
+                familyKey: familyHint?.key ?? null,
+                techTags,
+                falsifiedHypotheses: falsified.items,
+                antipatterns,
+                effectivePattern: effectivePattern || null,
+                nextPivotAdvice,
+              });
+              tacticalLesson = { recorded: true, id: lesson.id };
+              appendProgress(
+                ctx.workspaceDir,
+                `tactical_lesson ${lesson.id} ← ${done.id} @${lesson.assetRoot}`,
+              );
+            } catch (err) {
+              tacticalLesson = {
+                recorded: false,
+                error: err instanceof Error ? err.message : String(err),
+              };
+            }
+          }
+        }
+      }
       // Lane D — Explore 结束即解绑：conclude 之后写的 Fact 不再继承（宁可不挂，不乱挂）。
       ctx.history.bindActiveIntent(ctx.taskId, null);
       if (ctx.state.activeIntentId === done.id) {
@@ -1181,7 +1390,7 @@ export function handleGraphTool(
         ctx.workspaceDir,
         `intent_conclude ${done.id} → ${status}; phase=${ctx.state.phase}`,
       );
-      return JSON.stringify(done);
+      return JSON.stringify(tacticalLesson ? { ...done, tacticalLesson } : done);
     } catch (err) {
       return `错误: ${err instanceof Error ? err.message : String(err)}`;
     }

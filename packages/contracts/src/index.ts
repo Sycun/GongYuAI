@@ -272,6 +272,7 @@ export type TaskScope = AuthScope;
 export * from "./scope.js";
 export * from "./dsml.js";
 export * from "./credentials.js";
+export * from "./advisory.js";
 export * from "./fanout.js";
 export * from "./family-key.js";
 export * from "./finding.js";
@@ -316,6 +317,16 @@ export const RelayProtocolSchema = z.object({
   active_sessions: z.string().default(""),
   foothold: z.string().default(""),
   unexplored_surface: z.string().default(""),
+  /** 已确认系统结构及无效死分支/诱饵逻辑判定（decoy logic）。 */
+  confirmed_architecture_and_decoys: z.string().default(""),
+  /** 带命令或偏移依据的已排除假设清单。 */
+  falsified_hypotheses: z.string().default(""),
+  /** 磁盘已保存的分析产物、提取数据段或辅助脚本路径。 */
+  workspace_artifacts: z.string().default(""),
+  /** 当前可用会话、已登记凭据 ID、活跃转发端口及验活方式。 */
+  live_footholds: z.string().default(""),
+  /** 下一步唯一可验证假设。 */
+  next_falsifiable_experiment: z.string().default(""),
   open_intents: z.array(z.string()).default([]),
   budget_spent: z.object({
     tokens: z.number().int().nonnegative().default(0),
@@ -728,6 +739,10 @@ export const IntentSchema = z.object({
   technique: z.string().trim().min(1).max(80).nullable().default(null),
   /** 资产根（规范化地址）；缺省时由 sourceFactIds 的资产标签派生。 */
   assetRoot: z.string().trim().min(1).max(255).nullable().default(null),
+  /** 子表面互斥分区：本 Intent 独占的子路径/端口面；旧档缺省为空。 */
+  assignedSurfaces: z.array(z.string().trim().min(1)).optional(),
+  /** 与其他并发槽位的边界约定；旧档缺省为空。 */
+  mutexNote: z.string().optional(),
   claimedBy: z.string().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
