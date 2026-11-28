@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, Typecheck & Test (TS + Go netd)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GY_REQUIRE_GO: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install system test dependencies (socat)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends socat
+
+      - name: Setup Go toolchain
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: services/netd/go.mod
+          cache-dependency-path: services/netd/go.sum
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack & pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.15.0 --activate
+
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages, Go netd sidecar, and Console UI
+        run: |
+          pnpm run build
+          pnpm run build:console
+
+      - name: Ensure dist contains zero test artifacts
+        run: |
+          count=$(find packages apps -path '*/dist/*.test.*' -o -path '*/dist/*.spec.*' | wc -l | tr -d ' ')
+          echo "Test files in dist: ${count}"
+          test "${count}" -eq 0
+
+      - name: Typecheck all packages and tests
+        run: pnpm run typecheck
+
+      - name: Run full unit & integration test suite (Workspace + Scripts + Go -race)
+        run: pnpm run test
+
+      - name: Run smoke & offline acceptance gates
+        run: |
+          pnpm run smoke
+          pnpm run acceptance:firstpass
+          pnpm run restore:selftest

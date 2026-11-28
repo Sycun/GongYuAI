@@ -715,14 +715,25 @@ func (m *Manager) PromoteForFinding(opts PromoteOptions) (*PromoteResult, error)
 	}
 	promoted := 0
 
+	isPersisted := func(e *RingEntry) bool {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return e.Persisted
+	}
+	markPersisted := func(e *RingEntry) {
+		m.mu.Lock()
+		e.Persisted = true
+		m.mu.Unlock()
+	}
+
 	persistEntry := func(e *RingEntry) error {
-		if e.Persisted {
+		if isPersisted(e) {
 			_ = m.store.LinkTrafficFinding(opts.TaskDir, e.ID, opts.FindingID)
 			addLinked(e.ID)
 			return nil
 		}
 		if existing, _ := m.store.GetTraffic(opts.TaskDir, e.ID); existing != nil {
-			e.Persisted = true
+			markPersisted(e)
 			_ = m.store.LinkTrafficFinding(opts.TaskDir, e.ID, opts.FindingID)
 			addLinked(e.ID)
 			return nil
@@ -730,7 +741,7 @@ func (m *Manager) PromoteForFinding(opts PromoteOptions) (*PromoteResult, error)
 		if _, err := m.PersistCaptured(opts.TaskDir, e.ID, e.Write, e.ReqBody, e.ResBody, []string{opts.FindingID}, opts.Retention); err != nil {
 			return err
 		}
-		e.Persisted = true
+		markPersisted(e)
 		promoted++
 		addLinked(e.ID)
 		return nil
