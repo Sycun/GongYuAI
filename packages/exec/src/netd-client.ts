@@ -404,9 +404,9 @@ let syncWorker: Worker | null = null;
 let syncCtrl: Int32Array | null = null;
 let syncBuf: Uint8Array | null = null;
 
-const SYNC_WORKER_CODE = `
-const { parentPort, workerData } = require("node:worker_threads");
-const http = require("node:http");
+const SYNC_WORKER_ESM = `
+import { parentPort, workerData } from "node:worker_threads";
+import http from "node:http";
 const ctrl = new Int32Array(workerData.ctrlBuf);
 const data = new Uint8Array(workerData.dataBuf);
 const agent = new http.Agent({ keepAlive: true, maxSockets: 8 });
@@ -457,14 +457,15 @@ parentPort.on("message", ({ socketPath, method, path, payload }) => {
 });
 `;
 
+const SYNC_WORKER_URL = new URL(`data:text/javascript,${encodeURIComponent(SYNC_WORKER_ESM)}`);
+
 function ensureSyncWorker(): { worker: Worker; ctrl: Int32Array; buf: Uint8Array } {
   if (syncWorker && syncCtrl && syncBuf) {
     return { worker: syncWorker, ctrl: syncCtrl, buf: syncBuf };
   }
   const ctrlBuf = new SharedArrayBuffer(16);
   const dataBuf = new SharedArrayBuffer(SYNC_BUF_BYTES);
-  const worker = new Worker(SYNC_WORKER_CODE, {
-    eval: true,
+  const worker = new Worker(SYNC_WORKER_URL, {
     workerData: { ctrlBuf, dataBuf },
   });
   worker.unref();
