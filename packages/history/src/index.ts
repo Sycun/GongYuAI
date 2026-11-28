@@ -228,6 +228,7 @@ export class HistoryStore {
       this.db = new DatabaseSync(opts.dbPath);
       this.db.exec("PRAGMA busy_timeout = 10000;");
       this.db.exec("PRAGMA journal_mode = WAL;");
+      this.db.exec("PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -16000;");
       this.db.exec("PRAGMA foreign_keys = ON;");
       migrateHistorySchema(this.db);
       this.ops = new TaskOperations(this.db);

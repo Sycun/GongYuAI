@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | **并发与单意图隔离** | [parallel-explore-scaling.md](./parallel-explore-scaling.md) · [optimization-plan-20261126.md](./optimization-plan-20261126.md) | 默认 `1 Leader + 3 Followers`、滑动窗口补单、按资产动态扩容（只扩不缩）、Follower 单 Intent 会话重置 |
 | **靶场实战复盘** | [tsecbench-retro-20261126.md](./tsecbench-retro-20261126.md) · [pentest-evidence-rotation.md](./pentest-evidence-rotation.md) | 流量代理流容错、按资产面 `assetRoot` 判定证据停滞轮换、消除动态门禁死锁 |
-| **渗透执行与域对象** | [pentest-exec-c2-enhancement.md](./pentest-exec-c2-enhancement.md) · [pentest-capability-extension.md](./pentest-capability-extension.md) · [p17-closing-gaps.md](./p17-closing-gaps.md) | Shell/后台作业/PTY/C2、HTTP 事务证据、OAST、隧道、主机画像、AD/云图与模型候选链 |
+| **渗透执行与域对象** | [pentest-exec-c2-enhancement.md](./pentest-exec-c2-enhancement.md) · [pentest-capability-extension.md](./pentest-capability-extension.md) · [p17-closing-gaps.md](./p17-closing-gaps.md) · [go-sidecar-architecture.md](./go-sidecar-architecture.md) | Shell/后台作业/PTY/C2、HTTP 事务证据、OAST、隧道、主机画像、AD/云图与混合 Go 执行底座（`gy-netd` 架构与性能基线） |
 | **资产、证据与报告复核** | [asset-inventory.md](./asset-inventory.md) · [evidence-review.md](./evidence-review.md) · [delivery-record.md](./delivery-record.md) | 资产双向准入、证据 SHA-256 封存、撤回更正、R-017 离线复核与交付验收记录 |
 | **参考资料库与控制台** | [knowledge-library-api.md](./knowledge-library-api.md) · [knowledge-library-console.md](./knowledge-library-console.md) · [console-logic.md](./console-logic.md) | 资料导入、两步向量化/混合检索、定版引用与 Mission Control 控制台逻辑 |
 | **Pi 底座与实验数据** | [pi-durable-integration.md](./pi-durable-integration.md) · [experiments/](./experiments) · [implementation-ledger.md](./implementation-ledger.md) | `pi-durable` 原生 `terminate/reset/compaction` 映射、离线台账对照实验与实施台账 |

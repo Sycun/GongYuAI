@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
+import { netdJsonAsync, netdStreamNdjson, shouldUseGoBackend } from "./netd-client.js";
 
 /**
  * P14-B2 — 带外（OAST）回调监听。
@@ -225,6 +226,41 @@ export async function startOastListener(opts: OastListenerOptions): Promise<Oast
   const publicBaseUrl = opts.publicBaseUrl.trim().replace(/\/+$/, "");
   if (publicBaseUrl.length === 0) {
     throw new Error("OAST 监听需要 publicBaseUrl（目标可达的回调基地址，例如 http://10.0.0.9:8799）");
+  }
+
+  if (shouldUseGoBackend()) {
+    const started = await netdJsonAsync<{
+      id: string;
+      port: number;
+      boundUrl: string;
+      publicBaseUrl: string;
+    }>("POST", "/v1/oast/http/start", {
+      listenHost,
+      listenPort,
+      publicBaseUrl,
+      maxBodyBytes,
+    });
+    const stream = await netdStreamNdjson<OastCallbackHit>(
+      `/v1/oast/http/${started.id}/events`,
+      (hit) => emitHit(hit, opts.onHit),
+    );
+    let closing: Promise<void> | null = null;
+    return {
+      port: started.port,
+      boundUrl: started.boundUrl,
+      callbackUrl(token: string): string {
+        return `${publicBaseUrl}/t/${token}`;
+      },
+      close(): Promise<void> {
+        if (closing === null) {
+          closing = (async () => {
+            stream.close();
+            await netdJsonAsync("POST", `/v1/oast/http/${started.id}/stop`, {}, 10_000).catch(() => {});
+          })();
+        }
+        return closing;
+      },
+    };
   }
 
   const sockets = new Set<Socket>();

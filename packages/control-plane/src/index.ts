@@ -19,6 +19,7 @@ import { SilentUpdater, resolveInstallRoot } from "./updater.js";
 import { migrateLegacyHomeDataRoot, resolveCanonicalDataRoot } from "./data-root.js";
 import type { KnowledgeEmbeddingPatch } from "@gongyuai/contracts";
 import { KnowledgeStore } from "./knowledge.js";
+import { startManagedNetd, type ManagedNetdHandle } from "@gongyuai/exec";
 export { KnowledgeStore } from "./knowledge.js";
 export { KnowledgeApiError, routeKnowledge, scopeFromTask, scopeFromDeclaration, resolveCitation, buildReportExport } from "./knowledge-api.js";
 export { extractKnowledgeBody, sectionsFromSnapshot, findSection, deriveSourceKey, parentRangeOf, CHUNKER_VERSION, EXTRACTION_VERSION } from "./knowledge-parse.js";
@@ -97,6 +98,23 @@ export async function bootControlPlane(opts: BootOptions = {}) {
   // Seed env for this process so any child inherits defaults
   Object.assign(process.env, settings.workerEnv());
 
+  let netd: ManagedNetdHandle | null = null;
+  if (!process.env.GY_NETD_SOCKET?.trim()) {
+    try {
+      netd = await startManagedNetd(join(dataRoot, "runtime", "gy-netd.sock"));
+      if (netd) {
+        process.env.GY_NETD_SOCKET = netd.socketPath;
+      }
+    } catch (err) {
+      if ((process.env.GY_EXEC_BACKEND ?? "auto").trim().toLowerCase() === "go") {
+        throw err;
+      }
+      console.error(
+        `[gy] gy-netd sidecar unavailable, falling back to TS exec backend: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   const runner = new WorkerRunner(
     store,
     {
@@ -145,6 +163,12 @@ export async function bootControlPlane(opts: BootOptions = {}) {
       await jobs.stop();
       await server.close();
       runner.dispose();
+      if (netd) {
+        if (process.env.GY_NETD_SOCKET === netd.socketPath) {
+          delete process.env.GY_NETD_SOCKET;
+        }
+        await netd.close();
+      }
       knowledge.close();
       store.close();
       platform.close();

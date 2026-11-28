@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { netdJsonAsync, shouldUseGoBackend } from "./netd-client.js";
 
 /**
  * P14-B1 — HTTP 事务采集。
@@ -53,6 +54,12 @@ export type HttpArtifact = {
   blockedRedirect?: string;
 };
 
+export type HttpScopeRule = {
+  allowHosts?: string[];
+  denyHosts?: string[];
+  allowAll?: boolean;
+};
+
 export type HttpRequestOptions = {
   evidenceDir: string;
   /** Called for the initial URL host and every redirect hop. */
@@ -66,6 +73,12 @@ export type HttpRequestOptions = {
    * Falls back to `GY_HTTP_USER_AGENT`, then {@link DEFAULT_BROWSER_USER_AGENT}.
    */
   userAgent?: string;
+  /** Optional serializable host scope for zero-roundtrip redirects in Go sidecar. */
+  scope?: HttpScopeRule;
+  /** Optional proxy URL for Go sidecar transport. */
+  proxyUrl?: string;
+  /** Skip TLS verification when using Go sidecar transport. */
+  insecureTls?: boolean;
 };
 
 /** Standard browser UA so target requests do not fall back to undici's default. */
@@ -90,6 +103,7 @@ const TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 /** 跨源跳转不携带凭据，避免把授权 header 泄露给下一跳。 */
 const SENSITIVE_HEADERS: ReadonlySet<string> = new Set(["authorization", "cookie", "proxy-authorization"]);
 const NO_RESPONSE_TEXT = "HTTP/1.1 0\n\n";
+const NATIVE_FETCH = globalThis.fetch;
 
 type HeaderPair = [name: string, value: string];
 
@@ -423,6 +437,135 @@ export async function performHttpRequest(
   const maxResponseBytes = normalizeMaxResponseBytes(opts.maxResponseBytes);
   const timeoutMs = normalizeTimeout(input.timeoutMs);
 
+  // When Go sidecar is active (and caller has not monkey-patched globalThis.fetch for a spy/mock),
+  // delegate network I/O and atomic blob writes to gy-netd while keeping exact TS validation and authorizeHost callbacks.
+  if (shouldUseGoBackend() && globalThis.fetch === NATIVE_FETCH) {
+    const initialVerdict = opts.authorizeHost(host);
+    if (!initialVerdict.allowed) {
+      const request = persistBlob(opts.evidenceDir, "req", serializeRequest(method, url, headers, input.body));
+      const reason = initialVerdict.reason ? `: ${initialVerdict.reason}` : "";
+      return finish({
+        method, url, host, path, request,
+        hop: failureHop(),
+        redirects: [],
+        startedAtMs,
+        evidenceDir: opts.evidenceDir,
+        error: `blocked: host ${host} denied by authorizeHost${reason}`,
+        blockedRedirect: host,
+      });
+    }
+
+    let currentUrl = initialUrl;
+    let currentMethod = method;
+    let currentHeaders = headers;
+    let currentBody = input.body;
+    const redirects: string[] = [];
+    const deadlineMs = startedAtMs + timeoutMs;
+    let initialReqMeta: {
+      requestSha256: string;
+      requestPath: string;
+      requestBytes: number;
+    } | null = null;
+
+    for (;;) {
+      const remainingMs = Math.max(1, deadlineMs - Date.now());
+      const hopResult: {
+        artifact: HttpArtifact;
+        headers: Record<string, string>;
+        bodyHead: string;
+      } = await netdJsonAsync<{
+        artifact: HttpArtifact;
+        headers: Record<string, string>;
+        bodyHead: string;
+      }>("POST", "/v1/http/request", {
+        method: currentMethod,
+        url: currentUrl.href,
+        headers: currentHeaders,
+        ...(currentBody !== undefined ? { body: currentBody } : {}),
+        follow: false,
+        maxRedirects: 0,
+        maxResponseBytes,
+        timeoutMs: remainingMs,
+        evidenceDir: opts.evidenceDir,
+        ...(opts.proxyUrl ? { proxyUrl: opts.proxyUrl } : {}),
+        ...(opts.insecureTls ? { insecureTls: true } : {}),
+        ...(initialReqMeta ? { skipRequestPersist: true } : {}),
+      }, remainingMs + 5_000);
+
+      if (!initialReqMeta) {
+        initialReqMeta = {
+          requestSha256: hopResult.artifact.requestSha256,
+          requestPath: hopResult.artifact.requestPath,
+          requestBytes: hopResult.artifact.requestBytes,
+        };
+      }
+
+      const status = hopResult.artifact.status;
+      const location = hopResult.headers["location"];
+      if (
+        follow
+        && !hopResult.artifact.error
+        && REDIRECT_STATUSES.has(status)
+        && redirects.length < maxRedirects
+        && location
+      ) {
+        const target = resolveLocation(location, currentUrl);
+        if (target && (target.protocol === "http:" || target.protocol === "https:")) {
+          const targetHost = target.hostname.toLowerCase();
+          const verdict = opts.authorizeHost(targetHost);
+          if (!verdict.allowed) {
+            return {
+              artifact: {
+                ...hopResult.artifact,
+                method,
+                url,
+                host,
+                path,
+                requestSha256: initialReqMeta.requestSha256,
+                requestPath: initialReqMeta.requestPath,
+                requestBytes: initialReqMeta.requestBytes,
+                redirects: [...redirects],
+                startedAt: new Date(startedAtMs).toISOString(),
+                durationMs: Math.max(0, Date.now() - startedAtMs),
+                blockedRedirect: targetHost,
+              },
+              headers: hopResult.headers,
+              bodyHead: hopResult.bodyHead,
+            };
+          }
+          redirects.push(target.href);
+          const rewritten = rewriteForRedirect(status, currentMethod, currentBody, currentHeaders);
+          currentMethod = rewritten.method;
+          currentBody = rewritten.body;
+          currentHeaders =
+            target.origin === currentUrl.origin
+              ? rewritten.headers
+              : stripSensitiveHeaders(rewritten.headers);
+          currentUrl = target;
+          continue;
+        }
+      }
+
+      return {
+        artifact: {
+          ...hopResult.artifact,
+          method,
+          url,
+          host,
+          path,
+          requestSha256: initialReqMeta.requestSha256,
+          requestPath: initialReqMeta.requestPath,
+          requestBytes: initialReqMeta.requestBytes,
+          redirects,
+          startedAt: new Date(startedAtMs).toISOString(),
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+        },
+        headers: hopResult.headers,
+        bodyHead: hopResult.bodyHead,
+      };
+    }
+  }
+
   // 请求 blob 先落盘：证据先于动作；同内容重复调用只是跳过写入。
   const request = persistBlob(opts.evidenceDir, "req", serializeRequest(method, url, headers, input.body));
 
@@ -532,4 +675,84 @@ export async function performHttpRequest(
   } finally {
     clearTimeout(timer);
   }
+}
+
+export type HttpBatchItemInput = {
+  method?: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: string;
+  follow?: boolean;
+  timeoutMs?: number;
+};
+
+export type HttpBatchOptions = HttpRequestOptions & {
+  /** Max concurrent requests in the Go/TS pool (default 16, max 64). */
+  concurrency?: number;
+};
+
+export type HttpBatchItemResult =
+  | { ok: true; result: { artifact: HttpArtifact; headers: Record<string, string>; bodyHead: string } }
+  | { ok: false; error: string };
+
+/**
+ * Concurrent HTTP transaction batch. Uses Go gy-netd's native Goroutine pool
+ * (`POST /v1/http/batch`) when available and `opts.scope` is supplied; otherwise
+ * runs a bounded concurrent pool preserving input order.
+ */
+export async function performHttpBatch(
+  items: HttpBatchItemInput[],
+  opts: HttpBatchOptions,
+): Promise<HttpBatchItemResult[]> {
+  if (items.length === 0) return [];
+  const concurrency = Math.max(1, Math.min(64, Math.trunc(opts.concurrency ?? 16)));
+  const maxRedirects = normalizeMaxRedirects(opts.maxRedirects);
+  const maxResponseBytes = normalizeMaxResponseBytes(opts.maxResponseBytes);
+
+  if (shouldUseGoBackend() && opts.scope) {
+    const payloadItems = items.map((item) => {
+      const method = normalizeMethod(item.method);
+      const headers = applyDefaultUserAgent(normalizeHeaders(item.headers), opts.userAgent);
+      const initialUrl = normalizeUrl(item.url);
+      return {
+        method,
+        url: initialUrl.href,
+        headers,
+        ...(item.body !== undefined ? { body: item.body } : {}),
+        follow: item.follow !== false,
+        maxRedirects,
+        maxResponseBytes,
+        timeoutMs: normalizeTimeout(item.timeoutMs),
+        evidenceDir: opts.evidenceDir,
+        scope: opts.scope,
+        ...(opts.proxyUrl ? { proxyUrl: opts.proxyUrl } : {}),
+        ...(opts.insecureTls ? { insecureTls: true } : {}),
+      };
+    });
+    const res = await netdJsonAsync<{ results: HttpBatchItemResult[] }>(
+      "POST",
+      "/v1/http/batch",
+      { concurrency, items: payloadItems },
+      120_000,
+    );
+    return res.results;
+  }
+
+  const out: HttpBatchItemResult[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      for (;;) {
+        const idx = next++;
+        if (idx >= items.length) return;
+        try {
+          const result = await performHttpRequest(items[idx]!, opts);
+          out[idx] = { ok: true, result };
+        } catch (err) {
+          out[idx] = { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+    }),
+  );
+  return out;
 }

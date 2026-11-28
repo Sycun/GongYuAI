@@ -28,6 +28,12 @@ import {
   type CapturedBody,
 } from "./ring.js";
 import { closeTrafficDb, insertTraffic, type TrafficWrite } from "./store.js";
+import {
+  markGoTaskDir,
+  netdJsonAsync,
+  netdJsonSync,
+  shouldUseGoBackend,
+} from "../netd-client.js";
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -305,11 +311,82 @@ async function openUpstream(
  * child process. It does not change the host proxy configuration.
  */
 export async function startTrafficProxy(opts: TrafficProxyOptions): Promise<TrafficProxy> {
-  const ca = ensureTaskCa(opts.taskDir);
   const retention = resolveTrafficRetention();
-  const previewBytes = retention.maxPreviewChars;
   const mode = opts.mode ?? resolveTrafficMode();
-  const ringBodyBytes = trafficWindowDefaults().ringBodyBytes;
+  const windowConfig = trafficWindowDefaults();
+
+  if (shouldUseGoBackend()) {
+    parseUpstream(opts.upstream);
+    const initialIntent = opts.getIntentId?.() ?? opts.intentId;
+    const started = await netdJsonAsync<{
+      proxyId: string;
+      port: number;
+      caPath: string;
+      proxyUrl: string;
+    }>("POST", "/v1/proxy/start", {
+      taskId: opts.taskId,
+      taskDir: opts.taskDir,
+      ...(opts.workerId ? { workerId: opts.workerId } : {}),
+      ...(initialIntent ? { intentId: initialIntent } : {}),
+      ...(opts.upstream ? { upstream: opts.upstream } : {}),
+      insecureUpstream: opts.insecureUpstream === true,
+      mode,
+      retention,
+      windowConfig,
+    });
+    markGoTaskDir(opts.taskDir);
+
+    let lastIntent = initialIntent ?? "";
+    let intentTimer: ReturnType<typeof setInterval> | null = null;
+    if (opts.getIntentId) {
+      intentTimer = setInterval(() => {
+        const next = opts.getIntentId?.() ?? "";
+        if (next === lastIntent) return;
+        lastIntent = next;
+        void netdJsonAsync("POST", `/v1/proxy/${started.proxyId}/context`, {
+          intentId: next,
+        }).catch(() => {});
+      }, 50);
+      intentTimer.unref();
+    }
+
+    return {
+      port: started.port,
+      caPath: started.caPath,
+      getProxyEnv() {
+        const proxyUrl = `http://127.0.0.1:${started.port}`;
+        return {
+          HTTP_PROXY: proxyUrl,
+          HTTPS_PROXY: proxyUrl,
+          http_proxy: proxyUrl,
+          https_proxy: proxyUrl,
+          NODE_EXTRA_CA_CERTS: started.caPath,
+          REQUESTS_CA_BUNDLE: started.caPath,
+          SSL_CERT_FILE: started.caPath,
+          CURL_CA_BUNDLE: started.caPath,
+          NODE_USE_ENV_PROXY: "1",
+        };
+      },
+      setUpstream(url: string | null) {
+        parseUpstream(url);
+        netdJsonSync("POST", `/v1/proxy/${started.proxyId}/upstream`, {
+          upstream: url ?? "",
+        });
+      },
+      async close() {
+        if (intentTimer) {
+          clearInterval(intentTimer);
+          intentTimer = null;
+        }
+        await netdJsonAsync("POST", `/v1/proxy/${started.proxyId}/stop`, {}).catch(() => {});
+        closeTrafficDb(opts.taskDir);
+      },
+    };
+  }
+
+  const ca = ensureTaskCa(opts.taskDir);
+  const previewBytes = retention.maxPreviewChars;
+  const ringBodyBytes = windowConfig.ringBodyBytes;
   let upstream = parseUpstream(opts.upstream);
   const insecureUpstream = opts.insecureUpstream === true;
   const sockets = new Set<Socket>();

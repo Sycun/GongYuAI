@@ -2,6 +2,13 @@
 # GongYuAI — TSecBench Hosted Official Competition Image (build with --platform linux/amd64)
 # Runs Control Plane + Watchdog + 1 Leader + 3 Followers autonomously in offline sandbox.
 
+FROM golang:1.26-bookworm AS netd-builder
+WORKDIR /src/services/netd
+COPY services/netd/go.mod services/netd/go.sum ./
+RUN go mod download
+COPY services/netd ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gy-netd ./cmd/gy-netd
+
 FROM node:22-bookworm-slim AS builder
 
 WORKDIR /opt/gongyuai
@@ -160,6 +167,7 @@ COPY --from=builder /opt/gongyuai/packages/worker/node_modules ./packages/worker
 COPY --from=builder /opt/gongyuai/apps/cli/package.json ./apps/cli/package.json
 COPY --from=builder /opt/gongyuai/apps/cli/dist ./apps/cli/dist
 COPY --from=builder /opt/gongyuai/apps/cli/node_modules ./apps/cli/node_modules
+COPY --from=netd-builder /out/gy-netd ./bin/gy-netd
 
 COPY mcp/builtin ./mcp/builtin
 COPY skills/builtin ./skills/builtin

@@ -76,6 +76,7 @@ export function openTrafficDb(taskDir: string): DatabaseSync {
   // pages after rolling deletes so index.sqlite does not keep the high-water mark.
   if (fresh) db.exec("PRAGMA auto_vacuum = INCREMENTAL");
   db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA synchronous = NORMAL; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -16000;");
   db.exec("PRAGMA busy_timeout = 3000");
   db.exec(`
     CREATE TABLE IF NOT EXISTS exchanges (

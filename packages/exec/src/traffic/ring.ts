@@ -15,6 +15,19 @@ import {
   type TrafficQuery,
   type TrafficWrite,
 } from "./store.js";
+import {
+  getActiveNetdSocketSync,
+  isGoTaskDir,
+  netdJsonSync,
+  resolveExecBackendMode,
+  unmarkGoTaskDir,
+} from "../netd-client.js";
+
+function useGoRing(taskDir: string): boolean {
+  if (resolveExecBackendMode() === "ts") return false;
+  if (!getActiveNetdSocketSync()) return false;
+  return isGoTaskDir(taskDir) || Boolean(process.env.GY_NETD_SOCKET?.trim());
+}
 
 /**
  * Finding-window ("black box") traffic retention.
@@ -137,6 +150,10 @@ export function pushTrafficRing(
 }
 
 export function trafficRingSize(taskDir: string): number {
+  if (useGoRing(taskDir)) {
+    const res = netdJsonSync<{ size: number }>("POST", "/v1/traffic/ring/size", { taskDir });
+    return res.size;
+  }
   return rings.get(key(taskDir))?.entries.length ?? 0;
 }
 
@@ -146,6 +163,16 @@ export function getRingEntry(taskDir: string, id: string): RingEntry | undefined
 
 /** Drop the ring, post-windows and noise counters for one task (or all tasks). */
 export function clearTrafficRing(taskDir?: string): void {
+  if (resolveExecBackendMode() !== "ts" && getActiveNetdSocketSync()) {
+    if (taskDir == null || isGoTaskDir(taskDir) || Boolean(process.env.GY_NETD_SOCKET?.trim())) {
+      try {
+        netdJsonSync("POST", "/v1/traffic/ring/clear", taskDir ? { taskDir } : {});
+      } catch {
+        /* best effort */
+      }
+      unmarkGoTaskDir(taskDir);
+    }
+  }
   if (taskDir == null) {
     rings.clear();
     windows.clear();
@@ -250,6 +277,10 @@ function ringMatches(entry: RingEntry, query: TrafficQuery): boolean {
 
 /** Ring-only (not yet persisted) records matching a query, oldest first. */
 export function queryTrafficRing(taskDir: string, query: TrafficQuery): TrafficRecord[] {
+  if (useGoRing(taskDir)) {
+    const res = netdJsonSync<{ traffic: TrafficRecord[] }>("POST", "/v1/traffic/ring/query", { taskDir, query });
+    return res.traffic;
+  }
   const ring = rings.get(key(taskDir));
   if (!ring) return [];
   return ring.entries
@@ -267,6 +298,9 @@ export type LiveTrafficPage = TrafficPage & {
  * fresh exchange is visible on page one; then the index.sqlite rows.
  */
 export function queryTrafficLive(taskDir: string, query: TrafficQuery): LiveTrafficPage {
+  if (useGoRing(taskDir)) {
+    return netdJsonSync<LiveTrafficPage>("POST", "/v1/traffic/query-live", { taskDir, query });
+  }
   const offset = Math.max(0, Math.floor(query.offset ?? 0));
   const limit = Math.max(1, Math.min(200, Math.floor(query.limit ?? 50)));
   const hot = queryTrafficRing(taskDir, query);
@@ -284,6 +318,10 @@ export function queryTrafficLive(taskDir: string, query: TrafficQuery): LiveTraf
 
 /** Persisted record first, then the ring. */
 export function getTrafficLive(taskDir: string, id: string): TrafficRecord | null {
+  if (useGoRing(taskDir)) {
+    const res = netdJsonSync<{ record: TrafficRecord | null }>("POST", "/v1/traffic/get-live", { taskDir, id });
+    return res.record;
+  }
   const stored = getTraffic(taskDir, id);
   if (stored) return stored;
   const entry = getRingEntry(taskDir, id);
@@ -305,6 +343,19 @@ export function readTrafficBodyLive(
   offset?: number,
   maxBytes?: number,
 ): LiveBodySlice {
+  if (useGoRing(taskDir)) {
+    const bounds = normalizeSlice(offset, maxBytes);
+    const res = netdJsonSync<Omit<LiveBodySlice, "bytes"> & { bytesBase64?: string }>(
+      "POST",
+      "/v1/traffic/body-live",
+      { taskDir, id: trafficId, side, offset: bounds.offset, maxBytes: bounds.maxBytes },
+    );
+    const { bytesBase64, ...rest } = res;
+    return {
+      ...rest,
+      bytes: Buffer.from(bytesBase64 ?? "", "base64"),
+    };
+  }
   if (getTraffic(taskDir, trafficId)) {
     return { ...readTrafficBody(taskDir, trafficId, side, offset, maxBytes), source: "store" };
   }
@@ -467,6 +518,23 @@ export type PromoteTrafficResult = {
  * persisted directly by the proxy and linked to `findingId`.
  */
 export function promoteTrafficForFinding(taskDir: string, opts: PromoteTrafficOptions): PromoteTrafficResult {
+  if (useGoRing(taskDir)) {
+    return netdJsonSync<PromoteTrafficResult>("POST", "/v1/traffic/promote", {
+      taskDir,
+      findingId: opts.findingId,
+      ...(opts.intentId ? { intentId: opts.intentId } : {}),
+      ...(opts.host ? { host: opts.host } : {}),
+      ...(opts.asset ? { asset: opts.asset } : {}),
+      ...(opts.trafficIds ? { trafficIds: opts.trafficIds } : {}),
+      ...(opts.preWindowMs != null ? { preWindowMs: opts.preWindowMs } : {}),
+      ...(opts.preMaxItems != null ? { preMaxItems: opts.preMaxItems } : {}),
+      ...(opts.postWindowMs != null ? { postWindowMs: opts.postWindowMs } : {}),
+      ...(opts.postMaxItems != null ? { postMaxItems: opts.postMaxItems } : {}),
+      ...(opts.converge ? { converge: true } : {}),
+      ...(opts.retention ? { retention: resolveTrafficRetention(opts.retention) } : {}),
+      ...(opts.nowMs != null ? { nowMs: opts.nowMs } : {}),
+    });
+  }
   const defaults = trafficWindowDefaults();
   const now = opts.nowMs ?? Date.now();
   const findingId = opts.findingId;
@@ -548,6 +616,13 @@ export function openFindingWindow(
     nowMs?: number;
   },
 ): PromoteTrafficResult["window"] {
+  if (useGoRing(taskDir)) {
+    const res = netdJsonSync<{ window: PromoteTrafficResult["window"] }>("POST", "/v1/traffic/window/open", {
+      taskDir,
+      ...opts,
+    });
+    return res.window;
+  }
   const defaults = trafficWindowDefaults();
   const now = opts.nowMs ?? Date.now();
   const intentId = opts.intentId?.trim() || undefined;
@@ -600,6 +675,10 @@ export function openFindingWindow(
 }
 
 export function closeFindingWindow(taskDir: string, findingId: string): boolean {
+  if (useGoRing(taskDir)) {
+    const res = netdJsonSync<{ closed: boolean }>("POST", "/v1/traffic/window/close", { taskDir, findingId });
+    return res.closed;
+  }
   return windows.get(key(taskDir))?.delete(findingId) ?? false;
 }
 
@@ -641,6 +720,12 @@ export function activeFindingWindows(
   taskDir: string,
   nowMs = Date.now(),
 ): Array<{ findingId: string; intentId?: string; host?: string; expiresAt: number; remaining: number }> {
+  if (useGoRing(taskDir)) {
+    const res = netdJsonSync<{
+      windows: Array<{ findingId: string; intentId?: string; host?: string; expiresAt: number; remaining: number }>;
+    }>("POST", "/v1/traffic/window/active", { taskDir, nowMs });
+    return res.windows;
+  }
   const byFinding = windows.get(key(taskDir));
   if (!byFinding) return [];
   return [...byFinding.values()]

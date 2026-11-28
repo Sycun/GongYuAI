@@ -1,3 +1,10 @@
+FROM golang:1.26-bookworm AS netd-builder
+WORKDIR /src/services/netd
+COPY services/netd/go.mod services/netd/go.sum ./
+RUN go mod download
+COPY services/netd ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/gy-netd ./cmd/gy-netd
+
 FROM kalilinux/kali-rolling
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -12,6 +19,7 @@ WORKDIR /opt/gongyuai
 COPY package.json pnpm-workspace.yaml tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
+COPY --from=netd-builder /out/gy-netd ./bin/gy-netd
 
 RUN corepack enable && corepack prepare pnpm@10.15.0 --activate \
   && pnpm install --frozen-lockfile=false \

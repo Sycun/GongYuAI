@@ -87,6 +87,11 @@ prepare() {
     || { log "!! 安装失败，见 /tmp/gy-deploy-install.log"; exit 1; }
   ( cd "${NEW_DIR}" && /home/parallels/.npm-global/bin/pnpm run build >/tmp/gy-deploy-build.log 2>&1 ) \
     || { log "!! 构建失败，见 /tmp/gy-deploy-build.log"; exit 1; }
+  if [ -x "${NEW_DIR}/bin/gy-netd" ]; then
+    log "Go Sidecar 构建产物 bin/gy-netd 大小=$(stat -c %s "${NEW_DIR}/bin/gy-netd") 字节"
+  else
+    log "未检测到 Go 环境，跳过 bin/gy-netd（运行时自动回退 TS exec 后端）"
+  fi
   log "构建产物 packages/control-plane/dist/server.js 时间=$(stat -c %y "${NEW_DIR}/packages/control-plane/dist/server.js" | cut -d. -f1)"
 
   if ! command -v aimy-mcp >/dev/null 2>&1; then

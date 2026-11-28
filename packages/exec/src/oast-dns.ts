@@ -1,4 +1,5 @@
 import { createSocket, type RemoteInfo, type Socket } from "node:dgram";
+import { netdJsonAsync, netdStreamNdjson, shouldUseGoBackend } from "./netd-client.js";
 
 /**
  * P14-B2 — DNS 回调通道（UDP）。
@@ -112,6 +113,46 @@ export function startOastDnsListener(opts: OastDnsListenerOptions): Promise<Oast
   const ttlSec = Math.max(0, Math.min(86_400, opts.ttlSec ?? 60));
   const domain = opts.domain.replace(/^\.+|\.+$/g, "").toLowerCase();
   if (!domain) return Promise.reject(new Error("oast dns domain required"));
+
+  if (shouldUseGoBackend()) {
+    return (async () => {
+      const started = await netdJsonAsync<{ id: string; port: number; domain: string }>(
+        "POST",
+        "/v1/oast/dns/start",
+        {
+          listenHost,
+          listenPort: opts.listenPort ?? 0,
+          domain,
+          answerIp: opts.answerIp ?? "127.0.0.1",
+          ttlSec,
+        },
+      );
+      const stream = await netdStreamNdjson<OastDnsHit>(
+        `/v1/oast/dns/${started.id}/events`,
+        (hit) => {
+          try {
+            void Promise.resolve(opts.onHit(hit)).catch(() => undefined);
+          } catch {
+            /* ignore */
+          }
+        },
+      );
+      let closing: Promise<void> | null = null;
+      return {
+        port: started.port,
+        hostname: (token: string) => `${token}.${domain}`,
+        close(): Promise<void> {
+          if (closing === null) {
+            closing = (async () => {
+              stream.close();
+              await netdJsonAsync("POST", `/v1/oast/dns/${started.id}/stop`, {}, 10_000).catch(() => {});
+            })();
+          }
+          return closing;
+        },
+      };
+    })();
+  }
 
   return new Promise((resolve, reject) => {
     const socket: Socket = createSocket({ type: "udp4" });
