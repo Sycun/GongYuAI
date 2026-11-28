@@ -170,6 +170,35 @@ test("poolTurnYieldDirective lets a pulse-woken leader run at most its supervisi
     /YIELD/,
     "督导预算不得放大到派单/其它工具",
   );
+  // Mixed saturated pool (1 proposed + 2 claimed across 3 slots): pulse-woken leader must still advise.
+  assert.equal(
+    poolTurnYieldDirective({
+      ...base,
+      workerCount: 4,
+      openIntents: [
+        { id: "p1", status: "proposed" },
+        { id: "c1", status: "claimed" },
+        { id: "c2", status: "running" },
+      ],
+      toolName: "intent_advise",
+      supervisionBudget: 2,
+    }),
+    undefined,
+  );
+  assert.match(
+    poolTurnYieldDirective({
+      ...base,
+      workerCount: 4,
+      openIntents: [
+        { id: "p1", status: "proposed" },
+        { id: "c1", status: "claimed" },
+        { id: "c2", status: "running" },
+      ],
+      toolName: "intent_advise",
+      supervisionBudget: 0,
+    }) ?? "",
+    /YIELD/,
+  );
 });
 
 test("waitForPoolTurn wakes a saturated leader on an anomalous follower pulse", async () => {

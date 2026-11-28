@@ -328,7 +328,6 @@ export function poolTurnYieldDirective(opts: {
     if (opts.phase === "bootstrap" && opts.toolName === "phase_set") return undefined;
     if (!opts.activeIntentId && proposedCount + activeCount >= exploreSlots) {
       if (
-        proposedCount === 0 &&
         LEADER_SUPERVISION_TOOLS.has(opts.toolName) &&
         (opts.supervisionBudget ?? 0) > 0
       ) {

@@ -753,6 +753,7 @@ export async function tryPiDurable(
           appendProgress(manifest.workspaceDir, "任务目标已清或主节点已收卷，结束 Pi 循环");
           break;
         }
+        supervisionStepsRemaining = 0;
         if (lastStaleSweep.supervisionRequested) {
           lastStaleSweep.supervisionRequested = false;
           supervisionStepsRemaining = 2;

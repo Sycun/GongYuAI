@@ -47,6 +47,8 @@ import {
 import { canRelay, synthesizeGroundedRelayFields, writeRelayProtocol } from "./relay-protocol.js";
 import { formatSupervisorAdvisoryGate } from "./supervisor-advisory.js";
 import {
+  LEADER_SUPERVISION_TOOLS,
+  consumePendingSoftPace,
   evaluateEnvironmentTerminalExit,
   flushUsage,
   maybeSoftPaceMessage,
@@ -56,6 +58,7 @@ import {
   runExploreTimeoutGate,
   shouldResetFollowerSession,
   waitForPoolTurn,
+  type PoolSweepState,
 } from "./loop-shared.js";
 
 function tokenDelta(usage?: {
@@ -126,13 +129,14 @@ export async function runOpenAiToolLoop(
   }
   const readPoolSize = createPoolSizeReader(manifest);
   const leader = isExploreLeader(manifest);
-  const lastStaleSweep = { at: Date.now() };
+  const lastStaleSweep: PoolSweepState = { at: Date.now() };
   const refreshSystem = () => systemPrompt(manifest, undefined, mcpHub, skillHub);
 
   let lastInjectedPhase = asGraphPhase(state.phase);
   let pendingAutoRelayAsk = false;
   let refusalStreak = 0;
   let leaderIdleStepsSincePropose = 0;
+  let supervisionStepsRemaining = 0;
   let pendingFollowerIntentReset = false;
   let terminalFinalizationRounds = 0;
 
@@ -283,6 +287,15 @@ export async function runOpenAiToolLoop(
       lastStaleSweep,
     });
     if (poolDecision === "exit") break;
+    supervisionStepsRemaining = 0;
+    if (lastStaleSweep.supervisionRequested) {
+      lastStaleSweep.supervisionRequested = false;
+      supervisionStepsRemaining = 2;
+      appendProgress(
+        manifest.workspaceDir,
+        "supervisor pulse wake: leader granted 2 lightweight supervision steps (OpenAI loop)",
+      );
+    }
 
     const livePoolSize = readPoolSize();
     const role = resolveWorkerRole({ leader, workerCount: livePoolSize });
@@ -355,7 +368,8 @@ export async function runOpenAiToolLoop(
     }
 
     if (role !== "follower") {
-      const softPace = maybeSoftPaceMessage(state, ctx, workerStartedAt);
+      const pendingSoft = consumePendingSoftPace(state);
+      const softPace = pendingSoft ?? maybeSoftPaceMessage(state, ctx, workerStartedAt);
       if (softPace) {
         messages.push({ role: "user", content: softPace });
         ckpt.save(state);
@@ -633,11 +647,21 @@ export async function runOpenAiToolLoop(
           openIntents: livePoolSize > 1 ? ctx.history.openIntents(manifest.taskId) : [],
           allGoalsPass: livePoolSize > 1 ? ctx.history.allGoalsPass(manifest.taskId) : false,
           leaderIdleStepsSincePropose,
+          supervisionBudget: supervisionStepsRemaining,
         });
         if (yieldBlock) {
           appendProgress(manifest.workspaceDir, `pool yield ${callName}: ${yieldBlock.slice(0, 120)}`);
           messages.push({ role: "tool", tool_call_id: call.id, content: yieldBlock });
           continue;
+        }
+        if (
+          leader &&
+          livePoolSize > 1 &&
+          !state.activeIntentId &&
+          supervisionStepsRemaining > 0 &&
+          LEADER_SUPERVISION_TOOLS.has(callName)
+        ) {
+          supervisionStepsRemaining -= 1;
         }
 
         const denied = evaluateWorkerToolGate({
