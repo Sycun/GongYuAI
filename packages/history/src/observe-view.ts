@@ -222,6 +222,12 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
 
   const factById = new Map(allFacts.map((f) => [f.id, f]));
   const intentById = new Map(allIntents.map((i) => [i.id, i]));
+  const factShortNo = new Map(allFacts.map((f, idx) => [f.id, `F${idx + 1}`]));
+  const intentShortNo = new Map(allIntents.map((i, idx) => [i.id, `I${idx + 1}`]));
+  const allFindingsByCreation = [...src.listFindings(taskId)].sort(
+    (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  );
+  const findingShortNo = new Map(allFindingsByCreation.map((f, idx) => [f.id, `V${idx + 1}`]));
   const hotFactIds = new Set<string>();
   const factQueue: string[] = [];
   const enqueueFact = (id: string) => {
@@ -359,7 +365,10 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
   } else {
     for (const f of transferable) {
       const summaryLimit = f.tags.includes("scope-brief") ? 600 : 160;
-      lines.push(`- [${f.id}] ${f.title}${f.summary ? `: ${f.summary.slice(0, summaryLimit)}` : ""}`);
+      const fNo = factShortNo.get(f.id);
+      lines.push(
+        `- ${fNo ? `[${fNo}] ` : ""}[${f.id}] ${f.title}${f.summary ? `: ${f.summary.slice(0, summaryLimit)}` : ""}`,
+      );
     }
   }
   lines.push("", `## Findings 台账（${findings.length}）`);
@@ -367,11 +376,12 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
     lines.push("- （无；发现线索即 finding_record，复现后 finding_verify 才可进交付）");
   } else {
     for (const f of findings.slice(-30)) {
+      const vNo = findingShortNo.get(f.id);
       lines.push(
-        `- [${f.id}] (${f.status}/${f.severity}) ${f.title} · ${f.asset}${f.endpoint ? ` · ${f.endpoint}` : ""} · ${f.vulnClass}`,
+        `- ${vNo ? `[${vNo}] ` : ""}[${f.id}] (${f.status}/${f.severity}) ${f.title} · ${f.asset}${f.endpoint ? ` · ${f.endpoint}` : ""} · ${f.vulnClass}`,
       );
     }
-    lines.push("（tentative 不得写进交付叙述；verified 须附证据与 repro；同 dedupKey 幂等。）");
+    lines.push("（tentative 不得写进交付叙述；verified 须附证据与 repro；工具调用可直接传短号如 V1 或完整 UUID。）");
   }
   lines.push(
     "",
@@ -380,23 +390,26 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
       : "## 事实标题（title 层）",
   );
   for (const f of titles) {
-    const intent = f.intentId ? ` ←intent ${f.intentId}` : "";
+    const iNo = f.intentId ? intentShortNo.get(f.intentId) : undefined;
+    const intent = f.intentId ? ` ←intent ${iNo ? `${iNo}/` : ""}${f.intentId}` : "";
     const hotPin = !recentTitleSet.has(f.id) ? " [热祖先]" : "";
-    lines.push(`- [${f.id}]${hotPin} ${f.title}${intent}`);
+    const fNo = factShortNo.get(f.id);
+    lines.push(`- ${fNo ? `[${fNo}] ` : ""}[${f.id}]${hotPin} ${f.title}${intent}`);
   }
   lines.push("", `## 进行中意图（${open.length}）`);
   if (open.length === 0) {
     lines.push("- （无）");
   } else {
     for (const i of open.slice(0, MAX_OPEN_INTENTS)) {
-      const srcIds = i.sourceFactIds.join(",");
+      const srcIds = i.sourceFactIds.map((fid) => factShortNo.get(fid) ?? fid).join(",");
       const surfaces = i.assignedSurfaces?.length
         ? ` · surfaces=${i.assignedSurfaces.join(",")}`
         : "";
       const mutex = i.mutexNote ? ` · mutex=${i.mutexNote.slice(0, 120)}` : "";
       const pulse = renderIntentPulse(i, allFacts, httpTransactions, nowMs);
+      const iNo = intentShortNo.get(i.id);
       lines.push(
-        `- [${i.id}] (${i.status}) ${i.title} ←facts ${srcIds}${surfaces}${mutex}${pulse ? ` · ${pulse}` : ""}`,
+        `- ${iNo ? `[${iNo}] ` : ""}[${i.id}] (${i.status}) ${i.title} ←facts ${srcIds}${surfaces}${mutex}${pulse ? ` · ${pulse}` : ""}`,
       );
     }
     if (open.length > MAX_OPEN_INTENTS) {
@@ -404,7 +417,7 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
     }
     if (open.some((i) => ACTIVE_INTENT_STATUSES.has(i.status))) {
       lines.push(
-        "（claimed/running 意图附运行脉搏：已运行时长、claimed_by、最近 HTTP 状态码统计或最新 Fact 标题；连续 500/000 或长时间无新证据应视为停滞信号。）",
+        "（claimed/running 意图附运行脉搏：已运行时长、claimed_by、最近 HTTP 状态码统计或最新 Fact 标题；所有事实/意图/漏洞工具均支持短编号如 F1 / I1 / V1。）",
       );
     }
   }
@@ -420,7 +433,8 @@ function renderObserveCore(src: ObserveRenderSource, taskId: string): string[] {
       const technique = i.technique ?? "—";
       const root = i.assetRoot ?? "—";
       const conclusion = (i.conclusion ?? "").slice(0, 240);
-      lines.push(`- [${i.id}] (${i.status} / ${technique} @${root}) ${i.title} — ${conclusion}`);
+      const iNo = intentShortNo.get(i.id);
+      lines.push(`- ${iNo ? `[${iNo}] ` : ""}[${i.id}] (${i.status} / ${technique} @${root}) ${i.title} — ${conclusion}`);
     }
   }
   const profiles = src.listHostProfiles(taskId);

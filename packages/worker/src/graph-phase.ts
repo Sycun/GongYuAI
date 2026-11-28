@@ -43,10 +43,11 @@ export function fanoutPolicyFromExecution(
     execution?.maxConcurrentExplores ?? DEFAULT_MAX_CONCURRENT_EXPLORES;
   const basePerReason =
     execution?.maxIntentsPerReason ?? DEFAULT_MAX_INTENTS_PER_REASON;
+  const basePerRoot =
+    execution?.maxIntentsPerAssetRoot ?? DEFAULT_MAX_INTENTS_PER_ASSET_ROOT;
   return {
     maxIntentsPerReason: Math.max(basePerReason, configuredExplores),
-    maxIntentsPerAssetRoot:
-      execution?.maxIntentsPerAssetRoot ?? DEFAULT_MAX_INTENTS_PER_ASSET_ROOT,
+    maxIntentsPerAssetRoot: Math.max(basePerRoot, Math.ceil(configuredExplores / 3)),
   };
 }
 
@@ -55,6 +56,8 @@ const ALWAYS = new Set([
   "history_overview",
   "history_read_fact",
   "history_list_layer",
+  "execution_trace_search",
+  "execution_trace_read",
   "asset_list",
   "asset_record",
   "finding_list",
@@ -272,7 +275,7 @@ export function phaseDirective(
   if (p === "bootstrap") {
     if (multiWorkerLeader) {
       lines.push(
-        `Bootstrap（多节点并发开局）：你是 slot 0 Leader，拥有 ${exploreSlots} 个并发 Explore Follower。先确认/开启首批目标坐标（靶场任务先调 tsecbench list，优先按 difficulty 由易到难 easy → medium → hard 挑题，避免开局全压硬题阻塞流水线；多目标任务连续 start 最多 3 台未完成靶机填满并发槽位）→ 扇出 ${exploreSlots} 条独立 Intent（勿传 claim='true'，严禁多目标混塞同一 Intent；若当前活跃可测主机少于 ${exploreSlots} 台——如单目标重点渗透或尾盘攻坚——直接对同一重点 assetRoot 按正交 technique 并行拆出 2～3 条独立 Intent，如 recon-surface / greybox-auth-logic / known-cve-poc 同时推进）→ 随后 phase_set('reason') 进入驻留监听。禁止 shell / assert_goal。`,
+        `Bootstrap（多节点并发开局）：你是 slot 0 Leader，拥有 ${exploreSlots} 个并发 Explore Follower。先确认/开启首批目标坐标（靶场任务先调 tsecbench list，优先按 difficulty 由易到难 easy → medium → hard 挑题，连续 start 最多 3 台未完成靶机填满平台活跃容器槽位）→ 采用混合扇出（Hybrid Fan-out）派满 ${exploreSlots} 条独立 Intent（勿传 claim='true'，严禁多目标混塞同一 Intent：easy 单入口题派 1 条速清；medium/hard 或多 flag 题对同一活跃容器 assetRoot 按正交 technique + 互斥 assigned_surfaces 并行拆出 2～4 条独立 Intent，如 greybox-auth-logic / web-injection-upload / service-source-re 同时猛攻）→ 随后 phase_set('reason') 进入驻留监听。禁止 shell / assert_goal。`,
       );
     } else {
       const wantScale = (opts.maxConcurrentExplores ?? DEFAULT_MAX_CONCURRENT_EXPLORES) > 1;
@@ -282,11 +285,11 @@ export function phaseDirective(
     }
   } else if (p === "explore") {
     lines.push(
-      "Explore（轻装试错 · 立足点搜刮先行 · 客观收束）：先读 Observe 中的委托简报（若含预置工号/口令/Token，首探第一步必须先实测预置凭据登录与鉴权边界，严禁越过已知凭据盲爆）、凭据台账与「存活持久连接与后台设施」（跨 Intent 直接复用已有 SOCKS 隧道、PTY shell_session 与后台监听），一次只 claim 一个 Intent → 高速验证（一旦取得任意文件读或命令执行立足点，前 5 分钟必须优先搜刮本机源码配置、*.sql/init.sql、本地 DB/Redis 与环境变量，用 credential_record 登记凭据并对内网认证面交叉喷洒，发现内网存活主机立即 asset_record 建档 + tunnel_open 纳管隧道；跨架构二进制/VM 逆向优先用 r2 -2 -q -e scr.color=0 -c 'aa; afl; pdg @ main' 导出全量跳表 handler 伪 C 再写 Python/Z3/Unicorn 求解，严禁讨要靶场 hint；同目标多路并行时临时文件按 <host>-<technique>-* 隔离，随时用 fact_draft 更新草稿）→ 突破或进入 3 步收尾保护窗时集中入账 → intent_conclude（未完全达成时只客观陈述已测输入、响应特征、已获凭据与存活会话/隧道端口，严禁写“无漏洞/此路不通/已穷尽”绝对否定结论）。",
+      "Explore（轻装试错 · 立足点搜刮先行 · 客观收束）：先读系统钉死的本卡派发契约与 Observe 中的委托简报（若含预置工号/口令/Token，首探第一步必须先实测预置凭据登录与鉴权边界，严禁越过已知凭据盲爆）、凭据台账与「存活持久连接与后台设施」（跨 Intent 直接复用已有 SOCKS 隧道、PTY shell_session 与后台监听，或用 execution_trace_search 查同目标前序槽位已跑命令与原始回显避免重复扫描）；若系统尚未预认领 activeIntentId 再调 intent_claim → 高速验证（一旦取得任意文件读或命令执行立足点，前 5 分钟必须优先搜刮本机源码配置、*.sql/init.sql、本地 DB/Redis 与环境变量，用 credential_record 登记凭据并对内网认证面交叉喷洒，发现内网存活主机立即 asset_record 建档 + tunnel_open 纳管隧道；跨架构二进制/VM 逆向优先用 r2 -2 -q -e scr.color=0 -c 'aa; afl; pdg @ main' 导出全量跳表 handler 伪 C 再写 Python/Z3/Unicorn 求解，严禁讨要靶场 hint；同目标多路并行时临时文件按 <host>-<technique>-* 隔离，随时用 fact_draft 更新草稿）→ 突破或进入 3 步收尾保护窗时集中入账 → intent_conclude（intentId 可省略，默认自动绑定当前活跃卡；未完全达成时只客观陈述已测输入、响应特征、已获凭据与存活会话/隧道端口，严禁写“无漏洞/此路不通/已穷尽”绝对否定结论）。",
     );
   } else if (p === "reason") {
     lines.push(
-      `Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + 凭据台账 + 存活隧道/会话 + 委托范围待回补项 + Hint + transferable + Findings 台账 + 作战计划（plan_list）→ 优先为 0 Intent 未触达资产与仅首探失败 1 次即被搁置的受挫目标（shallow-failure / 待回补项）换正交 technique 补单；内网横向发现新存活主机（如 172.x / 192.168.x）必须按单台内网主机作为独立 assetRoot 拆单推进并组织既有凭据交叉喷洒，严禁全部堆在公网入口 IP 大包干；当活跃可测主机少于并发槽位或面对复杂重点资产时，主动按不同正交 technique 并行扇出 2～3 条短 Intent → 更新 engagement 叙事。${multiWorkerLeader ? `当前 ${exploreSlots} 路并发 Follower 在岗：靶场已解题或本轮时间盒耗尽容器先 tsecbench(close) 腾槽，优先按 easy → medium → hard 梯队 start 新题（首探 12m 快扫建图，二探 30m 攻坚长链，三探+ 45m 纵深决战，阶段突破自动续期 20m），尾盘优先回补仅首探 1 次未果的挂起目标，再单题多路正交并进保持 ${exploreSlots} 路满槽（勿传 claim='true'）。` : "单节点下 intent_propose 可传 claim='true' 直接切入 Explore。"}repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset / shallow-failure 出现时先处理，不要继续磨。可质疑子会话失败结论的完整性并换正交维度重测；oos 禁止作利用唯一前驱。交付叙述只引用 verified finding。禁止 shell / MCP 执行。`,
+      `Reason（战役调度）：先读观察员/作业记分卡（engagement_audit）→ 读资产清单 + 凭据台账 + 存活隧道/会话 + 委托范围待回补项 + Hint + transferable + Findings 台账 + 作战计划（plan_list），必要时用 execution_trace_search 查阅前序 Worker 原始命令输出核实漏记线索 → 优先为 0 Intent 未触达资产与仅首探失败 1 次即被搁置的受挫目标（shallow-failure / 待回补项）换正交 technique 补单；内网横向发现新存活主机（如 172.x / 192.168.x）必须按单台内网主机作为独立 assetRoot 拆单推进并组织既有凭据交叉喷洒，严禁全部堆在公网入口 IP 大包干；当活跃可测主机少于并发槽位（如靶场 3 台活跃容器配 ${exploreSlots} 路 Follower）或面对 medium/hard 重点资产时，主动对同一活跃容器按不同正交 technique + assigned_surfaces 并行扇出 2～4 条短 Intent 共享容器协同攻坚。${multiWorkerLeader ? `当前 ${exploreSlots} 路并发 Follower 在岗：靶场已解题容器先 tsecbench(close) 腾槽，优先按 easy → medium → hard 梯队 start 新题（首探 12m 快扫建图，二探 30m 攻坚长链，三探+ 45m 纵深决战，阶段突破自动续期 20m），尾盘优先回补仅首探 1 次未果的挂起目标，保持 ${exploreSlots} 路满槽（勿传 claim='true'）。` : "单节点下 intent_propose 可传 claim='true' 直接切入 Explore。"}repeat-failure / duplicate-open / stalled / tentative-backlog / unexplored-asset / shallow-failure 出现时先处理，不要继续磨。可质疑子会话失败结论的完整性并换正交维度重测；oos 禁止作利用唯一前驱。交付叙述只引用 verified finding。禁止 shell / MCP 执行。`,
     );
   }
   return lines.join("\n");
@@ -517,7 +520,7 @@ export const GRAPH_PHASE_TOOLS = [
     function: {
       name: "intent_conclude",
       description:
-        "Conclude claimed Intent. status=succeeded requires factsJson array (≥1 Fact with layer/title, or a prior fact_draft). When status=failed, conclusion must state objective tested inputs, observed responses, and saved file/session refs — never declare a surface 'impossible' or 'exhausted'.",
+        "Conclude the active claimed Intent (intentId optional — defaults to this worker's active Intent). status=succeeded requires factsJson array (≥1 Fact with layer/title, or a prior fact_draft). When status=failed, conclusion must state objective tested inputs, observed responses, and saved file/session refs — never declare a surface 'impossible' or 'exhausted'.",
       parameters: {
         type: "object",
         properties: {
@@ -547,7 +550,7 @@ export const GRAPH_PHASE_TOOLS = [
             description: "可选：留给后续同族资产的下一步换面建议。",
           },
         },
-        required: ["intentId", "status", "conclusion"],
+        required: ["status", "conclusion"],
       },
     },
   },
@@ -1273,8 +1276,13 @@ export function handleGraphTool(
           ? "failed"
           : null;
     if (!status) return `invalid status: ${args.status ?? ""} (succeeded|failed)`;
-    const intentId = args.intentId ?? "";
-    if (ctx.state.activeIntentId !== intentId) {
+    const rawIntentId = (args.intentId ?? "").trim();
+    const resolvedArgIntent = rawIntentId ? ctx.history.getIntent(ctx.taskId, rawIntentId) : null;
+    const intentId =
+      rawIntentId === ""
+        ? (ctx.state.activeIntentId ?? "")
+        : (resolvedArgIntent?.id ?? rawIntentId);
+    if (!intentId || ctx.state.activeIntentId !== intentId) {
       return `denied: conclude only active Intent ${ctx.state.activeIntentId ?? "—"}; claim it first`;
     }
     const parsedFacts = parseFactsJson(args.factsJson);

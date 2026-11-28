@@ -13,8 +13,10 @@ import type { SettingsStore } from "./settings.js";
 export function taskWorkerCount(task: TaskRecord, assetCount?: number): number {
   const configured = task.execution?.maxConcurrentExplores ?? DEFAULT_MAX_CONCURRENT_EXPLORES;
   const hasTsecBoard = !task.mock && task.goals.some((g) => g.boardGate === "tsecbench");
+  // Decouple Explore worker concurrency (e.g. 8–10 Followers) from the 3-container platform cap
+  // so multi-hypothesis fan-out (2–4 orthogonal Intents sharing 1 medium/hard container) starts at full pool size.
   const effectiveTargets = hasTsecBoard
-    ? Math.max(task.auth.targets.length, Math.min(configured, 3))
+    ? Math.max(task.auth.targets.length, configured)
     : task.auth.targets.length;
   const exploreCount = resolveExploreWorkerCount({
     maxConcurrentExplores: configured,

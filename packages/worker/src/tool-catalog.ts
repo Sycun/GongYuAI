@@ -7,7 +7,12 @@
  * session isolation upon `intent_conclude`.
  */
 import { isExploreLeader, type WorkerManifest } from "@gongyuai/contracts";
-import { readEvidenceFile, type openHistory } from "@gongyuai/history";
+import {
+  readEvidenceFile,
+  readExecutionTraceCallContent,
+  searchExecutionTrace,
+  type openHistory,
+} from "@gongyuai/history";
 import type { CheckpointStore, CheckpointState } from "./checkpoint.js";
 import { runAssetSearch } from "./asset-collectors.js";
 import { hasBenchmarkHarness } from "./board-policy.js";
@@ -521,6 +526,61 @@ export function buildWorkerToolCatalog(env: ToolCatalogEnv): UnifiedToolSpec[] {
           return { text: `invalid layer: ${asStr(args.layer)}` };
         }
         return { text: JSON.stringify(ctx.history.listFacts(manifest.taskId, layer).slice(-30)) };
+      },
+    },
+    {
+      name: "execution_trace_search",
+      description:
+        "Search saved shell commands and raw outputs across all worker slots in this task (case-insensitive substring match). Use this before rescanning a shared target container or resuming a stalled challenge to inspect exact commands, ports, responses, and errors already observed by peer workers. Read full output of a hit with execution_trace_read.",
+      params: {
+        q: { type: "string", required: true, description: "Case-insensitive keyword (host, path, port, tool name, error, flag prefix)." },
+        beforeSeq: { type: "number", description: "Optional pagination cursor (nextBeforeSeq from prior page)." },
+        limit: { type: "number", description: "Max hits to return (1..20, default 10)." },
+      },
+      replay: "safe",
+      execute: async (args) => {
+        const beforeRaw = optStr(args.beforeSeq);
+        const limitRaw = optStr(args.limit);
+        const page = searchExecutionTrace(manifest.dataDir, {
+          query: asStr(args.q),
+          ...(beforeRaw ? { beforeSeq: Number(beforeRaw) } : {}),
+          ...(limitRaw ? { limit: Number(limitRaw) } : {}),
+        });
+        return {
+          text: markUntrusted(JSON.stringify(page), { tool: "execution_trace_search" }),
+          alreadyMarkedUntrusted: true,
+        };
+      },
+    },
+    {
+      name: "execution_trace_read",
+      description:
+        "Read paged Unicode text of one saved shell trace call (part=result|command) returned by execution_trace_search. Follow nextOffset while hasMore=true.",
+      params: {
+        stepId: { type: "string", required: true, description: "stepId from execution_trace_search hit." },
+        callId: { type: "string", description: "Optional callId when a step ran multiple parallel shell calls." },
+        part: { type: "string", enum: ["result", "command"], description: "result (default) or command." },
+        offset: { type: "number", description: "Unicode character offset (default 0)." },
+        limit: { type: "number", description: "Max characters to read (1..32000, default 8000)." },
+      },
+      replay: "safe",
+      execute: async (args) => {
+        const offsetRaw = optStr(args.offset);
+        const limitRaw = optStr(args.limit);
+        const content = readExecutionTraceCallContent(manifest.dataDir, {
+          stepId: asStr(args.stepId),
+          ...(optStr(args.callId) ? { callId: asStr(args.callId) } : {}),
+          part: optStr(args.part) === "command" ? "command" : "result",
+          ...(offsetRaw ? { offset: Number(offsetRaw) } : {}),
+          ...(limitRaw ? { limit: Number(limitRaw) } : {}),
+        });
+        if (!content) {
+          return { text: JSON.stringify({ error: "trace_not_found", stepId: asStr(args.stepId) }) };
+        }
+        return {
+          text: markUntrusted(JSON.stringify(content), { tool: "execution_trace_read" }),
+          alreadyMarkedUntrusted: true,
+        };
       },
     },
     {

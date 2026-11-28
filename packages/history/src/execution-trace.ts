@@ -76,3 +76,192 @@ export function readExecutionStepCalls(dataDir: string, stepId: string): ShellTr
     return row ? JSON.parse(row.shell_calls as string) as ShellTraceCall[] : null;
   });
 }
+
+export type ExecutionTraceHit = {
+  seq: number;
+  stepId: string;
+  callId: string;
+  workerSlot: number;
+  stepNumber: number;
+  at: string;
+  exitCode: number | null;
+  durationMs: number | null;
+  commandPreview: string | null;
+  resultPreview: string | null;
+  totalCommandChars: number;
+  totalResultChars: number;
+};
+
+export type ExecutionTraceSearchPage = {
+  hits: ExecutionTraceHit[];
+  nextBeforeSeq: number | null;
+  hasMore: boolean;
+};
+
+export type ExecutionTraceCallContent = {
+  stepId: string;
+  callId: string;
+  part: "command" | "result";
+  offset: number;
+  nextOffset: number;
+  totalChars: number;
+  hasMore: boolean;
+  exitCode: number | null;
+  text: string;
+};
+
+function extractMatchSnippet(text: string | null | undefined, needleLower: string, radius = 1_600): string | null {
+  if (!text) return null;
+  const idx = text.toLowerCase().indexOf(needleLower);
+  if (idx < 0) return null;
+  const start = Math.max(0, idx - Math.floor(radius / 2));
+  const end = Math.min(text.length, idx + needleLower.length + Math.ceil(radius / 2));
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < text.length ? "…" : "";
+  return `${prefix}${text.slice(start, end)}${suffix}`;
+}
+
+/**
+ * Search persisted shell commands and raw outputs across all worker slots in this task
+ * (inspired by nectar `execution_trace_search`). Newest steps first.
+ */
+export function searchExecutionTrace(
+  dataDir: string,
+  opts: {
+    query: string;
+    limit?: number;
+    beforeSeq?: number;
+    excludeStepId?: string;
+  },
+): ExecutionTraceSearchPage {
+  const query = (opts.query ?? "").trim();
+  if (!query) return { hits: [], nextBeforeSeq: null, hasMore: false };
+  const needle = query.toLowerCase();
+  const limit = Math.max(1, Math.min(20, Math.floor(opts.limit ?? 10) || 10));
+
+  return readTrace<ExecutionTraceSearchPage>(
+    dataDir,
+    { hits: [], nextBeforeSeq: null, hasMore: false },
+    (db) => {
+      const hits: ExecutionTraceHit[] = [];
+      let cursorSeq = opts.beforeSeq;
+      const batchSize = 100;
+
+      for (;;) {
+        const rows = (
+          cursorSeq === undefined
+            ? db
+                .prepare("SELECT seq, id, summary, shell_calls FROM steps ORDER BY seq DESC LIMIT ?")
+                .all(batchSize)
+            : db
+                .prepare("SELECT seq, id, summary, shell_calls FROM steps WHERE seq < ? ORDER BY seq DESC LIMIT ?")
+                .all(cursorSeq, batchSize)
+        ) as Array<{ seq: number; id: string; summary: string; shell_calls: string }>;
+
+        if (rows.length === 0) {
+          return { hits, nextBeforeSeq: null, hasMore: false };
+        }
+
+        for (const row of rows) {
+          cursorSeq = row.seq;
+          if (opts.excludeStepId && row.id === opts.excludeStepId) continue;
+          let stepMeta: ExecutionStep;
+          let calls: ShellTraceCall[];
+          try {
+            stepMeta = JSON.parse(row.summary) as ExecutionStep;
+            calls = JSON.parse(row.shell_calls) as ShellTraceCall[];
+          } catch {
+            continue;
+          }
+          if (!Array.isArray(calls) || calls.length === 0) continue;
+          for (const call of calls) {
+            const cmdPreview = extractMatchSnippet(call.command, needle);
+            const resPreview = extractMatchSnippet(call.result, needle);
+            if (!cmdPreview && !resPreview) continue;
+            if (hits.length >= limit) {
+              return {
+                hits,
+                nextBeforeSeq: hits[hits.length - 1]!.seq,
+                hasMore: true,
+              };
+            }
+            hits.push({
+              seq: row.seq,
+              stepId: row.id,
+              callId: call.id,
+              workerSlot: stepMeta.workerSlot ?? 0,
+              stepNumber: stepMeta.number,
+              at: stepMeta.at,
+              exitCode: call.exitCode ?? null,
+              durationMs: call.durationMs ?? null,
+              commandPreview: cmdPreview ?? (call.command ? call.command.slice(0, 240) : null),
+              resultPreview: resPreview,
+              totalCommandChars: Array.from(call.command ?? "").length,
+              totalResultChars: Array.from(call.result ?? "").length,
+            });
+          }
+        }
+
+        if (rows.length < batchSize) {
+          return { hits, nextBeforeSeq: null, hasMore: false };
+        }
+      }
+    },
+  );
+}
+
+/**
+ * Read paged Unicode character slices of a specific shell trace call's command or output
+ * (inspired by nectar `execution_trace_content`).
+ */
+export function readExecutionTraceCallContent(
+  dataDir: string,
+  opts: {
+    stepId: string;
+    callId?: string;
+    part?: "command" | "result";
+    offset?: number;
+    limit?: number;
+  },
+): ExecutionTraceCallContent | null {
+  const stepId = (opts.stepId ?? "").trim();
+  if (!stepId) return null;
+  const part: "command" | "result" = opts.part === "command" ? "command" : "result";
+  const offset = Math.max(0, Math.floor(opts.offset ?? 0) || 0);
+  const limit = Math.max(1, Math.min(32_000, Math.floor(opts.limit ?? 8_000) || 8_000));
+
+  return readTrace<ExecutionTraceCallContent | null>(dataDir, null, (db) => {
+    const row = db.prepare("SELECT shell_calls FROM steps WHERE id = ?").get(stepId) as
+      | { shell_calls: string }
+      | undefined;
+    if (!row) return null;
+    let calls: ShellTraceCall[];
+    try {
+      calls = JSON.parse(row.shell_calls) as ShellTraceCall[];
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(calls) || calls.length === 0) return null;
+    const call = opts.callId
+      ? calls.find((c) => c.id === opts.callId)
+      : calls[0];
+    if (!call) return null;
+    const raw = part === "command" ? (call.command ?? "") : (call.result ?? "");
+    const chars = Array.from(raw);
+    const totalChars = chars.length;
+    const clampedOffset = Math.min(offset, totalChars);
+    const slice = chars.slice(clampedOffset, clampedOffset + limit).join("");
+    const nextOffset = clampedOffset + Array.from(slice).length;
+    return {
+      stepId,
+      callId: call.id,
+      part,
+      offset: clampedOffset,
+      nextOffset,
+      totalChars,
+      hasMore: nextOffset < totalChars,
+      exitCode: call.exitCode ?? null,
+      text: slice,
+    };
+  });
+}

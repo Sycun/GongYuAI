@@ -143,10 +143,10 @@ function resolveRuntimeConfig() {
   const providerHit = firstNonEmptyEnv(["GY_PROVIDER", "MODEL_PROVIDER", "LLM_PROVIDER"]);
   const provider = providerHit?.value || inferProvider(baseUrl);
 
-  const rawConcurrency = Number(process.env.GY_CONCURRENCY || DEFAULT_MAX_CONCURRENT_EXPLORES || 3);
+  const rawConcurrency = Number(process.env.GY_CONCURRENCY || 10);
   const concurrency = Number.isFinite(rawConcurrency)
-    ? Math.max(1, Math.min(6, Math.floor(rawConcurrency)))
-    : 3;
+    ? Math.max(1, Math.min(16, Math.floor(rawConcurrency)))
+    : 10;
 
   const visionModelId = (process.env.GY_VISION_MODEL ?? "").trim();
   const visionFlag = (process.env.GY_VISION ?? "").trim().toLowerCase();
@@ -202,8 +202,11 @@ async function probeBenchmarkReady(benchmarkBase, benchmarkToken) {
         signal: AbortSignal.timeout(15_000),
       });
       const text = await res.text();
-      if (res.status === 409 && /already\s+finished|invalid_state/i.test(text)) {
-        log(`benchmark already finished (409): ${text.slice(0, 200)}`);
+      if (
+        res.status >= 400 &&
+        /already\s+finished|task\s+\S+\s+already\s+finished|evaluation\s+(?:already\s+)?(?:ended|finished)|评测已结束|比赛已结束|任务已结束/i.test(text)
+      ) {
+        log(`benchmark already finished (${res.status}): ${text.slice(0, 200)}`);
         return { ready: false, alreadyFinished: true };
       }
       if (res.status >= 200 && res.status < 300) {
@@ -373,6 +376,8 @@ async function main() {
     goals,
     execution: {
       maxConcurrentExplores: cfg.concurrency,
+      maxIntentsPerReason: Math.max(14, cfg.concurrency + 4),
+      maxIntentsPerAssetRoot: 4,
     },
     budget: {
       maxTokens: Number(process.env.GY_MAX_TOKENS || BUDGET_UNLIMITED),

@@ -357,12 +357,144 @@ export function autoAdmitContainerTargets(
   return admitted;
 }
 
-function isBoardTerminalResponse(status: number, text: string): boolean {
-  if (status === 409 && /already\s+finished|invalid_state/i.test(text)) return true;
-  if (status >= 400 && /"code"\s*:\s*"invalid_state"/i.test(text) && /already\s+finished/i.test(text)) {
-    return true;
+export function isBoardTerminalResponse(status: number, text: string): boolean {
+  if (status < 400) return false;
+  return /already\s+finished|task\s+\S+\s+already\s+finished|evaluation\s+(?:already\s+)?(?:ended|finished)|benchmark\s+(?:already\s+)?(?:ended|finished)|评测已结束|比赛已结束|任务已结束/i.test(
+    text,
+  );
+}
+
+export function isDuplicateFlagResponse(status: number, text: string): boolean {
+  if (status !== 409) return false;
+  return /"code"\s*:\s*"duplicate"/i.test(text) || /\bduplicate\b|已提交过|重复提交/i.test(text);
+}
+
+export function isActiveContainerLimitResponse(status: number, text: string): boolean {
+  if (status !== 409) return false;
+  if (isBoardTerminalResponse(status, text) || isDuplicateFlagResponse(status, text)) return false;
+  return (
+    /"code"\s*:\s*"invalid_state"/i.test(text) &&
+    /上限|最多|active|limit|maximum|running\s+containers?/i.test(text)
+  );
+}
+
+/** Per-process first-seen active timestamps for stale container cleanup (leader reaper). */
+const activeContainerSince = new Map<string, number>();
+
+/**
+ * Zero-LLM-token container hygiene (aligned with nectar `reconcileContainers`):
+ * 1. Immediately closes any challenge with `is_completed === true && container_status !== "stopped"`;
+ * 2. Optionally closes non-completed containers stuck active past `staleAfterMs` (default 45m)
+ *    ONLY when no open (`proposed` / `claimed` / `running`) Intent references that challenge or its hosts,
+ *    so active multi-worker fan-out groups are never interrupted.
+ */
+export async function reconcileBenchmarkContainers(
+  ctx: ToolContext,
+  opts?: { staleAfterMs?: number; nowMs?: number },
+): Promise<{ closedCompleted: string[]; closedStale: string[]; activeCodes: string[] }> {
+  const closedCompleted: string[] = [];
+  const closedStale: string[] = [];
+  const activeCodes: string[] = [];
+  let listRes: { status: number; text: string };
+  try {
+    listRes = await api(ctx, "GET", "/openapi/v1/challenges");
+  } catch {
+    return { closedCompleted, closedStale, activeCodes };
   }
-  return false;
+  if (isBoardTerminalResponse(listRes.status, listRes.text)) {
+    recordBoardTerminalState(ctx, "reconcile", listRes);
+    return { closedCompleted, closedStale, activeCodes };
+  }
+  if (listRes.status >= 400) return { closedCompleted, closedStale, activeCodes };
+
+  let items: Array<Record<string, unknown>> = [];
+  try {
+    const parsed = JSON.parse(listRes.text) as unknown;
+    if (Array.isArray(parsed)) items = parsed as Array<Record<string, unknown>>;
+  } catch {
+    return { closedCompleted, closedStale, activeCodes };
+  }
+
+  const nowMs = opts?.nowMs ?? Date.now();
+  const staleAfterMs = opts?.staleAfterMs ?? 45 * 60_000;
+  const openIntents = ctx.history.openIntents(ctx.manifest.taskId);
+  const seenRunning = new Set<string>();
+
+  for (const item of items) {
+    const code = String(item.unique_code ?? "").trim();
+    if (!code) continue;
+    const status = String(item.container_status ?? "").toLowerCase();
+    if (!status || status === "stopped") {
+      activeContainerSince.delete(code);
+      continue;
+    }
+    seenRunning.add(code);
+    if (item.is_completed === true) {
+      try {
+        const cr = await api(ctx, "POST", "/openapi/v1/challenges/close", {
+          query: { unique_code: code },
+          body: { unique_code: code },
+        });
+        if (cr.status < 400 || /stopped|invalid_state/i.test(cr.text)) {
+          closedCompleted.push(code);
+          activeContainerSince.delete(code);
+          continue;
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    const firstSeen = activeContainerSince.get(code);
+    if (firstSeen === undefined) {
+      activeContainerSince.set(code, nowMs);
+      activeCodes.push(code);
+      continue;
+    }
+
+    const hosts = parseContainerAddresses(item.container_addr).map((p) => p.host);
+    const codeLower = code.toLowerCase();
+    const hasOpenWork = openIntents.some((intent) => {
+      const hay = `${intent.title} ${intent.summary}`.toLowerCase();
+      if (hay.includes(codeLower)) return true;
+      if (intent.assetRoot && hosts.some((h) => targetAllows([h], intent.assetRoot!, []))) {
+        return true;
+      }
+      return false;
+    });
+
+    if (!hasOpenWork && nowMs - firstSeen > staleAfterMs) {
+      try {
+        const cr = await api(ctx, "POST", "/openapi/v1/challenges/close", {
+          query: { unique_code: code },
+          body: { unique_code: code },
+        });
+        if (cr.status < 400) {
+          closedStale.push(code);
+          activeContainerSince.delete(code);
+          continue;
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+    activeCodes.push(code);
+  }
+
+  for (const tracked of [...activeContainerSince.keys()]) {
+    if (!seenRunning.has(tracked)) activeContainerSince.delete(tracked);
+  }
+  if (closedCompleted.length || closedStale.length) {
+    try {
+      appendProgress(
+        ctx.manifest.workspaceDir,
+        `tsecbench reconcile closed completed=[${closedCompleted.join(",")}] stale=[${closedStale.join(",")}]`,
+      );
+    } catch {
+      /* best-effort */
+    }
+  }
+  return { closedCompleted, closedStale, activeCodes };
 }
 
 function recordBoardTerminalState(
@@ -471,14 +603,59 @@ export async function tsecbenchTool(
   }
   if (!code) return JSON.stringify({ error: "code required for start/submit/close" });
   if (action === "start") {
-    const r = await api(ctx, "POST", "/openapi/v1/challenges/start", { query: { unique_code: code } });
+    let r = await api(ctx, "POST", "/openapi/v1/challenges/start", {
+      query: { unique_code: code },
+      body: { unique_code: code },
+    });
     if (isBoardTerminalResponse(r.status, r.text)) return recordBoardTerminalState(ctx, action, r);
+    if (isActiveContainerLimitResponse(r.status, r.text)) {
+      const sweep = await reconcileBenchmarkContainers(ctx);
+      if (sweep.closedCompleted.length > 0 || sweep.closedStale.length > 0) {
+        r = await api(ctx, "POST", "/openapi/v1/challenges/start", {
+          query: { unique_code: code },
+          body: { unique_code: code },
+        });
+        if (isBoardTerminalResponse(r.status, r.text)) return recordBoardTerminalState(ctx, action, r);
+      }
+      if (isActiveContainerLimitResponse(r.status, r.text)) {
+        return JSON.stringify({
+          error: "active_container_limit",
+          status: r.status,
+          activeContainers: sweep.activeCodes,
+          closedCompleted: sweep.closedCompleted,
+          message:
+            `当前平台活跃靶机容器已满 3 台上限（活跃中：${sweep.activeCodes.join(", ") || "3 台"}），并非评测结束！` +
+            "请不要再 start 第 4 题或盲关队友正在打的未完成靶机；请立即对当前已开启的活跃靶机（尤其是 medium/hard 或多 flag 题）并行扇出 2～4 条正交攻击假设 Intent 协同猛攻，待任一题解出释放后再开启新题。",
+        });
+      }
+    }
     let admitted: Array<{ address: string; factId: string }> = [];
     try {
-      const parsed = JSON.parse(r.text) as Record<string, unknown>;
-      const dataObj = (parsed.data && typeof parsed.data === "object" ? parsed.data : parsed) as Record<string, unknown>;
-      const addr = parsed.container_addr ?? dataObj.container_addr;
+      let parsed = JSON.parse(r.text) as Record<string, unknown>;
+      let dataObj = (parsed.data && typeof parsed.data === "object" ? parsed.data : parsed) as Record<string, unknown>;
+      let addr = parsed.container_addr ?? dataObj.container_addr;
+      // If container is still booting (200 OK without container_addr yet), poll /challenges briefly (--wait semantics).
+      if (r.status < 400 && parseContainerAddresses(addr).length === 0) {
+        const waitMs = Number(process.env.GY_TSEC_START_WAIT_MS ?? 12_000);
+        const deadline = Date.now() + Math.max(0, waitMs);
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 1_500));
+          const pollRes = await api(ctx, "GET", "/openapi/v1/challenges");
+          if (pollRes.status >= 400) break;
+          const items = JSON.parse(pollRes.text) as Array<Record<string, unknown>>;
+          const current = items.find((c) => c.unique_code === code);
+          if (current && parseContainerAddresses(current.container_addr).length > 0) {
+            parsed = current;
+            dataObj = current;
+            addr = current.container_addr;
+            break;
+          }
+        }
+      }
       if (addr) admitted = autoAdmitContainerTargets(ctx, code, addr);
+      if (admitted.length > 0) {
+        activeContainerSince.set(code, activeContainerSince.get(code) ?? Date.now());
+      }
       let scopeBriefFactId = admitted.length > 0
         ? ensureChallengeScopeBrief(
             ctx,
@@ -538,8 +715,12 @@ export async function tsecbenchTool(
     return r.text.slice(0, 2000);
   }
   if (action === "close") {
-    const r = await api(ctx, "POST", "/openapi/v1/challenges/close", { query: { unique_code: code } });
+    const r = await api(ctx, "POST", "/openapi/v1/challenges/close", {
+      query: { unique_code: code },
+      body: { unique_code: code },
+    });
     if (isBoardTerminalResponse(r.status, r.text)) return recordBoardTerminalState(ctx, action, r);
+    activeContainerSince.delete(code);
     return r.text.slice(0, 2000);
   }
   if (action === "submit") {
@@ -547,6 +728,13 @@ export async function tsecbenchTool(
     if (!flag) return JSON.stringify({ error: "flag required" });
     const r = await api(ctx, "POST", "/openapi/v1/challenges/submit", { body: { unique_code: code, flag } });
     if (isBoardTerminalResponse(r.status, r.text)) return recordBoardTerminalState(ctx, action, r);
+    if (isDuplicateFlagResponse(r.status, r.text)) {
+      return JSON.stringify({
+        status: 200,
+        duplicate: true,
+        response: { correct: true, duplicate: true, message: r.text.slice(0, 300) },
+      });
+    }
     if (r.status < 400) {
       try {
         const safeCode = code.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 80) || "challenge";
@@ -559,8 +747,11 @@ export async function tsecbenchTool(
         const response = JSON.parse(r.text) as unknown;
         const solved = submitCorrect(response);
         const traffic = solved ? captureSolveTraffic(ctx, code) : null;
+        const requiresReportGoal = ctx.manifest.goals.some(
+          (g) => Boolean(g.findingsGate) || g.id === "engagement-report",
+        );
         let findingVerifyReminder: string | undefined;
-        if (solved) {
+        if (solved && requiresReportGoal) {
           const hosts = resolveChallengeHosts(ctx, code);
           const hasVerifiedFinding = ctx.history.listFindings(ctx.manifest.taskId).some(
             (f) =>

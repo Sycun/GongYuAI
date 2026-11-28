@@ -130,7 +130,11 @@ export async function runOpenAiToolLoop(
   const readPoolSize = createPoolSizeReader(manifest);
   const leader = isExploreLeader(manifest);
   const lastStaleSweep: PoolSweepState = { at: Date.now() };
-  const refreshSystem = () => systemPrompt(manifest, undefined, mcpHub, skillHub);
+  const refreshSystem = () =>
+    systemPrompt(manifest, undefined, mcpHub, skillHub, {
+      history: ctx.history,
+      activeIntentId: state.activeIntentId,
+    });
 
   let lastInjectedPhase = asGraphPhase(state.phase);
   let pendingAutoRelayAsk = false;
@@ -285,6 +289,7 @@ export async function runOpenAiToolLoop(
       workerStartedAt,
       readPoolSize,
       lastStaleSweep,
+      ckpt,
     });
     if (poolDecision === "exit") break;
     supervisionStepsRemaining = 0;
@@ -342,7 +347,14 @@ export async function runOpenAiToolLoop(
     ) {
       pendingFollowerIntentReset = false;
       resetConversationToObserve(
-        "Follower 单 Intent 干净会话已重置：请立即 intent_claim 一个待认领的 proposed Intent 独立验证，完成后调用 intent_conclude。",
+        state.activeIntentId
+          ? `Follower 单 Intent 干净会话已重置：系统已为你原子预认领 activeIntentId=${state.activeIntentId}（无需再调 intent_claim），请直接按本卡派发契约调用 shell / http_request 独立验证，完成后调用 intent_conclude 结项退出。`
+          : "Follower 单 Intent 干净会话已重置：请立即 intent_claim 一个待认领的 proposed Intent 独立验证，完成后调用 intent_conclude。",
+        false,
+      );
+    } else if (role === "follower" && i === 0 && state.activeIntentId && messages[0]?.role === "system") {
+      resetConversationToObserve(
+        `Follower 单 Intent 隔离短会话：系统已为你原子预认领 activeIntentId=${state.activeIntentId}（无需再调 intent_claim），请直接按本卡派发契约调用 shell / http_request 独立验证，完成后调用 intent_conclude 结项退出。`,
         false,
       );
     } else if (timeoutNote) {
@@ -708,6 +720,15 @@ export async function runOpenAiToolLoop(
           catalog = openAiCatalog();
         }
         if (callName === "relay" && !result.startsWith("relay skipped:")) {
+          relayResetOccurred = true;
+          break;
+        }
+        if (out.control?.terminate) {
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: smartTruncateToolOutput(result, 12_000),
+          });
           relayResetOccurred = true;
           break;
         }

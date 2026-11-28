@@ -663,7 +663,10 @@ export async function tryPiDurable(
         "gongyuai-system",
         () => {
           manifest.workerCount = readPoolSize();
-          return systemPrompt(manifest, undefined, mcpHub, skillHub);
+          return systemPrompt(manifest, undefined, mcpHub, skillHub, {
+            history: ctx.history,
+            activeIntentId: state.activeIntentId,
+          });
         },
         { tag: false },
       ),
@@ -748,6 +751,7 @@ export async function tryPiDurable(
           workerStartedAt,
           readPoolSize,
           lastStaleSweep,
+          ckpt,
         });
         if (poolDecision === "exit") {
           appendProgress(manifest.workspaceDir, "任务目标已清或主节点已收卷，结束 Pi 循环");
@@ -860,7 +864,9 @@ export async function tryPiDurable(
             ? [
                 "你是 GongYuAI 红队作业执行节点。对操作者可见的说明尽量用中文。",
                 role === "follower"
-                  ? "你是 Explore Follower（单 Intent 隔离短会话）：请立即 intent_claim 一个待认领的 proposed Intent，集中完成该攻击面验证、证据落盘与 finding_verify，最后调用 intent_conclude 结项。"
+                  ? state.activeIntentId
+                    ? `你是 Explore Follower（单 Intent 隔离短会话）：系统已为你原子预认领 activeIntentId=${state.activeIntentId}（无需再调 intent_claim），请直接按本卡派发契约调用 shell / http_request 高速验证，随时用 fact_draft 保存进展，完成后直接调用 intent_conclude 结项退出。`
+                    : "你是 Explore Follower（单 Intent 隔离短会话）：请立即 intent_claim 一个待认领的 proposed Intent，集中完成该攻击面验证与证据落盘，最后调用 intent_conclude 结项。"
                   : "这是长程任务（可连续跑数日）。请用工具完成所有未通过目标；未经 assert_goal 成功不得宣称通过。",
                 "禁止因预算/剩余时间估计提前收口或写最终汇报；目标未全过就继续。",
                 yieldRuleLine,

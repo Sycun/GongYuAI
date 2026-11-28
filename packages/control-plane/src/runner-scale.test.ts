@@ -124,6 +124,17 @@ test("reconcileWorkers never exceeds the operator cap (1 leader + cap followers)
     assert.equal(defaultTask.execution.maxConcurrentExplores, 3);
     await runner.start(defaultTask.id);
     assert.deepEqual(spawned, [0, 1, 2, 3], "tsecbench starts immediately with 1 leader + 3 explore followers");
+
+    spawned.length = 0;
+    const hostedTenTask = store.createTask(CreateTaskRequestSchema.parse({
+      name: "hosted 10 explores hybrid fan-out",
+      mock: false,
+      auth: { authorizationNote: "tsecbench hosted", targets: ["10.0.0.0/8"] },
+      goals: [{ id: "clear-board", title: "清板", description: "board", evidencePatterns: ["ALL.json"], boardGate: "tsecbench" }],
+      execution: { maxConcurrentExplores: 10, maxIntentsPerReason: 14, maxIntentsPerAssetRoot: 4 },
+    }));
+    await runner.start(hostedTenTask.id);
+    assert.equal(spawned.length, 11, "tsecbench 10-concurrency boots 1 leader + 10 explore followers immediately");
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

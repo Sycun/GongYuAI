@@ -163,7 +163,16 @@ export { describeGoalEvidence, formatAccounting, formatCorrections, type GoalEvi
 export { minimatch } from "./minimatch.js";
 export { renderHistoryObserve, renderHistoryOverview, renderSurfaceMutexDeclaration } from "./observe-view.js";
 export type { ObserveActiveTunnel, ObserveRenderSource } from "./observe-view.js";
-export { listExecutionSteps, readExecutionStepCalls, saveExecutionStep } from "./execution-trace.js";
+export {
+  listExecutionSteps,
+  readExecutionStepCalls,
+  readExecutionTraceCallContent,
+  saveExecutionStep,
+  searchExecutionTrace,
+  type ExecutionTraceCallContent,
+  type ExecutionTraceHit,
+  type ExecutionTraceSearchPage,
+} from "./execution-trace.js";
 export {
   listEvidenceFiles,
   readEvidenceBytes,
@@ -468,10 +477,20 @@ export class HistoryStore {
   }
 
   getFact(taskId: string, factId: string): Fact | null {
+    const clean = factId.trim();
     const r = this.db
       .prepare(`SELECT * FROM facts WHERE task_id = ? AND id = ?`)
-      .get(taskId, factId) as Record<string, unknown> | undefined;
-    return r ? this.rowToFact(r) : null;
+      .get(taskId, clean) as Record<string, unknown> | undefined;
+    if (r) return this.rowToFact(r);
+    const shortMatch = /^F([1-9]\d*)$/i.exec(clean);
+    if (shortMatch) {
+      const offset = Number(shortMatch[1]) - 1;
+      const aliasRow = this.db
+        .prepare(`SELECT * FROM facts WHERE task_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1 OFFSET ?`)
+        .get(taskId, offset) as Record<string, unknown> | undefined;
+      if (aliasRow) return this.rowToFact(aliasRow);
+    }
+    return null;
   }
 
   getFactNeighborhood(
@@ -505,7 +524,7 @@ export class HistoryStore {
       )
       .all(taskId, fact.intentId) as Array<Record<string, unknown>>;
     const facts = chain.map((r) => this.rowToFact(r));
-    const idx = facts.findIndex((f) => f.id === factId);
+    const idx = facts.findIndex((f) => f.id === fact.id);
     if (idx < 0) return { fact, before: [], after: [] };
     const toSummary = (f: Fact) => ({
       id: f.id,
@@ -559,18 +578,21 @@ export class HistoryStore {
     if (!sourceFactIds.length) {
       throw new Error("sourceFactIds required: Intent must hang on ≥1 Fact (or origin)");
     }
-    const unique = [...new Set(sourceFactIds.map((id) => id.trim()).filter(Boolean))];
-    if (!unique.length) {
+    const rawItems = sourceFactIds.map((id) => id.trim()).filter(Boolean);
+    if (!rawItems.length) {
       throw new Error("sourceFactIds required: Intent must hang on ≥1 Fact (or origin)");
     }
-    for (const id of unique) {
-      if (id === ORIGIN_FACT_ID) continue;
-      const row = this.db
-        .prepare(`SELECT 1 AS ok FROM facts WHERE task_id = ? AND id = ?`)
-        .get(taskId, id) as { ok: number } | undefined;
-      if (!row) throw new Error(`unknown source fact: ${id}`);
+    const canonical: string[] = [];
+    for (const id of rawItems) {
+      if (id === ORIGIN_FACT_ID) {
+        if (!canonical.includes(ORIGIN_FACT_ID)) canonical.push(ORIGIN_FACT_ID);
+        continue;
+      }
+      const resolved = this.getFact(taskId, id);
+      if (!resolved) throw new Error(`unknown source fact: ${id}`);
+      if (!canonical.includes(resolved.id)) canonical.push(resolved.id);
     }
-    return unique;
+    return canonical;
   }
 
   proposeIntent(input: {
@@ -891,6 +913,8 @@ export class HistoryStore {
   }
 
   claimIntent(taskId: string, intentId: string, workerId: string): Intent | null {
+    const resolved = this.getIntent(taskId, intentId);
+    const canonicalId = resolved?.id ?? intentId.trim();
     const now = this.now();
     const result = this.db
       .prepare(
@@ -898,11 +922,11 @@ export class HistoryStore {
          SET status = 'claimed', claimed_by = ?, claimed_at = ?, updated_at = ?
          WHERE id = ? AND task_id = ? AND status = 'proposed'`,
       )
-      .run(workerId, now, now, intentId, taskId);
+      .run(workerId, now, now, canonicalId, taskId);
     if ((result.changes ?? 0) === 0) return null;
-    this.bindActiveIntent(taskId, intentId);
-    this.emit(taskId, "intent_claimed", { intentId, workerId });
-    return this.getIntent(taskId, intentId);
+    this.bindActiveIntent(taskId, canonicalId);
+    this.emit(taskId, "intent_claimed", { intentId: canonicalId, workerId });
+    return this.getIntent(taskId, canonicalId);
   }
 
   concludeIntent(
@@ -912,6 +936,8 @@ export class HistoryStore {
     conclusion: string,
     opts?: { facts?: ConcludeFactInput[]; workerId?: string; system?: boolean },
   ): Intent | null {
+    const resolvedTarget = this.getIntent(taskId, intentId);
+    intentId = resolvedTarget?.id ?? intentId.trim();
     const facts = opts?.facts ?? [];
     if (!opts?.system) {
       if (!opts?.workerId) throw new Error("conclude requires workerId (or system timeout)");
@@ -992,10 +1018,20 @@ export class HistoryStore {
   }
 
   getIntent(taskId: string, intentId: string): Intent | null {
+    const clean = intentId.trim();
     const r = this.db
       .prepare(`SELECT * FROM intents WHERE task_id = ? AND id = ?`)
-      .get(taskId, intentId) as Record<string, unknown> | undefined;
-    return r ? this.rowToIntent(r) : null;
+      .get(taskId, clean) as Record<string, unknown> | undefined;
+    if (r) return this.rowToIntent(r);
+    const shortMatch = /^[IW]([1-9]\d*)$/i.exec(clean);
+    if (shortMatch) {
+      const offset = Number(shortMatch[1]) - 1;
+      const aliasRow = this.db
+        .prepare(`SELECT * FROM intents WHERE task_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1 OFFSET ?`)
+        .get(taskId, offset) as Record<string, unknown> | undefined;
+      if (aliasRow) return this.rowToIntent(aliasRow);
+    }
+    return null;
   }
 
   listIntents(taskId: string, status?: IntentStatus): Intent[] {

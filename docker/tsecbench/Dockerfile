@@ -35,7 +35,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     GY_TSEC_HOSTED=1 \
     GY_INSTALL_ROOT=/opt/gongyuai \
     GY_DATA_DIR=/task/gongyuai-data \
-    GY_CONCURRENCY=3 \
+    GY_CONCURRENCY=10 \
     GY_TSEC_ALLOW_HINT=0 \
     NODE_ENV=production
 

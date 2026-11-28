@@ -303,11 +303,68 @@ function stableSeedTargetsLine(manifest: WorkerManifest): string {
   return cached;
 }
 
+/**
+ * Render an uncompactable DispatchContract + PinnedGoal block for an active Explore card
+ * (inspired by nectar `DispatchContract` + `PinnedGoal` in system prompt).
+ * Injected directly into the dynamic system prompt section so context compaction never drops
+ * the bound `activeIntentId`, target `assetRoot`, surface partition, or grey-box preset credentials.
+ */
+export function renderPinnedDispatchContract(
+  manifest: WorkerManifest,
+  history: ReturnType<typeof openHistory> | undefined,
+  activeIntentId: string | null | undefined,
+): string {
+  if (!history || !activeIntentId) return "";
+  const intent = history.getIntent(manifest.taskId, activeIntentId);
+  if (!intent) return "";
+  const goals = history.listGoals(manifest.taskId);
+  const goalSummary = goals
+    .map((g) => `${g.id}(${g.passes ? "通过" : "未通过"}): ${g.title}`)
+    .join("；");
+  const allFacts = history.listFacts(manifest.taskId);
+  const relatedBriefs = allFacts.filter((f) => {
+    if (!f.tags.includes("scope-brief")) return false;
+    if (intent.sourceFactIds.includes(f.id)) return true;
+    if (
+      intent.assetRoot &&
+      f.tags.some(
+        (t) =>
+          t.startsWith("asset.addr:") &&
+          t.slice("asset.addr:".length).toLowerCase() === intent.assetRoot!.toLowerCase(),
+      )
+    ) {
+      return true;
+    }
+    return false;
+  });
+  const lines = [
+    "[本卡派发契约（系统预认领 · 上下文压缩不可改写或丢弃）]",
+    `- 任务目标（Pinned Goal）：${goalSummary}`,
+    `- 当前绑定 Intent ID：${intent.id}（调用 intent_conclude 时可省略 intentId，系统自动绑定此卡）`,
+    `- 攻击假设标题：${intent.title}`,
+    ...(intent.summary ? [`- 派发说明与完成判据：${intent.summary}`] : []),
+    ...(intent.assetRoot ? [`- 目标资产根（assetRoot）：${intent.assetRoot}`] : []),
+    ...(intent.technique ? [`- 正交战术维度（technique）：${intent.technique}`] : []),
+    ...(intent.assignedSurfaces?.length
+      ? [`- 负责子表面（assigned_surfaces）：${intent.assignedSurfaces.join(", ")}`]
+      : []),
+    ...(intent.mutexNote ? [`- 并行互斥约定（mutex_note）：${intent.mutexNote}`] : []),
+  ];
+  for (const brief of relatedBriefs.slice(0, 2)) {
+    lines.push(`- 关联委托简报 [${brief.id}]：${brief.summary.slice(0, 600)}`);
+  }
+  return `\n${lines.join("\n")}\n`;
+}
+
 export function systemPrompt(
   manifest: WorkerManifest,
   observeText?: string,
   mcpHub?: McpHub,
   skillHub?: SkillHub,
+  pinned?: {
+    history?: ReturnType<typeof openHistory>;
+    activeIntentId?: string | null;
+  },
 ): string {
   const visionOn = manifest.model?.visionEnabled !== false;
   const visionLine = visionOn
@@ -337,16 +394,21 @@ export function systemPrompt(
   // Fast, high-KV-cache-hit Follower contract: static prefix (unaffected by runtime target mutations),
   // zero planning/reporting cognitive tax, and strict epistemological anti-false-negative discipline.
   if (isFollower) {
+    const dispatchBlock = renderPinnedDispatchContract(
+      manifest,
+      pinned?.history,
+      pinned?.activeIntentId,
+    );
     return `你是 GongYuAI 专职渗透执行节点（Explore Follower slot ${workerSlot}/${workerCount}，workerId=${manifest.workerId}）。
 初始坐标：${seedTargetsLine}（动态准入靶机与跳板私网详见本轮 Observe 资产清单与委托简报 Fact；排除项：${manifest.auth.outOfScope.join("、") || "无"}；能力档位：${manifest.auth.capability ?? "active-lab"}）
 ${manifest.auth.roe ? `操作者意图（RoE）：${manifest.auth.roe}\n` : ""}
 核心执行纪律（轻装试错 · 搜刮先行 · 客观收束）：
-1. **灰盒优先与并行隔离**：先读清 Observe 中的委托简报（若给出预置工号/口令/Token，首探第一步必须先实测预置凭据登录与鉴权边界，禁止越过已知账号盲打黑盒）、凭据台账与「存活持久连接与后台设施」（直接复用已有 SOCKS5 隧道或 PTY shell_session），claim 1 条 proposed Intent 后高速验证；同目标并行临时文件按 \`<host>-<technique>-*\` 隔离，结项（intent_conclude）立即退出重置干净会话。
+1. **灰盒优先与并行隔离**：先读清本卡派发契约与 Observe 中的委托简报（若给出预置工号/口令/Token，首探第一步必须先实测预置凭据登录与鉴权边界，禁止越过已知账号盲打黑盒）、凭据台账与「存活持久连接与后台设施」（直接复用已有 SOCKS5 隧道或 PTY shell_session，并用 execution_trace_search 查同目标前序槽位已跑命令避免重复探测）；若系统已预认领 activeIntentId 则直接开打（无需再调 intent_claim），同目标并行临时文件按 \`<host>-<technique>-*\` 隔离，结项（intent_conclude）立即退出重置干净会话。
 2. **立足点必先搜刮（Loot-First）与内网建户**：一旦拿到任意文件读（LFI/SSRF）或命令执行（WebShell/RCE），**前 5 分钟必须搜刮本机源码配置、\`*.sql\`/\`init.sql\`、本机 DB/Redis、环境变量与历史记录**，将口令调用 \`credential_record\` 入库并向内网认证面交叉喷洒，**严禁未搜刮立足点就直接对内网盲爆字典**；发现内网存活主机立即 \`asset_record\` 建档并用 \`tunnel_open\` 纳管隧道，重大突破立即 \`finding_verify\` 落库。
 3. **认识论铁律（防假阴性）**：随时用 \`fact_draft\` 更新关键发现草稿；未完全达成目标时，\`intent_conclude\` **只准客观陈述“已测输入、响应状态码/特征、已获凭据及存活会话/隧道标识”，严禁写“无漏洞/此路不通/已穷尽”绝对否定结论**。
 4. **本地弹药与伪 C 逆向**：通用组件优先检索本机 PoC/模板库对照版本；跨架构 stripped 二进制或自定义 VM 优先用 \`r2 -2 -q -e scr.color=0 -c 'aa; afl; pdg @ main'\`（r2ghidra 伪 C）批量导出主函数及跳表**全部 handler（含未引用分支）**后用 Python/Z3/Unicorn 求解，严禁逐段 \`sed\` 裸啃汇编或通过 \`operator_consult\` 讨要平台 \`hint\`；禁止修改宿主机网络或 pkill 无关进程。
 5. **工程效率**：预计 >30s 的枚举任务优先走 shell_job 异步轮询，禁止在主循环同步 sleep 空等；逆向/路由分析先核实中间计算值是否流入最终判定出口，跳过不产生实际副作用的诱饵分支（Decoy Logic）。
-${visionLine}${boardClearPolicyBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}${observeText ? `\n当前 Observe（History）：\n${observeText}\n` : ""}`;
+${visionLine}${boardClearPolicyBlock(manifest)}${mcpBlock}${mcpCatalogBlock}${skillRouteBlock}${skillHintBlock}${dispatchBlock}${observeText ? `\n当前 Observe（History）：\n${observeText}\n` : ""}`;
   }
 
   const poolLine =

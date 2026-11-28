@@ -227,6 +227,7 @@ export class FindingLedgerStore {
   ): Finding {
     const finding = this.getFinding(taskId, findingId);
     if (!finding) throw new Error(`unknown finding: ${findingId}`);
+    findingId = finding.id;
     if (finding.status === "retracted") {
       throw new Error("finding retracted: 误报撤回后不可再验证（另录新 finding）");
     }
@@ -396,6 +397,7 @@ export class FindingLedgerStore {
   ): { retest: FindingRetest; finding: Finding } {
     const finding = this.getFinding(taskId, findingId);
     if (!finding) throw new Error(`unknown finding: ${findingId}`);
+    findingId = finding.id;
     if (finding.status === "retracted") throw new Error("retracted finding cannot be retested");
     const reviewer = input.reviewer.trim();
     if (!reviewer) throw new Error("retest requires reviewer");
@@ -504,6 +506,7 @@ export class FindingLedgerStore {
   ): { finding: Finding; action: FindingAction } {
     const finding = this.getFinding(taskId, findingId);
     if (!finding) throw new Error(`unknown finding: ${findingId}`);
+    findingId = finding.id;
     if (finding.status === "retracted") throw new Error("retracted finding cannot be retested");
     if (finding.status === "tentative") throw new Error("finding must be verified before a remediation retest");
     const paths = [...new Set(input.evidencePaths.map((p) => p.trim()).filter(Boolean))];
@@ -573,6 +576,7 @@ export class FindingLedgerStore {
   ): { finding: Finding; action: FindingAction } {
     const finding = this.getFinding(taskId, findingId);
     if (!finding) throw new Error(`unknown finding: ${findingId}`);
+    findingId = finding.id;
     if (!["verified", "retested"].includes(finding.status)) {
       throw new Error("仅已验证或已复测的发现可登记客户风险处置");
     }
@@ -639,6 +643,7 @@ export class FindingLedgerStore {
   retractFinding(taskId: string, findingId: string, reason: string): Finding {
     const finding = this.getFinding(taskId, findingId);
     if (!finding) throw new Error(`unknown finding: ${findingId}`);
+    findingId = finding.id;
     const note = reason.trim();
     if (!note) throw new Error("finding_retract requires reason");
     if (!findingStatusAllows(finding.status, "retracted")) {
@@ -678,6 +683,7 @@ export class FindingLedgerStore {
   ): { validation: FindingValidation; finding: Finding } {
     const finding = this.getFinding(taskId, findingId);
     if (!finding) throw new Error(`unknown finding: ${findingId}`);
+    findingId = finding.id;
     if (!["verified", "retested", "accepted"].includes(finding.status)) {
       throw new Error(`finding ${findingId} is ${finding.status}; validate only verified findings`);
     }
@@ -794,10 +800,20 @@ export class FindingLedgerStore {
 
   getFinding(taskId: string, findingId: string): Finding | null {
     if (this.deps.archiveTables && !this.deps.archiveTables.has("findings")) return null;
+    const clean = findingId.trim();
     const r = this.deps.db
       .prepare(`SELECT * FROM findings WHERE task_id = ? AND id = ?`)
-      .get(taskId, findingId) as HistoryRow | undefined;
-    return r ? this.rowToFinding(r) : null;
+      .get(taskId, clean) as HistoryRow | undefined;
+    if (r) return this.rowToFinding(r);
+    const shortMatch = /^V([1-9]\d*)$/i.exec(clean);
+    if (shortMatch) {
+      const offset = Number(shortMatch[1]) - 1;
+      const aliasRow = this.deps.db
+        .prepare(`SELECT * FROM findings WHERE task_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1 OFFSET ?`)
+        .get(taskId, offset) as HistoryRow | undefined;
+      if (aliasRow) return this.rowToFinding(aliasRow);
+    }
+    return null;
   }
 
   private findFindingByDedupKey(taskId: string, dedupKey: string): Finding | null {

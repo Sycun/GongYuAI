@@ -13,6 +13,9 @@ import { assertCommandAllowed } from "./tools.js";
 import {
   autoAdmitContainerTargets,
   captureSolveTraffic,
+  isActiveContainerLimitResponse,
+  isBoardTerminalResponse,
+  isDuplicateFlagResponse,
   parseContainerAddresses,
   resolveChallengeHosts,
   submitCorrect,
@@ -439,6 +442,117 @@ test("OpenAPI string[] container_addr auto-admits live assets, unblocks Leader i
     if (prevTok === undefined) delete process.env.BENCHMARK_TOKEN;
     else process.env.BENCHMARK_TOKEN = prevTok;
     ckpt.close();
+    history.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("409 invalid_state active container limit does NOT trigger terminal suicide, auto-reconciles completed containers, and normalizes duplicate flags", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gy-tsec-409-limit-"));
+  const leader = makeManifest(dir);
+  leader.auth.targets = ["10.0.0.0/8"];
+  leader.workerCount = 11; // 1 Leader + 10 Followers
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(leader, null, 2));
+
+  const history = openHistory({ dbPath: leader.historyDb, evidenceDir: leader.evidenceDir });
+  const prevUrl = process.env.BENCHMARK_BASE_URL;
+  const prevTok = process.env.BENCHMARK_TOKEN;
+  const origFetch = globalThis.fetch;
+  process.env.BENCHMARK_BASE_URL = "http://10.0.100.1:8000";
+  process.env.BENCHMARK_TOKEN = "test-benchmark-token";
+
+  let closedDone = false;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const u = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    if (u.includes("/openapi/v1/challenges/start")) {
+      if (!closedDone) {
+        return new Response(
+          JSON.stringify({ code: "invalid_state", message: "当前活跃容器数量已达上限（最多 3 个）" }),
+          { status: 409, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ unique_code: "hard_04", container_addr: ["10.0.2.44:8080"] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (u.includes("/openapi/v1/challenges/close")) {
+      closedDone = true;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (u.includes("/openapi/v1/challenges/submit")) {
+      return new Response(
+        JSON.stringify({ code: "duplicate", message: "flag already submitted" }),
+        { status: 409, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify([
+        {
+          unique_code: "easy_01",
+          difficulty: "easy",
+          is_completed: true,
+          container_status: "available",
+          container_addr: ["10.0.2.11:80"],
+        },
+        {
+          unique_code: "med_02",
+          difficulty: "medium",
+          is_completed: false,
+          container_status: "available",
+          container_addr: ["10.0.2.22:80"],
+        },
+        {
+          unique_code: "hard_03",
+          difficulty: "hard",
+          is_completed: false,
+          container_status: "available",
+          container_addr: ["10.0.2.33:80"],
+        },
+      ]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    assert.equal(
+      isBoardTerminalResponse(409, '{"code":"invalid_state","message":"活跃容器已达上限"}'),
+      false,
+    );
+    assert.equal(
+      isActiveContainerLimitResponse(409, '{"code":"invalid_state","message":"活跃容器已达上限"}'),
+      true,
+    );
+    assert.equal(
+      isDuplicateFlagResponse(409, '{"code":"duplicate","message":"flag already submitted"}'),
+      true,
+    );
+
+    const ctx = { manifest: leader, history, usage: { toolCalls: 0, installs: 0 } };
+    const startRaw = await tsecbenchTool(ctx, { action: "start", code: "hard_04" });
+    const startJson = JSON.parse(startRaw) as {
+      error?: string;
+      autoAdmittedAssets?: Array<{ address: string }>;
+    };
+    assert.equal(existsSync(join(dir, "environment-terminal.json")), false, "must NOT mark board terminal on 409 container limit");
+    assert.equal(closedDone, true, "reconciler must auto-close completed easy_01 and retry start");
+    assert.equal(startJson.autoAdmittedAssets?.[0]?.address, "10.0.2.44");
+
+    const dupRaw = await tsecbenchTool(ctx, { action: "submit", code: "hard_04", flag: "flag{dup}" });
+    const dupJson = JSON.parse(dupRaw) as { status: number; duplicate?: boolean; response?: { correct?: boolean } };
+    assert.equal(dupJson.status, 200);
+    assert.equal(dupJson.duplicate, true);
+    assert.equal(dupJson.response?.correct, true);
+    assert.equal(existsSync(join(dir, "environment-terminal.json")), false);
+  } finally {
+    globalThis.fetch = origFetch;
+    if (prevUrl === undefined) delete process.env.BENCHMARK_BASE_URL;
+    else process.env.BENCHMARK_BASE_URL = prevUrl;
+    if (prevTok === undefined) delete process.env.BENCHMARK_TOKEN;
+    else process.env.BENCHMARK_TOKEN = prevTok;
     history.close();
     rmSync(dir, { recursive: true, force: true });
   }

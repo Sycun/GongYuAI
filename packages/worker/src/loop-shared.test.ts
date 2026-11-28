@@ -6,15 +6,18 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { ORIGIN_FACT_ID } from "@gongyuai/contracts";
 import { openHistory } from "@gongyuai/history";
-import type { CheckpointState } from "./checkpoint.js";
+import { CheckpointStore, type CheckpointState } from "./checkpoint.js";
 import { maybeForceEvidenceStall } from "./evidence-rotation.js";
+import { handleGraphTool } from "./graph-phase.js";
 import { appendNoteToToolResult } from "./long-turn.js";
+import { renderPinnedDispatchContract } from "./prompt-builder.js";
 import {
   EXPLORE_TIMEOUT_MIN_INTERVAL_MS,
   accountExploreTimeoutTurn,
   beginExploreTimeoutClock,
   evaluateEnvironmentTerminalExit,
   readEnvironmentTerminal,
+  tryAutoClaimFollowerIntent,
   writeEnvironmentTerminal,
   type ExploreTimeoutClock,
 } from "./loop-shared.js";
@@ -222,6 +225,122 @@ test("evaluateEnvironmentTerminalExit parks followers immediately, waits for dra
       { shouldExit: true, runFinalizationRound: false },
     );
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("tryAutoClaimFollowerIntent pre-claims without race, pins DispatchContract, and intent_conclude defaults intentId to active card", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gy-preclaim-"));
+  const history = openHistory({ dbPath: join(dir, "h.sqlite"), evidenceDir: join(dir, "evidence") });
+  const ckpt1 = new CheckpointStore(join(dir, "w1.ckpt.sqlite"));
+  const ckpt2 = new CheckpointStore(join(dir, "w2.ckpt.sqlite"));
+  try {
+    const taskId = "33333333-3333-4333-8333-333333333333";
+    history.seedGoals(taskId, [
+      {
+        id: "clear-board",
+        title: "Clear board",
+        description: "clear",
+        evidencePatterns: ["ALL.json"],
+        passes: false,
+        evidencePaths: [],
+        assertedAt: null,
+      },
+    ]);
+    const brief = history.appendFact({
+      taskId,
+      layer: "title",
+      title: "委托简报 [a-11] OA 系统",
+      summary: "预置测试账号：2001 / Sys@Oa123",
+      tags: ["scope-brief", "challenge:a-11", "asset.addr:10.0.1.99"],
+    });
+    const intent = history.proposeIntent({
+      taskId,
+      title: "Verify OA preset login and IDOR",
+      summary: "Login as 2001 and test /api/admin",
+      sourceFactIds: [brief.id],
+      assetRoot: "10.0.1.99",
+      technique: "greybox-authz",
+      assignedSurfaces: ["/login", "/api/admin"],
+      mutexNote: "Only authz endpoints; leave binary port 9999 to slot 2",
+    });
+
+    const baseManifest = {
+      taskId,
+      dataDir: dir,
+      historyDb: join(dir, "h.sqlite"),
+      durableDb: join(dir, "d.sqlite"),
+      evidenceDir: join(dir, "evidence"),
+      workspaceDir: dir,
+      auth: { authorizationNote: "", targets: ["10.0.0.0/8"], outOfScope: [], capability: "full" as const },
+      scopeVersion: 1,
+      goals: [],
+      budget: { maxTokens: 0, maxWallMs: 0, maxToolCalls: 0, maxInstalls: 0, relayTokenThreshold: 30_000, relayMinToolCalls: 2 },
+      execution: { maxConcurrentExplores: 10, maxIntentsPerReason: 14, maxIntentsPerAssetRoot: 4, exploreTimeoutMs: 900_000, reasonLeaseMs: 120_000 },
+      workerId: "w1",
+      workerSlot: 1,
+      workerCount: 11,
+      commandConfirmation: "auto" as const,
+      mock: true,
+      mcpServers: [],
+      mcpPool: [],
+      mcpCatalog: [],
+      skillPacks: [],
+      skillPool: [],
+      skillCatalog: [],
+      assetCollectors: [],
+    };
+    const s1 = ckpt1.load();
+    const s2 = ckpt2.load();
+    const claimedBy1 = tryAutoClaimFollowerIntent({
+      manifest: baseManifest,
+      ctx: { manifest: baseManifest, history, usage: { toolCalls: 0, installs: 0 } },
+      state: s1,
+      ckpt: ckpt1,
+    });
+    const claimedBy2 = tryAutoClaimFollowerIntent({
+      manifest: { ...baseManifest, workerId: "w2", workerSlot: 2 },
+      ctx: { manifest: { ...baseManifest, workerId: "w2", workerSlot: 2 }, history, usage: { toolCalls: 0, installs: 0 } },
+      state: s2,
+      ckpt: ckpt2,
+    });
+
+    assert.equal(claimedBy1, intent.id, "slot 1 wins pre-claim");
+    assert.equal(s1.activeIntentId, intent.id);
+    assert.equal(claimedBy2, null, "slot 2 loses CAS cleanly and stays parked with zero LLM turn");
+    assert.equal(s2.activeIntentId, null);
+
+    const pinned = renderPinnedDispatchContract(baseManifest, history, s1.activeIntentId);
+    assert.match(pinned, /本卡派发契约/);
+    assert.match(pinned, /Sys@Oa123/);
+    assert.match(pinned, /\/api\/admin/);
+
+    // Conclude WITHOUT passing intentId (auto-resolves from s1.activeIntentId!)
+    const concludeRaw = handleGraphTool(
+      "intent_conclude",
+      {
+        status: "failed",
+        conclusion: "Tested 2001/Sys@Oa123 on /login -> 200 session cookie, /api/admin -> 403",
+      },
+      {
+        history,
+        taskId,
+        workspaceDir: baseManifest.workspaceDir,
+        state: s1,
+        workerId: "w1",
+        leader: false,
+        workerCount: 11,
+        save: () => ckpt1.save(s1),
+      },
+    );
+    const concluded = JSON.parse(concludeRaw!) as { id: string; status: string };
+    assert.equal(concluded.id, intent.id);
+    assert.equal(concluded.status, "failed");
+    assert.equal(s1.activeIntentId, null);
+  } finally {
+    ckpt1.close();
+    ckpt2.close();
+    history.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -12,12 +12,14 @@ import {
 } from "@gongyuai/contracts";
 import type { openHistory } from "@gongyuai/history";
 import type { CheckpointState, CheckpointStore } from "./checkpoint.js";
+import { hasBenchmarkHarness } from "./board-policy.js";
 import { DEFAULT_DRAIN_STEPS, maybeForceEvidenceStall } from "./evidence-rotation.js";
 import { syncGraphPhase, type WorkerRole } from "./graph-phase.js";
 import { isLeaderStatusTerminal, normalizeProviderId } from "./model-resilience.js";
 import { takeSoftPaceAdvice } from "./soft-pace.js";
 import { writeWorkerStatus } from "./status.js";
 import { appendProgress, extractHosts, type ToolContext } from "./tools.js";
+import { reconcileBenchmarkContainers } from "./tsecbench-tools.js";
 
 export const STALE_INTENT_MAX_AGE_MS = 20 * 60_000;
 export const ENVIRONMENT_TERMINAL_FILE = "environment-terminal.json";
@@ -113,6 +115,8 @@ export function evaluateEnvironmentTerminalExit(opts: {
  * before starting the next round ("单 Intent 干净会话隔离"):
  * Followers persist all verified findings/facts/assets into SQLite History on `intent_conclude`;
  * resetting the transcript between Intents eliminates cross-target context pollution and relay overhead.
+ * Note: `waitForPoolTurn` may pre-claim the next Intent right after the reset flag was set,
+ * so `pendingIntentReset` alone triggers the clean reset when transitioning to the new card.
  */
 export function shouldResetFollowerSession(opts: {
   role: WorkerRole;
@@ -122,7 +126,52 @@ export function shouldResetFollowerSession(opts: {
 }): boolean {
   if (opts.role !== "follower") return false;
   if (opts.round <= 1) return false;
-  return opts.pendingIntentReset && opts.activeIntentId === null;
+  return opts.pendingIntentReset;
+}
+
+/**
+ * Zero-Turn Follower Pre-Claim (aligned with nectar scheduler `ReserveNext`):
+ * Atomically claims the first available `proposed` Intent in SQLite before waking the LLM,
+ * eliminating Turn-1 `intent_claim` round-trips and multi-Follower claim race retries.
+ */
+export function tryAutoClaimFollowerIntent(opts: {
+  manifest: WorkerManifest;
+  ctx: ToolContext;
+  state: CheckpointState;
+  ckpt?: CheckpointStore;
+}): string | null {
+  const { manifest, ctx, state, ckpt } = opts;
+  if (isExploreLeader(manifest)) return null;
+  if (state.activeIntentId) return state.activeIntentId;
+  const workerId = manifest.workerId || `worker-${manifest.taskId.slice(0, 8)}`;
+  const candidates = ctx.history
+    .openIntents(manifest.taskId)
+    .filter((i) => i.status === "proposed");
+  for (const candidate of candidates) {
+    const claimed = ctx.history.claimIntent(manifest.taskId, candidate.id, workerId);
+    if (!claimed) continue;
+    ctx.history.bindActiveIntent(manifest.taskId, claimed.id);
+    state.activeIntentId = claimed.id;
+    state.activeIntentClaimedAt = new Date().toISOString();
+    state.toolsAtIntentClaim = state.toolCalls;
+    state.lastSoftSurfaceMilestone = 0;
+    state.phase = "explore";
+    try {
+      ckpt?.save(state);
+    } catch {
+      /* best-effort */
+    }
+    try {
+      appendProgress(
+        manifest.workspaceDir,
+        `follower slot=${manifest.workerSlot ?? 0} pre-claimed Intent ${claimed.id} (${claimed.title.slice(0, 60)})`,
+      );
+    } catch {
+      /* best-effort progress log */
+    }
+    return claimed.id;
+  }
+  return null;
 }
 
 /**
@@ -378,8 +427,9 @@ export async function waitForPoolTurn(opts: {
   workerStartedAt: number;
   readPoolSize: () => number;
   lastStaleSweep: PoolSweepState;
+  ckpt?: CheckpointStore;
 }): Promise<"ready" | "exit"> {
-  const { manifest, ctx, state, workerStartedAt, readPoolSize, lastStaleSweep } = opts;
+  const { manifest, ctx, state, workerStartedAt, readPoolSize, lastStaleSweep, ckpt } = opts;
   const taskId = manifest.taskId;
   for (;;) {
     const workerCount = readPoolSize();
@@ -391,6 +441,13 @@ export async function waitForPoolTurn(opts: {
         requeue: true,
         maxRequeues: 2,
       });
+      if (!manifest.mock && hasBenchmarkHarness(manifest)) {
+        try {
+          await reconcileBenchmarkContainers(ctx);
+        } catch {
+          /* best-effort container reaper */
+        }
+      }
     }
 
     const envTerminal = readEnvironmentTerminal(manifest.dataDir);
@@ -492,9 +549,18 @@ export async function waitForPoolTurn(opts: {
 
     if (isLeaderStatusTerminal(manifest.dataDir)) return "exit";
     if (envTerminal && !state.activeIntentId) return "exit";
-    if (state.activeIntentId || open.some((i) => i.status === "proposed")) {
+    if (state.activeIntentId) {
       state.phase = "explore";
       return "ready";
+    }
+    if (open.some((i) => i.status === "proposed")) {
+      const claimedId = ckpt
+        ? tryAutoClaimFollowerIntent({ manifest, ctx, state, ckpt })
+        : open.find((i) => i.status === "proposed")?.id ?? null;
+      if (claimedId) {
+        state.phase = "explore";
+        return "ready";
+      }
     }
     flushUsage(manifest, ctx, state);
     await new Promise((r) => setTimeout(r, 1_000));
